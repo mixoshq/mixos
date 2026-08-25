@@ -1,0 +1,30 @@
+{
+  "name": "_template",
+  "displayName": "Template Connector",
+  "description": "Starter template for an API-key service. Copy this folder, rename it to your service (no leading underscore), and replace the example methods. Setup instructions and required scopes belong in this field — the Connector Registry is the only place an admin ever sees a connector.",
+  "authors": [{ "name": "Your Name", "email": "you@example.com" }],
+  "credentialFields": [
+    { "key": "apiKey", "label": "API Key", "type": "password" },
+    { "key": "baseUrl", "label": "Base URL (optional)", "type": "text" }
+  ],
+  "auth": {
+    "strategy": "apiKey",
+    "in": "header",
+    "name": "X-Api-Key",
+    "credentialKeys": ["apiKey"]
+  },
+  "http": {
+    "baseUrl": "https://api.example.com",
+    "timeoutMs": 10000,
+    "maxAttempts": 3,
+    "pagination": {
+      "style": "cursor",
+      "itemsPath": "data",
+      "cursorPath": "meta.next_cursor",
+      "cursorParam": "cursor",
+      "limitParam": "limit",
+      "pageSize": 100
+    }
+  },
+  "telemetry": [{ "method": "listItems", "description": "Listed items" }]
+}

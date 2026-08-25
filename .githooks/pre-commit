@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#
+# Two jobs, whenever an app or connector is part of this commit:
+#
+#   1. Stamp `lastUpdated` on every app/connector manifest the commit touches,
+#      and re-stage it so the date ships with the change it describes.
+#   2. Validate app/connector manifests (and rebuild the gitignored
+#      src/generated/*.ts). The generator schema-validates every app.json /
+#      connector.json and aborts loudly on a bad manifest, so wiring it here
+#      fails the commit before a broken manifest can land.
+#
+# Order matters: stamp first, then regenerate, so the registry picks up the dates
+# written a moment ago instead of lagging a commit behind.
+#
+# The stamp step never blocks a commit — a missing date is cosmetic. Validation
+# does block, because a broken manifest is not.
+#
+# Activated via core.hooksPath (.githooks), set by the package.json `prepare`
+# script on `npm install`. To run manually: npx tsx scripts/stamp-updated.ts
+# followed by npm run registry.
+set -euo pipefail
+
+# Only run when a manifest/structure under apps/ or connectors/ is part of this
+# commit — keeps unrelated commits fast.
+#
+# core.quotePath=false matters: by default git C-quotes a non-ASCII path
+# (`"apps/a/na\303\257ve.txt"`), which starts with a double quote and so fails
+# the `^(apps/` test below — the hook would skip both the stamp and manifest
+# validation for that commit without a word.
+staged="$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMRD)"
+if ! printf '%s\n' "$staged" | grep -qE '^(apps/|connectors/)'; then
+  exit 0
+fi
+
+# Stamps what changed and `git add`s the manifests it wrote. Exits 0 even on
+# failure, by design — see the header of scripts/stamp-updated.ts.
+npx tsx scripts/stamp-updated.ts
+
+echo "[pre-commit] apps/ or connectors/ changed — validating manifests…"
+# Non-zero on a bad manifest — exactly what we want before a commit lands.
+npm run --silent registry >/dev/null

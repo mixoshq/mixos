@@ -1,0 +1,32 @@
+{
+  "name": "_template-oauth",
+  "displayName": "Template Connector (OAuth)",
+  "description": "Starter template for a service that uses three-legged OAuth. Copy this folder, rename it (no leading underscore), and register the redirect URI shown on this page in the provider's app settings. An admin saves the client ID and secret here, then presses Connect once on behalf of the whole deployment.",
+  "authors": [{ "name": "Your Name", "email": "you@example.com" }],
+  "credentialFields": [
+    { "key": "clientId", "label": "Client ID", "type": "text" },
+    { "key": "clientSecret", "label": "Client Secret", "type": "password" },
+    { "key": "webhookSecret", "label": "Webhook Signing Secret", "type": "password" }
+  ],
+  "auth": {
+    "strategy": "oauth2_authorization_code",
+    "authorizeUrl": "https://provider.example.com/oauth/authorize",
+    "tokenUrl": "https://provider.example.com/oauth/token",
+    "tokenAuth": "basic",
+    "credentialKeys": ["clientId", "clientSecret"],
+    "scopes": ["things:read"]
+  },
+  "http": {
+    "baseUrl": "https://api.provider.example.com",
+    "timeoutMs": 10000,
+    "maxAttempts": 3
+  },
+  "webhook": {
+    "algorithm": "hmac-sha256",
+    "signatureHeader": "X-Provider-Signature",
+    "timestampHeader": "X-Provider-Timestamp",
+    "toleranceSeconds": 300,
+    "secretKey": "webhookSecret"
+  },
+  "telemetry": [{ "method": "listThings", "description": "Listed things" }]
+}
