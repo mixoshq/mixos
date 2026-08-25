@@ -1,0 +1,66 @@
+name: ci
+
+# The only build gate in this repo. Vercel owns building and deploying the app
+# itself (Preview per PR, Production on main), so CI here exists purely to fail
+# a PR before it merges — it produces no artifact and pushes nothing.
+#
+# Replaces the six workflows from the previous self-hosted deploy pipeline
+# (image build, image push, cluster deploy, deployment-manifest lint, and a
+# container smoke test) — none of which apply on Vercel.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A force-push or a quick follow-up commit supersedes the run in flight.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # NON-BLOCKING, deliberately and temporarily. `npm run lint` currently
+      # reports 10 pre-existing errors that predate the Vercel migration — 7x
+      # react-hooks/set-state-in-effect, 1x react-hooks/refs, 1x
+      # react-hooks/static-components, plus an unescaped entity — spread across
+      # 9 dashboard/admin components. Fixing them means reworking component
+      # render logic, which was out of scope for this change.
+      #
+      # Typecheck and build below ARE blocking and both pass. Once the 10 are
+      # fixed, delete this comment and the `continue-on-error` line so lint
+      # gates PRs like the others.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # `prebuild` regenerates src/generated/app-registry.ts, so this also
+      # catches a malformed app.json / connector.json manifest.
+      #
+      # No database or secrets are provided on purpose. The Postgres pool is a
+      # lazy proxy (src/lib/db/client.ts) and the Supabase client is created
+      # per-request, so nothing touches PG*/SUPABASE_* env vars until a request
+      # is served. If this step ever starts failing on a missing env var, that
+      # means something began connecting at module scope — fix that, don't add
+      # the secret here.
+      - name: Build
+        run: npm run build

@@ -1,0 +1,217 @@
+# Local MOS stack — the Next.js app plus the cron sidecar.
+#
+# THERE IS NO DATABASE SERVICE HERE, AND THAT IS DELIBERATE.
+# Postgres, PostgREST, Kong and Studio are owned out-of-band by the Supabase
+# CLI (`supabase start`, driven by scripts/docker-up.ts), which runs its own
+# containers on its own network named supabase_network_mixos. Declaring them
+# here too would mean two owners for one database: version drift against the
+# hosted project, and a compose `down -v` that silently discards a volume the
+# CLI thinks it manages.
+#
+# The consequence is that the app reaches the database the same way anything
+# outside that network would — over the host, at host.docker.internal, on the
+# ports the CLI publishes (54321 api / 54322 postgres). Every service therefore
+# carries an extra_hosts entry; see the comment on the first one.
+name: mixos
+
+services:
+  # ---------------------------------------------------------------------------
+  # app-dev — `next dev` with hot reload. The default (`npm run dev:docker`).
+  # ---------------------------------------------------------------------------
+  app-dev:
+    profiles: ["dev"]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    # Order matters: .env.docker holds the committed dev-only secrets,
+    # .env.docker.local holds the Supabase URL/key/DSN that scripts/docker-up.ts
+    # writes from `supabase status -o json` after the stack is up. Later files
+    # win, which is the direction we want — generated values override defaults.
+    #
+    # Both are required on purpose. If .env.docker.local is missing, compose
+    # fails here naming the file, which is a far better failure than a container
+    # that boots happily with no DATABASE_URL and then throws on every request.
+    # Run `npm run dev:docker`; it generates the file before calling compose.
+    env_file:
+      - .env.docker
+      - .env.docker.local
+    ports:
+      # The `127.0.0.1:` prefix is load-bearing, not tidiness. Compose's short
+      # syntax with no host IP publishes on 0.0.0.0 — every interface, Wi-Fi
+      # included — and Docker Desktop installs its own NAT rule, so the macOS
+      # Application Firewall (which ships DISABLED and which users are prompted
+      # to allow com.docker.backend through anyway) is the only thing that would
+      # have stood between a coffee-shop network and this container.
+      #
+      # That matters more here than for a typical dev server because .env.docker
+      # is committed: INITIAL_ADMIN_EMAIL / INITIAL_ADMIN_PASSWORD are seeded on
+      # every boot, so anyone holding the repo can sign in as admin, and the
+      # committed AUTH_SECRET lets them forge a session cookie without even
+      # doing that. Admin reaches the Connector Registry — the one screen where
+      # a developer pastes REAL third-party API keys to test a connector against
+      # a live service — and the committed CONNECTOR_ENCRYPTION_KEY decrypts
+      # them. Loopback is what makes committing those values defensible; the
+      # header of .env.docker states that bargain, so the two must stay in sync.
+      #
+      # This does NOT cut off the cron sidecar. Verified on Docker Desktop for
+      # macOS: a container hitting host.docker.internal:<port> is proxied by the
+      # Docker backend, which connects to the host over loopback, so a
+      # 127.0.0.1-only publish still answers 200 from a sibling container.
+      - "127.0.0.1:3000:3000"
+    volumes:
+      # The working copy, so edits reach the dev server.
+      - .:/app
+      # These two named volumes are not a performance tweak, they are required.
+      #
+      # node_modules: the host tree is darwin/arm64 and the container needs
+      # linux/arm64 — @next/swc alone makes them non-interchangeable. The volume
+      # is seeded from the image's own `npm ci` (see Dockerfile.dev).
+      #
+      # .next: `next dev` takes an exclusive OS lock at .next/dev/lock. Sharing
+      # the directory with a host `npm run dev` makes the second server exit(1)
+      # with "Another next dev server is already running" — and flock semantics
+      # over a macOS bind mount are unreliable even when only one is running.
+      # Keeping the container's build output off the mount lets both coexist,
+      # which decision 2 of the plan explicitly promises.
+      - dev-node-modules:/app/node_modules
+      - dev-next:/app/.next
+    extra_hosts:
+      # Mandatory, not a portability nicety. Measured on Docker Desktop for
+      # macOS 4.35 (gvisor networking): without this mapping the name does not
+      # resolve at all from a compose network — `getent hosts
+      # host.docker.internal` exits 2, and there is no DNS fallback. With it the
+      # container gets 192.168.65.254. Required on Linux too; a harmless
+      # duplicate on Desktop versions that do inject it.
+      - "host.docker.internal:host-gateway"
+    # PID 1 ignores signals it has no handler for, so `npm run dev` as PID 1
+    # would sit through SIGTERM until compose's 10s kill timer. tini fixes that.
+    init: true
+    healthcheck:
+      # /ready, not /live: readiness opens a real connection to Postgres, which
+      # is precisely the leg most likely to be broken here — host.docker.internal
+      # resolution, the generated DATABASE_URL, and PGSSLMODE=disable all have to
+      # be right for it to pass. A liveness-only check would go green on a
+      # container that cannot reach its database at all.
+      #
+      # `node -e` because neither image installs curl and Node 22 has fetch.
+      test:
+        - CMD
+        - node
+        - "-e"
+        - "fetch('http://127.0.0.1:3000/api/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      # Generous because the first request to a cold `next dev` compiles the
+      # route on demand, and Turbopack's first compile over a macOS bind mount
+      # is slow. Failures inside start_period do not count toward `retries`, so
+      # this only delays the point at which the container is called unhealthy.
+      start_period: 180s
+
+  # ---------------------------------------------------------------------------
+  # app — production-parity build (`npm run docker:prod`).
+  # ---------------------------------------------------------------------------
+  app:
+    profiles: ["prod"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.docker
+      - .env.docker.local
+    ports:
+      # Loopback for the reasons spelled out on app-dev above, and if anything
+      # the case is stronger here: this profile serves the production build, so
+      # it presents as a finished deployment while still running on the
+      # committed .env.docker credentials. Keep the two publishes identical —
+      # an exposure that only exists under one profile is the kind nobody finds.
+      - "127.0.0.1:3000:3000"
+    # No bind mount and no node_modules volume: this image is the artifact under
+    # test. Mounting source over it would defeat the entire point of the profile.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - "-e"
+        - "fetch('http://127.0.0.1:3000/api/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      # Nothing compiles at runtime here, so this only has to cover process
+      # start and the first Postgres connection.
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # cron — stands in for Vercel Cron. Runs in BOTH profiles.
+  # ---------------------------------------------------------------------------
+  #
+  # Production ticks the scheduler by having Vercel Cron GET /api/cron with
+  # `Authorization: Bearer $CRON_SECRET` (see vercel.json and
+  # src/app/api/cron/route.ts). This reproduces that exactly — an outside HTTP
+  # caller with a bearer token — rather than reviving an in-process timer, so
+  # the auth check, the route's serverless-shaped assumptions, and the atomic
+  # job claim all get exercised locally the same way they are in production.
+  cron:
+    profiles: ["dev", "prod"]
+    image: curlimages/curl:8.21.0
+    # Only .env.docker: CRON_SECRET is a committed dev-only value and this
+    # container has no business holding the database credentials.
+    env_file:
+      - .env.docker
+    depends_on:
+      # `required: false` is what lets one cron service serve both profiles —
+      # whichever app service is not enabled by the active profile is simply
+      # ignored instead of erroring. Waiting for *healthy* (not just started)
+      # means the first tick lands on an app that has already talked to Postgres.
+      app-dev:
+        condition: service_healthy
+        required: false
+      app:
+        condition: service_healthy
+        required: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    init: true
+    entrypoint: ["/bin/sh", "-c"]
+    # Note on $$: compose interpolates $VAR itself before the shell ever sees
+    # it, so every dollar sign meant for /bin/sh is doubled here.
+    #
+    # The target is host.docker.internal rather than a compose service name
+    # because the service is called app-dev under one profile and app under the
+    # other — one URL that works in both beats branching. It also happens to be
+    # the more faithful simulation: an external caller hitting the published
+    # port, exactly like Vercel Cron hitting the deployment URL.
+    command:
+      - |
+        set -u
+        TARGET="http://host.docker.internal:3000/api/cron"
+        INTERVAL=300
+        # Belt-and-braces on top of depends_on: healthy only proves the app
+        # answered once. Give the first real request a little more room, and
+        # keep the tick off the same instant as every other container's start.
+        WARMUP=30
+
+        if [ -z "$${CRON_SECRET:-}" ]; then
+          echo "[cron] WARNING: CRON_SECRET is empty — every tick will 401. Is .env.docker being loaded?"
+        fi
+        echo "[cron] first tick in $${WARMUP}s, then every $${INTERVAL}s against $$TARGET"
+        sleep "$$WARMUP"
+
+        # Never exits. A failed tick is normal (app restarting, a job throwing,
+        # a migration in flight) and must not take the sidecar down with it —
+        # the next tick would fix itself, but only if there is a next tick.
+        # curl's exit status is swallowed and its stderr left visible, so a
+        # connection refused shows up as a 000 line plus curl's own message.
+        while :; do
+          code=$$(curl -sS -o /dev/null -w '%{http_code}' --max-time 290 \
+            -H "Authorization: Bearer $${CRON_SECRET:-}" "$$TARGET") || code="000"
+          echo "[cron] $$(date -u '+%Y-%m-%dT%H:%M:%SZ') GET /api/cron -> $$code"
+          sleep "$$INTERVAL"
+        done
+
+volumes:
+  dev-node-modules:
+  dev-next:

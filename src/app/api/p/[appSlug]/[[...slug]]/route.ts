@@ -1,0 +1,40 @@
+/**
+ * The public app API surface: `/api/p/<slug>/<path>`.
+ *
+ * The anonymous-only view of the same pipeline the authenticated mount uses —
+ * `dispatchAppRoute` with `mount: "public"`, which narrows the eligible tiers to
+ * `password` and `public`. A route declaring only identity tiers is a 404 here,
+ * never a 401, so probing this surface cannot tell "exists but forbidden" from
+ * "no such route".
+ *
+ * This path is in the proxy's public prefix list, so "no session cookie" is the
+ * expected state and nothing upstream will have bounced the caller to /login.
+ * Everything that gates access to a route therefore happens inside the
+ * dispatcher.
+ */
+import { dispatchAppRoute, type HttpMethod } from "@/lib/apps/dispatch";
+
+interface RouteContext {
+  params: Promise<{ appSlug: string; slug?: string[] }>;
+}
+
+async function handle(
+  request: Request,
+  { params }: RouteContext,
+  method: HttpMethod,
+): Promise<Response> {
+  const { appSlug, slug = [] } = await params;
+  return dispatchAppRoute({
+    request,
+    method,
+    appSlug,
+    segments: slug,
+    mount: "public",
+  });
+}
+
+export const GET = (req: Request, ctx: RouteContext) => handle(req, ctx, "GET");
+export const POST = (req: Request, ctx: RouteContext) => handle(req, ctx, "POST");
+export const PUT = (req: Request, ctx: RouteContext) => handle(req, ctx, "PUT");
+export const PATCH = (req: Request, ctx: RouteContext) => handle(req, ctx, "PATCH");
+export const DELETE = (req: Request, ctx: RouteContext) => handle(req, ctx, "DELETE");

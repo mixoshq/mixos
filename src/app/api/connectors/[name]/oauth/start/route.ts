@@ -1,0 +1,72 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { requireReadOnlySession } from "@/lib/auth/session";
+import { requireAdmin } from "@/lib/apps/access";
+import { connectorRegistry } from "@/generated/connector-registry";
+import { getDecryptedConfig } from "@/lib/connectors/config";
+import {
+  OAUTH_STATE_COOKIE,
+  buildAuthorizeUrl,
+  newFlowState,
+  safeReturnPath,
+  sealFlowState,
+} from "@/lib/connectors/oauth";
+
+/**
+ * Begin the tenant OAuth consent flow for one connector.
+ *
+ * Admin-only, and deliberately NOT in the proxy's public prefixes: this is a
+ * browser navigation carrying a session cookie, so bouncing an unauthenticated
+ * visitor to /login is the correct behaviour.
+ *
+ * The PKCE verifier goes into an encrypted, HttpOnly cookie rather than into
+ * `state` — the provider sees `state`, and handing it the verifier would
+ * defeat the binding PKCE exists to create.
+ */
+export const dynamic = "force-dynamic";
+
+export async function GET(
+  request: NextRequest,
+  ctx: { params: Promise<{ name: string }> },
+) {
+  const session = await requireReadOnlySession();
+  await requireAdmin(session);
+
+  const { name } = await ctx.params;
+  const returnTo = safeReturnPath(request.nextUrl.searchParams.get("return"));
+  const back = (status: string) =>
+    NextResponse.redirect(
+      new URL(
+        `${returnTo}?connector=${encodeURIComponent(name)}&oauth=${status}`,
+        request.nextUrl.origin,
+      ),
+    );
+
+  const connector = connectorRegistry.find((c) => c.name === name);
+  const policy = connector?.auth;
+  if (!connector || policy?.strategy !== "oauth2_authorization_code") {
+    return back("unsupported");
+  }
+
+  const [idKey] = policy.credentialKeys ?? ["clientId", "clientSecret"];
+  const credentials = await getDecryptedConfig(name);
+  const clientId = credentials?.[idKey];
+  if (!clientId) {
+    // The admin has to save the client id and secret before consent can start.
+    return back("missing-client");
+  }
+
+  const flow = newFlowState(name, returnTo);
+  const response = NextResponse.redirect(
+    buildAuthorizeUrl(policy, { connector: name, clientId, flow }),
+  );
+  response.cookies.set(OAUTH_STATE_COOKIE, sealFlowState(flow), {
+    httpOnly: true,
+    // Lax, not Strict: the provider sends the admin back via a top-level GET
+    // navigation, which Strict would strip the cookie from.
+    sameSite: "lax",
+    secure: request.nextUrl.protocol === "https:",
+    path: "/api/connectors",
+    maxAge: 600,
+  });
+  return response;
+}
