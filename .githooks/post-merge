@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+#
+# After a successful `git pull` (merge/fast-forward), show the newest section of
+# WHATS-NEW.md — but only when that file was among the commits just pulled, so
+# ordinary pulls stay silent.
+#
+# git sets ORIG_HEAD to the pre-pull commit and runs this hook after the merge,
+# so we diff ORIG_HEAD..HEAD to decide whether the notes changed.
+#
+# Activated via core.hooksPath (.githooks), set by the package.json `prepare`
+# script on `npm install` — same mechanism as the pre-commit hook. Note: this
+# runs on merge/fast-forward pulls, not on `git pull --rebase` (that fires
+# post-rewrite instead).
+set -euo pipefail
+
+notes="WHATS-NEW.md"
+
+# ORIG_HEAD = the commit before this pull. If it's missing, we can't diff — bail.
+git rev-parse --verify --quiet ORIG_HEAD >/dev/null || exit 0
+
+# Only speak up when the notes file actually changed in what was pulled.
+if ! git diff --name-only ORIG_HEAD HEAD -- "$notes" | grep -q .; then
+  exit 0
+fi
+
+# The file may have been deleted/renamed in the pulled range — guard the read.
+[ -f "$notes" ] || exit 0
+
+# Print the newest section: the first `## …` block (up to, not including, the
+# next `## …` line), which skips the leading `# ` title and intro paragraph.
+section="$(awk '/^## /{n++} n==1{print} n==2{exit}' "$notes")"
+[ -n "$section" ] || exit 0
+
+printf '\n\033[1;36m📢 What'\''s new in MixOS since your last pull:\033[0m\n\n'
+printf '%s\n\n' "$section"
+printf 'Full history: %s\n\n' "$notes"
