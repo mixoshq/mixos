@@ -1,0 +1,76 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { timingSafeEqual } from "node:crypto";
+import { runDueJobs } from "@/lib/apps/scheduler";
+import { pruneRateBuckets } from "@/lib/rate-limit";
+import { pruneRouteTelemetry } from "@/lib/apps/telemetry";
+import { pruneWebhookEvents } from "@/lib/connectors/webhook";
+
+/**
+ * Scheduler tick endpoint, invoked by Vercel Cron (see vercel.json).
+ *
+ * Replaces the in-process `setInterval` that used to run from
+ * instrumentation.ts. A serverless instance is frozen between requests, so the
+ * tick has to come from outside; `runDueJobs()` itself is unchanged and still
+ * claims each job with an atomic Postgres UPDATE, which is what makes an
+ * overlapping or duplicated invocation harmless.
+ *
+ * AUTH: Vercel signs cron invocations with the CRON_SECRET environment variable
+ * as `Authorization: Bearer <secret>`. Without that check this route would be a
+ * public, unauthenticated way for anyone to trigger every app's background jobs
+ * on demand. The route IS on the proxy's public-route list (src/proxy.ts), and
+ * that is deliberate: the proxy only does a cookie-presence check, and "no
+ * session cookie" is the expected state for a caller that is not a browser.
+ * Removing it from that list does not harden this route, it disables it — the
+ * tick 307s to /login, which is a successful HTTP exchange, so the caller
+ * records a delivered invocation and runDueJobs() silently never runs. The
+ * timing-safe bearer comparison below is the real gate.
+ *
+ * If CRON_SECRET is unset the route refuses to run rather than defaulting open.
+ */
+export const dynamic = "force-dynamic";
+// Jobs get up to 4 minutes each (JOB_TIMEOUT_MS); give the tick room to finish.
+// Vercel caps this by plan — Hobby allows 60s, so a long tick is cut short
+// there. The Postgres claim means a truncated tick simply resumes next time.
+export const maxDuration = 300;
+
+function authorized(request: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+
+  const header = request.headers.get("authorization") ?? "";
+  const expected = `Bearer ${secret}`;
+  const a = Buffer.from(header);
+  const b = Buffer.from(expected);
+  // timingSafeEqual throws on length mismatch, so compare lengths first.
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+export async function GET(request: NextRequest) {
+  if (!authorized(request)) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const startedAt = Date.now();
+  try {
+    await runDueJobs();
+  } catch (err) {
+    console.error("[cron] tick failed:", err);
+    return NextResponse.json(
+      { ok: false, error: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
+    );
+  }
+  // Housekeeping, after the jobs and outside their try: a failed prune must not
+  // report the tick as failed, and pruneRateBuckets swallows its own errors.
+  const prunedBuckets = await pruneRateBuckets();
+  const prunedRouteEvents = await pruneRouteTelemetry();
+  const prunedWebhookEvents = await pruneWebhookEvents();
+
+  return NextResponse.json({
+    ok: true,
+    durationMs: Date.now() - startedAt,
+    prunedBuckets,
+    prunedRouteEvents,
+    prunedWebhookEvents,
+  });
+}

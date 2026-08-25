@@ -1,0 +1,57 @@
+# Build context exclusions for Dockerfile and Dockerfile.dev.
+#
+# Be careful editing this. next.config.ts's outputFileTracingIncludes globs are
+# evaluated against the build context, so anything excluded here can never reach
+# the standalone output no matter what that config says. In particular apps/,
+# connectors/, docs/apps/, docs/connectors/, public/, scripts/, src/ and
+# supabase/migrations/ are all needed by the build or at runtime and must stay
+# in. The Dockerfile has a post-build assertion that catches the apps/ and docs/
+# cases specifically.
+
+# Host dependency tree. darwin/arm64 binaries (@next/swc, esbuild) cannot run in
+# the container, and shipping ~500MB into the context slows every build.
+node_modules
+**/node_modules
+
+# Host build output — dev artifacts leaking into a prod build is a real source
+# of "works on my machine". The image builds its own.
+.next
+out
+build
+
+# Git history: large, and nothing in the build reads it.
+.git
+
+# Supabase CLI scratch state (linked project ref, branch metadata). Note this
+# does NOT exclude supabase/migrations/ or supabase/config.toml.
+supabase/.temp
+supabase/.branches
+
+# Every .env form, not just .env.local. `next build` with output: "standalone"
+# copies .env and .env.production into .next/standalone, which would bake them
+# into the image. Compose reads .env.docker / .env.docker.local on the host via
+# env_file, so excluding them from the context costs nothing.
+.env*
+
+# Incremental TypeScript state; stale entries can skip type errors.
+*.tsbuildinfo
+
+# Editor / OS / agent scaffolding and CI config — none of it is read by the
+# build, and docs/plans is design documentation, unlike docs/apps and
+# docs/connectors which the guide pages serve at runtime.
+.DS_Store
+**/.DS_Store
+docs/plans
+.claude
+.vscode
+.github
+.githooks
+.vercel
+coverage
+
+# The container definitions themselves. Nothing inside the image reads them,
+# and leaving them out keeps `COPY . .` from re-running on every compose edit.
+Dockerfile
+Dockerfile.dev
+docker-compose.yml
+.dockerignore
