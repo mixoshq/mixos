@@ -8,6 +8,53 @@ The platform ships a design system (Tailwind + a fixed set of CSS variables in [
 
 ---
 
+## Compose from the primitives
+
+Most of this guide used to be rules a reviewer had to check. The ones that could
+become components have:
+
+| Instead of | Use | What it makes impossible |
+| --- | --- | --- |
+| `<button>` | [`Button`](../../src/components/ui/button.tsx) | Forgetting the pending state. `busy` disables, spins, and sets `aria-busy` as one fact. |
+| An icon-only `<button>` | `IconButton` | Shipping without an accessible name — `label` is required by the type. |
+| `<input>` / `<select>` / `<textarea>` | [`Input`](../../src/components/ui/input.tsx) inside [`Field`](../../src/components/ui/field.tsx) | A label pointing at nothing. `Field` owns the id and the `htmlFor` wiring. |
+| `<table>` | [`DataTable`](../../src/components/ui/data-table.tsx) | A skeleton that drifts from the table, and a page that scrolls sideways. |
+| A hand-rolled card shell | [`Card`](../../src/components/ui/card.tsx) / `SectionCard` | The 87th copy of `rounded-xl border border-border bg-card`. |
+| A status colour picked by hand | [`Badge`](../../src/components/ui/badge.tsx) | A category chip rendered in `destructive` — tones split grading from distinguishing. |
+| A `useEffect` fetch + three booleans | [`useAppQuery`](../../src/lib/apps/use-app-query.ts) + [`AsyncView`](../../src/components/ui/async-view.tsx) | Shipping a surface with no loading, empty, or error state. |
+
+**All of these are lint-enforced for `apps/**`.** A raw `<button>`, `<input>`,
+`<select>`, `<textarea>` or `<table>` in an app is a build error, as is a literal
+copy of the card shell.
+
+### The async pair
+
+`AsyncView` is where "every state is designed" stops being advice:
+
+```tsx
+const query = useAppQuery<Result>(appSlug, "GET /items", { scope });
+
+<AsyncView
+  query={query}
+  skeleton={<ItemsSkeleton />}
+  empty={{ cause: "no-data", body: "Sync a source to populate this." }}
+  refetchingLabel={`Loading ${scope}…`}
+>
+  {(data) => <DataTable rows={data.items} columns={COLUMNS} rowKey={(r) => r.id} />}
+</AsyncView>
+```
+
+You cannot reach the data branch without a `skeleton` and an `empty` — the types
+require both — and `empty` takes a `cause`, so a generic grey box is not
+expressible. Loading, refetching and error are handled for you, including keeping
+the previous data on screen during a user-triggered refetch.
+
+`useAppQuery` models the four states as a discriminated union rather than three
+booleans, because `loading && error` and `!loading && !data && !error` are states
+the boolean version can represent and no UI ever handles.
+
+---
+
 ## Non-negotiables (the things to get right every time)
 
 1. **Every async surface has a loading state, and it mirrors the final layout.** Never show bare `Loading…` text or a lone centered spinner. Use `Skeleton` from [`@/components/ui/skeleton`](../../src/components/ui/skeleton.tsx) shaped like the content it's replacing — a chart skeleton is a big block, a table skeleton is repeated rows, a stat is a small block. (This is also app invariant #10.)
@@ -94,11 +141,11 @@ Pull from the tokens defined in [`src/app/globals.css`](../../src/app/globals.cs
 | Destructive / error | `bg-destructive` | `text-destructive-foreground` — or `text-destructive` on a page |
 | Borders & dividers | `border-border` | — |
 
-**`bg-primary` is the MONTALBANO navy** (`#002345`). `--primary` and `--color-mixcharcoal` read from the same `--brand-navy` variable, so they are the same colour and cannot drift. Use `bg-primary` when you mean *the primary action*, and `bg-mixcharcoal` when you mean *the brand* — a navy header band, a branded backdrop. Same pixels, different intent.
+**`bg-primary` and `bg-brand` are different intents, not the same pixels.** `bg-primary` means *the primary action* — a button, a link. `bg-brand` means *the brand surface* — the menu bar, the sign-in page — and carries `text-brand-foreground`. Both come from the active theme (`themes/<slug>/theme.css`), so a rebrand changes them together without touching an app. See [docs/themes/tokens.md](../themes/tokens.md).
 
 ### Verified pairs: two legal tokens can make an illegal element
 
-The table above is the set of pairs that were **measured**. `globals.css` verifies each token twice — as text on the page background, and as a surface under its own foreground — and that is the whole guarantee. It says nothing about **token on token**.
+The table above is the set of pairs that were **measured**. the theme build verifies each token twice — as text on the page background, and as a surface under its own foreground — and that is the whole guarantee. It says nothing about **token on token**.
 
 So `text-muted-foreground` is legal, `bg-muted` is legal, and putting them on the same element is a WCAG failure. That combination alone appeared on **135 elements across 16 apps**, every one of them green in CI, because the colour lint rule matches token *names* and there is nothing wrong with either name.
 
@@ -119,7 +166,9 @@ Measured, light theme, tint composited over `bg-card`:
 
 Read those last five together, because they are the argument for the rule over the convention: **the same construction passes in success and fails in warning and destructive.** Nobody eyeballs a 0.4 difference. The three status tokens are equally legible *on the page*, and equally illegible *on their own tint* — but not at the same alpha, so there is no threshold to memorise.
 
-**This is lint-enforced.** `mixos-design/no-low-contrast-token-pairs` parses the tokens out of `globals.css`, resolves the classes on each element per variant state, composites any alpha, and computes the ratio. It ships as a **warning**, not an error, because it flags ~215 pre-existing elements whose fix is a visual decision for each app's owner. Treat it as an error in new code. Its blind spots are documented in the rule file — runtime-assembled class names and imported constants are invisible to it, exactly as they are to the colour rule.
+**This is lint-enforced, as an error.** `mixos-design/no-low-contrast-token-pairs` parses the tokens out of `globals.css`, resolves the classes on each element per variant state, composites any alpha, and computes the ratio. It shipped as a warning while ~215 pre-existing elements across 16 apps were outstanding; that backlog is gone, and a floor that only warns is not a floor.
+
+It earns its keep on new code too. Promoting it immediately caught two elements in the primitives above: `hover:bg-destructive/90` under `text-destructive-foreground` composites to **4.11:1** — while the identical treatment on `primary` and `secondary` passes, which is exactly the "no threshold to memorise" asymmetry this section describes. The destructive button signals hover with a ring instead. Its blind spots are documented in the rule file — runtime-assembled class names and imported constants are invisible to it, exactly as they are to the colour rule.
 
 The three fixes, in order of preference:
 
@@ -187,15 +236,20 @@ Rules of thumb:
   - The exception is **alpha over a known ground**: `bg-white/10` as a hover state on a navy panel, or `bg-black/70` as a modal scrim, are fine. The rule targets opaque fills that pretend to be a theme surface.
 - **Don't restyle focus rings away.** Keyboard focus must stay visible (the `ring` token).
 
-### The platform is light-only today
+### A dark look is a different theme — and it is not your job either way
 
-`globals.css` defines a complete, AA-correct `.dark` token set, but **nothing applies the class** — there is no theme provider and no toggle. Dark mode is not reachable in the product.
+There is no light/dark switch. A theme declares **one** palette, an admin picks which theme the install runs, and the platform ships two: `mixos` (light, the default) and `mixos-dark`. Each is verified on its own — ~24 contrast pairs, build fails on any shortfall.
 
-That does not mean "ignore it." It means:
+> **There is no `dark:` variant to write.** Colour lives in the active theme's tokens, and nowhere else.
 
-> **Colours fork in `globals.css`, never in an app.** Do not write `dark:` variants.
+This is what makes an app survive a repaint it never coded for. `bg-card` resolves to `#ffffff` under `mixos` and `#1e293b` under `mixos-dark` without the app knowing either value, so a page written once is correct under both — and under the next theme somebody authors. A `dark:` variant hard-codes a second answer in a place the contrast gate cannot see, and it would be wrong the moment a third theme appears.
 
-A `dark:` variant in app code is dead today and actively harmful tomorrow: it's how you get twenty apps that each half-support dark mode, none of them verifiable. Keeping every colour in a token is what makes shipping dark mode a change to one file instead of an audit of every app. This is lint-enforced for `apps/**`.
+It is lint-enforced for `apps/**` **and `src/**`**. The platform exempted itself from this rule while no dark palette was reachable, and by the time one was its own chrome had accumulated ~120 raw palette utilities and 13 `dark:` variants — a `<pre>` with a background but no ink, headings inheriting UA-default black at 1.05:1 on a near-black page. That cleanup is [`docs/plans/20260826_1959-dark-mode-legibility.md`](../plans/20260826_1959-dark-mode-legibility.md), and the fence now covers both trees.
+
+**Two things you inherit for free, so don't re-implement them:**
+
+- **The page ground and the default ink.** `body` carries `background-color: var(--background)` and `color: var(--foreground)`. Anything that just renders text is already correct in both modes; setting a colour is for when you mean something other than "body text".
+- **The surface ladder.** `--background`, `--muted` (recessed: content areas, wells, stripes), `--card` (raised: panels, widgets) and `--accent` (hover) are four distinguishable rungs. Every theme is responsible for keeping them apart, which is what lets a form control on `bg-background` read as a control inside a `bg-card` panel without an app doing anything.
 
 ## Empty, error & not-connected states
 

@@ -315,9 +315,16 @@ breakage.
 
 ## Running Next.js on the host against the container backend
 
-Still supported, and noticeably faster for UI work — Docker's filesystem layer
-on macOS makes hot reload slow, and Next's own docs recommend against
-containerized dev for that reason.
+Still supported, and the right fallback if hot reload is slow on your machine —
+but no longer the default advice.
+
+Next's own docs do recommend against containerized dev, on the grounds that
+Docker's filesystem layer on macOS can push HMR into seconds or minutes. That
+was true under the older gRPC-FUSE file sharing. With **VirtioFS**, which Docker
+Desktop has defaulted to on macOS for several versions, this repo measures
+edit-to-served at roughly **0.2s for an API route and 0.3s for a page
+component**. Reach for the host server when you have measured a problem, not on
+principle.
 
 Boot the backend, then hand port 3000 back to the host. These are two steps,
 and how you sequence them depends on whether the boot is attached:
@@ -402,9 +409,20 @@ side, but this one is an unhandled `readFile` ENOENT, so it surfaces as a real
 `/_next/*` and the hot-reload websocket from origins it doesn't recognize, and
 its allowlist is `localhost`-based. Use `http://localhost:3000`.
 
-**Hot reload is slow.** A known cost of bind mounts on macOS, and there is no
-polling escape hatch under Turbopack. Run `npm run dev` on the host against the
+**Hot reload is slow.** It shouldn't be — expect well under a second, and see
+"Running Next.js on the host against the container backend" above for the
+measured figures. First check that Docker Desktop is using **VirtioFS** rather
+than gRPC-FUSE, under Settings → General; gRPC-FUSE is the configuration Next's
+docs have in mind when they warn about HMR taking minutes. Turbopack exposes no
+polling fallback the way webpack's `watchOptions.poll` did, so if VirtioFS is
+already on and it is still slow, run `npm run dev` on the host against the
 containerized backend instead.
+
+**The first request to a page is slow, but editing it afterwards is fast.** Not
+a watcher problem — that is Turbopack compiling the route on demand the first
+time anything asks for it. The `.next` named volume keeps that work across
+container restarts, so it is a once-per-route cost rather than a
+once-per-restart one.
 
 **The stack is up but the first request after a break takes many seconds.**
 Docker Desktop's Resource Saver pauses the VM after ~5 minutes idle. Turn it off

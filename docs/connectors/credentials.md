@@ -73,3 +73,27 @@ them in `credentialFields`, and never read them from a connector method.
 Connection** in the Registry runs the connector's `testConnection()` against the
 real API, which is how an admin finds out a key was pasted with a trailing space
 now rather than through a broken widget next week.
+
+---
+
+## Caching a user-scoped response
+
+A tenant-scoped connector returns the same thing to everyone, so a cache key
+naming the app and the query is enough. A **user-scoped** connector does not,
+and the same key then serves one person's data to another.
+
+The platform cannot enforce this, and it is worth being precise about why: an
+app chooses its own cache keys when it calls `context.cache`, so the connector
+layer never sees them. The rule is therefore yours to keep:
+
+```ts
+// WRONG for a user-scoped connector — one key, many people
+const key = `mail:inbox:${folder}`;
+
+// Right: the grant is per user, so the cached response is too
+const key = `mail:inbox:${folder}:user:${context.user.id}`;
+```
+
+The same applies to anything else that outlives the request: a row written to an
+app table, a value put in a shared store, a payload logged for debugging. If it
+came from a user-scoped connector, it belongs to one person.
