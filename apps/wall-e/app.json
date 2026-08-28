@@ -1,0 +1,31 @@
+{
+  "name": "Wall·E",
+  "description": "A dashboard widget with a different inspirational line from WALL·E every day.",
+  "icon": "bot",
+  "authors": [
+    {
+      "name": "Anthony Montalbano",
+      "email": "amontalbano@gmail.com"
+    }
+  ],
+  "connectors": [],
+  "database": false,
+  "notifications": false,
+  "global": true,
+  "widgets": [
+    {
+      "name": "Wall-E",
+      "description": "One line from WALL·E, chosen by the date and stable until tomorrow.",
+      "defaultSize": {
+        "w": 4,
+        "h": 2
+      },
+      "minSize": {
+        "w": 2,
+        "h": 1
+      },
+      "component": "widgets/quote-of-the-day.tsx"
+    }
+  ],
+  "lastUpdated": "2026-08-28T05:32:01.230Z"
+}
