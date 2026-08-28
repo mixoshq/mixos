@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { NextResponse, type NextRequest } from "next/server";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
@@ -29,7 +33,6 @@ export async function GET(
   ctx: { params: Promise<{ name: string }> },
 ) {
   const session = await requireReadOnlySession();
-  await requireAdmin(session);
 
   const { name } = await ctx.params;
   const returnTo = safeReturnPath(request.nextUrl.searchParams.get("return"));
@@ -47,6 +50,18 @@ export async function GET(
     return back("unsupported");
   }
 
+  /*
+    Who is allowed to start this, and whose grant it becomes.
+
+    A tenant connector is still admin-only: pressing Connect there authorises
+    an account on behalf of everyone. A user-scoped one is the opposite — the
+    grant is the person's own, so any signed-in user may start it and an admin
+    check would only stop people connecting their own accounts.
+  */
+  const userScoped = connector.userScoped === true;
+  if (!userScoped) await requireAdmin(session);
+  const flowUserId = userScoped ? session.user.id : null;
+
   const [idKey] = policy.credentialKeys ?? ["clientId", "clientSecret"];
   const credentials = await getDecryptedConfig(name);
   const clientId = credentials?.[idKey];
@@ -55,7 +70,7 @@ export async function GET(
     return back("missing-client");
   }
 
-  const flow = newFlowState(name, returnTo);
+  const flow = newFlowState(name, returnTo, flowUserId);
   const response = NextResponse.redirect(
     buildAuthorizeUrl(policy, { connector: name, clientId, flow }),
   );

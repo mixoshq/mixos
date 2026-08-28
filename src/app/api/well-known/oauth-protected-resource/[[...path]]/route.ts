@@ -1,9 +1,13 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { NextResponse } from "next/server";
 import { protectedResourceMetadata } from "@/lib/mcp/oauth";
 import { WELL_KNOWN_CORS } from "../../cors";
 
 /**
- * RFC 9728 protected-resource metadata for the MOS MCP server.
+ * RFC 9728 protected-resource metadata for the MixOS MCP server.
  *
  * This is the first document an MCP client fetches after a 401: the
  * `WWW-Authenticate` header on `/api/mcp` points here, and this points on to

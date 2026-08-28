@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { NextResponse, type NextRequest } from "next/server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { isAcceptableRedirectUri } from "@/lib/mcp/oauth";
@@ -12,7 +16,7 @@ import { getClientIp } from "@/lib/apps/public-access";
  * deliberate: it is what makes claude.ai's one-click "Add custom connector"
  * work, and it is safe because **registration grants nothing**. A registered
  * client can do exactly one thing: send a user to the consent screen. No data
- * moves until a logged-in MOS user ticks specific apps there.
+ * moves until a logged-in MixOS user ticks specific apps there.
  *
  * What we still enforce:
  *  - redirect URIs must be https, http-on-loopback (RFC 8252), or a native

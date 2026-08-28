@@ -1,11 +1,15 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { getAppOrigin } from "@/lib/env/origin";
 
 /**
- * Crypto and metadata for MOS-as-OAuth-2.1-authorization-server.
+ * Crypto and metadata for MixOS-as-OAuth-2.1-authorization-server.
  *
- * This is MOS acting as an authorization *server*: MCP clients authenticate
- * *to* MOS. Nothing here reaches out to a third-party identity provider.
+ * This is MixOS acting as an authorization *server*: MCP clients authenticate
+ * *to* MixOS. Nothing here reaches out to a third-party identity provider.
  *
  * Security model:
  *  - Clients are PUBLIC — no client_secret is ever issued. PKCE S256 is the
@@ -23,7 +27,7 @@ import { getAppOrigin } from "@/lib/env/origin";
 
 const DERIVE_LABEL = "mixmcp-oauth-token-key-v1";
 
-/** Scope string this AS issues. Read-only is the only mode MOS supports today. */
+/** Scope string this AS issues. Read-only is the only mode MixOS supports today. */
 export const MCP_SCOPE = "mcp:read";
 
 export const ACCESS_TOKEN_TTL_SEC = 60 * 60; // 1 hour
@@ -77,9 +81,9 @@ export function verifyPkce(codeVerifier: string, storedChallenge: string): boole
 }
 
 /**
- * The canonical resource identifier for the MOS MCP server (RFC 8707). Clients
+ * The canonical resource identifier for the MixOS MCP server (RFC 8707). Clients
  * send this as `resource` on authorize and token requests; we reject mismatches
- * so a token minted for MOS cannot be replayed at another resource server.
+ * so a token minted for MixOS cannot be replayed at another resource server.
  *
  * Origin comes from `getAppOrigin()` (NEXTAUTH_URL), never the Host header — a
  * host-injection would otherwise let an attacker steer redirect URIs.

@@ -1,5 +1,9 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Boots the whole local stack in one command: Supabase (Postgres + PostgREST +
-// Studio) through the Supabase CLI, then MOS itself through Docker Compose.
+// Studio) through the Supabase CLI, then MixOS itself through Docker Compose.
 //
 // The step order is not cosmetic — each step produces something the next one
 // needs:
@@ -366,7 +370,7 @@ function readSupabaseStatus(): SupabaseStatus {
     throw new SetupError(
       "`supabase status -o json` did not include SERVICE_ROLE_KEY.",
       "supabase/config.toml needs `[auth] enabled = true` — the CLI only emits the " +
-        "key set when the auth container is running, even though MOS never calls " +
+        "key set when the auth container is running, even though MixOS never calls " +
         "Supabase Auth. Set it, then run `npm run docker:down && npm run dev:docker`.",
     );
   }
@@ -707,7 +711,7 @@ async function preflight(opts: {
   // The app port is always contested: compose publishes it. The Supabase ports
   // only matter when we are about to start the stack — if it is already up, it
   // is *supposed* to be holding them.
-  const portsToCheck: Array<[number, string]> = [[PORTS.app, "the MOS app"]];
+  const portsToCheck: Array<[number, string]> = [[PORTS.app, "the MixOS app"]];
   if (!supabaseRunning) {
     portsToCheck.push(
       [PORTS.supabaseApi, "the Supabase API gateway (Kong)"],
@@ -915,7 +919,7 @@ function printBanner(opts: {
 
   console.log(`\n${rule}`);
   console.log(
-    `  ${c.bold(`MOS is starting — ${prod ? "prod" : "dev"} profile`)}`,
+    `  ${c.bold(`MixOS is starting — ${prod ? "prod" : "dev"} profile`)}`,
   );
   console.log("");
   console.log(`  App        ${c.bold("http://localhost:3000")}`);
@@ -1184,7 +1188,7 @@ function parseArgs(argv: string[]): Args {
 }
 
 const HELP = `
-Boot the local MOS stack: Supabase (Postgres + PostgREST + Studio) and the app.
+Boot the local MixOS stack: Supabase (Postgres + PostgREST + Studio) and the app.
 
   npm run dev:docker              dev profile — source bind-mounted, hot reload
   npm run docker:prod             prod profile — production-parity standalone image

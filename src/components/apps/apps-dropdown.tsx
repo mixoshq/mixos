@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import {
@@ -311,7 +315,7 @@ export default function AppsDropdown() {
                       className={`shrink-0 rounded-md p-1.5 transition-colors hover:bg-accent ${
                         pinned
                           ? "text-foreground"
-                          : "text-muted-foreground/40 hover:text-muted-foreground"
+                          : "text-muted-foreground hover:text-accent-foreground"
                       }`}
                     >
                       <Pin
@@ -393,7 +397,7 @@ export default function AppsDropdown() {
             >
               <LucideIcon name={app.icon} className="h-3.5 w-3.5 shrink-0" />
               {iconOnly ? (
-                <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-mixnavy px-2 py-1 text-xs font-medium text-white shadow-lg ring-1 ring-white/10 group-hover:block">
+                <span className="pointer-events-none absolute left-1/2 top-full z-50 mt-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-brand px-2 py-1 text-xs font-medium text-brand-foreground shadow-lg ring-1 ring-white/10 group-hover:block">
                   {app.name}
                 </span>
               ) : (

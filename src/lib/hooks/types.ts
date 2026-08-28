@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import type { AppManifest } from "@/lib/apps/types";
 import type { BaseConnector } from "@/lib/connectors/types";
 import type { NotificationsClient } from "@/lib/apps/notifications";
@@ -5,6 +9,8 @@ import type { ReadOnlyScopedClient, ScopedClient } from "@/lib/apps/scoped-db";
 
 export type { ScopedClient, ReadOnlyScopedClient };
 import type { TelemetryClient } from "@/lib/apps/telemetry";
+import type { AppEnv } from "@/lib/apps/env";
+import type { AppHttpClient } from "@/lib/apps/http";
 
 // ============================================================
 // AppContext — the runtime bag passed to apps, widgets, and hooks
@@ -83,7 +89,7 @@ export interface McpCaller {
 
 /**
  * Context passed to an MCP tool handler (`apps/<slug>/mcp/<name>.ts`), invoked
- * by the MOS MCP server on behalf of a connecting user.
+ * by the MixOS MCP server on behalf of a connecting user.
  *
  * Shaped by what a tool is *for* — answering a question:
  *
@@ -122,6 +128,25 @@ export interface AppContext {
   telemetry: TelemetryClient | null;
   /** Cross-app data requests; non-null only when the app declares `consumes`. */
   services: ServicesClient | null;
+  /**
+   * App-scoped settings declared in the manifest under `env` and filled in by an
+   * admin. Empty when the app declares none.
+   *
+   * This is why `process.env` is lint-banned in app code: the raw environment
+   * carries the platform's own secrets, and this carries only what the app asked
+   * for. `password` values are decrypted here and nowhere else.
+   */
+  env: AppEnv;
+  /**
+   * Outbound HTTP, bounded by the manifest's `egress` hostname allowlist and
+   * guarded against SSRF — the hostname is checked, then resolved, then every
+   * returned address re-checked, with redirects followed manually so each hop
+   * repeats both. `null` when the app declares no `egress`.
+   *
+   * Raw `fetch` is lint-banned in app code so this is the only door. Anything
+   * with fixed, admin-configured hosts belongs in a connector instead.
+   */
+  http: AppHttpClient | null;
   manifest: AppManifest;
   hooks: HookRegistrar;
 }
@@ -151,6 +176,25 @@ export interface PublicAppContext {
    * calling one.
    */
   services: ServicesClient | null;
+  /**
+   * App-scoped settings declared in the manifest under `env` and filled in by an
+   * admin. Empty when the app declares none.
+   *
+   * This is why `process.env` is lint-banned in app code: the raw environment
+   * carries the platform's own secrets, and this carries only what the app asked
+   * for. `password` values are decrypted here and nowhere else.
+   */
+  env: AppEnv;
+  /**
+   * Outbound HTTP, bounded by the manifest's `egress` hostname allowlist and
+   * guarded against SSRF — the hostname is checked, then resolved, then every
+   * returned address re-checked, with redirects followed manually so each hop
+   * repeats both. `null` when the app declares no `egress`.
+   *
+   * Raw `fetch` is lint-banned in app code so this is the only door. Anything
+   * with fixed, admin-configured hosts belongs in a connector instead.
+   */
+  http: AppHttpClient | null;
   manifest: AppManifest;
   hooks: HookRegistrar;
 }
@@ -184,6 +228,25 @@ export interface SystemAppContext {
    * User-less, so only `audience: "app"` services are reachable from a job.
    */
   services: ServicesClient | null;
+  /**
+   * App-scoped settings declared in the manifest under `env` and filled in by an
+   * admin. Empty when the app declares none.
+   *
+   * This is why `process.env` is lint-banned in app code: the raw environment
+   * carries the platform's own secrets, and this carries only what the app asked
+   * for. `password` values are decrypted here and nowhere else.
+   */
+  env: AppEnv;
+  /**
+   * Outbound HTTP, bounded by the manifest's `egress` hostname allowlist and
+   * guarded against SSRF — the hostname is checked, then resolved, then every
+   * returned address re-checked, with redirects followed manually so each hop
+   * repeats both. `null` when the app declares no `egress`.
+   *
+   * Raw `fetch` is lint-banned in app code so this is the only door. Anything
+   * with fixed, admin-configured hosts belongs in a connector instead.
+   */
+  http: AppHttpClient | null;
   manifest: AppManifest;
   hooks: HookRegistrar;
 }
@@ -226,6 +289,11 @@ export interface SidebarItem {
 
 export interface ActionHookMap {
   "init": () => Promise<void> | void;
+  // `user-login` and `user-sync` are declared but NOT currently dispatched.
+  // Their trigger was the SSO sign-in callback; SSO was removed and no
+  // equivalent hook was added to the credentials path. Listening to either is
+  // legal and will simply never fire — wire them up or drop them, but do not
+  // leave a reader believing they are live.
   "user-login": (user: { id: string; email: string }) => Promise<void> | void;
   "user-sync": (user: { id: string; email: string; name: string }) => Promise<void> | void;
 }

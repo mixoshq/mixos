@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -33,7 +37,7 @@ export default function RangeSelector({ current }: { current: number }) {
             onClick={() => select(r.value)}
             className={
               active
-                ? "rounded-md bg-mixnavy px-3 py-1.5 text-sm font-medium text-white"
+                ? "rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-brand-foreground"
                 : "rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
             }
           >

@@ -1,10 +1,43 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import type { ConnectorErrorCategory } from "./errors";
 
 export interface ConnectorManifest {
   name: string;
   displayName: string;
-  /** Technical description shown to admins in the Connector Registry. */
+  /**
+   * Public URL of the connector's icon, e.g. `/connector-assets/gmail/icon.png`.
+   * Authored as a filename inside `connectors/<name>/assets/`; the generator
+   * copies the directory to `public/connector-assets/<name>/` and rewrites this to
+   * the URL. Absent when the connector ships no artwork, which the registry
+   * renders as a generic plug glyph.
+   */
+  icon?: string;
+  /**
+   * Each person signs into their own account, instead of sharing the one an
+   * admin connected. Three-legged OAuth only; the grant lives in
+   * `user_connector_oauth` keyed by user, while the client id and secret stay
+   * tenant-wide in `connector_configs` — the *application* is registered once,
+   * only the *grant* is personal.
+   */
+  userScoped?: boolean;
+  /**
+   * What the **service** is, in a sentence or two — "Highly popular email
+   * service by Google." Not what this connector does with it, and not how to
+   * set it up: that is `setup`. Capped at 140 characters by the schema.
+   *
+   * The registry tile shows the first 15 words; the configure dialog shows all
+   * of it. So the first sentence should stand on its own.
+   */
   description: string;
+  /**
+   * How an admin provisions the credentials, structured so the registry can
+   * render numbered steps with working links. Optional — a connector needing
+   * nothing but a pasted API key can omit it.
+   */
+  setup?: ConnectorSetupGuide;
   credentialFields: CredentialField[];
   authors: ConnectorAuthor[];
   /**
@@ -81,6 +114,12 @@ export interface ConnectorAuthPolicy {
   authorizeUrl?: string;
   /** oauth2_*: scopes requested at provisioning time. Minimum set only. */
   scopes?: string[];
+  /**
+   * The provider's scope reference page, parsed by the Connector Registry to
+   * show permissions in plain English. Must be a page that tabulates scopes
+   * against descriptions.
+   */
+  scopesUrl?: string;
 }
 
 export interface ConnectorHttpPolicy {
@@ -146,6 +185,75 @@ export interface ConnectorWebhookPolicy {
 export interface ConnectorTelemetryDefinition {
   method: string;
   description?: string;
+  /**
+   * True when the method changes state upstream. Read by the MCP context, which
+   * refuses a mutating call from a read-only tool — closing the one hole
+   * `docs/apps/mcp.md` documented as reviewer-enforced.
+   */
+  mutates?: boolean;
+}
+
+/** A link an admin follows while provisioning. Always https — see the schema. */
+export interface ConnectorDocLink {
+  label: string;
+  url: string;
+}
+
+export interface ConnectorSetupStep {
+  /** The instruction, and only the instruction. One imperative sentence. */
+  text: string;
+  /**
+   * Why the step is that way — rendered behind a "?" the reader opens on hover
+   * or focus. Rationale only: a tooltip is not somewhere an instruction can
+   * live, so anything the reader must *do* belongs in `text`.
+   */
+  why?: string;
+  /**
+   * Literal values the step tells the admin to choose — "Internal", "Web
+   * application" — emboldened where they appear in `text`. Every entry must
+   * occur in the sentence; the build rejects one that does not.
+   */
+  values?: string[];
+  /** Where the step is carried out, when that is somewhere else. */
+  link?: ConnectorDocLink;
+  /**
+   * Render this deployment's redirect URI, with a copy button, beneath this
+   * step. Required on exactly one step of a three-legged connector — it is the
+   * one value the manifest cannot carry, since it comes from the running
+   * deployment's origin.
+   */
+  showRedirectUri?: boolean;
+}
+
+/**
+ * Provisioning instructions for the Connector Registry.
+ *
+ * Structured rather than prose because the two things an admin most needs are
+ * things prose cannot carry: a clickable link to the provider's console, and a
+ * slot for the redirect URI, which only the running deployment knows.
+ */
+/**
+ * Provider-specific warnings attached to the platform's own steps, so each
+ * appears at the control it is about rather than all at once on arrival.
+ */
+export interface ConnectorSetupNotes {
+  credentials?: string;
+  authorize?: string;
+  verify?: string;
+}
+
+export interface ConnectorSetupGuide {
+  /** Label for the provider-side step. Defaults to "Get your credentials". */
+  title?: string;
+  /**
+   * The provider-side work only — what an admin does in someone else's console.
+   * Saving credentials, authorizing and verifying are the registry's own steps,
+   * because it can tell whether those are done.
+   */
+  steps: ConnectorSetupStep[];
+  notes?: ConnectorSetupNotes;
+  /** Reference material — scope tables, API docs. Not steps to carry out. */
+  docs?: ConnectorDocLink[];
 }
 
 export interface ConnectorAuthor {

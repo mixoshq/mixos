@@ -1,6 +1,7 @@
 name: Danger
 
-# Applies the `os-change` review label and per-app / per-connector scope labels
+# Applies the `os-change` review label and per-app / per-connector / per-theme
+# scope labels
 # based on which paths a PR touches. See dangerfile.ts.
 
 on:

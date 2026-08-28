@@ -1,10 +1,14 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useState } from "react";
 import Header from "./header";
 import { usePreferences } from "./preferences-context";
 
-export default function HeaderShell({ isLocal = false }: { isLocal?: boolean }) {
+export default function HeaderShell({ logo }: { logo?: string | null }) {
   const { menuBar } = usePreferences();
   const [peek, setPeek] = useState(false);
 
@@ -12,7 +16,7 @@ export default function HeaderShell({ isLocal = false }: { isLocal?: boolean }) 
   const visible = !hidden || peek;
 
   if (!hidden) {
-    return <Header isLocal={isLocal} />;
+    return <Header logo={logo} />;
   }
 
   return (
@@ -29,7 +33,7 @@ export default function HeaderShell({ isLocal = false }: { isLocal?: boolean }) 
         onMouseEnter={() => setPeek(true)}
         onMouseLeave={() => setPeek(false)}
       >
-        <Header isLocal={isLocal} />
+        <Header logo={logo} />
       </div>
     </>
   );

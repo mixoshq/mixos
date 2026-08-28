@@ -9,7 +9,13 @@ You are creating or modifying an app under `apps/`.
 
 ## Write a plan first (before any code)
 
-For anything beyond a trivial one-line tweak, **write a build plan to `docs/plans/YYYYMMDD_HHMM-<plan-name>.md`** before editing code. Cover: **Context** (why this change), **Decisions** (anything locked with the user), **Structure** (the file-level changes — manifest, migrations, routes, pages/widgets), and **Verification** (how you'll prove it works). Get it reviewed when the change is non-trivial. See [`docs/plans/README.md`](docs/plans/README.md) for the convention.
+For anything beyond a trivial one-line tweak, **write a build plan to `apps/<slug>/plans/YYYYMMDD_HHMM-<plan-name>.md`** before editing code — the plan lives **inside the app it describes**, so it travels with the code. Cover: **Context** (why this change), **Decisions** (anything locked with the user), **Structure** (the file-level changes — manifest, migrations, routes, pages/widgets), and **Verification** (how you'll prove it works). Get it reviewed when the change is non-trivial.
+
+- **Creating a new app?** Make `apps/<slug>/plans/` as the first thing you write, before `app.json`. It is legitimate for the folder to hold only a plan until the build starts.
+- **Read the existing plans in that folder first** when modifying an app. They record decisions already locked with the user; contradicting one silently is how a change loses trust.
+- **Changing the platform, not the app?** (`src/`, `scripts/`, `eslint.config.mjs`, the build.) That is a *platform* plan and goes to `docs/plans/` instead.
+
+See [`docs/plans/README.md`](docs/plans/README.md) for the full convention.
 
 ## Required reading (do this first, in order)
 
@@ -32,7 +38,7 @@ For anything beyond a trivial one-line tweak, **write a build plan to `docs/plan
    - [docs/apps/ux.md](docs/apps/ux.md)
    - [docs/apps/app-shell.md](docs/apps/app-shell.md) — settings surfaces, headers, tabs, URL state, permission-aware UI
    - [docs/apps/telemetry.md](docs/apps/telemetry.md) — declaring and recording key-usage events
-   - [docs/apps/mcp.md](docs/apps/mcp.md) — exposing read-only tools to Claude via the MOS MCP server
+   - [docs/apps/mcp.md](docs/apps/mcp.md) — exposing read-only tools to Claude via the MixOS MCP server
 4. Authoritative types: [src/lib/apps/types.ts](src/lib/apps/types.ts). Canonical template: [apps/_template/](apps/_template/).
 5. For any Next.js API you're not certain about in this repo's version, read the relevant file in `node_modules/next/dist/docs/` before using it.
 6. If updating an existing app, read its current files before proposing edits.
@@ -79,7 +85,7 @@ If the app has a `jobs/` handler or caches upstream data, confirm the [data-fres
 5. **Prove the job is incremental.** If the job syncs or caches upstream data, run the tick a **second** time. Both runs must be `ok` with a duration well under 240s, and the second must do materially less work than the first — a smaller window, fewer pages, or fewer items in the log line. A second run that costs the same as the first is a full refresh wearing a scheduler's clothes; fix it per the [data-freshness discipline above](#data-freshness-discipline-jobs--cached-read-paths). Then load the page and confirm the read path still renders from the snapshot with the upstream connector unconfigured.
 6. For UI changes, load `/apps/<slug>` in the dev server and exercise the golden path plus one edge case. Don't claim "done" on a UI change you haven't opened in a browser.
 7. **Smoke-test the connector data path.** If `app.json` declares any `connectors`, run `npx tsx scripts/smoke-test-app.ts <slug>` against the running dev server (see the script header for the `SMOKE_COOKIE` setup). Confirm two things:
-   - **Guard path:** for any connector that isn't yet configured, the relevant route(s) classify as `UNCONFIGURED_TENANT` (503). A `GUARD_MISMATCH` outcome means the route uses the connector without a `?.configured` early-return — fix it per [`apps/AGENTS.md` invariant 12](../../apps/AGENTS.md).
+   - **Guard path:** for any connector that isn't yet configured, the relevant route(s) classify as `UNCONFIGURED_TENANT` (503). A `GUARD_MISMATCH` outcome means the route uses the connector without a `?.configured` early-return — fix it per [`apps/AGENTS.md` invariant 12](apps/AGENTS.md).
    - **Live data path:** for each connector that *is* configured, at least one route returns `OK_DATA` with the shape the widget consumes (read the widget file to confirm the field names match — the script doesn't validate widget contracts). If no connector is configured yet, **pause and ask the user to add credentials at `/admin/connectors`** before reporting done. Don't ship an app whose live data path you haven't seen work end-to-end.
 8. **Connector-call review** (any new/changed connector-backed widget or route). Re-read the route against the [discipline above](#connector-call-discipline-widgets--routes): does it fetch anything the widget doesn't render? Does it enrich before filtering? Does `resolveConfig` hit a lightweight endpoint with a timeout fallback? Trim what isn't needed before claiming done.
 9. **Exercise the MCP tools.** If `app.json` declares `mcp`, run `npx @modelcontextprotocol/inspector` against `http://localhost:3000/api/mcp`, complete the OAuth flow (register → consent → token), then call each tool with real arguments. Two checks, both by reading the output rather than running a script:
@@ -90,7 +96,7 @@ If the app has a `jobs/` handler or caches upstream data, confirm the [data-fres
 
 Triage by outcome class, then act. Re-run the smoke test after every fix or user-provided change. Don't claim done until every connector-backed route lands on `OK_DATA`, `OK_NOT_CONNECTED`, `UNCONFIGURED_TENANT`, or a `SKIPPED_*` outcome you've manually verified.
 
-- **`GUARD_MISMATCH`** — code bug. Add the missing `if (!connector?.configured)` early-return in the route per [`apps/AGENTS.md` invariant 12](../../apps/AGENTS.md). Fix and re-run.
+- **`GUARD_MISMATCH`** — code bug. Add the missing `if (!connector?.configured)` early-return in the route per [`apps/AGENTS.md` invariant 12](apps/AGENTS.md). Fix and re-run.
 - **`OK_EMPTY`** — route returned `{}`, `[]`, or `null`. May be valid (no rows yet) or a shape bug. Read the widget file: if the widget expects `{ deals: [...], totalArr: number }` and the route returns `{}`, you have a shape mismatch — fix in code. If the upstream really has no data, ask the user whether that's expected.
 - **Code-side errors** (wrong property name, wrong status code, missing `safeErrorMessage`, typo in SQL or HubSpot property): fix in the route and re-run.
 - **`AUTH_ERROR`** (401/403, or 5xx with auth-y error text) — do **not** edit code. Ask the user, e.g. *"The `<connector>` route is returning 401/403. Can you confirm the credentials in `/admin/connectors` are valid and include the scope(s) `<...>`? The error body was: `<excerpt>`."*

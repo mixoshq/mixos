@@ -1,9 +1,9 @@
 ---
-description: Guided first-time local setup of MixOS (MOS) on your machine
+description: Guided first-time local setup of MixOS on your machine
 argument-hint: [notes]
 ---
 
-You are installing MixOS (MOS) on someone's machine and booting it for the first
+You are installing MixOS on someone's machine and booting it for the first
 time. Assume **macOS**, **Claude running in VSCode**, and that the person may not
 be a developer. The whole system — app, Postgres, PostgREST, and the scheduler
 tick — runs locally in **Docker**; there is no cloud account to create and no
@@ -21,7 +21,7 @@ then install everything.
 
 Run `uname -s`. If it is not `Darwin`, stop and say so plainly:
 
-> This guided installer only covers macOS. MOS runs fine on Linux and on Windows
+> This guided installer only covers macOS. MixOS runs fine on Linux and on Windows
 > via WSL2, but the install steps differ enough that guessing them would waste
 > your time. The manual path is in [README.md](../../README.md) and
 > [docs/local-docker.md](../../docs/local-docker.md) — everything after
@@ -29,7 +29,7 @@ Run `uname -s`. If it is not `Darwin`, stop and say so plainly:
 
 Then stop. Do not attempt a Linux or Windows install.
 
-## Step 0b — Is MOS already set up?
+## Step 0b — Is MixOS already set up?
 
 Check for the three Docker-path signals:
 
@@ -51,7 +51,7 @@ services it prints `Stopped services: [...]` for the rest and still exits 0.
 
 If all three are true, don't re-run setup. Tell them:
 
-> MOS is already set up. Run `npm run dev:docker` and open
+> MixOS is already set up. Run `npm run dev:docker` and open
 > http://localhost:3000. If you'd rather figure out what to build, run
 > `/mix-help`.
 
@@ -73,7 +73,7 @@ complete list in Step 2 instead of six separate prompts.
 | Docker daemon | `docker info` | Bare, and read the **exit code**. `docker info --format '{{.ServerVersion}}'` exits 0 with empty output when the daemon is down, so it reports dead as healthy. |
 | VSCode CLI | `code --version` | If missing: VSCode → Command Palette (`Cmd+Shift+P`) → **Shell Command: Install 'code' command in PATH**, then retry. |
 | Extensions | `code --list-extensions` | Looking for `Anthropic.claude-code` and `esbenp.prettier-vscode`. |
-| GitHub CLI (optional) | `gh --version` | Not needed to boot MOS. `/mix-deploy` uses it to open pull requests, and falls back to a paste-ready link without it. |
+| GitHub CLI (optional) | `gh --version` | Not needed to boot MixOS. `/mix-deploy` uses it to open pull requests, and falls back to a paste-ready link without it. |
 
 Also check that ports **3000, 54321, 54322, and 54323** are free:
 
@@ -102,11 +102,11 @@ for" each. Something like:
 > 1. **Homebrew** — the macOS package manager everything else installs through.
 > 2. **Node 22** — runs the build tools and the local database CLI.
 > 3. **Project dependencies** (`npm ci`) — about 90 seconds.
-> 4. **Docker Desktop** — runs MOS and its database on your machine.
+> 4. **Docker Desktop** — runs MixOS and its database on your machine.
 > 5. **VSCode extensions** — Claude Code and Prettier.
 >
 > Total download is roughly 1 GB now, plus several more GB of database images
-> the first time MOS boots. Want me to go ahead?
+> the first time MixOS boots. Want me to go ahead?
 
 Wait for a yes. Skip anything already present and say so ("Homebrew is already
 installed, skipping"). After this point don't ask again unless something fails
@@ -237,7 +237,7 @@ Then say, before you start polling:
 > Docker Desktop is starting. The first launch shows a couple of screens — accept
 > the service agreement, choose the recommended settings, and enter your Mac
 > password when it asks to install a helper. You can skip the sign-in / "create
-> an account" screen entirely; MOS doesn't need a Docker account. I'll wait.
+> an account" screen entirely; MixOS doesn't need a Docker account. I'll wait.
 
 Poll until the daemon actually answers, with a timeout:
 
@@ -266,7 +266,7 @@ only trust it after the poll succeeded). Below `4294967296` (4 GB), tell them to
 raise it in Docker Desktop → Settings → Resources; the Postgres, Kong,
 PostgREST, and Studio containers plus a Next.js build are tight under 4 GB.
 
-## Step 5 — Boot MOS
+## Step 5 — Boot MixOS
 
 ```bash
 npm run dev:docker -- --detach
@@ -323,11 +323,11 @@ don't start a second boot on top of it — poll instead, then carry on to Step 6
 deadline=$(( $(date +%s) + 1200 ))
 until [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health/ready)" = "200" ]; do
   if [ "$(date +%s)" -ge "$deadline" ]; then
-    echo "MOS did not become ready within 20 minutes" >&2; exit 1
+    echo "MixOS did not become ready within 20 minutes" >&2; exit 1
   fi
   sleep 5
 done
-echo "MOS is ready"
+echo "MixOS is ready"
 ```
 
 The comparison is on the printed status code rather than curl's exit status on
@@ -368,7 +368,7 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
    page renders unstyled and broken.
 3. Print this verbatim:
 
-   > **MOS is successfully installed!**
+   > **MixOS is successfully installed!**
    >
    > "Welcome to the real world. It sucks! You're gonna love it!"
 
@@ -376,8 +376,19 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
    - **Not sure what to build?** Run **`/mix-help`** — it explains how apps and
      connectors relate and recommends what to build.
    - **`/mix-app`** builds something under `apps/`; **`/mix-connector`** builds
-     an integration under `connectors/`; **`/mix-deploy`** makes the branch and
+     an integration under `connectors/`; **`/mix-theme`** changes how the whole
+     install looks, under `themes/`; **`/mix-deploy`** makes the branch and
      opens the pull request when you're ready. Never commit straight to `main`.
+   - **Your edits appear on save; brand-new apps, connectors and themes do not.** The
+     container runs `next dev` over your working tree, so editing a page, a
+     component, or an API route is live in about two seconds — no restart, no
+     rebuild. The one exception is the generated registry: `apps/`,
+     `connectors/` and `themes/` are scanned once at container start by the
+     `predev` hook, so a **newly created** app, connector, or theme stays
+     invisible until you run `npm run registry`. That writes `src/generated/`,
+     which then hot-reloads like any other file. `/mix-app`, `/mix-connector`
+     and `/mix-theme` already run the generator as their first verification
+     step, so this mostly bites when you add a directory by hand.
    - **Everyday commands:** `npm run dev:docker` to start — it stays in the
      foreground streaming logs, and Ctrl-C ends the session by stopping the app
      container while the database keeps running. `npm run docker:down` stops
@@ -385,10 +396,10 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
      started in Step 5 comes down. `npm run docker:reset` wipes the local
      database and starts over.
    - **Connector API keys are not environment variables.** An admin enters them
-     in the UI at http://localhost:3000/admin/connectors and MOS encrypts them
-     in the database. The real keys live in the team's **MOS 1Password vault** —
+     in the UI at http://localhost:3000/admin/connectors and MixOS encrypts them
+     in the database. The real keys live in the team's **MixOS 1Password vault** —
      request access from Anthony (amix@gmail.com), and never share them.
-     This isn't needed to boot MOS; it can wait.
+     This isn't needed to boot MixOS; it can wait.
 
 ## Notes
 
@@ -403,7 +414,7 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
   without a terminal to confirm on, precisely so that an agent cannot wipe a
   database by accident. `npm run docker:reset -- --yes` is the deliberate
   override; needing it should feel like a decision.
-- **If they ask about running without Docker:** MOS also runs with Node on the
+- **If they ask about running without Docker:** MixOS also runs with Node on the
   host against a hosted Supabase project — see the "Alternative: hosted
   Supabase" section of [README.md](../../README.md). Don't offer this
   unprompted; it is more setup, not less.

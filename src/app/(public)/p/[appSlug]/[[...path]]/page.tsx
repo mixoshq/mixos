@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { appRegistry } from "@/generated/app-registry";
@@ -55,11 +59,11 @@ export default async function PublicAppPage({ params }: Props) {
         );
         return (
           <div className="flex min-h-screen items-center justify-center bg-muted px-4">
-            <div className="max-w-sm rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-              <h1 className="text-lg font-semibold text-gray-900">
+            <div className="max-w-sm rounded-xl border border-border bg-card p-8 text-center shadow-sm">
+              <h1 className="text-lg font-semibold text-card-foreground">
                 This app is not available
               </h1>
-              <p className="mt-2 text-sm text-gray-600">
+              <p className="mt-2 text-sm text-muted-foreground">
                 The administrator hasn&apos;t finished setting up access for
                 this page. Please try again later.
               </p>

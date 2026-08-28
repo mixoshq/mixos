@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { redirect } from "next/navigation";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import LucideIcon from "@/components/lucide-icon";
@@ -107,7 +111,7 @@ export default async function AuthorizePage({ searchParams }: PageProps) {
   return (
     <div className="mx-auto max-w-2xl py-12">
       <h1 className="text-xl font-semibold">
-        Allow <span className="text-mixcharcoal dark:text-white">{client.clientName}</span>{" "}
+        Allow <span className="text-primary">{client.clientName}</span>{" "}
         to read MixOS data?
       </h1>
       <p className="mt-2 text-sm text-muted-foreground">
@@ -145,7 +149,7 @@ export default async function AuthorizePage({ searchParams }: PageProps) {
                     name="apps"
                     value={app.slug}
                     defaultChecked
-                    className="mt-1 h-4 w-4 shrink-0 accent-mixcharcoal"
+                    className="mt-1 h-4 w-4 shrink-0 accent-brand"
                   />
                   <span className="min-w-0">
                     <span className="flex items-center gap-2 font-medium">
@@ -180,7 +184,7 @@ export default async function AuthorizePage({ searchParams }: PageProps) {
           <button
             type="submit"
             formAction={approveAuthorization}
-            className="rounded-md bg-mixcharcoal px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:opacity-90"
           >
             Allow
           </button>

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * The app route contract.
  *
@@ -159,18 +163,37 @@ interface BaseRouteSpec<A extends readonly RouteAuth[]> {
   summary?: string;
 }
 
+/**
+ * The parsed input a handler receives: the schema's OUTPUT, with defaults
+ * applied and transforms run. `Record<string, never>` when no schema is
+ * declared, because an undeclared input is unavailable rather than unvalidated.
+ */
+export type ParsedInput<S> = S extends z.ZodType
+  ? z.output<S>
+  : Record<string, never>;
+
+/**
+ * The input a CALLER sends: the schema's INPUT, where a field with a default is
+ * optional. Distinct from `ParsedInput` on purpose — a route declaring
+ * `limit: z.number().default(10)` must not force every caller to pass a limit
+ * just because its handler is guaranteed one.
+ */
+export type WireInput<S> = S extends z.ZodType
+  ? z.input<S>
+  : Record<string, never>;
+
 export interface JsonRouteSpec<
-  TIn,
+  S,
   TOut,
   A extends readonly RouteAuth[] = ["session"],
 > extends BaseRouteSpec<A> {
   raw?: false;
-  input?: z.ZodType<TIn>;
+  input?: S;
   output: RouteOutput<TOut>;
-  handler: (ctx: ContextFor<A>, input: TIn) => TOut | Promise<TOut>;
+  handler: (ctx: ContextFor<A>, input: ParsedInput<S>) => TOut | Promise<TOut>;
 }
 
-export interface RawRouteSpec<TIn, A extends readonly RouteAuth[] = ["session"]>
+export interface RawRouteSpec<S, A extends readonly RouteAuth[] = ["session"]>
   extends BaseRouteSpec<A> {
   /**
    * This route owns its own Response — a file stream, a redirect, a non-JSON
@@ -178,10 +201,10 @@ export interface RawRouteSpec<TIn, A extends readonly RouteAuth[] = ["session"]>
    * timeout only covers producing the Response, not consuming its body.
    */
   raw: true;
-  input?: z.ZodType<TIn>;
+  input?: S;
   handler: (
     ctx: ContextFor<A>,
-    input: TIn,
+    input: ParsedInput<S>,
     request: Request,
   ) => Response | Promise<Response>;
 }
@@ -193,7 +216,7 @@ export const ROUTE_DEFINITION = Symbol.for("mos.route.definition");
  * The hoisted, inspectable form of a route. The generator reads the plain
  * fields; the gateway and `context.call()` both dispatch through `runRoute`.
  */
-export interface RouteDefinition {
+export interface RouteDefinition<S = unknown, TOut = unknown> {
   readonly brand: typeof ROUTE_DEFINITION;
   readonly auth: RouteAuth[];
   readonly roles: string[];
@@ -208,7 +231,26 @@ export interface RouteDefinition {
     input: never,
     request: Request,
   ) => unknown | Promise<unknown>;
+  /**
+   * Phantom. Never assigned, erased at runtime, and present only so that
+   * `typeof GET` carries the shapes the route declared.
+   *
+   * This is what makes the generated client typed. `defineRoute` knows `TIn`
+   * and `TOut` from the Zod schemas, but a non-generic `RouteDefinition` would
+   * throw both away at the export boundary, leaving the client with nothing to
+   * infer from and `client.call()` no better than the `get<T>()` assertion it
+   * replaces.
+   */
+  readonly __types?: { schema: S; output: TOut };
 }
+
+/** What a CALLER passes — the schema's input side, so defaults stay optional. */
+export type RouteInputOf<D> =
+  D extends RouteDefinition<infer S, unknown> ? WireInput<S> : never;
+
+/** The data a route resolves to. */
+export type RouteOutputOf<D> =
+  D extends { __types?: { output: infer TOut } } ? TOut : never;
 
 function normalizeCap(declared: number | undefined, fallback: number): number {
   if (declared === undefined) return fallback;
@@ -220,17 +262,25 @@ function normalizeCap(declared: number | undefined, fallback: number): number {
   return declared;
 }
 
-export function defineRoute<TIn, TOut, A extends readonly RouteAuth[] = ["session"]>(
-  spec: JsonRouteSpec<TIn, TOut, A>,
-): RouteDefinition;
-export function defineRoute<TIn, A extends readonly RouteAuth[] = ["session"]>(
-  spec: RawRouteSpec<TIn, A>,
-): RouteDefinition;
+export function defineRoute<
+  TOut,
+  A extends readonly RouteAuth[] = ["session"],
+  S extends z.ZodType | undefined = undefined,
+>(spec: JsonRouteSpec<S, TOut, A>): RouteDefinition<S, TOut>;
+export function defineRoute<
+  A extends readonly RouteAuth[] = ["session"],
+  S extends z.ZodType | undefined = undefined,
+>(spec: RawRouteSpec<S, A>): RouteDefinition<S, Response>;
 export function defineRoute(
-  spec: JsonRouteSpec<unknown, unknown, readonly RouteAuth[]> | RawRouteSpec<unknown, readonly RouteAuth[]>,
+  spec:
+    | JsonRouteSpec<z.ZodType | undefined, unknown, readonly RouteAuth[]>
+    | RawRouteSpec<z.ZodType | undefined, readonly RouteAuth[]>,
 ): RouteDefinition {
   const raw = spec.raw === true;
-  const declaredOutput = raw ? undefined : (spec as JsonRouteSpec<unknown, unknown, readonly RouteAuth[]>).output;
+  const declaredOutput = raw
+    ? undefined
+    : (spec as JsonRouteSpec<z.ZodType | undefined, unknown, readonly RouteAuth[]>)
+        .output;
 
   const output =
     declaredOutput && "schema" in declaredOutput ? declaredOutput.schema : declaredOutput;
@@ -499,6 +549,16 @@ export interface RunRouteOptions {
   method: string;
   /** Values for the route's dynamic segments, e.g. `{ id: "42" }`. */
   pathParams?: Record<string, string>;
+  /**
+   * Input supplied directly rather than parsed out of the request.
+   *
+   * The in-process transport has a real object already and should not have to
+   * flatten it into a query string just so the pipeline can parse it back —
+   * that round trip is exactly what loses the types the caller had. Validation
+   * still runs against it, so this is a shortcut past *parsing*, never past the
+   * schema.
+   */
+  inputOverride?: unknown;
 }
 
 /** `my-app GET /items/[id]` — built here so the log label and the telemetry
@@ -508,25 +568,165 @@ function labelFor(appSlug: string, method: string, routePattern: string): string
 }
 
 /**
- * Run a declared route and produce its Response.
+ * The route pipeline itself, shared by every transport.
+ *
+ * Throws `AppError` on any failure and returns either the validated payload or,
+ * for a `raw` route, the Response the handler produced. It does not build an
+ * HTTP response and it does not record telemetry — those belong to the caller,
+ * because they differ between the wire and an in-process call.
  *
  * The order is the same one both existing brokers use, and it is load-bearing:
- * validate before building anything expensive, run the handler under its
- * budget, then check what came back. See `src/lib/mcp/broker.ts` for the
- * original.
+ * authorize, validate, then run under budget, then check what came back. See
+ * `src/lib/mcp/broker.ts` for the original.
  */
-export async function runRoute(
+async function executeRoute(
   def: RouteDefinition,
   request: Request,
-  { context, appSlug, routePattern, method, pathParams = {} }: RunRouteOptions,
-): Promise<Response> {
-  const label = labelFor(appSlug, method, routePattern);
-  const startedAt = Date.now();
+  context: ResolvedContext,
+  pathParams: Record<string, string>,
+  label: string,
+  inputOverride?: unknown,
+): Promise<{ kind: "raw"; response: Response } | { kind: "data"; payload: unknown }> {
+  // ROLES, ENFORCED HERE RATHER THAN AT THE MOUNT. This is the single place
+  // every caller passes through — both HTTP mounts and the in-process
+  // `callAppRoute` — so a route's role gate cannot be reachable by a path that
+  // forgot to check it. Default-deny: a declared role that nobody satisfies is
+  // a 403, never a fall-through.
+  //
+  // `isAdmin` deliberately does NOT bypass. App roles are app-local, and the
+  // platform admin flag says nothing about what an app's "approver" means. This
+  // matches `hasRole`'s documented purity — an app that wants admins to bypass
+  // grants them the role.
+  //
+  // The build additionally rejects `roles` on any auth set but `["session"]`,
+  // since no other tier carries roles; this check is what makes that guarantee
+  // true at runtime rather than merely at build time.
+  if (def.roles.length > 0) {
+    if (!context.user) {
+      throw AppError.forbidden("This requires a signed-in user with a role.");
+    }
+    if (!context.user.hasRole(def.roles)) {
+      throw AppError.forbidden();
+    }
+  }
 
-  // One recorder, both exits. Declared here rather than duplicated at each
-  // `return` so the success path and the failure path cannot drift — and fired
-  // with `void`, because telemetry never blocks or fails a request.
-  const record = (status: number, overBudget?: "timeout" | "connector-budget") => {
+  const assembled =
+    inputOverride !== undefined
+      ? { ...(inputOverride as Record<string, unknown>), ...pathParams }
+      : await assembleInput(def, request, pathParams);
+
+  let input: unknown = {};
+  if (def.input) {
+    const parsed = def.input.safeParse(assembled);
+    if (!parsed.success) {
+      throw AppError.invalidInput(
+        `Invalid request for ${label}.`,
+        parsed.error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          message: issue.message,
+        })),
+      );
+    }
+    input = parsed.data;
+  }
+
+  // Always wrapped. A cap of 0 means "no connector calls", and the counter
+  // rejects the first one; skipping the proxy at 0 would make the strictest
+  // declaration an author can write the only unbounded one.
+  const ctx = {
+    ...context,
+    connectors: withConnectorBudget(
+      context.connectors,
+      def.budget.connectorCalls,
+      label,
+    ),
+  };
+
+  const handler = def.handler as (
+    c: unknown,
+    i: unknown,
+    r: Request,
+  ) => unknown | Promise<unknown>;
+
+  const result = await withTimeout(
+    Promise.resolve(handler(ctx, input, request)),
+    def.budget.ms,
+    () =>
+      AppError.timeout(
+        `${label} did not finish within its ${def.budget.ms}ms budget.`,
+      ),
+  );
+
+  // A raw route owns its Response: no output schema, no payload cap, and the
+  // timeout above only covered producing it.
+  if (def.raw) {
+    if (!(result instanceof Response)) {
+      throw new AppError(
+        "INVALID_OUTPUT",
+        `${label} declares \`raw: true\` but did not return a Response.`,
+      );
+    }
+    return { kind: "raw", response: result };
+  }
+
+  if (result instanceof Response) {
+    throw new AppError(
+      "INVALID_OUTPUT",
+      `${label} returned a Response without declaring \`raw: true\`.`,
+    );
+  }
+
+  if (!def.output) return { kind: "data", payload: result };
+
+  const parsed = def.output.safeParse(result);
+  // The `dev-only` escape downgrades a FAILURE from a 500 to a log. It does not
+  // skip the parse, because `parsed.data` is also what strips undeclared keys —
+  // skipping it would turn a performance escape into a data leak, and production
+  // would send fields the schema exists to withhold.
+  if (parsed.success) return { kind: "data", payload: parsed.data };
+
+  const enforce =
+    def.outputValidation === "always" || process.env.NODE_ENV !== "production";
+
+  // Logged either way, because safeErrorMessage never logs and in production
+  // the caller only sees the generic message. Without this an output mismatch
+  // is invisible on the server.
+  console.error(
+    enforce
+      ? `[route] ${label} returned a payload that failed its own output schema:`
+      : `[route] ${label} failed its own output schema (validation relaxed by a declared escape):`,
+    parsed.error.issues,
+  );
+
+  if (!enforce) return { kind: "data", payload: result };
+
+  throw new AppError(
+    "INVALID_OUTPUT",
+    `${label} returned data that does not match its declared output.`,
+    process.env.NODE_ENV === "production"
+      ? undefined
+      : parsed.error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          message: issue.message,
+        })),
+  );
+}
+
+/**
+ * Telemetry for one route invocation, shared by both transports.
+ *
+ * Returned as a closure rather than inlined so the success and failure paths
+ * cannot drift, and fired with `void` because telemetry never blocks or fails a
+ * request.
+ */
+function routeRecorder(
+  appSlug: string,
+  method: string,
+  routePattern: string,
+  context: ResolvedContext,
+) {
+  const startedAt = Date.now();
+  return (status: number, overBudget?: "timeout" | "connector-budget") => {
     void recordRouteCall({
       appSlug,
       // The PATTERN, not the URL. See recordRouteCall for why this matters.
@@ -538,143 +738,62 @@ export async function runRoute(
       ...(overBudget ? { overBudget } : {}),
     });
   };
+}
+
+/** Which budget a failure blew, for telemetry. */
+function budgetFrom(err: unknown): "timeout" | "connector-budget" | undefined {
+  if (!(err instanceof AppError)) return undefined;
+  if (err.code === "TIMEOUT") return "timeout";
+  if (err.code === "BUDGET_EXCEEDED") return "connector-budget";
+  return undefined;
+}
+
+/**
+ * Run a declared route and produce its HTTP Response. Used by both mounts.
+ *
+ * Never throws: every failure becomes a Response, which is the contract the
+ * gateway depends on.
+ */
+export async function runRoute(
+  def: RouteDefinition,
+  request: Request,
+  {
+    context,
+    appSlug,
+    routePattern,
+    method,
+    pathParams = {},
+    inputOverride,
+  }: RunRouteOptions,
+): Promise<Response> {
+  const label = labelFor(appSlug, method, routePattern);
+  const record = routeRecorder(appSlug, method, routePattern, context);
 
   try {
-    // ROLES, ENFORCED HERE RATHER THAN AT THE MOUNT. This is the single place
-    // every caller passes through — both HTTP mounts today and `context.call()`
-    // in Phase 2 — so a route's role gate cannot be reachable by a path that
-    // forgot to check it. Default-deny: a declared role that nobody satisfies
-    // is a 403, never a fall-through.
-    //
-    // `isAdmin` deliberately does NOT bypass. App roles are app-local, and the
-    // platform admin flag says nothing about what an app's "approver" means.
-    // This matches `hasRole`'s documented purity — an app that wants admins to
-    // bypass grants them the role.
-    if (def.roles.length > 0) {
-      if (!context.user) {
-        // An anonymous tier can never hold an app role, so this is a
-        // misconfiguration rather than a challenge worth issuing.
-        throw AppError.forbidden("This requires a signed-in user with a role.");
-      }
-      if (!context.user.hasRole(def.roles)) {
-        throw AppError.forbidden();
-      }
-    }
-
-    const assembled = await assembleInput(def, request, pathParams);
-
-    let input: unknown = {};
-    if (def.input) {
-      const parsed = def.input.safeParse(assembled);
-      if (!parsed.success) {
-        throw AppError.invalidInput(
-          `Invalid request for ${label}.`,
-          parsed.error.issues.map((issue) => ({
-            path: issue.path.join("."),
-            message: issue.message,
-          })),
-        );
-      }
-      input = parsed.data;
-    }
-
-    // Always wrapped. A cap of 0 means "no connector calls", and the counter
-    // rejects the first one; skipping the proxy at 0 would make the strictest
-    // declaration an author can write the only unbounded one.
-    const ctx = {
-      ...context,
-      connectors: withConnectorBudget(
-        context.connectors,
-        def.budget.connectorCalls,
-        label,
-      ),
-    };
-
-    const handler = def.handler as (
-      c: unknown,
-      i: unknown,
-      r: Request,
-    ) => unknown | Promise<unknown>;
-
-    const result = await withTimeout(
-      Promise.resolve(handler(ctx, input, request)),
-      def.budget.ms,
-      () =>
-        AppError.timeout(
-          `${label} did not finish within its ${def.budget.ms}ms budget.`,
-        ),
+    const out = await executeRoute(
+      def,
+      request,
+      context,
+      pathParams,
+      label,
+      inputOverride,
     );
 
-    // A raw route owns its Response: no output schema, no payload cap, and the
-    // timeout above only covered producing it.
-    if (def.raw) {
-      if (!(result instanceof Response)) {
-        throw new AppError(
-          "INVALID_OUTPUT",
-          `${label} declares \`raw: true\` but did not return a Response.`,
-        );
-      }
+    if (out.kind === "raw") {
       // For a raw route this measures time-to-Response, not time-to-last-byte:
       // the handler produced a stream and the body is still being consumed.
-      record(result.status);
-      return result;
+      record(out.response.status);
+      return out.response;
     }
 
-    if (result instanceof Response) {
-      throw new AppError(
-        "INVALID_OUTPUT",
-        `${label} returned a Response without declaring \`raw: true\`.`,
-      );
-    }
-
-    let payload = result;
-
-    if (def.output) {
-      const parsed = def.output.safeParse(result);
-      // The `dev-only` escape downgrades a FAILURE from a 500 to a log. It does
-      // not skip the parse, because `parsed.data` is also what strips undeclared
-      // keys — skipping it would turn a performance escape into a data leak, and
-      // production would send fields the schema exists to withhold.
-      const enforce =
-        def.outputValidation === "always" ||
-        process.env.NODE_ENV !== "production";
-
-      if (parsed.success) {
-        payload = parsed.data;
-      } else if (!enforce) {
-        console.error(
-          `[route] ${label} failed its own output schema (validation relaxed by a declared escape):`,
-          parsed.error.issues,
-        );
-      } else {
-        // Logged because safeErrorMessage never logs, and in production the
-        // caller only sees the generic message. Without this line an output
-        // mismatch is invisible on the server.
-        console.error(
-          `[route] ${label} returned a payload that failed its own output schema:`,
-          parsed.error.issues,
-        );
-        throw new AppError(
-          "INVALID_OUTPUT",
-          `${label} returned data that does not match its declared output.`,
-          process.env.NODE_ENV === "production"
-            ? undefined
-            : parsed.error.issues.map((issue) => ({
-                path: issue.path.join("."),
-                message: issue.message,
-              })),
-        );
-      }
-    }
-
-    if (payload === undefined) {
+    if (out.payload === undefined) {
       record(204);
       return new NextResponse(null, { status: 204 });
     }
 
     let serialized: string;
     try {
-      serialized = JSON.stringify(payload);
+      serialized = JSON.stringify(out.payload);
     } catch {
       throw new AppError(
         "HANDLER_ERROR",
@@ -698,16 +817,7 @@ export async function runRoute(
       console.error(`[route] ${label} threw:`, err);
     }
     const { status, body } = toErrorResponse(err, `${label} failed.`);
-    // Which budget, not a single boolean: `ms` produced a 504 while the handler
-    // kept running, and `connectorCalls` actually stopped the work. Conflating
-    // them would make the number useless for deciding which one to raise.
-    const overBudget =
-      err instanceof AppError && err.code === "TIMEOUT"
-        ? ("timeout" as const)
-        : err instanceof AppError && err.code === "BUDGET_EXCEEDED"
-          ? ("connector-budget" as const)
-          : undefined;
-    record(status, overBudget);
+    record(status, budgetFrom(err));
     try {
       return NextResponse.json(body, { status });
     } catch {
@@ -717,5 +827,62 @@ export async function runRoute(
       console.error(`[route] ${label}: error details were not serializable.`);
       return NextResponse.json({ error: body.error, code: body.code }, { status });
     }
+  }
+}
+
+/**
+ * Run a declared route and return its data, with no HTTP in the middle.
+ *
+ * The in-process transport behind `callAppRoute`. Identical pipeline —
+ * same roles, same input validation, same budget, same output validation, same
+ * telemetry — so a server component rendering from its own route gets exactly
+ * what a browser calling that route would get, minus a network hop and a
+ * serialize/parse round trip.
+ *
+ * Unlike `runRoute` this THROWS `AppError`, because a caller holding real data
+ * wants a real exception, not a Response it has to unpack.
+ *
+ * The payload cap does not apply: it bounds what crosses the wire, and nothing
+ * crosses one here. A `raw` route is refused — its whole purpose is a Response.
+ */
+export async function runRouteData<TOut = unknown>(
+  def: RouteDefinition,
+  request: Request,
+  {
+    context,
+    appSlug,
+    routePattern,
+    method,
+    pathParams = {},
+    inputOverride,
+  }: RunRouteOptions,
+): Promise<TOut> {
+  const label = labelFor(appSlug, method, routePattern);
+  const record = routeRecorder(appSlug, method, routePattern, context);
+
+  try {
+    const out = await executeRoute(
+      def,
+      request,
+      context,
+      pathParams,
+      label,
+      inputOverride,
+    );
+    if (out.kind === "raw") {
+      throw new AppError(
+        "INVALID_OUTPUT",
+        `${label} declares \`raw: true\` and can only be called over HTTP.`,
+      );
+    }
+    record(200);
+    return out.payload as TOut;
+  } catch (err) {
+    if (!(err instanceof AppError)) {
+      console.error(`[route] ${label} threw:`, err);
+    }
+    const { status } = toErrorResponse(err, `${label} failed.`);
+    record(status, budgetFrom(err));
+    throw err;
   }
 }

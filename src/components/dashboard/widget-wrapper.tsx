@@ -1,10 +1,15 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
-import { Suspense, lazy, useMemo, useState } from "react";
+import { Suspense, lazy, useState, type ComponentType } from "react";
 import { GripVertical, X, Settings } from "lucide-react";
 import type { DashboardWidget } from "@/lib/dashboard/actions";
 import { updateWidgetConfig } from "@/lib/dashboard/actions";
 import type { WidgetDefinition } from "@/lib/apps/types";
+import type { WidgetProps } from "@/lib/hooks/types";
 import { widgetLoaders } from "@/generated/app-registry";
 import { useDashboardEdit } from "./edit-mode-context";
 import WidgetConfigModal from "./widget-config-modal";
@@ -16,6 +21,19 @@ interface WidgetWrapperProps {
   onRemove: () => void;
 }
 
+/**
+ * Every widget's lazy wrapper, built once at module load.
+ *
+ * `lazy()` does not invoke its loader — it only wraps it — so this is cheap, and
+ * doing it here means no component is ever created during render.
+ */
+const LAZY_WIDGETS: Record<string, ComponentType<WidgetProps>> = Object.fromEntries(
+  Object.entries(widgetLoaders).map(([key, loader]) => [
+    key,
+    lazy(loader) as unknown as ComponentType<WidgetProps>,
+  ]),
+);
+
 export default function WidgetWrapper({
   widget,
   definition,
@@ -26,13 +44,12 @@ export default function WidgetWrapper({
   const [configOpen, setConfigOpen] = useState(false);
   const [currentConfig, setCurrentConfig] = useState(widget.config);
 
-  const WidgetComponent = useMemo(() => {
-    if (!definition) return null;
-    const key = `${appSlug}/${definition.component}`;
-    const loader = widgetLoaders[key];
-    if (!loader) return null;
-    return lazy(loader);
-  }, [appSlug, definition]);
+  // Looked up, never created. `lazy()` runs once per widget at module load
+  // (see LAZY_WIDGETS) rather than during render, which is both what React's
+  // rule asks for and what stops a remount from discarding the loaded chunk.
+  const WidgetComponent = definition
+    ? (LAZY_WIDGETS[`${appSlug}/${definition.component}`] ?? null)
+    : null;
 
   // Slide-in/out classes for the edit bar. Absolutely positioned so it
   // overlays the top of the widget content rather than pushing it down,
@@ -44,7 +61,7 @@ export default function WidgetWrapper({
   // The entire bar is the drag handle so users can grab any part of it. Action
   // buttons (settings, remove) are excluded via a `cancel` selector in the
   // grid's dragConfig so clicks on them still fire normally.
-  const barClass = `widget-drag-handle absolute inset-x-0 top-0 z-20 flex select-none items-center justify-between bg-mixnavy px-3 py-1 transition-transform duration-300 ease-out ${
+  const barClass = `widget-drag-handle absolute inset-x-0 top-0 z-20 flex select-none items-center justify-between bg-brand px-3 py-1 transition-transform duration-300 ease-out ${
     isEditing
       ? "translate-y-0 cursor-grab active:cursor-grabbing"
       : "pointer-events-none -translate-y-[103%]"
@@ -52,14 +69,14 @@ export default function WidgetWrapper({
 
   if (!definition) {
     return (
-      <div className="relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="mix-widget relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className={barClass}>
           <span className="text-xs font-medium text-white/70">
             Unknown Widget
           </span>
           <button
             onClick={onRemove}
-            className="widget-bar-action cursor-pointer text-white/70 hover:text-red-300"
+            className="widget-bar-action cursor-pointer text-white/70 hover:text-destructive"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -90,7 +107,7 @@ export default function WidgetWrapper({
           )}
           <button
             onClick={onRemove}
-            className="widget-bar-action cursor-pointer rounded p-0.5 text-white/70 hover:bg-white/10 hover:text-red-300"
+            className="widget-bar-action cursor-pointer rounded p-0.5 text-white/70 hover:bg-white/10 hover:text-destructive"
           >
             <X className="h-3 w-3" />
           </button>

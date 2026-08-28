@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
@@ -97,7 +101,7 @@ export default function AppPasswordPanel({ slug, appName }: Props) {
       </p>
 
       {statusError ? (
-        <p className="mt-2 flex items-start gap-1.5 text-xs text-rose-700">
+        <p className="mt-2 flex items-start gap-1.5 text-xs text-destructive">
           <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
           <span>{statusError}</span>
         </p>
@@ -106,7 +110,7 @@ export default function AppPasswordPanel({ slug, appName }: Props) {
       ) : (
         <p className="mt-2 text-xs">
           {status.set ? (
-            <span className="text-emerald-700">
+            <span className="text-success">
               <Check className="mr-1 inline-block h-3 w-3" />
               Password is set
               {status.updatedAt && (
@@ -116,7 +120,7 @@ export default function AppPasswordPanel({ slug, appName }: Props) {
               )}
             </span>
           ) : (
-            <span className="text-amber-700">
+            <span className="text-warning">
               <AlertCircle className="mr-1 inline-block h-3 w-3" />
               No password set — password-protected pages will fail closed.
             </span>
@@ -140,13 +144,13 @@ export default function AppPasswordPanel({ slug, appName }: Props) {
             autoComplete="new-password"
             minLength={8}
             placeholder="Min. 8 characters"
-            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm focus:border-ring focus:outline-none"
+            className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:border-ring focus:outline-none"
           />
         </div>
         <button
           type="submit"
           disabled={pending || !pwd}
-          className="rounded-md bg-mixnavy px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-mixnavy/90 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground shadow-sm hover:bg-brand/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {pending ? "Saving…" : status?.set ? "Update" : "Set"}
         </button>
@@ -163,13 +167,13 @@ export default function AppPasswordPanel({ slug, appName }: Props) {
       </form>
 
       {actionError && (
-        <p className="mt-2 flex items-start gap-1.5 text-xs text-rose-700">
+        <p className="mt-2 flex items-start gap-1.5 text-xs text-destructive">
           <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
           <span>{actionError}</span>
         </p>
       )}
       {actionSuccess && (
-        <p className="mt-2 text-xs text-emerald-700">{actionSuccess}</p>
+        <p className="mt-2 text-xs text-success">{actionSuccess}</p>
       )}
     </div>
   );

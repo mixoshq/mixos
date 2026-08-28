@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import {
@@ -102,7 +106,7 @@ export default function UserAccordionList({
                   {user.installedActiveCount} installed
                 </span>
                 {user.is_admin && (
-                  <span className="rounded-full bg-mixnavy px-2.5 py-0.5 text-xs font-medium text-white">
+                  <span className="rounded-full bg-brand px-2.5 py-0.5 text-xs font-medium text-brand-foreground">
                     Admin
                   </span>
                 )}
@@ -148,7 +152,7 @@ export default function UserAccordionList({
                                   type="button"
                                   disabled
                                   aria-disabled="true"
-                                  className="cursor-not-allowed rounded-full bg-mixnavy/70 px-4 py-1.5 text-sm font-medium text-white opacity-90"
+                                  className="cursor-not-allowed rounded-full bg-brand/70 px-4 py-1.5 text-sm font-medium text-brand-foreground opacity-90"
                                 >
                                   Granted
                                 </button>
@@ -169,8 +173,8 @@ export default function UserAccordionList({
                                   type="submit"
                                   className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
                                     granted
-                                      ? "bg-mixnavy text-white hover:bg-mixnavy/80"
-                                      : "border border-border bg-background text-muted-foreground hover:bg-accent"
+                                      ? "bg-brand text-brand-foreground hover:bg-brand/80"
+                                      : "border border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground"
                                   }`}
                                 >
                                   {granted ? "Granted" : "Not Granted"}
@@ -214,7 +218,7 @@ export default function UserAccordionList({
               role="status"
               className={`pointer-events-auto flex max-w-sm items-start gap-3 rounded-lg border px-4 py-3 text-sm shadow-lg ${
                 t.kind === "error"
-                  ? "border-red-300 bg-red-50 text-red-800"
+                  ? "border-destructive/40 bg-destructive/10 text-foreground"
                   : "border-border bg-card text-foreground"
               }`}
             >
@@ -298,7 +302,7 @@ function RoleSelect({
         value={value}
         onChange={handleChange}
         disabled={pending}
-        className="rounded-md border border-border bg-background px-2 py-1 text-xs disabled:opacity-60"
+        className="rounded-md border border-input bg-background px-2 py-1 text-xs disabled:opacity-60"
       >
         {roles.map((role) => (
           <option key={role.key} value={role.key}>

@@ -4,7 +4,7 @@ argument-hint: [deploy|release] [notes]
 ---
 
 You are managing git branches, pull requests, and production releases for a
-developer building on **MixOS (MOS)**, so they don't have to do it by hand. One
+developer building on **MixOS**, so they don't have to do it by hand. One
 call does the right thing based on where they are in the workflow: start work on a
 fresh branch; commit, push, and open a PR when they're ready; or cut a versioned
 production release tag from `main`.
@@ -29,7 +29,7 @@ production release tag from `main`.
 - **Confirm the branch name** with the user before creating it, and **confirm the
   version number** before cutting a release tag.
 - Checks **warn, they don't block** — surface failures and let the user decide.
-- **Review the manifest before you commit an app or connector.** `lastUpdated`
+- **Review the manifest before you commit an app, connector, or theme.** `lastUpdated`
   stamps itself in the pre-commit hook, so the date is never the thing you forget
   — but the date is a claim that the manifest is current, and only you can check
   that it is. See the manifest review in the Deploy phase.
@@ -59,8 +59,8 @@ assemble the changelog from history instead of guessing.
 - **type** — `feat` (new user-facing behavior), `fix` (bug fix), `ops` (infra /
   deploy plumbing), or `refactor` / `perf` / `test` / `docs` / `chore` (no behavior
   change / housekeeping). These mirror the branch-name prefixes.
-- **scope** — the app or connector slug the change lives in, or **`os`** for
-  anything platform-wide (outside `apps/` and `connectors/`: `src/`, `scripts/`,
+- **scope** — the app, connector, or theme slug the change lives in, or **`os`**
+  for anything platform-wide (outside `apps/`, `connectors/` and `themes/`: `src/`, `scripts/`,
   `.github/`, `supabase/migrations/`, root config). Use `deps` for dependency
   bumps.
 - **breaking change** — append `!` before the colon (`feat(<slug>)!:`) **and** add a
@@ -72,7 +72,7 @@ assemble the changelog from history instead of guessing.
 | Highest-ranking change since the last tag | Bump | Example |
 |---|---|---|
 | any breaking (`!` / `BREAKING CHANGE`), **or** any `os`-scoped / OS-path change | **minor** | `v0.1.3 → v0.2.0` |
-| everything else (`feat`/`fix`/… inside an app or connector, `docs`) | **patch** | `v0.1.3 → v0.1.4` |
+| everything else (`feat`/`fix`/… inside an app, connector, or theme, `docs`) | **patch** | `v0.1.3 → v0.1.4` |
 
 Major stays `0` while the platform is pre-1.0, so a breaking change bumps the minor.
 
@@ -107,9 +107,13 @@ Read git state and pick a phase:
    (`git merge --ff-only origin/main`) so the branch isn't based on stale code.
    Any uncommitted changes in the working tree carry over to the new branch, so
    they're safe.
-2. **Infer a branch name.** Prefer the slug of a matching plan file in
-   `docs/plans/` if one exists for this work. Choose the type prefix by the nature
-   of the change: `fix/` for a bug fix, `ops/` for infra (`.github/`, `vercel.json`,
+2. **Infer a branch name.** Prefer the slug of a matching plan file if one exists
+   for this work. Plans live in two places: **beside their subject**
+   (`apps/<slug>/plans/`, `connectors/<slug>/plans/`, `themes/<slug>/plans/`) for
+   work scoped to one app, connector, or theme, and in `docs/plans/` for platform
+   work. Search both — `ls docs/plans/*.md {apps,connectors,themes}/*/plans/*.md`
+   — and match against the changed paths. Choose the type prefix by the nature of
+   the change: `fix/` for a bug fix, `ops/` for infra (`.github/`, `vercel.json`,
    `scripts/`), otherwise `feat/`. Kebab-case the rest (mirrors the
    `docs/plans/README.md` slug convention). Example: `feat/deal-radar`.
 3. **Confirm before creating.** Show the proposed name and let the user accept or
@@ -131,7 +135,7 @@ Read git state and pick a phase:
      the branch (`git merge origin/main`, or rebase) and continue only once the user
      decides. This is the command-level stand-in for "require branches up to date"
      until that branch protection is enabled.
-2. **Run the MOS verification suite** and capture pass/fail for each:
+2. **Run the MixOS verification suite** and capture pass/fail for each:
    - `npx tsx scripts/generate-project-registry.ts` (registry)
    - `npm run typecheck`
    - `npx eslint <changed dirs>` (scope to the directories that changed)
@@ -154,8 +158,8 @@ Read git state and pick a phase:
    platform-facing impact). Confirm the wording with the user.
 4. **Review the manifest, then commit.**
 
-   **First, if this branch touched an app or connector, check its manifest is
-   still true.** The commit is about to stamp `lastUpdated`, and that date claims
+   **First, if this branch touched an app, connector, or theme, check its manifest
+   is still true.** The commit is about to stamp `lastUpdated`, and that date claims
    the manifest describes what exists today. Read the actual code and compare:
 
    - **`description`** — does it describe what the app does *now*? An app that
@@ -217,10 +221,13 @@ Generate GitHub-flavored markdown with these sections:
 - **Summary** — what this change does and why (1–3 sentences).
 - **What changed** — grouped by scope, derived from the changed paths:
   `app:<slug>` (files under `apps/<slug>/`), `connector:<slug>`
-  (`connectors/<slug>/`), **OS** (anything under `src/`, `scripts/`, `.github/`,
-  `vercel.json`, root config, etc.), `migrations`, `docs`.
+  (`connectors/<slug>/`), `theme:<slug>` (`themes/<slug>/`), **OS** (anything under
+  `src/`, `scripts/`, `.github/`, `vercel.json`, root config, etc.), `migrations`,
+  `docs`.
 - **⚠️ OS change** — include this heads-up **only if** any changed file is outside
-  `apps/` and `connectors/` (excluding `docs/plans/*`):
+  `apps/`, `connectors/` and `themes/`, excluding every build plan (`docs/plans/*.md` and any
+  `*/plans/*.md` co-located in an app, connector, or theme — a plan describes work,
+  it does not perform it):
   note that Danger will label the PR `os-change` and it needs admin review before
   merge (per `OS-UPDATES.md`).
 - **Migrations** — list any new `**/migrations/*.sql`; note they apply automatically
@@ -261,8 +268,9 @@ a tag build checks out the tagged commit, so it is **immune to the stale-head bu
    commits since it — `git log <lasttag>..<target> --format='%s%n%b'` — by the
    **Commit message discipline** rules: **minor** if any commit is breaking
    (`!` / `BREAKING CHANGE`) or `os`-scoped, else **patch**. Cross-check against
-   `git diff --name-only <lasttag>..<target>`: if a path outside `apps/`/`connectors/`
-   changed (excluding `docs/plans/*`) but no commit
+   `git diff --name-only <lasttag>..<target>`: if a path outside
+   `apps/`/`connectors/`/`themes/` changed (excluding build plans — `docs/plans/*.md`
+   and any `*/plans/*.md`) but no commit
    was `os`-scoped, treat it as **minor** and flag the mislabeled commit. Show the
    computed version, the commits that drove it, and **confirm before tagging** — a
    hotfix or recovery may deliberately override to a patch, so let the user set the

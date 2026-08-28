@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * Stamp `lastUpdated` on every app/connector manifest the current commit touches.
  *
@@ -36,10 +40,10 @@ import { execFileSync } from "child_process";
 const ROOT = path.resolve(__dirname, "..");
 
 /** Directories whose subdirectories are independently stampable units. */
-const ROOTS = ["apps", "connectors"] as const;
+const ROOTS = ["apps", "connectors", "themes"] as const;
 
 interface Target {
-  /** "apps" | "connectors" */
+  /** "apps" | "connectors" | "themes" */
   root: string;
   /** Directory name, which is the slug (an invariant the generator enforces). */
   slug: string;
@@ -108,8 +112,11 @@ function resolveManifest(
   slug: string,
 ): { rel: string; isModule: boolean } | null {
   const dir = path.join(ROOT, root, slug);
-  if (root === "connectors") {
-    const rel = `connectors/${slug}/connector.json`;
+  if (root === "connectors" || root === "themes") {
+    const rel =
+      root === "connectors"
+        ? `connectors/${slug}/connector.json`
+        : `themes/${slug}/theme.json`;
     return fs.existsSync(path.join(ROOT, rel)) ? { rel, isModule: false } : null;
   }
   if (fs.existsSync(path.join(dir, "app.ts"))) {
@@ -133,8 +140,8 @@ function collectTargets(changed: string[]): Target[] {
     // `_`-prefixed directories are templates — the same convention the registry
     // generator skips. They are scaffolding, not shippable units.
     if (slug.startsWith("_")) continue;
-    // Files directly under apps/ or connectors/ (e.g. AGENTS.md) belong to no
-    // app.
+    // Files directly under apps/, connectors/ or themes/ (e.g. AGENTS.md) belong
+    // to no app.
     if (parts.length < 3) continue;
 
     const key = `${root}/${slug}`;

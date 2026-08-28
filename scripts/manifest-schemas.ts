@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { z } from "zod";
 import { assertValidCron } from "../src/lib/apps/cron";
 
@@ -242,6 +246,30 @@ const syncDefinitionSchema = z.strictObject({
   budgetMs: z.number().int().min(1_000).max(300_000),
 });
 
+/**
+ * A hook this app fires, and who may listen.
+ *
+ * Cross-app hook listening was the one channel between apps with NO consent at
+ * all: any app could `addAction("other-app:thing", fn)` using the full prefixed
+ * name and observe another app's events. App Services requires two-sided
+ * consent for a *pull*; a push had none.
+ *
+ * So an emitter now declares its consumers, exactly as `provides` does, and the
+ * generator enforces both sides. Undeclared is default-deny.
+ */
+const hookEmitSchema = z.strictObject({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  // An allowlist of app slugs, or "*" for any app that declares the dependency.
+  consumers: z.union([z.array(z.string().min(1)), z.literal("*")]),
+});
+
+/** A hook this app listens for, named as `<emitter-slug>:<hook>`. */
+const hookListenSchema = z.strictObject({
+  app: z.string().min(1),
+  hook: z.string().min(1),
+});
+
 const appTelemetryEventSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -250,6 +278,25 @@ const appTelemetryEventSchema = z.strictObject({
 const connectorTelemetryEventSchema = z.strictObject({
   method: z.string().min(1),
   description: z.string().optional(),
+  /**
+   * Does this method change anything upstream?
+   *
+   * This is the gap the platform could not close before. MCP tools are
+   * read-only, enforced three ways for `ctx.db` — type, runtime Proxy, ESLint —
+   * but `docs/apps/mcp.md` had to say outright: "Connectors are the gap the
+   * platform can't close. It cannot know which connector methods mutate... a
+   * reviewer has to confirm it."
+   *
+   * Declared here, the platform can. The MCP context wraps `ctx.connectors` and
+   * throws on a method marked `mutates`, so a read-only tool calling a write is
+   * a runtime error rather than a blocking review finding somebody has to catch.
+   *
+   * Defaults to `false`, which is safe for the wrong reason and stated here so
+   * nobody mistakes it for a guarantee: an UNDECLARED method is invisible to
+   * this check entirely. Declaring a connector's writes is what buys the
+   * enforcement.
+   */
+  mutates: z.boolean().optional(),
 });
 
 const serviceDefinitionSchema = z.strictObject({
@@ -417,6 +464,20 @@ export const RawAppManifestSchema = z
     icon: z.string().optional(),
     authors: z.array(authorSchema).optional(),
     connectors: z.array(z.string().min(1)).optional(),
+    /**
+     * Connectors a PART of this app uses, which the app works without.
+     *
+     * The difference from `connectors` is what happens when one is not
+     * configured: a required connector refuses the app's registration, because
+     * the app cannot function; an optional one never blocks anything, and the
+     * sub-component that needs it is the only thing that degrades. Use it for
+     * the widget nobody would uninstall the app over.
+     *
+     * Optional connectors are still built into `context.connectors` when they
+     * ARE configured, and are still declarable as a sync source or MCP tool
+     * dependency — app code must simply cope with the entry being absent.
+     */
+    optionalConnectors: z.array(z.string().min(1)).optional(),
     database: z.boolean().optional(),
     notifications: z.boolean().optional(),
     global: z.boolean().optional(),
@@ -433,6 +494,10 @@ export const RawAppManifestSchema = z
     // Each name additionally verified on disk by the generator
     // (apps/<slug>/jobs/<name>.ts).
     schedules: z.array(scheduleSchema).optional(),
+    // Cross-app hook wiring. `emits[].consumers` is the emitter's allowlist and
+    // `listensTo` is the consumer's declaration; the generator enforces both.
+    emits: z.array(hookEmitSchema).optional(),
+    listensTo: z.array(hookListenSchema).optional(),
     // Declarative incremental syncs. Each name is additionally verified on disk
     // by the generator (apps/<slug>/sync/<name>.ts, a `defineSync` default
     // export), and `source` is cross-checked against the declared connectors.
@@ -522,6 +587,19 @@ const connectorAuthSchema = z
     tokenAuth: z.enum(["basic", "post"]).optional(),
     authorizeUrl: z.url().optional(),
     scopes: z.array(z.string().min(1)).optional(),
+    /**
+     * The provider's own scope/permission reference page.
+     *
+     * The Connector Registry reads it to render permissions in the provider's
+     * words — "View your email messages and settings" instead of
+     * `.../auth/gmail.readonly`, which tells a non-technical admin nothing.
+     * Point it at the page that TABULATES scopes against descriptions, not at
+     * the API home page: the registry parses table rows out of it.
+     */
+    scopesUrl: z
+      .url()
+      .refine((u) => u.startsWith("https://"), "must be an https:// URL")
+      .optional(),
   })
   .superRefine((a, ctx) => {
     if (a.strategy === "apiKey" && (a.in === "header" || a.in === "query") && !a.name) {
@@ -628,12 +706,185 @@ const credentialFieldSchema = z.strictObject({
   type: z.enum(["text", "password"]),
 });
 
+/**
+ * A link an admin follows to provision the credential — a provider console, an
+ * API-key page, a scope reference.
+ *
+ * `https:` only, enforced here rather than sanitized at render time. The admin
+ * page turns these into real anchors, so a `javascript:` or `data:` URL in a
+ * manifest would be a stored XSS with an admin session attached. Failing the
+ * build is the cheaper place to catch it, and a connector legitimately needing
+ * a plain-http setup link does not exist.
+ */
+const connectorDocLinkSchema = z.strictObject({
+  label: z.string().min(1),
+  url: z
+    .url()
+    .refine((u) => u.startsWith("https://"), "must be an https:// URL"),
+});
+
+const connectorSetupStepSchema = z.strictObject({
+  /**
+   * The instruction, and only the instruction — one imperative sentence. The UI
+   * numbers these, so don't number them here.
+   */
+  text: z.string().min(1),
+  /**
+   * Why the step is that way, behind a "?" the reader opens if they care.
+   *
+   * This is where the paragraph goes that a careful author wants to include and
+   * a reader following instructions does not want in their way — Gmail's step
+   * "set User type to Internal" is four words of instruction carrying thirty
+   * words of justification about CASA assessments and 7-day refresh tokens.
+   * Inline, that buries the instruction; deleted, the next person changes the
+   * setting back. A tooltip is the shape that fits: available, not in the way.
+   *
+   * Rationale only. Anything the reader must DO belongs in `text`, because a
+   * tooltip is not somewhere an instruction can live.
+   */
+  why: z
+    .string()
+    .min(1)
+    .max(300, "a tooltip, not an essay — put anything longer in the connector's docs")
+    .optional(),
+  /** Where this step is carried out, when it happens somewhere else. */
+  link: connectorDocLinkSchema.optional(),
+  /**
+   * Literal values the step tells the admin to choose — "Internal", "Web
+   * application". Each is emboldened where it appears in `text`, so the thing
+   * to type or pick is findable without reading the sentence twice.
+   *
+   * Values, not emphasis: this is for a string the admin must match exactly in
+   * someone else's form, and every entry must actually appear in `text`, which
+   * the build checks.
+   */
+  values: z.array(z.string().min(1)).optional(),
+  /**
+   * Render this deployment's redirect URI, with a copy button, directly beneath
+   * this step.
+   *
+   * Declared rather than inferred: the redirect URI is the one value in the
+   * whole guide the manifest cannot contain — it is built from the running
+   * deployment's origin — and it is useless anywhere except beside the step
+   * that asks you to paste it into someone else's form.
+   */
+  showRedirectUri: z.boolean().optional(),
+}).superRefine((step, ctx) => {
+  for (const value of step.values ?? []) {
+    // Same whole-phrase rule the UI uses to find them; a value that is not in
+    // the sentence would simply never render, which is a silent no-op.
+    const pattern = new RegExp(
+      `(^|[^\\w])${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w])`,
+    );
+    if (!pattern.test(step.text)) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `values entry ${JSON.stringify(value)} does not appear in this step's text, ` +
+          "so nothing would be emboldened. Match it exactly, or drop it.",
+        path: ["values"],
+      });
+    }
+  }
+});
+
+/**
+ * Provisioning instructions, structured so the admin page can render them as a
+ * numbered list with working links.
+ *
+ * This exists because `description` could not carry a link. It is also the only
+ * way the platform can interleave a fact the manifest cannot know — chiefly the
+ * redirect URI, which is derived from this deployment's origin at runtime —
+ * into the middle of a provider's own steps, which is exactly where an admin
+ * needs it.
+ */
+/**
+ * Notes attached to the platform's own setup steps.
+ *
+ * The registry generates "save credentials", "authorize" and "verify" itself —
+ * it knows when each is done, because it can check. What it cannot know is the
+ * one provider-specific warning that belongs at each: for Gmail, that whoever
+ * approves the consent screen is the mailbox everyone will then read. Putting
+ * that at the top of the dialog shows it on arrival, minutes before it matters
+ * and long before it means anything; here it appears attached to the button it
+ * is about.
+ */
+const connectorSetupNotesSchema = z.strictObject({
+  credentials: z.string().min(1).optional(),
+  authorize: z.string().min(1).optional(),
+  verify: z.string().min(1).optional(),
+});
+
+const connectorSetupSchema = z.strictObject({
+  /**
+   * Label for the provider-side step — "Create a Google Cloud OAuth app".
+   * Defaults to "Get your credentials", which is accurate but says less.
+   */
+  title: z.string().min(1).max(60).optional(),
+  /**
+   * The provider-side work only — what an admin does in someone else's console
+   * before they have anything to paste in. Do NOT list "save the credentials",
+   * "press Connect" or "test the connection": the registry renders those as its
+   * own steps and, unlike these, knows whether they are done.
+   */
+  steps: z.array(connectorSetupStepSchema).min(1),
+  notes: connectorSetupNotesSchema.optional(),
+  /** Reference material — scope tables, API docs. Not steps to carry out. */
+  docs: z.array(connectorDocLinkSchema).optional(),
+});
+
+/**
+ * Path to the connector's icon, relative to its own `assets/` directory.
+ *
+ * Constrained to a plain relative filename: the generator copies `assets/` into
+ * `public/connectors/<name>/` and builds a URL from this value, so an absolute
+ * path, a `..` segment or a URL would either escape that directory or silently
+ * produce a broken `<img>`. The generator additionally proves the file exists
+ * and is a square of at least 512x512 — see validateConnectorIcon().
+ */
+const connectorIconSchema = z
+  .string()
+  .min(1)
+  .refine((v) => !v.startsWith("/") && !v.includes("..") && !/^[a-z][a-z0-9+.-]*:/i.test(v),
+    "must be a path inside the connector's assets/ directory, e.g. \"icon.png\"");
+
 export const RawConnectorManifestSchema = z.strictObject({
   name: z.string().min(1),
   displayName: z.string().min(1),
+  icon: connectorIconSchema.optional(),
+  /**
+   * Each person signs into their own account, rather than everyone sharing one
+   * the admin connected.
+   *
+   * The default — and the right answer for most connectors — is tenant-scoped:
+   * one credential set, one grant, and every user of every app sees the same
+   * response. Set this only when one shared account is genuinely wrong, as it
+   * is for a person's own mail or calendar. It costs the property that made the
+   * tenant model easy to reason about, so it is opt-in and narrow.
+   *
+   * Three-legged OAuth only. See docs/connectors/architecture.md.
+   */
+  userScoped: z.boolean().optional(),
   /** ISO 8601 date-time, stamped by scripts/stamp-updated.ts. Never hand-edited. */
   lastUpdated: z.iso.datetime().optional(),
-  description: z.string().optional(),
+  /**
+   * What the SERVICE is — "Highly popular email service by Google" — not what
+   * this connector does with it, and not how to set it up.
+   *
+   * Capped because this field is where a 1,400-character block of numbered
+   * setup steps once lived, for want of anywhere better; `setup` is that
+   * somewhere now, and a limit is what stops the prose migrating back. 140 is
+   * two real sentences — and the registry tile shows the first 15 words of it,
+   * so the cap also bounds how far a tile can be from the whole truth.
+   */
+  description: z
+    .string()
+    .max(
+      140,
+      "keep it to ~2 sentences about the service itself. Provisioning steps go in \"setup\"",
+    )
+    .optional(),
+  setup: connectorSetupSchema.optional(),
   credentialFields: z.array(credentialFieldSchema).optional(),
   authors: z.array(authorSchema).optional(),
   telemetry: z.array(connectorTelemetryEventSchema).optional(),
@@ -641,6 +892,45 @@ export const RawConnectorManifestSchema = z.strictObject({
   http: connectorHttpSchema.optional(),
   webhook: connectorWebhookSchema.optional(),
 }).superRefine((m, ctx) => {
+  // Per-user credentials only mean something for a flow where each person can
+  // present their own identity. An API key is one string an admin pastes; a
+  // "user-scoped" one would be the tenant key wearing a label.
+  if (m.userScoped && m.auth?.strategy !== "oauth2_authorization_code") {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        `"userScoped" requires auth.strategy "oauth2_authorization_code"; ` +
+        `this connector uses "${m.auth?.strategy ?? "none"}". There is no ` +
+        `per-user equivalent of an API key an admin pastes once.`,
+      path: ["userScoped"],
+    });
+  }
+
+  // The redirect URI belongs to the three-legged flow and nothing else, and an
+  // OAuth connector that never shows it strands the admin: it cannot be
+  // guessed, and the provider rejects the authorization without it. So it is
+  // required exactly once, and rejected everywhere else.
+  const redirectSteps = (m.setup?.steps ?? []).filter((s) => s.showRedirectUri);
+  const isThreeLegged = m.auth?.strategy === "oauth2_authorization_code";
+  if (redirectSteps.length > 0 && !isThreeLegged) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        "showRedirectUri is only meaningful for auth.strategy " +
+        `"oauth2_authorization_code"; this connector uses "${m.auth?.strategy ?? "none"}".`,
+      path: ["setup", "steps"],
+    });
+  }
+  if (isThreeLegged && m.setup && redirectSteps.length !== 1) {
+    ctx.addIssue({
+      code: "custom",
+      message:
+        `exactly one setup step must set "showRedirectUri": true (found ${redirectSteps.length}). ` +
+        "A three-legged connector cannot be configured without registering the redirect URI upstream.",
+      path: ["setup", "steps"],
+    });
+  }
+
   // Every credential key the policy reads must be a field the admin is
   // actually asked for. A mismatch here is invariant 10 failing silently: the
   // connector reads a key nobody ever filled in.
@@ -660,6 +950,59 @@ export const RawConnectorManifestSchema = z.strictObject({
       });
     }
   }
+});
+
+// ── themes ───────────────────────────────────────────────────────────────────
+
+const themeFontFaceSchema = z.strictObject({
+  family: z.string().min(1),
+  /** Path relative to the theme's assets/ directory. Existence checked by the generator. */
+  file: z.string().min(1),
+  weight: z.union([z.number().int().min(1).max(1000), z.string().min(1)]),
+  style: z.enum(["normal", "italic"]).default("normal"),
+  display: z.enum(["auto", "block", "swap", "fallback", "optional"]).optional(),
+});
+
+const themeAssetsSchema = z.strictObject({
+  logo: z.string().min(1).optional(),
+  favicon: z.string().min(1).optional(),
+  appIcon192: z.string().min(1).optional(),
+  appIcon512: z.string().min(1).optional(),
+  preview: z.string().min(1).optional(),
+});
+
+/**
+ * Escaping the contrast gate is possible, declared, and visible — never silent,
+ * and never a flag that merely turns the check off. The theme must name the
+ * exact pair, so the escape stays scoped to the one decision that was actually
+ * reviewed, and `reason` must be a sentence someone can act on. The generator
+ * additionally rejects an escape for a pair that passes: a stale escape reads
+ * as "reviewed and accepted" while protecting nothing.
+ */
+const themeEscapeSchema = z.strictObject({
+  rule: z.literal("contrast-aa"),
+  pair: z.string().min(1),
+  reason: z
+    .string()
+    .min(15, "give a reason a reviewer can act on, not a placeholder"),
+});
+
+export const RawThemeManifestSchema = z.strictObject({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  tagline: z.string().optional(),
+  authors: z.array(authorSchema).optional(),
+  /** ISO 8601 date-time, stamped by scripts/stamp-updated.ts. Never hand-edited. */
+  lastUpdated: z.iso.datetime().optional(),
+  fonts: z.array(themeFontFaceSchema).optional(),
+  assets: themeAssetsSchema.optional(),
+  /**
+   * Allowlisted .mix-* surfaces this theme styles. Cross-checked against
+   * theme.css by the generator in both directions, so it can neither
+   * under-report a theme's reach nor carry a stale entry.
+   */
+  surfaces: z.array(z.string().min(1)).optional(),
+  escapes: z.array(themeEscapeSchema).optional(),
 });
 
 /**

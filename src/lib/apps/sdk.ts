@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * Client-side SDK for apps and widgets to communicate with the
  * secure edge gateway at /api/apps/[...slug].
@@ -6,13 +10,66 @@
  * rather than importing DB or connector modules directly.
  */
 
-export interface AppClient {
+export interface AppClient<S extends string = string> {
+  /**
+   * Call one of this app's declared routes, with the input and output types
+   * taken from the route's own schemas.
+   *
+   * ```tsx
+   * const client = createAppClient<"my-app">(appSlug);
+   * const { items } = await client.call("GET /items", { limit: 20 });
+   * //      ^ inferred from the route's `output`, not asserted
+   * ```
+   *
+   * The spec is `"<METHOD> /<pattern>"` with `[param]` segments left in place —
+   * values go in the input object, which is where the route's schema can
+   * validate them. A spec the app does not declare is a compile error.
+   *
+   * **The `<"my-app">` type argument is what buys the types.** `appSlug` arrives
+   * as a plain `string` from `WidgetProps`, which TypeScript cannot narrow to a
+   * literal, so the app names itself once and gets a checked client. Without it
+   * the call still works and falls back to `unknown`.
+   */
+  call: TypedCall<S>;
+
+  /**
+   * @deprecated Use `call()`. `T` here is an unchecked assertion — nothing ties
+   * it to what the route actually returns, which is the class of bug the typed
+   * client exists to remove. Kept for code not yet migrated.
+   */
   get<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
+  /** @deprecated Use `call()`. */
   post<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
+  /** @deprecated Use `call()`. */
   put<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
+  /** @deprecated Use `call()`. */
   patch<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
+  /** @deprecated Use `call()`. */
   delete<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
 }
+
+/** The routes an app declares, or an open map when the slug is not a literal. */
+type RoutesFor<S extends string> = S extends keyof AppRouteTypes
+  ? AppRouteTypes[S]
+  : Record<string, never>;
+
+// `[S] extends [keyof AppRouteTypes]` — wrapped in a tuple so a plain `string`
+// (what `WidgetProps.appSlug` is) does NOT distribute and match some member of
+// the union. Without the tuple, `string extends "my-app"` was evaluated the
+// wrong way round and every caller silently took the typed branch against an
+// empty route map.
+type TypedCall<S extends string> = [S] extends [keyof AppRouteTypes]
+  ? <K extends keyof RoutesFor<S> & string>(
+      spec: K,
+      ...args: Record<string, never> extends RouteInputOf<RoutesFor<S>[K]>
+        ? [input?: RouteInputOf<RoutesFor<S>[K]>]
+        : [input: RouteInputOf<RoutesFor<S>[K]>]
+    ) => Promise<RouteOutputOf<RoutesFor<S>[K]>>
+  : // Slug wasn't a literal: stay usable, but check nothing and say so.
+    (spec: string, input?: Record<string, unknown>) => Promise<unknown>;
+
+import type { AppRouteTypes } from "@/generated/app-clients";
+import type { RouteInputOf, RouteOutputOf } from "@/lib/apps/route";
 
 export interface RequestOptions {
   body?: unknown;
@@ -100,8 +157,58 @@ async function request<T>(
   return res.json() as Promise<T>;
 }
 
-export function createAppClient(appSlug: string): AppClient {
+/**
+ * Build the URL for a typed call.
+ *
+ * `"GET /items/[id]"` plus `{ id: 42, limit: 10 }` becomes
+ * `/items/42?limit=10` — the path params are consumed by the pattern and only
+ * what is left travels as a query string. For a body method the remainder is
+ * the JSON body instead.
+ */
+function buildCall(
+  spec: string,
+  input: Record<string, unknown>,
+): { method: string; path: string; body?: Record<string, unknown> } {
+  const [method, rawPath = ""] = spec.split(" ");
+  const rest: Record<string, unknown> = { ...input };
+
+  const path = rawPath
+    .split("/")
+    .map((segment) => {
+      if (!segment.startsWith("[") || !segment.endsWith("]")) return segment;
+      const name = segment.slice(1, -1).replace(/^\.\.\./, "");
+      const value = rest[name];
+      delete rest[name];
+      return encodeURIComponent(String(value ?? ""));
+    })
+    .join("/");
+
+  if (method === "POST" || method === "PUT" || method === "PATCH") {
+    return { method, path, body: rest };
+  }
+
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(rest)) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) {
+      for (const v of value) query.append(key, String(v));
+    } else {
+      query.set(key, String(value));
+    }
+  }
+  const qs = query.toString();
+  return { method, path: qs ? `${path}?${qs}` : path };
+}
+
+export function createAppClient<S extends string = string>(
+  appSlug: string,
+): AppClient<S> {
   return {
+    call: ((spec: string, input?: Record<string, unknown>) => {
+      const { method, path, body } = buildCall(spec, input ?? {});
+      return request<unknown>(appSlug, method, path, body ? { body } : undefined);
+    }) as TypedCall<S>,
+
     get: <T = unknown>(path: string, opts?: RequestOptions) =>
       request<T>(appSlug, "GET", path, opts),
     post: <T = unknown>(path: string, opts?: RequestOptions) =>
