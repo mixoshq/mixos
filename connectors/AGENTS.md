@@ -4,7 +4,7 @@ You are about to create or modify a connector under `connectors/`. **Read the se
 
 The same content is rendered in the UI at the Connector Registry admin page by [`src/components/connectors/connector-guide-tabs.tsx`](../src/components/connectors/connector-guide-tabs.tsx), which reads these markdown files directly. Editing a guide updates the UI; adding a new one means registering it in that component's `TABS` list.
 
-**Before you start: write a plan.** For anything beyond a trivial tweak, write a build plan to `docs/plans/YYYYMMDD_HHMM-<plan-name>.md` first (Context, decisions, file-level changes, verification). See [`../docs/plans/README.md`](../docs/plans/README.md).
+**Before you start: write a plan.** For anything beyond a trivial tweak, write a build plan to `connectors/<slug>/plans/YYYYMMDD_HHMM-<plan-name>.md` first — **beside the connector it describes**, so the design history travels with the code (Context, decisions, file-level changes, verification). Every connector has a `plans/` directory, [`_template`](_template/plans/) included, so a scaffolded connector inherits the convention. A change to the connector *base layer* (`src/lib/connectors/`) is a *platform* plan and goes to `docs/plans/` instead. See [`../docs/plans/README.md`](../docs/plans/README.md).
 
 ---
 
@@ -23,22 +23,32 @@ Read these once, then read the guides. Most agent failures come from ignoring th
 9. **Do not hand-edit `lastUpdated` in `connector.json`.** It is stamped automatically by `.githooks/pre-commit` (via `scripts/stamp-updated.ts`) on any commit that touches this connector, and re-staged into that commit. It records when the connector last changed.
 10. **`credentialFields[].key` must match what `initialize()` reads.** A typo here is a silent break.
 11. **Connectors are stateless wrappers.** Do not cache data between requests — the connector is re-initialised for every app context build. If `initialize()` throws, the connector is excluded from context entirely — it is never added in a half-initialized state.
-12. **`configured` must reflect reality.** Derive it from `auth.credentialKeys` rather than writing it by hand — the base class does this for you, and for the three-legged OAuth flow it additionally requires an actual grant, so a connector whose admin never pressed Connect correctly reports `false`.
-13. **`description` is written for admins.** It is shown in the Connector Registry, which is the only place a connector is ever surfaced to a human. Keep setup instructions and required scopes there.
-14. **Telemetry is declared, never coded.** To track usage, list the methods to count in `connector.json` `telemetry` (`[{ method, description? }]`) — the platform auto-instruments them via the `context.connectors.<name>` proxy and records which app made each call. Never import a tracker, call one, or write `public.telemetry_events` from `index.ts`; the connector class stays untouched. `method` names must match public methods on the class. See [`docs/connectors/telemetry.md`](../docs/connectors/telemetry.md).
+12. **`configured` must reflect reality.** Derive it from `auth.credentialKeys` rather than writing it by hand — the base class does this for you, and for the three-legged OAuth flow it additionally requires an actual grant, so a connector whose admin never pressed Connect correctly reports `false`. The rule itself lives in [`src/lib/connectors/status.ts`](../src/lib/connectors/status.ts), because the Connector Registry has to answer the same question about credentials it has read but never instantiated. Anything else needing to know how ready a connector is calls that function — it does not re-derive the answer.
+13. **`description` is the tile blurb; `setup` is the instructions.** Both are written for admins — the Connector Registry is the only place a connector is ever surfaced to a human — but they are rendered in different places and only one of them can carry links. `description` is **what the service is** ("Highly popular email service by Google"), capped at 140 characters — not what your connector does with it, which belongs in `setup`. The registry tile shows its first 15 words and the configure dialog shows all of it, so the first sentence must stand on its own. In `setup.steps`, `text` is the instruction and `why` is the justification behind a "?" tooltip — never put something the reader must DO in `why`. Provisioning steps go in **`setup`** (`{ title?, steps[], notes?, docs? }`) and cover the PROVIDER's console only — the registry renders saving, authorizing and verifying as its own steps and knows whether each is done. A step's `link.label` is linked in place where it appears in `text`; put the redirect URI on the one step that registers it with `showRedirectUri`. Every URL must be `https:`; the schema rejects anything else. Do not hand-write an explanation of OAuth or restate the redirect URI or the scopes — for an `oauth2_authorization_code` connector the registry already renders all three. See [Architecture](../docs/connectors/architecture.md#setup-guidance-and-the-icon).
+14. **An `icon` is a file in the connector's own `assets/`.** Declare it as a bare filename (`"icon": "icon.png"`), ship the file at `connectors/<name>/assets/icon.png`, and let the generator copy it to `public/connector-assets/<name>/`. It must be **square and at least 512x512**, `.png` / `.webp` / `.svg` — the generator measures it and aborts the build otherwise. Never point `icon` at a URL, an absolute path, or anything containing `..`. Omitting it is fine: the tile falls back to a generic plug glyph.
+15. **Every connector ships a configuration experience.** `icon`, `setup.title`, `setup.steps` and `auth.scopesUrl` are **required** — the build rejects a connector without them and names all of them at once. They are not decoration: without them an admin gets an unidentifiable tile, a blank first step, and a permissions list that can never populate. A three-legged connector must also set `showRedirectUri` on exactly one step. See [Registry UX](../docs/connectors/registry-ux.md).
+16. **Telemetry is declared, never coded.** To track usage, list the methods to count in `connector.json` `telemetry` (`[{ method, description? }]`) — the platform auto-instruments them via the `context.connectors.<name>` proxy and records which app made each call. Never import a tracker, call one, or write `public.telemetry_events` from `index.ts`; the connector class stays untouched. `method` names must match public methods on the class. See [`docs/connectors/telemetry.md`](../docs/connectors/telemetry.md).
 
 ## Credential handling
 
-Every connector is **tenant-scoped**: one credential set, configured once by an
-admin in the Connector Registry and shared by every user. There is no per-user
-authentication, and no per-user token storage.
+Connectors are **tenant-scoped by default**: one credential set, configured once
+by an admin in the Connector Registry and shared by every user. That is the
+right answer for almost everything, and it is what makes a connector's output
+easy to reason about — every user sees the same response.
+
+A connector may declare `"userScoped": true` when one shared account is
+genuinely wrong (a person's own mail or calendar). Then the client id and secret
+are still tenant-wide, but each person authorises their own grant, stored in
+`user_connector_oauth`. Three-legged OAuth only, never usable from a scheduled
+job, and both rules are build-enforced. See
+[Architecture](../docs/connectors/architecture.md#user-scoped-connectors).
 
 Hard rules:
 
-15. **Credentials come from `connector_configs`.** API keys, tokens, service-account identifiers — all of it arrives through [`getDecryptedConfig()`](../src/lib/connectors/config.ts) (AES-256-GCM at rest) and is handed to `initialize()`. Never read the table directly, and never accept a credential as a method argument from app code.
-16. **Never log or echo credentials.** Not in `console.*`, not in error messages, not in API responses. Drop upstream error bodies on failure — they often contain account or tenant detail.
-17. **Minimum scopes only.** Request the smallest scope set the feature needs when provisioning the upstream credential. Adding a scope requires a security note in the PR. Never ask for `*.ReadWrite` if `*.Read` would do.
-18. **Stay stateless.** Do not stash credentials or responses in module-level variables, closures outside the instance, or caches that outlive the request. The platform creates a fresh instance and calls `initialize()` per request — that is the only legal lifecycle.
+17. **Credentials come from `connector_configs`.** API keys, tokens, service-account identifiers — all of it arrives through [`getDecryptedConfig()`](../src/lib/connectors/config.ts) (AES-256-GCM at rest) and is handed to `initialize()`. Never read the table directly, and never accept a credential as a method argument from app code.
+18. **Never log or echo credentials.** Not in `console.*`, not in error messages, not in API responses. Drop upstream error bodies on failure — they often contain account or tenant detail.
+19. **Minimum scopes only.** Request the smallest scope set the feature needs when provisioning the upstream credential. Adding a scope requires a security note in the PR. Never ask for `*.ReadWrite` if `*.Read` would do.
+20. **Stay stateless.** Do not stash credentials or responses in module-level variables, closures outside the instance, or caches that outlive the request. The platform creates a fresh instance and calls `initialize()` per request — that is the only legal lifecycle.
 
 Authoritative types: [`src/lib/connectors/types.ts`](../src/lib/connectors/types.ts). Starting point: [`connectors/_template/`](_template/).
 
@@ -53,8 +63,10 @@ Authoritative types: [`src/lib/connectors/types.ts`](../src/lib/connectors/types
 5. [Credentials](../docs/connectors/credentials.md) — encryption, tenant OAuth, configuration status checks
 6. [Webhooks](../docs/connectors/webhooks.md) — signature verification, freshness, replay protection
 7. [Telemetry](../docs/connectors/telemetry.md) — declaring which methods to count, auto-instrumented usage tracking, caller-app attribution
+8. [Registry UX](../docs/connectors/registry-ux.md) — the admin experience the manifest builds: the three tabs, the one-step-at-a-time wizard, Next vs. a step's own action, how instructions carry links and values
+9. [Scopes](../docs/connectors/scopes.md) — reading a provider's permissions in its own words, and what granted / documented / observed can each actually answer
 
-Creating or modifying an **app** instead? See [`../apps/AGENTS.md`](../apps/AGENTS.md).
+Creating or modifying an **app** instead? See [`../apps/AGENTS.md`](../apps/AGENTS.md). A **theme**? See [`../themes/AGENTS.md`](../themes/AGENTS.md).
 
 ---
 
@@ -65,7 +77,8 @@ From the repo root:
 1. `npx tsx scripts/generate-project-registry.ts` — regenerates `src/generated/connector-registry.ts`. Confirm your connector appears. The generator **schema-validates `connector.json`** (via `scripts/manifest-schemas.ts`): an unknown field, a wrong-typed value, a bad `credentialFields[].type`, or a `name` that doesn't match the folder **aborts the whole build** with a message pointing at the offending path. Keep the manifest within the fields in `src/lib/connectors/types.ts`.
 2. `npm run typecheck` — ensures the class conforms to `HttpConnector` and `credentialFields` shapes match.
 3. `npm run verify:connectors` — runs the abstraction against a local stub upstream (and a stub OAuth token endpoint): retries, `Retry-After`, the write-safety rule, every auth strategy, the failure envelope, and webhook verification. Set `DATABASE_URL` to additionally exercise the advisory-lock and webhook-replay guarantees against real Postgres.
-3. Start the dev server and, as an admin, open **Administration → Connector Registry**. Confirm the new connector renders with the expected credential fields, save credentials, and exercise it from a test app API route. Do not claim "done" on a connector you haven't actually configured and called.
+4. `npx tsx scripts/check-scopes.ts <name>` — proves `auth.scopesUrl` parses, and prints every scope with its read/write classification. **Read the output**: "14 scopes parsed" is not the test; whether the descriptions are English sentences and the split looks right is.
+5. Start the dev server and, as an admin, open **Administration → Connector Registry**. Confirm the new connector renders with the expected credential fields, save credentials, and exercise it from a test app API route. Do not claim "done" on a connector you haven't actually configured and called.
 
 ---
 
@@ -79,6 +92,11 @@ From the repo root:
 - Importing a connector from client code.
 - Stateful caching across requests on the connector instance.
 - Adding fields to `connector.json` that aren't in `src/lib/connectors/types.ts`.
+- Burying setup instructions in `description`, where the UI renders them as an unclickable paragraph, instead of in `setup`.
+- Pointing `icon` at a remote URL, or shipping one that isn't a square of at least 512x512. Use `npx tsx scripts/prepare-icon.ts <name> <url-or-file>` — it keys out a flat background, trims and re-pads, so one connector's mark isn't twice the size of its neighbour's.
+- Hand-writing an explanation of OAuth, or restating the redirect URI or the scopes, in `setup`. The registry renders all three itself.
+- Putting an instruction in `why`. It is a tooltip; anything the reader must DO belongs in `text`.
+- Pointing `auth.scopesUrl` at an API overview rather than the page that tabulates scopes against descriptions.
 - Editing `src/generated/connector-registry.ts` by hand.
 - Shipping a real connector under a folder starting with `_`.
 - A folder name that doesn't match the manifest `name`.
