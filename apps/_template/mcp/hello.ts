@@ -4,7 +4,7 @@ import type { McpToolContext } from "@/lib/hooks/types";
 /**
  * Example MCP tool.
  *
- * Declared in app.json under `mcp`, invoked by the MOS MCP server when a user
+ * Declared in app.json under `mcp`, invoked by the MixOS MCP server when a user
  * has connected an MCP client (Claude) and ticked this app on the consent
  * screen. It runs as that user, with this app's roles resolved.
  *
