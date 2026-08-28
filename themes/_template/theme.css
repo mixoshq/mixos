@@ -1,0 +1,123 @@
+/*
+ * Theme template.
+ *
+ * A theme sets TOKEN VALUES. It never adds a utility, never writes a `dark:`
+ * variant, and never selects an app's internals — those are the platform's,
+ * and the build rejects a theme that reaches for them.
+ *
+ * ONE block carries tokens, and nothing else may:
+ *   :root
+ *
+ * A theme is a single palette. There is no light/dark switch inside a theme —
+ * a dark look is a SECOND THEME that an admin selects at /admin/themes, which
+ * is how `themes/mixos` and `themes/mixos-dark` relate. If you are copying a
+ * palette that has a `:root[data-mode="dark"]` block, split it into its own
+ * theme folder; the build rejects that selector and tells you so.
+ *
+ * Every value must be a hex, rgb() or hsl() literal, or a var() chain ending
+ * in one. The build computes WCAG contrast for ~24 pairs and fails if any is
+ * short — a value it cannot evaluate is a token the check silently stops
+ * covering, so those are rejected too.
+ *
+ * Verify with:  npx tsx scripts/generate-project-registry.ts
+ * See the ratio table with:  THEME_REPORT=1 npx tsx scripts/generate-project-registry.ts
+ * Full reference: docs/themes/tokens.md
+ */
+
+/* Self-host any font under assets/ and @font-face it here. A theme may not
+   reference another host — see docs/themes/assets.md.
+
+@font-face {
+  font-family: "Your Face";
+  src: url("fonts/your-face.woff2") format("woff2-variations");
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+*/
+
+:root {
+  /* ── surfaces ─────────────────────────────────────────────────────────── */
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  /* ── actions ──────────────────────────────────────────────────────────── */
+  --primary: #0369a1;
+  --primary-foreground: #f8fafc;
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #f1f5f9;
+  --accent-foreground: #0f172a;
+
+  /* ── status ───────────────────────────────────────────────────────────────
+   * Each of these is checked TWICE: as text on the page, and as a filled
+   * surface under its own foreground. Passing one direction and failing the
+   * other is the most common way a palette ships unreadable. */
+  --destructive: #dc2626;
+  --destructive-foreground: #f8fafc;
+  --success: #047857;
+  --success-foreground: #f8fafc;
+  --warning: #b45309;
+  --warning-foreground: #f8fafc;
+
+  /* ── categorical ──────────────────────────────────────────────────────────
+   * These DISTINGUISH; they never grade. A category chip rendered in the error
+   * colour tells the reader something untrue, so never reuse --destructive,
+   * --warning or --success here. Pick six that stay apart. */
+  --cat-1: #0369a1;
+  --cat-2: #7c3aed;
+  --cat-3: #0f766e;
+  --cat-4: #be185d;
+  --cat-5: #1d4ed8;
+  --cat-6: #4d7c0f;
+
+  /* ── lines ────────────────────────────────────────────────────────────────
+   * --border is decorative and ungated. --input and --ring are NOT: a control's
+   * boundary and a focus ring both carry information, and are held to 3:1. */
+  --border: #e2e8f0;
+  --input: #64748b;
+  --ring: #0369a1;
+
+  /* ── brand ────────────────────────────────────────────────────────────────
+   * --brand is a SURFACE (the menu bar, the sign-in page), not an accent.
+   * Its foreground and accent are measured against it, not against the page. */
+  --brand: #0f172a;
+  --brand-foreground: #f8fafc;
+  --brand-accent: #38bdf8;
+
+  /* ── shape and type ───────────────────────────────────────────────────── */
+  --radius: 0.5rem;
+  --type-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --type-heading: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --type-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+/*
+ * Building the dark counterpart? Copy this whole folder to themes/<slug>-dark/
+ * and re-tone the values in its `:root`. Two things change more than authors
+ * expect: on a dark ground a status colour gets LIGHTER and its foreground
+ * flips DARK, and the surface ladder needs real steps between --background,
+ * --muted, --card and --accent or a control cannot be told apart from the panel
+ * it sits in. themes/mixos-dark/theme.css is a worked example of both.
+ */
+
+/*
+ * Beyond tokens, a theme may style these surfaces and nothing else:
+ *
+ *   .mix-app-shell  .mix-menubar  .mix-card   .mix-widget  .mix-page-header
+ *   .mix-button     .mix-input    .mix-modal  .mix-popover .mix-table
+ *
+ * List each one you style under "surfaces" in theme.json — the build checks
+ * both directions, so it can neither under-report your reach nor keep a stale
+ * entry.
+ *
+.mix-card {
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.06);
+}
+*/
