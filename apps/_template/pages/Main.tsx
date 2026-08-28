@@ -1,22 +1,57 @@
-export default function ExampleAppPage() {
+import { callAppRoute } from "@/lib/apps/call";
+import { EmptyState } from "@/components/ui/app-states";
+import { Card, CardBody } from "@/components/ui/card";
+
+/**
+ * A server component that renders from its own API route.
+ *
+ * THIS IS HOW A PAGE GETS DATA. It does not import a connector, the database,
+ * or its own `lib/server` — all three are lint errors here, because reaching
+ * them would skip the gateway entirely: no auth-tier resolution, no role gate,
+ * no input or output validation, no connector budget, no telemetry.
+ *
+ * `callAppRoute` runs the identical pipeline in-process. Same everything a
+ * browser calling `/api/apps/_template/hello` would get, minus the network hop
+ * and the JSON round trip. It throws `AppError` rather than returning a
+ * Response, so a page that would rather degrade than fail should catch it —
+ * as this one does.
+ */
+export default async function TemplatePage() {
+  let greeting: string | null = null;
+
+  try {
+    const data = await callAppRoute<{ message: string }>(
+      "_template",
+      "GET /hello",
+      { shout: false },
+    );
+    greeting = data.message;
+  } catch {
+    // Degrade, don't fail: one unavailable route should cost the card, not the
+    // page. See docs/apps/ux.md — every state gets a designed screen.
+    greeting = null;
+  }
+
   return (
-    <div className="flex min-h-[80vh] flex-col items-center justify-center px-8 text-center">
-      <h1 className="text-5xl font-extrabold tracking-tight">Example App</h1>
-      <p className="mt-4 max-w-lg text-lg text-muted-foreground">
-        The same thing we do every night, Louis &mdash; try to take over the
-        world!
+    <div className="p-8">
+      <h1 className="text-2xl font-semibold text-foreground">Hello MixOS</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Rendered on the server, from this app&apos;s own declared route.
       </p>
-      <div className="mt-8 rounded-xl border border-border bg-card px-8 py-6 shadow-sm">
-        <p className="text-sm font-medium uppercase tracking-widest text-muted-foreground">
-          World Domination Progress
-        </p>
-        <div className="mt-3 h-3 w-64 overflow-hidden rounded-full bg-muted">
-          <div className="h-full w-[4%] rounded-full bg-mixnavy" />
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">
-          4% &mdash; but we&apos;re feeling optimistic
-        </p>
-      </div>
+
+      <Card className="mt-6">
+        <CardBody>
+          {greeting ? (
+            <p className="text-lg text-card-foreground">{greeting}</p>
+          ) : (
+            <EmptyState
+              cause="no-data"
+              title="Nothing to greet yet"
+              body="The hello route did not return anything. Check the server log for the reason."
+            />
+          )}
+        </CardBody>
+      </Card>
     </div>
   );
 }
