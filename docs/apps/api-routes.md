@@ -149,7 +149,7 @@ may read it. A stranger gets `public` too.
 | `session` (default) | Signed in **and** granted this app | populated | `/api/apps/<slug>/…` |
 | `signed-in` | Signed in; no grant needed | populated | `/api/apps/<slug>/…` |
 | `password` | The app's unlock cookie | `null` | `/api/p/<slug>/…` only |
-| `key` | A scoped API key *(Phase 6 — not implemented; a route declaring only `key` is unreachable, never open)* | `null` | — |
+| `key` | A scoped API key | `null` | `/api/p/<slug>/…` only |
 | `public` | Nothing | `null` | `/api/p/<slug>/…` |
 
 A route accepting `public` or `password` is **derived** into the `/api/p/` mount.
@@ -164,8 +164,33 @@ You do not declare it in two places; if you also set `apiVisibility` in
 - `/api/p/<slug>/…` serves `password` and `public`. A session-only route is a
   **404** here, never a 401, so probing this surface cannot distinguish "exists
   but forbidden" from "no such route".
-- `password` is not reachable on `/api/apps/…` at all: the unlock cookies are
-  path-scoped to `/p/` and `/api/p/`, so a browser would never send one there.
+- `password` and `key` are not reachable on `/api/apps/…` at all. The unlock
+  cookies are path-scoped to `/p/` and `/api/p/`, so a browser would never send
+  one there; and `/api/apps` sits behind the proxy's cookie check, which
+  redirects a machine-to-machine caller to `/login` before any of this runs.
+
+### Machine-to-machine: scoped API keys
+
+An admin mints a key per app with an explicit scope list, an optional expiry, and
+a label. It is shown **once** — only an HMAC digest is stored, so a database leak
+alone yields nothing replayable.
+
+```
+curl -H "Authorization: Bearer mosk_…" https://mos.example.com/api/p/my-app/items
+```
+
+Three properties worth knowing:
+
+- **A key is bound to one app.** Presenting a valid key for app A on app B's
+  route does not authenticate, or a key would become a platform-wide credential.
+- **Scopes are per route.** `["GET /items"]` opens exactly that; a key minted for
+  one endpoint never becomes a key for the whole app. `["*"]` covers everything
+  the app declares.
+- **Revocation and expiry are live**, checked on every request rather than cached
+  on the key — one indexed lookup, and a revoked key stops working immediately.
+
+The key travels in `Authorization: Bearer` or `X-API-Key`, never a query string,
+which would end up in access logs, browser history and referrer headers.
 
 ## `roles`
 
@@ -319,40 +344,73 @@ no route returns 404.
 Dynamic segments arrive in your `input` under their bracket name — `items/[id]`
 gives you `input.id`, provided you declared `id` in the schema.
 
-## Calling from widgets and pages
+## Calling from a widget or client page
 
 ```tsx
 "use client";
 import { createAppClient } from "@/lib/apps/sdk";
 
-const client = createAppClient(appSlug);
-const { items } = await client.get<{ items: Item[] }>("/items?limit=20");
+const client = createAppClient<"my-app">(appSlug);
+const { items } = await client.call("GET /items", { limit: 20 });
+//      ^ inferred from the route's `output` schema — not asserted
 ```
+
+Three things are checked at compile time: the spec must be a route your app
+declares, the input must match that route's schema, and the result is typed from
+its `output`. A typo in any of them is a build error rather than a runtime
+surprise.
+
+**Why the `<"my-app">` type argument.** `appSlug` arrives from `WidgetProps` as a
+plain `string`, which TypeScript cannot narrow to a literal, so it can't be used
+to look your routes up. Naming the app once gives you the checked client; the
+runtime argument stays the prop. Omit it and `call()` still works, untyped.
+
+**Defaults stay optional.** A route declaring `limit: z.number().default(50)`
+gives its *handler* a guaranteed number, but its *caller* may omit it — the
+client types come from the schema's input side, the handler's from its output
+side.
 
 The SDK throws `AppClientError` with the HTTP status and the response body on a
 non-2xx. The body carries `{ error, code }`, so a client can branch on the code
 rather than string-matching the message.
 
-> **Phase 2 will replace this with a generated, typed client** — `client.call("GET /items", { limit: 20 })` with the input and output types inferred from your route. Until then `get<T>()` is an unchecked assertion, so keep `T` honest.
-
 Requests always go to `/api/apps/<your-slug>/…`; you cannot call another app's
 routes. For that, use [App Services](./app-services.md).
 
+> `client.get<T>()` still works and is **deprecated**. `T` there was an assertion
+> with nothing behind it — the exact bug class `call()` removes.
+
 ## Server components
 
-A server page does **not** import `lib/server`, connectors, or the DB. It calls
-its own route:
+A server page does **not** import `lib/server`, a connector, or the database.
+All three are lint errors, because reaching them skips the gateway entirely — no
+auth-tier resolution, no role gate, no validation, no budget, no telemetry. A
+page gets its data through its own declared route:
 
 ```tsx
+// apps/my-app/pages/Main.tsx
+import { callAppRoute } from "@/lib/apps/call";
+
 export default async function Page() {
-  const { items } = await context.call("GET /items", { limit: 20 });
+  const { items } = await callAppRoute<Result>("my-app", "GET /items", { limit: 20 });
   return <ItemsTable rows={items} />;
 }
 ```
 
-Same validation, same roles, same telemetry as the HTTP path — no network hop.
+Identical pipeline to the wire — the same auth tier resolved against the page's
+own session, the same roles, the same input and output validation, the same
+connector budget, the same telemetry row — minus the network hop and the JSON
+round trip. It deliberately skips the rate limiters: the page render is already
+bounded by the request that triggered it, and charging a user's API budget twice
+for one page view would make a dashboard throttle itself.
 
-> `context.call()` lands in Phase 2. Until then, a server page should render a client component that uses `createAppClient`.
+`callAppRoute` **throws** `AppError` rather than returning a Response. A page
+that would rather degrade than fail should catch it and render an
+[`EmptyState`](./ux.md#empty-error--not-connected-states) — see
+[`apps/_template/pages/Main.tsx`](../../apps/_template/pages/Main.tsx).
+
+A `raw: true` route can only be called over HTTP; there is no Response to hand
+back in-process.
 
 ## Anti-patterns
 

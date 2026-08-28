@@ -2,7 +2,7 @@
 
 App grants are **binary** at the platform level — a user either has the app or they don't. For finer-grained, in-app permissions (e.g. "admin" vs "read-only", "editor" vs "approver"), an app declares its own **roles**.
 
-Roles are **isolated to your app**: the role keys mean nothing outside it, and the platform provides only the membership check. *Your app* decides what each role is allowed to do — MOS never enforces a policy on your behalf.
+Roles are **isolated to your app**: the role keys mean nothing outside it, and the platform provides only the membership check. *Your app* decides what each role is allowed to do — MixOS never enforces a policy on your behalf.
 
 ## Declaring roles
 

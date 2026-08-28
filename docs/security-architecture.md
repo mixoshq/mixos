@@ -241,8 +241,8 @@ Output:     base64(IV) : base64(AuthTag) : base64(Ciphertext)
 |     users        |         |      apps        |
 |------------------|         |------------------|
 | id (uuid, PK)   |         | slug (PK)        |
-| sso_id (unique)  |         | name             |
-| email            |         | ...              |
+| email (unique)   |         | name             |
+| display_name     |         | ...              |
 | is_admin         |         |                  |
 +------------------+         +------------------+
         |                            |
@@ -458,7 +458,7 @@ app code can dispatch a push.
 | `SUPABASE_SERVICE_ROLE_KEY` | Full database access; bypasses RLS   | Full read/write to every table                   |
 | `DATABASE_URL`              | Postgres connection (full DB access) | Full read/write to every table                   |
 | `CONNECTOR_ENCRYPTION_KEY`  | Decrypts all connector credentials, AND derives the MCP token HMAC key and the app-unlock cookie key | Exposes every third-party API key; lets an attacker mint MCP tokens and unlock cookies |
-| `APP_UNLOCK_SECRET`         | Signs app password-unlock cookies    | Bypass of every app password                     |
+| `APP_UNLOCK_SECRET`         | Signs app password-unlock cookies    | Bypass of every app password. Note that app **API keys** deliberately do NOT derive from this — they derive from `CONNECTOR_ENCRYPTION_KEY` under their own label, so rotating this secret does not silently invalidate every integration. |
 | `CRON_SECRET`               | Authenticates Vercel Cron -> /api/cron | Attacker can trigger every app background job  |
 | `VAPID_PRIVATE_KEY`         | Signs Web Push messages              | Attacker could send push to existing subscribers; no data read access |
 | `VAPID_PUBLIC_KEY` / `VAPID_SUBJECT` | Client subscribe key / contact URL | Not secret; public key is handed to the browser to subscribe |
@@ -681,8 +681,8 @@ Format:        Comma-separated (e.g. "mix.mysite.com,example.com")
 Behaviour:
   - When set:   Only users whose email domain matches may sign in
   - When unset: Any email domain is accepted
-  - Enforced in: src/lib/auth/config.ts (emailAllowed), applied to BOTH
-                 the credentials provider and the OIDC signIn callback
+  - Enforced in: src/lib/auth/config.ts (emailAllowed), applied in the
+                 credentials provider — the only sign-in path
 ```
 
 The allowlist is a provisioning control, not an authentication control. It
@@ -824,10 +824,10 @@ catches initialization failures separately from module-loading failures.
 
 ## 17. MCP Server and OAuth Authorization Server
 
-MOS exposes a single MCP server at `POST /api/mcp` so an MCP client (claude.ai,
+MixOS exposes a single MCP server at `POST /api/mcp` so an MCP client (claude.ai,
 Claude Desktop, Claude Code) can read app data on a user's behalf. This is the
 only inbound surface authenticated by a **bearer token** rather than a session
-cookie, and the only place MOS acts as an OAuth **authorization server** rather
+cookie, and the only place MixOS acts as an OAuth **authorization server** rather
 than an OAuth client.
 
 ### Authorization chain
@@ -896,7 +896,7 @@ blocking review finding.
   `redirect_uri`, bad verifier — returns an identical `invalid_grant`. A caller
   cannot probe which codes exist.
 - `redirect_uri` is matched **exactly** against the set registered for that
-  client. No prefix matching, no wildcards. A mismatch renders an error **on MOS**
+  client. No prefix matching, no wildcards. A mismatch renders an error **on MixOS**
   and never redirects — redirecting an unvalidated URI is precisely the
   open-redirect an attacker is fishing for. A valid request the user *denies* does
   redirect, with `access_denied`.
@@ -913,14 +913,14 @@ blocking review finding.
 access token. This is deliberate — it is what makes claude.ai's zero-config
 connector flow work — and is safe because **registration grants nothing**. A
 registered client can do exactly one thing: send a user to the consent screen. No
-data moves until a logged-in MOS user ticks specific apps there. Registration is
+data moves until a logged-in MixOS user ticks specific apps there. Registration is
 rate-limited per IP, redirect URIs must be `https`, `http` on loopback (RFC 8252),
 or a native custom scheme, and only public clients are accepted.
 
 ### Transport and exposure
 
 - `POST` only. `GET` (which would open a server→client SSE stream) and `DELETE`
-  (session teardown) return 405 — MOS is stateless and sends no server-initiated
+  (session teardown) return 405 — MixOS is stateless and sends no server-initiated
   messages, so a single JSON response per request is the whole transport.
 - Every 401 carries `WWW-Authenticate: Bearer ... resource_metadata="..."`. This
   is required for client bootstrap and is the single easiest header to omit and

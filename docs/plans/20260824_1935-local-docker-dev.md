@@ -2,7 +2,7 @@
 
 ## Context
 
-MOS deploys to Vercel with a hosted Supabase Postgres. Local development
+MixOS deploys to Vercel with a hosted Supabase Postgres. Local development
 currently requires each developer to create their own Supabase cloud project,
 copy four secrets out of its dashboard, link the CLI, push the schema, and seed
 an admin by hand — the path documented in [README.md](../../README.md) and
@@ -18,7 +18,7 @@ machine, logged in as an admin.
 
 ### What the codebase actually needs from Supabase
 
-This is the finding that shapes the whole design. MOS uses a very narrow slice
+This is the finding that shapes the whole design. MixOS uses a very narrow slice
 of Supabase. [src/lib/db/server.ts](../../src/lib/db/server.ts) documents the
 only two data paths:
 
