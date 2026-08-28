@@ -1,0 +1,43 @@
+{
+  "name": "MixOS Dark",
+  "description": "The MixOS palette drawn for a dark ground. Slate and cyan with Plus Jakarta Sans, Inter and JetBrains Mono, from the MixOS brand guidelines v1.0. A separate theme, not a mode.",
+  "tagline": "Where Apps and Connectors Flow Together — after dark.",
+  "authors": [
+    {
+      "name": "MixOS Core Team",
+      "email": "core@mixos.local"
+    }
+  ],
+  "fonts": [
+    {
+      "family": "Plus Jakarta Sans",
+      "file": "fonts/jakarta-variable.woff2",
+      "weight": "400 800",
+      "style": "normal",
+      "display": "swap"
+    },
+    {
+      "family": "Inter",
+      "file": "fonts/inter-variable.woff2",
+      "weight": "300 600",
+      "style": "normal",
+      "display": "swap"
+    },
+    {
+      "family": "JetBrains Mono",
+      "file": "fonts/jetbrains-variable.woff2",
+      "weight": "400 700",
+      "style": "normal",
+      "display": "swap"
+    }
+  ],
+  "assets": {
+    "logo": "logo.png",
+    "favicon": "favicon.png",
+    "appIcon192": "icon-192.png",
+    "appIcon512": "icon-512.png"
+  },
+  "surfaces": [],
+  "escapes": [],
+  "lastUpdated": "2026-08-28T05:31:37.354Z"
+}
