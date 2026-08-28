@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 /**
@@ -44,6 +48,10 @@ export function Dialog({
   open,
   onClose,
   title,
+  icon,
+  subtitle,
+  tabs,
+  fixedHeight = false,
   size = "md",
   children,
   footer,
@@ -52,12 +60,50 @@ export function Dialog({
   onClose: () => void;
   /** Announced as the dialog's accessible name. Required for that reason. */
   title: string;
+  /**
+   * Rendered before the title. Decorative only — `title` stays a plain string
+   * so the accessible name can never become "image image Gmail", which is what
+   * happens the moment a title is allowed to be arbitrary nodes.
+   */
+  icon?: ReactNode;
+  /**
+   * A line under the title, in the header bar. Becomes the dialog's
+   * `aria-describedby`, which is what a screen reader reads after the title —
+   * so this is for what the dialog is *about*, not for a control or a warning.
+   */
+  subtitle?: ReactNode;
+  /**
+   * A tab band directly beneath the title, outside the scrolling body — so the
+   * tabs stay put while their panel scrolls, which is the whole reason a tab
+   * bar is worth having.
+   *
+   * Passing this also merges the header into the band: they share one muted
+   * ground with no rule between them, and the only rule is the one under the
+   * tabs, running the full width of the panel. The active tab's `bg-card` fill
+   * then punches through that rule and reads as continuous with the body.
+   */
+  tabs?: ReactNode;
+  /**
+   * Hold one height regardless of what is in the panel.
+   *
+   * For a dialog whose panels differ a lot in length — a tab set, a wizard —
+   * height-to-content means the panel jumps and the tabs move under the cursor
+   * on every switch. Opt-in, because a confirm dialog with two lines in it
+   * should still be two lines tall.
+   *
+   * `max-h-[85vh]` still applies, so this shrinks on a short viewport rather
+   * than overflowing it. Header, tab band and footer are all outside the scroll
+   * area, so a fixed height means the panel edges hold still and only the
+   * content beneath them moves.
+   */
+  fixedHeight?: boolean;
   size?: keyof typeof WIDTHS;
   children: ReactNode;
   /** Action row, pinned below the scrolling content. */
   footer?: ReactNode;
 }) {
   const titleId = useId();
+  const subtitleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   /** Whatever had focus before we opened, so we can hand it back. */
   const restoreTo = useRef<HTMLElement | null>(null);
@@ -127,25 +173,84 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={subtitle != null ? subtitleId : undefined}
         tabIndex={-1}
-        className={`relative flex max-h-[85vh] w-full ${WIDTHS[size]} flex-col rounded-xl border border-border bg-card shadow-xl`}
+        className={`mix-modal relative flex w-full ${WIDTHS[size]} flex-col rounded-xl border border-border bg-card shadow-xl ${
+          fixedHeight ? "h-[38rem] max-h-[85vh]" : "max-h-[85vh]"
+        }`}
       >
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <h2 id={titleId} className="text-lg font-semibold text-foreground">
-            {title}
-          </h2>
+        {/*
+          Centred while the header is one line, top-aligned once a subtitle
+          makes it two — so the 13 dialogs that pass no subtitle keep exactly
+          the header they had.
+
+          With tabs, the header gives up its own bottom rule and takes the
+          band's ground instead: one surface from the title down to the tabs,
+          and a single rule underneath the pair.
+        */}
+        <div
+          className={`flex gap-2 px-4 py-3 ${
+            subtitle != null ? "items-start" : "items-center"
+          } ${
+            tabs != null
+              // rounded-t-xl matches the panel's own radius: the panel is not
+              // overflow-hidden (that would clip focus rings and any tooltip
+              // that escapes its row), so the first child carrying a fill has
+              // to round its own top corners or it squares off the dialog's.
+              ? "rounded-t-xl bg-muted/40"
+              : "border-b border-border"
+          }`}
+        >
+          {icon != null && (
+            <span aria-hidden className="flex shrink-0 items-center">
+              {icon}
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <h2 id={titleId} className="text-lg font-semibold text-foreground">
+              {title}
+            </h2>
+            {subtitle != null && (
+              <p id={subtitleId} className="mt-0.5 text-sm text-muted-foreground">
+                {subtitle}
+              </p>
+            )}
+          </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="shrink-0 rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <X aria-hidden className="h-4 w-4" />
           </button>
         </div>
+        {/* Full-bleed: the rule under the tabs spans the whole panel, and the
+            horizontal padding sits inside it. */}
+        {tabs != null && (
+          <div className="border-b border-border bg-muted/40 px-4">{tabs}</div>
+        )}
+
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{children}</div>
+        {/*
+          Two footers, chosen by whether this dialog has tabs.
+
+          Without tabs it is an action row — right-aligned controls, the shape
+          every existing caller passes a SaveRow into. With tabs the dialog has
+          banded chrome (muted header, muted tab band), and the footer completes
+          it: a full-width band carrying provenance rather than actions, pinned
+          outside the scroll area so it stays put. `rounded-b-xl` for the same
+          reason the header rounds its top — the panel is not overflow-hidden,
+          so a filled last child has to round its own corners.
+        */}
         {footer && (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
+          <div
+            className={
+              tabs != null
+                ? "shrink-0 rounded-b-xl border-t border-border bg-muted/40 px-4 py-2.5 text-xs text-foreground"
+                : "flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3"
+            }
+          >
             {footer}
           </div>
         )}

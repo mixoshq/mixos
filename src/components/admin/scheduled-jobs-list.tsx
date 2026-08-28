@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { Fragment, useState } from "react";
@@ -94,17 +98,17 @@ function nextDue(nextRunAt: string | null): string {
 function StatusBadge({ status, running }: { status: string | null; running: boolean }) {
   if (running) {
     return (
-      <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+      <span className="inline-flex rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
         running…
       </span>
     );
   }
   const map: Record<string, string> = {
-    ok: "bg-green-100 text-green-700 dark:bg-green-950/40 dark:text-green-300",
-    error: "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300",
-    timeout: "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+    ok: "bg-success text-success-foreground",
+    error: "bg-destructive text-destructive-foreground",
+    timeout: "bg-warning text-warning-foreground",
   };
-  const cls = status ? map[status] : "bg-muted text-muted-foreground";
+  const cls = status ? map[status] : "bg-muted text-foreground";
   return (
     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
       {status ?? "never run"}
@@ -115,8 +119,8 @@ function StatusBadge({ status, running }: { status: string | null; running: bool
 function TriggerBadge({ trigger }: { trigger: "scheduled" | "manual" }) {
   const cls =
     trigger === "manual"
-      ? "bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-      : "bg-muted text-muted-foreground";
+      ? "bg-cat-2 text-background"
+      : "bg-muted text-foreground";
   return (
     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
       {trigger}
@@ -161,7 +165,7 @@ function HistoryRow({ job, colSpan }: { job: JobView; colSpan: number }) {
                     <td className="px-3 py-1.5">
                       {r.error ? (
                         <span
-                          className="block max-w-md truncate text-red-600"
+                          className="block max-w-md truncate text-destructive"
                           title={r.error}
                         >
                           {r.error}
@@ -210,7 +214,7 @@ export default function ScheduledJobsList({
       <div className="flex items-center gap-2 text-sm">
         <span
           className={`inline-block h-2 w-2 rounded-full ${
-            schedulerEnabled ? "bg-green-500" : "bg-muted-foreground"
+            schedulerEnabled ? "bg-success" : "bg-muted-foreground"
           }`}
         />
         <span className="font-medium text-foreground">
@@ -296,7 +300,7 @@ export default function ScheduledJobsList({
                         <span className="tabular-nums">{cadenceLabel(j)}</span>
                       )}
                       {description && (
-                        <div className="mt-0.5 text-xs text-muted-foreground/70">
+                        <div className="mt-0.5 text-xs text-muted-foreground">
                           {description}
                         </div>
                       )}
@@ -311,7 +315,7 @@ export default function ScheduledJobsList({
                       <StatusBadge status={j.lastStatus} running={j.running} />
                       {j.lastStatus === "error" && j.lastError && (
                         <p
-                          className="mt-1 max-w-xs truncate text-xs text-red-600"
+                          className="mt-1 max-w-xs truncate text-xs text-destructive"
                           title={j.lastError}
                         >
                           {j.lastError}

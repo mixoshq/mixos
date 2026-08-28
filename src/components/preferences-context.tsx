@@ -1,12 +1,17 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import {
   createContext,
   useContext,
   useState,
-  useEffect,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { createLocalStore } from "@/lib/local-store";
 
 export type MenuBarMode = "always" | "hidden";
 export type MenuBarAppDisplay = "icon" | "icon-and-name";
@@ -43,6 +48,33 @@ interface OnboardingState {
   step: number;
 }
 
+const ONBOARDING_DEFAULTS: OnboardingState = { active: false, step: 0 };
+
+/**
+ * Module-level stores rather than state hydrated by an effect. See
+ * `createLocalStore` for why, and `docs/apps/app-shell.md` for the pattern.
+ */
+const prefsStore = createLocalStore<Preferences>(STORAGE_KEY, DEFAULTS, (raw) => {
+  const parsed = (raw ?? {}) as Partial<Preferences>;
+  return {
+    menuBar: parsed.menuBar === "hidden" ? "hidden" : "always",
+    menuBarAppDisplay:
+      parsed.menuBarAppDisplay === "icon" ? "icon" : "icon-and-name",
+  };
+});
+
+const onboardingStore = createLocalStore<OnboardingState>(
+  ONBOARDING_STATE_KEY,
+  ONBOARDING_DEFAULTS,
+  (raw) => {
+    const parsed = (raw ?? {}) as Partial<OnboardingState>;
+    return {
+      active: parsed.active === true,
+      step: typeof parsed.step === "number" ? parsed.step : 0,
+    };
+  },
+);
+
 const PreferencesContext = createContext<PreferencesContextValue>({
   ...DEFAULTS,
   setMenuBar: () => {},
@@ -59,54 +91,20 @@ const PreferencesContext = createContext<PreferencesContextValue>({
 });
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {
-  const [prefs, setPrefs] = useState<Preferences>(DEFAULTS);
-  const [onboarding, setOnboarding] = useState<OnboardingState>({
-    active: false,
-    step: 0,
-  });
+  const prefs = useSyncExternalStore(
+    prefsStore.subscribe,
+    prefsStore.read,
+    prefsStore.server,
+  );
+  const onboarding = useSyncExternalStore(
+    onboardingStore.subscribe,
+    onboardingStore.read,
+    onboardingStore.server,
+  );
   const [showCongratulations, setShowCongratulations] = useState(false);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<Preferences>;
-        setPrefs({
-          menuBar: parsed.menuBar === "hidden" ? "hidden" : "always",
-          menuBarAppDisplay:
-            parsed.menuBarAppDisplay === "icon" ? "icon" : "icon-and-name",
-        });
-      }
-      const onboardingRaw = localStorage.getItem(ONBOARDING_STATE_KEY);
-      if (onboardingRaw) {
-        const parsed = JSON.parse(onboardingRaw) as Partial<OnboardingState>;
-        setOnboarding({
-          active: parsed.active === true,
-          step: typeof parsed.step === "number" ? parsed.step : 0,
-        });
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  function update(next: Preferences) {
-    setPrefs(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // ignore
-    }
-  }
-
-  function persistOnboarding(next: OnboardingState) {
-    setOnboarding(next);
-    try {
-      localStorage.setItem(ONBOARDING_STATE_KEY, JSON.stringify(next));
-    } catch {
-      // ignore
-    }
-  }
+  const update = prefsStore.write;
+  const persistOnboarding = onboardingStore.write;
 
   function startOnboarding() {
     persistOnboarding({ active: true, step: 0 });

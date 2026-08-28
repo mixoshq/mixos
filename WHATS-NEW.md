@@ -9,6 +9,35 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-08-28
+
+- **Themes are a first-class abstraction.** `themes/<slug>/` sits beside `apps/`
+  and `connectors/`, with its own manifest, guide and **`/mix-theme`** command.
+  A theme declares **exactly one palette**: light is what an install gets by
+  default, and a dark look ships as a *separate installable theme*
+  (`mixos-dark`) rather than a mode you switch inside the current one.
+
+- **`/mix-convert`** turns an existing application into a MixOS app under
+  `apps/`.
+
+- **Connectors carry their own setup guide.** `connector.json` gained a
+  structured `setup` block — the provider-side steps, links, and a note that can
+  hang off each of the registry's own "save credentials / connect / verify"
+  buttons, including this deployment's redirect URI. `description` is now capped
+  at 140 characters and describes *the service*; provisioning prose belongs in
+  `setup`. A connector can also ship `assets/icon.png` for its registry tile.
+
+- **Per-user connectors.** A connector may declare `"userScoped": true`
+  (three-legged OAuth only). Each person then authorizes their own account at
+  **Account → Connections**, instead of everyone sharing the one grant an admin
+  connected. The client ID and secret stay tenant-wide — the *application* is
+  registered once, only the *grant* is personal.
+
+- **Gmail connector.** Read-only access to a shared mailbox: search with Gmail's
+  `q` syntax, threads, labels, attachments, and message bodies decoded out of
+  MIME.
+
+
 ## 2026-08-24
 
 - **Local development now runs in Docker.** One command brings up Supabase

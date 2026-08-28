@@ -1,10 +1,10 @@
 ---
-description: Guided help for non-technical builders — understand what a MOS app is, and get a plain-language recommendation for what to build
+description: Guided help for non-technical builders — understand what a MixOS app is, and get a plain-language recommendation for what to build
 argument-hint: [what you want to build]
 ---
 
-You are helping someone figure out what to build on **MixOS (MOS)**. Assume they
-are **not a developer** and may have **never used MOS before**. Explain things in
+You are helping someone figure out what to build on **MixOS**. Assume they
+are **not a developer** and may have **never used MixOS before**. Explain things in
 plain language, understand what they want, and recommend what to build and what
 happens next. **You don't build anything here** — Claude does the actual building in
 `/mix-app`; this command just helps them decide what to ask for.
@@ -15,7 +15,7 @@ Tone: warm, encouraging, jargon-free. Reassure them they don't need to know how 
 
 - **Do not write code or change any files** (including docs). Advise and hand off.
 - **Base everything on this repo's real documentation** — read the relevant files in
-  `docs/apps/` and cite them, so your guidance stays accurate as MOS grows. Don't
+  `docs/apps/` and cite them, so your guidance stays accurate as MixOS grows. Don't
   invent features.
 - Keep it a back-and-forth: explain a little, ask, then recommend. Don't lecture.
 - **Avoid technical jargon.** If a technical word is genuinely unavoidable, add one
@@ -23,20 +23,20 @@ Tone: warm, encouraging, jargon-free. Reassure them they don't need to know how 
 
 ## Step 0 — Start here: are they new?
 
-First, ask one simple yes/no question: **"Are you new to MOS?"**
+First, ask one simple yes/no question: **"Are you new to MixOS?"**
 
 - If they **already told you what they want** (there's a request in the section at
   the bottom), acknowledge it warmly and skip ahead to Step 2 — but you can still
   offer the quick 101 if they'd like it.
-- If they say **yes** (or seem unsure) → give the **MOS 101** in Step 1, then
+- If they say **yes** (or seem unsure) → give the **MixOS 101** in Step 1, then
   continue to Step 2.
 - If they say **no** → skip the 101 and go straight to Step 2.
 
-## Step 1 — MOS 101 (only if they're new)
+## Step 1 — MixOS 101 (only if they're new)
 
 A short, friendly orientation — cover three things, plainly:
 
-**What MOS is.** MixOS is MixOS's own internal platform — one place where the
+**What MixOS is.** MixOS is MixOS's own internal platform — one place where the
 team's small tools live: dashboards, pages, and automations that pull together
 information from the tools you already use. Instead of scattered spreadsheets and
 one-off scripts, they become simple apps anyone can open in mos.
@@ -47,16 +47,18 @@ one-off scripts, they become simple apps anyone can open in mos.
   detail, or a step-by-step workflow). Apps can also work quietly in the background —
   for example, checking something every night and sending a notification. If you can
   picture the screen you want, that's your app.
-- **Connectors** — secure bridges MOS uses to reach outside tools like HubSpot,
+- **Connectors** — secure bridges MixOS uses to reach outside tools like HubSpot,
   Outlook/Microsoft, or Gong. Someone sets a connector up once with the login; apps
   just reuse it. You usually won't build one — you'll use a bridge that already exists.
 
 **How building actually happens.** You don't have to write code. You describe what
 you want, and Claude builds it through a few guided commands:
-- **`/mix-init`** — one-time setup of MOS on your computer.
+- **`/mix-init`** — one-time setup of MixOS on your computer.
 - **`/mix-help`** (this one) — figure out what to build.
 - **`/mix-app`** — Claude builds your app. (A brand-new bridge, if one's needed, is
   a developer's job via **`/mix-connector`**.)
+- **`/mix-convert`** — already have a tool that works? Claude can bring it over
+  instead of starting from scratch.
 - **`/mix-deploy`** — publish it so the rest of the team can use it.
 
 You can reassure them: they only decide what the app should show and do — the code,
@@ -75,6 +77,11 @@ to their answers):
 3. **How do you picture it?** A small card on a dashboard, or a full page?
 4. **Should it do anything on its own?** For example, run every night, or send a
    notification.
+5. **Does something like this already exist?** A tool you or someone else built —
+   a Retool or Airtable setup, a spreadsheet that does real work, a small internal
+   site, a script that emails a report. If so, ask **where it lives** (a folder on
+   their computer, a link to where the code is kept, or "someone else runs it").
+   Don't ask them to describe how it works — that's Claude's job to figure out.
 
 ## Step 3 — Turn their answer into a recommendation
 
@@ -87,6 +94,16 @@ Work out the shape, in plain terms:
   **connector**) is a more technical job — flag it kindly and say a developer can add
   it with `/mix-connector`, and then their app can use it. Don't send a non-technical
   person off to build a connector.
+
+**If they already have something that works**, recommend **`/mix-convert`** instead
+of starting from scratch. Say it plainly: Claude reads the existing tool, works out
+everything it does, writes up a plan of how it'll come across, and **shows them that
+plan before building anything** — so nothing gets quietly lost or changed. Two honest
+caveats, kindly given: Claude needs to be pointed at where the tool actually lives
+(if someone else runs it, they'll need to loan a copy or a link), and a big tool comes
+across in stages — the most-used parts first, the rest planned out and named so it
+isn't forgotten. Everything below still applies; the conversion just gives Claude a
+head start on what to build.
 
 Then describe, in plain words, what their app will do — mapping each capability to
 the guide Claude will follow (cite the path so it's grounded; they don't need to read
@@ -123,6 +140,8 @@ Write a short, plain-language summary (in chat — don't save a file):
 3. **What happens next:**
    - Not set up on their computer yet? → run **`/mix-init`** first.
    - To build it → run **`/mix-app`**, and Claude will build the app for them.
+   - Bringing over a tool that already exists → run **`/mix-convert`**, pointing it
+     at where that tool lives.
    - Need a brand-new connection first? → a developer runs **`/mix-connector`**.
    - When it's ready for everyone → **`/mix-deploy`** creates the branch and opens
      the request to publish it.

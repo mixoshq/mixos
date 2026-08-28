@@ -12,7 +12,7 @@ project to get started.
 
 ## Prerequisites
 
-- [Visual Studio Code](https://code.visualstudio.com/) — the editor MOS is built
+- [Visual Studio Code](https://code.visualstudio.com/) — the editor MixOS is built
   to be worked on in. After installing, add these two extensions (Extensions
   view → search by ID, or run the `code` commands below):
   - **Anthropic.claude-code** — Claude Code, the assistant that drives the
@@ -168,7 +168,7 @@ global install.
    (Project Settings → Database → **Transaction pooler**, port 6543 — not the
    direct 5432 endpoint). `AUTH_SECRET`, `CONNECTOR_ENCRYPTION_KEY`,
    `APP_UNLOCK_SECRET`, and `CRON_SECRET` can be generated with the one-liners
-   in the comments. Secrets for a real deployment live in the team's MOS
+   in the comments. Secrets for a real deployment live in the team's MixOS
    1Password vault — request access from Anthony (amix@gmail.com) if you
    need them.
 
@@ -221,25 +221,25 @@ password form and shows only a "Login with SSO" button.
 
 ## Connectors
 
-Connectors integrate MOS with external services (HubSpot, Notion, GitHub, etc.).
+Connectors integrate MixOS with external services (HubSpot, Notion, GitHub, etc.).
 Their API keys are **not** environment variables — an admin enters them in the UI
-at [/admin/connectors](http://localhost:3000/admin/connectors), and MOS encrypts
+at [/admin/connectors](http://localhost:3000/admin/connectors), and MixOS encrypts
 them in the database (`CONNECTOR_ENCRYPTION_KEY`).
 
-The keys themselves live in the team's **MOS 1Password vault**. To get them,
+The keys themselves live in the team's **MixOS 1Password vault**. To get them,
 **request access from Anthony (amix@gmail.com)**. **Never share these keys
 with anyone**, even if you've been granted access.
 
 ## Connecting Claude (MCP)
 
-MOS runs an MCP server so Claude can answer questions using data from your apps.
+MixOS runs an MCP server so Claude can answer questions using data from your apps.
 In Claude, add a custom connector pointing at:
 
 ```
 https://mix.mysite.com/api/mcp        # or http://localhost:3000/api/mcp in dev
 ```
 
-You'll be sent to MOS to sign in and tick which apps the connection may read.
+You'll be sent to MixOS to sign in and tick which apps the connection may read.
 Access is **read-only** and never exceeds your own permissions — a connection can
 only ever see apps you already have. Review or revoke connections at
 [/account/mcp](http://localhost:3000/account/mcp).
@@ -249,16 +249,22 @@ them to yours.
 
 ## Developing
 
-To build on MOS, work from a feature branch and use the guided skills (Claude in
+To build on MixOS, work from a feature branch and use the guided skills (Claude in
 VSCode):
 
-- **`/mix-help`** — new here or unsure what to build? It explains how apps and
-  connectors relate, asks what you're trying to do, and recommends what to build
-  and which docs to read.
+- **`/mix-help`** — new here or unsure what to build? It explains how apps,
+  connectors, and themes relate, asks what you're trying to do, and recommends
+  what to build and which docs to read.
 - **`/mix-app`** — create or update an app under `apps/`. Spec:
   [apps/AGENTS.md](apps/AGENTS.md).
+- **`/mix-convert`** — turn an existing application (a local folder, a git URL,
+  or code you've staged here) into a MixOS app. It inventories the original,
+  writes a conversion plan to `apps/<slug>/plans/`, stops for your approval, then
+  builds the first slice.
 - **`/mix-connector`** — create or update a connector under `connectors/`. Spec:
   [connectors/AGENTS.md](connectors/AGENTS.md).
+- **`/mix-theme`** — create or update a theme under `themes/` — the colours, type,
+  and logo every app renders through. Spec: [themes/AGENTS.md](themes/AGENTS.md).
 - **`/mix-deploy`** — create your feature branch and, when you're ready, open the
   Pull Request (with a detailed description) for you.
 
@@ -269,9 +275,9 @@ Anthony or another developer to open it for you.
 
 There is no publish step. `.githooks/pre-commit` runs
 [`scripts/stamp-updated.ts`](scripts/stamp-updated.ts), which stamps `lastUpdated`
-on every app or connector with a file in the commit and re-stages the manifest —
-so the date shown in the App Manager and Connector Registry always matches the
-last commit that touched it. Preview what would be stamped with
+on every app, connector, or theme with a file in the commit and re-stages the
+manifest — so the date shown in the App Manager and Connector Registry always
+matches the last commit that touched it. Preview what would be stamped with
 `npx tsx scripts/stamp-updated.ts --dry-run`.
 
 Recent, developer-facing changes are summarized in [WHATS-NEW.md](WHATS-NEW.md);
@@ -369,3 +375,16 @@ One-time setup:
 `vercel.json` registers the scheduler cron (`/api/cron`, every 5 minutes). Note
 that Vercel's Hobby plan only permits **daily** cron schedules — the 5-minute
 cadence needs a Pro plan.
+
+## Licence
+
+MixOS is licensed under the **Mozilla Public License 2.0** ([`LICENSE`](LICENSE)).
+
+The platform is copyleft; **what you build on it is yours.** Apps, connectors
+and themes under `apps/`, `connectors/` and `themes/` are not Covered Software
+and may be licensed however you like, including proprietary — importing
+platform code does not change that. The scaffolding templates are public domain
+(CC0) so a copied template never carries obligations into your work.
+
+See [`LICENSING.md`](LICENSING.md) for the boundary in detail, why MPL was
+chosen over GPL and AGPL, and the trademark and contribution terms.

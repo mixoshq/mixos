@@ -1,10 +1,14 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * Minimal JSON-RPC 2.0 framing for the MCP endpoint.
  *
  * We implement the protocol by hand rather than pulling in
  * `@modelcontextprotocol/sdk`: its Streamable HTTP transport is written against
  * Node's `IncomingMessage`/`ServerResponse`, while Next 16 route handlers get a
- * Web `Request` — adapting it is more code than the five methods MOS actually
+ * Web `Request` — adapting it is more code than the five methods MixOS actually
  * serves (`initialize`, `notifications/initialized`, `ping`, `tools/list`,
  * `tools/call`). Protocol correctness is verified against MCP Inspector, not
  * assumed. See docs/apps/mcp.md.

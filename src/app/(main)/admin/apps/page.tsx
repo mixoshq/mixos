@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import Link from "next/link";
 import { appRegistry } from "@/generated/app-registry";
 import { requireReadOnlySession } from "@/lib/auth/session";
@@ -16,10 +20,10 @@ export default async function AppsAdminPage() {
   // toggle UI as a disabled state + inline warning so admins can't try to
   // register an app whose connectors aren't configured.
   const missingEntries = await Promise.all(
-    appRegistry.map(async (app) => [
-      app.slug,
-      await getMissingTenantConfigConnectors(app.slug),
-    ] as const),
+    appRegistry.map(
+      async (app) =>
+        [app.slug, await getMissingTenantConfigConnectors(app.slug)] as const,
+    ),
   );
   const missingConnectorsBySlug = Object.fromEntries(missingEntries);
 
@@ -27,15 +31,15 @@ export default async function AppsAdminPage() {
     <div>
       <div className="mb-6 flex items-start justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Administration</p>
-          <h1 className="mt-1 text-2xl font-bold text-foreground">App Registry</h1>
+          <h1 className="text-2xl font-bold text-foreground">App Registry</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Register apps to make them available for users. Deregistering removes access for all users.
+            Register apps to make them available for users. Deregistering
+            removes access for all users.
           </p>
         </div>
         <Link
           href="/apps/guide"
-          className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-mixnavy px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-mixnavy/90"
+          className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground shadow-sm hover:bg-brand/90"
         >
           How to create an app
         </Link>

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useState, useTransition } from "react";
@@ -67,12 +71,12 @@ export default function AppToggleList({
             <p className="text-sm text-muted-foreground">{app.description}</p>
             <div className="mt-1 flex items-center gap-2">
               {app.hasPages && (
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
                   Full App
                 </span>
               )}
               {app.widgets.length > 0 && (
-                <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
+                <span className="rounded-full bg-cat-2 px-2 py-0.5 text-xs font-medium text-background">
                   {app.widgets.length} {app.widgets.length === 1 ? "Widget" : "Widgets"}
                 </span>
               )}
@@ -87,7 +91,7 @@ export default function AppToggleList({
           <div className="flex items-center gap-2">
             <span
               className={`text-xs font-medium ${
-                installed ? "text-mixnavy" : "text-muted-foreground"
+                installed ? "text-brand" : "text-muted-foreground"
               }`}
             >
               {installed ? "Installed" : "Not installed"}
@@ -103,11 +107,11 @@ export default function AppToggleList({
                   : undefined
               }
               className={`relative h-6 w-11 rounded-full transition-colors ${
-                installed ? "bg-mixnavy" : "bg-muted"
+                installed ? "bg-primary" : "bg-muted"
               } ${isPending ? "opacity-50" : ""} ${blockInstall ? "cursor-not-allowed opacity-50" : ""}`}
             >
               <span
-                className={`absolute top-0.5 block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                className={`absolute top-0.5 block h-5 w-5 rounded-full border border-border bg-background shadow transition-transform ${
                   installed ? "translate-x-5" : "translate-x-0.5"
                 }`}
               />
@@ -123,9 +127,9 @@ export default function AppToggleList({
       </div>
 
       {blockInstall && (
-        <div className="border-l-4 border-mixcoral bg-mixcoral/10 px-6 py-2.5 dark:bg-mixcoral/20">
+        <div className="border-l-4 border-brand-accent bg-brand-accent/10 px-6 py-2.5">
           <p className="flex items-start gap-2 text-xs text-foreground">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-mixcoral" />
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
             <span>
               <span className="font-semibold">{app.name}</span> needs your{" "}
               {missingUserConnectors.map((m, i) => (
@@ -138,7 +142,7 @@ export default function AppToggleList({
               you can install it.{" "}
               <Link
                 href="/account/connections?return=/apps"
-                className="font-medium text-mixcoral underline underline-offset-2"
+                className="font-medium text-primary underline underline-offset-2"
               >
                 Connect →
               </Link>
@@ -148,8 +152,8 @@ export default function AppToggleList({
       )}
 
       {actionError && (
-        <div className="bg-rose-500/15 px-6 py-2.5">
-          <p className="flex items-start gap-2 text-xs text-rose-700 dark:text-rose-400">
+        <div className="bg-destructive/10 px-6 py-2.5">
+          <p className="flex items-start gap-2 text-xs text-foreground">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>{actionError}</span>
           </p>

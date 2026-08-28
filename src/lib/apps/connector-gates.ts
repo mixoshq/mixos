@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { isConnectorConfigured } from "@/lib/connectors/config";
@@ -37,6 +41,9 @@ export async function getMissingTenantConfigConnectors(
   const app = appRegistry.find((a) => a.slug === appSlug);
   if (!app) return [];
 
+  // `app.connectors` only, never `optionalConnectors`: refusing to register an
+  // app because an optional connector is unconfigured is precisely what makes
+  // it not optional. The sub-component that needs it degrades instead.
   const checks = await Promise.all(
     app.connectors.map(async (name) => {
       const meta = lookupConnector(name);

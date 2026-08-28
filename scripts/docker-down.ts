@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Stops everything `scripts/docker-up.ts` started, in the reverse order: the app
 // containers first (they hold open Postgres connections), then the Supabase
 // stack.
@@ -156,7 +160,7 @@ function parseArgs(argv: string[]): Args {
 }
 
 const HELP = `
-Stop the local MOS stack.
+Stop the local MixOS stack.
 
   npm run docker:down             stop the app and Supabase, keep the database
   npm run docker:reset            also delete the database (asks first)

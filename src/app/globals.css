@@ -1,6 +1,23 @@
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 @import "tailwindcss";
 
+/*
+ * Every installed theme, each scoped to [data-theme="<slug>"]. AUTO-GENERATED
+ * from themes/<slug>/theme.css by scripts/generate-project-registry.ts, which
+ * validates the token set, the selector allowlist and WCAG contrast before
+ * emitting anything. See themes/AGENTS.md.
+ */
+@import "../generated/themes.css";
+
+/*
+ * The utility → variable mapping. This is NOT themeable: a theme supplies
+ * values, it can never add or remove a utility. That asymmetry is what keeps
+ * `bg-card` meaning the same thing under every theme, and it is why an app can
+ * be written once against the token names and survive a rebrand untouched.
+ */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -31,143 +48,47 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  /* Literal brand utilities. Same value as --primary (see :root) but a
-     different intent: `bg-primary` means "the primary action", `bg-mixnavy`
-     means "the brand colour" — a navy backdrop, a branded header band. Both
-     read from --brand-* so they can never drift apart. */
-  --color-mixnavy: var(--brand-navy);
-  --color-mixcoral: var(--brand-coral);
-  /* Local-development band. Only ever reached when the request Host is
-     localhost — see src/lib/env/local-host.ts. */
-  --color-mixlocal: var(--brand-local);
-  --color-mixlocal-mark: var(--brand-local-mark);
-  --font-sans: 'Roboto', sans-serif;
+  /* Literal brand utilities. `bg-primary` means "the primary action";
+     `bg-brand` means "the brand surface" — the menu bar, the sign-in page, a
+     marketing panel. Deliberately named for the ROLE, never the hue: a utility
+     called after a colour becomes a lie the first time the brand changes, and
+     cannot survive a theme system at all. */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-accent: var(--brand-accent);
+  /* The published brand hues, for large text and non-text accents only —
+     several of them cannot carry body text at AA. See docs/themes/contrast.md. */
+  --color-brand-cyan: var(--brand-cyan);
+  --color-brand-teal: var(--brand-teal);
+  --color-brand-violet: var(--brand-violet);
+  --font-sans: var(--type-sans);
+  --font-heading: var(--type-heading);
+  --font-mono: var(--type-mono);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
 }
 
-/*
- * Colour tokens are the ONLY place a colour is allowed to fork by theme. App
- * code never writes a `dark:` variant and never names a raw palette colour —
- * it uses the semantic tokens below, so flipping the theme is a change here
- * rather than an audit of every app. Enforced for `apps/**` by the
- * no-restricted-syntax block in eslint.config.mjs. See docs/apps/ux.md.
- *
- * Every status pair below is verified to clear WCAG AA (4.5:1) in BOTH
- * directions — as text on the page background, and as a surface carrying its
- * own foreground — in both themes. Ratios are noted per line; recheck them if
- * you change a value.
- */
-:root {
-  /* Brand hexes, defined once. --primary and --color-mixnavy both read
-     from these, so `bg-primary` and `bg-mixnavy` cannot drift apart. */
-  --brand-navy: #002345;
-  --brand-coral: #F05237;
-
-  /* The menu bar swaps to these on localhost so a local tab is never mistaken
-     for the real thing. Off-brand on purpose — that IS the signal. Not themed:
-     the band is a fixed colour in both themes. Mark on band: 11.2:1. */
-  --brand-local: #3C1246;
-  --brand-local-mark: #FFD900;
-
-  --background: #ffffff;
-  --foreground: hsl(222.2 84% 4.9%);
-  --card: #ffffff;
-  --card-foreground: hsl(222.2 84% 4.9%);
-  --popover: #ffffff;
-  --popover-foreground: hsl(222.2 84% 4.9%);
-  --primary: var(--brand-navy); /* white on it: 15.84:1 */
-  --primary-foreground: hsl(210 40% 98%);
-  --secondary: hsl(210 40% 96.1%);
-  --secondary-foreground: hsl(222.2 47.4% 11.2%);
-  --muted: hsl(210 40% 96.1%);
-  --muted-foreground: hsl(215.4 16.3% 46.9%); /* on --background: 4.75:1 */
-  --accent: hsl(210 40% 96.1%);
-  --accent-foreground: hsl(222.2 47.4% 11.2%);
-  /* Was #ef4444 (3.76:1) — failed AA as `text-destructive` AND as a surface
-     under white. #dc2626 clears 4.85:1 both ways. */
-  --destructive: #dc2626;
-  --destructive-foreground: hsl(210 40% 98%);
-  --success: #047857; /* 5.49:1 both ways */
-  --success-foreground: hsl(210 40% 98%);
-  --warning: #b45309; /* 5.05:1 both ways */
-  --warning-foreground: hsl(210 40% 98%);
-
-  /* CATEGORICAL ramp — for distinguishing things, never for judging them.
-     Chart series, category chips, column accents: cases where the colour says
-     "this is a different one", not "this is bad". Assign by stable index.
-     Do NOT reach for --destructive/--warning/--success here; a category tile
-     rendered in the error colour tells the user something untrue.
-     Each clears AA as text on --background; ratios noted. */
-  --cat-1: #1d4ed8; /* 6.70:1 */
-  --cat-2: #7e22ce; /* 6.98:1 */
-  --cat-3: #0369a1; /* 5.93:1 */
-  --cat-4: #be185d; /* 6.04:1 */
-  --cat-5: #0f766e; /* 5.47:1 */
-  --cat-6: #4d7c0f; /* 4.99:1 */
-  --border: hsl(214.3 31.8% 91.4%);
-  --input: hsl(214.3 31.8% 91.4%);
-  --ring: hsl(222.2 84% 4.9%);
-  --radius: 0.5rem;
-}
-
-/*
- * NOT CURRENTLY REACHABLE. Nothing applies this class — there is no theme
- * provider and no toggle, and <html> in src/app/layout.tsx is bare. It is kept
- * complete and AA-correct on purpose: that is what keeps shipping dark mode a
- * change to this file rather than an audit of 21 apps. If you add a toggle,
- * these values are ready — verify them, don't assume.
- *
- * On a near-black page a status colour has to get LIGHTER, and its foreground
- * flips dark, exactly the way --primary already does here. The previous
- * --destructive got this backwards (hsl(0 62.8% 30.6%) = #7f1d1d, a mere
- * 2.00:1 against --background — effectively unreadable), which went unnoticed
- * precisely because the class was never applied.
- *
- * OPEN QUESTION: --primary here is the inherited near-white flip, not the
- * brand navy, because #002345 on this background is a 1.26:1 surface — an
- * invisible button. Choosing a lighter brand tint for dark mode is a brand
- * decision; until someone makes it, a dark-mode primary action is white.
- */
-.dark {
-  --background: hsl(222.2 84% 4.9%);
-  --foreground: hsl(210 40% 98%);
-  --card: hsl(222.2 84% 4.9%);
-  --card-foreground: hsl(210 40% 98%);
-  --popover: hsl(222.2 84% 4.9%);
-  --popover-foreground: hsl(210 40% 98%);
-  --primary: hsl(210 40% 98%);
-  --primary-foreground: hsl(222.2 47.4% 11.2%);
-  --secondary: hsl(217.2 32.6% 17.5%);
-  --secondary-foreground: hsl(210 40% 98%);
-  --muted: hsl(217.2 32.6% 17.5%);
-  --muted-foreground: hsl(215 20.2% 65.1%); /* on --background: 7.80:1 */
-  --accent: hsl(217.2 32.6% 17.5%);
-  --accent-foreground: hsl(210 40% 98%);
-  --destructive: #ef4444; /* text 5.31:1 · fg on it 4.74:1 */
-  --destructive-foreground: hsl(222.2 47.4% 11.2%);
-  --success: #34d399; /* text 10.4:1 · fg on it 9.28:1 */
-  --success-foreground: hsl(222.2 47.4% 11.2%);
-  --warning: #fbbf24; /* text 12.0:1 · fg on it 10.7:1 */
-  --warning-foreground: hsl(222.2 47.4% 11.2%);
-  /* Categorical ramp, lightened for a near-black ground — same hue order as
-     :root so a series keeps its identity across themes. */
-  --cat-1: #60a5fa;
-  --cat-2: #c084fc;
-  --cat-3: #38bdf8;
-  --cat-4: #f472b6;
-  --cat-5: #2dd4bf;
-  --cat-6: #a3e635;
-  --border: hsl(217.2 32.6% 17.5%);
-  --input: hsl(217.2 32.6% 17.5%);
-  --ring: hsl(212.7 26.8% 83.9%);
-}
-
+/* The page ground and the default ink, straight from the token contract.
+   These two declarations are the difference between `--background` /
+   `--foreground` being live and being inert: `<body>` carries `mix-app-shell`,
+   but that is an OPTIONAL theme surface (themes/mixos and _template both ship
+   `"surfaces": []`), so nothing else in the stack sets them. Without this,
+   every element that inherits its colour — a heading, a `<pre>`, a `<th>` —
+   falls back to the UA default black, which reads as correct on a white page
+   and as ~1.05:1 on a dark one. */
 body {
-  font-family: 'Roboto', sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--type-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings carry the brand face; body copy carries the UI face. Which faces
+   those are is the theme's call — this only says which role goes where. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--type-heading);
 }
 
 /* Match the widget card radius (rounded-xl = 0.75rem) on the drag/resize

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import type { AppManifest, RouteAuth } from "@/lib/apps/types";
 import { servesPublicSurface } from "@/lib/apps/types";
 
@@ -14,11 +18,11 @@ const AUTH_ORDER: RouteAuth[] = ["public", "password", "key", "signed-in", "sess
 function badgeFor(auth: RouteAuth): { label: string; className: string } {
   switch (auth) {
     case "public":
-      return { label: "Public", className: "bg-emerald-100 text-emerald-800" };
+      return { label: "Public", className: "bg-success text-success-foreground" };
     case "password":
-      return { label: "Password", className: "bg-amber-100 text-amber-800" };
+      return { label: "Password", className: "bg-warning text-warning-foreground" };
     case "key":
-      return { label: "API key", className: "bg-sky-100 text-sky-800" };
+      return { label: "API key", className: "bg-primary text-primary-foreground" };
     case "signed-in":
       return { label: "Signed in", className: "bg-muted text-foreground" };
     case "session":
