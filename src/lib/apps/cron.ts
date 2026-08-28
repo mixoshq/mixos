@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Cadence math for the app scheduler. A scheduled job runs on one of two
 // cadences: a fixed interval (`intervalMinutes`, minutes-since-last-run) or a
 // wall-clock CRON expression (`cron`, evaluated in `timezone`, default UTC).

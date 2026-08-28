@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useMemo, useState } from "react";
@@ -73,7 +77,7 @@ export default function AppRegistryList({
             placeholder="Search apps..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            className="w-full rounded-lg border border-input bg-background py-2 pl-9 pr-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
         <div
@@ -93,7 +97,7 @@ export default function AppRegistryList({
                 onClick={() => setStatus(opt.value)}
                 className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${
                   active
-                    ? "bg-mixnavy text-white"
+                    ? "bg-brand text-brand-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -102,7 +106,7 @@ export default function AppRegistryList({
                   className={`rounded px-1.5 py-px text-xs tabular-nums ${
                     active
                       ? "bg-white/20 text-white"
-                      : "bg-muted text-muted-foreground"
+                      : "bg-muted text-foreground"
                   }`}
                 >
                   {count}

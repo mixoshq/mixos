@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Shared .env loader for the standalone scripts (migrate, seed-admin,
 // run-scheduled-jobs). Deliberately hand-rolled rather than taking a dotenv
 // dependency — see the note in scripts/migrate.ts that this replaces.

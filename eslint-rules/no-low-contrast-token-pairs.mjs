@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * ESLint rule: no-low-contrast-token-pairs
  *
@@ -24,10 +28,16 @@
  * followed — the author of this rule broke it four times in one app while
  * actively auditing for it.
  *
- * WHAT IT DOES. Ratios are computed, not tabulated. Token values are parsed out
- * of `globals.css` at load, so the rule can never disagree with the stylesheet:
- * re-tone a token and the rule re-derives. Only the light theme is read, because
- * the platform is light-only today (see the `.dark` block's own note).
+ * WHAT IT DOES. Ratios are computed, not tabulated. Token values are read from
+ * `src/generated/theme-tokens.json`, emitted by the registry generator, so the
+ * rule can never disagree with the theme: re-tone a token and the rule
+ * re-derives on the next generate.
+ *
+ * It lints against the FALLBACK theme's light mode. Which theme is *active* is
+ * a database value that the build cannot know, and the dark mode of each theme
+ * is verified wholesale by scripts/theme-css.ts instead — this rule exists for
+ * the one thing that pass cannot see, which is which two tokens a given element
+ * puts together.
  *
  * Two checks:
  *
@@ -64,9 +74,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
-const GLOBALS_CSS = resolve(
+const THEME_TOKENS = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  "../src/app/globals.css",
+  "../src/generated/theme-tokens.json",
 );
 
 // ── colour maths ────────────────────────────────────────────────────────────
@@ -103,42 +113,26 @@ function composite(fg, bg, alpha) {
   return fg.map((c, i) => Math.round(c * alpha + bg[i] * (1 - alpha)));
 }
 
-// ── token table, parsed from globals.css ────────────────────────────────────
+// ── token table, from the generated theme registry ─────────────────────────
 
 /**
- * Reads the `:root` block only — the light theme. `--x: var(--y)` is followed,
- * which is how `--primary: var(--brand-navy)` resolves.
+ * Reads the fallback theme's resolved light-mode tokens. `var()` chains have
+ * already been followed by the theme compiler, so every value here is a literal.
  */
 function readTokens() {
-  const css = readFileSync(GLOBALS_CSS, "utf8");
-  const root = css.match(/:root\s*\{([\s\S]*?)\n\}/);
-  if (!root) return null;
-
-  const raw = new Map();
-  for (const [, name, value] of root[1].matchAll(/--([\w-]+)\s*:\s*([^;]+);/g)) {
-    raw.set(name, value.trim());
-  }
-
-  const resolveVar = (value, depth = 0) => {
-    if (depth > 4) return null;
-    const ref = value.match(/^var\(\s*--([\w-]+)\s*\)$/);
-    if (!ref) return value;
-    const next = raw.get(ref[1]);
-    return next == null ? null : resolveVar(next.trim(), depth + 1);
-  };
+  const raw = JSON.parse(readFileSync(THEME_TOKENS, "utf8"));
+  const values = raw.tokens?.[raw.fallback];
+  if (!values) return null;
 
   const tokens = new Map();
-  for (const [name, value] of raw) {
-    const resolved = resolveVar(value);
-    if (resolved == null) continue;
-    const hex = resolved.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  for (const [name, value] of Object.entries(values)) {
+    if (typeof value !== "string") continue;
+    const hex = value.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
     if (hex) {
-      tokens.set(name, hexToRgb(resolved));
+      tokens.set(name, hexToRgb(value));
       continue;
     }
-    const hsl = resolved.match(
-      /^hsl\(\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%\s*\)$/,
-    );
+    const hsl = value.match(/^hsl\(\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%\s*\)$/);
     if (hsl) {
       tokens.set(name, hslToRgb(Number(hsl[1]), Number(hsl[2]), Number(hsl[3])));
     }
@@ -156,12 +150,35 @@ if (TOKENS == null) {
   // A no-op beats a crash: a broken parse must not take editor linting with it.
   // Loud enough to notice in CI output, quiet enough not to fail the run.
   console.warn(
-    "[no-low-contrast-token-pairs] could not parse colour tokens from src/app/globals.css — the contrast check is inactive.",
+    "[no-low-contrast-token-pairs] could not read src/generated/theme-tokens.json — run `npm run registry`. The contrast check is inactive until you do.",
   );
 }
 
 /** The ground an alpha fill is assumed to sit on. Both are #ffffff today. */
 const GROUND = TOKENS?.get("background") ?? [255, 255, 255];
+
+/**
+ * A few tokens are defined against a ground that is NOT the page background.
+ * `--brand-foreground` and `--brand-accent` exist to sit on `--brand` — the
+ * menu bar, the login page, a branded panel — which the theme contract requires
+ * to be a surface dark enough to carry them (scripts/theme-css.ts verifies
+ * `brand-foreground/brand` at 4.5:1 in every mode).
+ *
+ * Without this, `text-brand-foreground/70` on the menu bar measures against
+ * white and reports 1.03:1 — a false positive on markup that is correct, and
+ * the kind of noise that gets a whole rule disabled.
+ */
+const GROUND_TOKEN_FOR = {
+  "brand-foreground": "brand",
+  "brand-accent": "brand",
+};
+
+/** The ground an element's text sits on when it declares no fill of its own. */
+function impliedGround(textToken) {
+  const via = GROUND_TOKEN_FOR[textToken];
+  const rgb = via && TOKENS?.get(via);
+  return rgb ?? GROUND;
+}
 
 // ── class parsing ───────────────────────────────────────────────────────────
 
@@ -305,13 +322,14 @@ function failuresIn(classString) {
     const ownFill = state.bg != null && state.bg !== "unknown"
       ? composite(TOKENS.get(state.bg.token), GROUND, state.bg.alpha)
       : null;
+    const pageGround = impliedGround(state.text.token);
 
     // ── DIM: a text token thinned by /N or a bare opacity-N ──
     const dim = state.text.alpha < 1 ? state.text.alpha : null;
     const faded = state.opacity != null && state.opacity < 1 ? state.opacity : null;
     const thinned = dim != null && faded != null ? dim * faded : (dim ?? faded);
     if (thinned != null) {
-      const ground = ownFill ?? GROUND;
+      const ground = ownFill ?? pageGround;
       const ratio = contrast(
         composite(TOKENS.get(state.text.token), ground, thinned),
         ground,

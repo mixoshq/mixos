@@ -1,4 +1,10 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { appRegistry } from "@/generated/app-registry";
+import { connectorRegistry } from "@/generated/connector-registry";
+import type { BaseConnector } from "@/lib/connectors/types";
 import { getUserById, hasAppGrant } from "@/lib/apps/access";
 import { createReadOnlyScopedClient } from "@/lib/apps/scoped-db";
 import { recordMcpCall } from "@/lib/apps/telemetry";
@@ -184,6 +190,54 @@ export async function callTool(
 }
 
 /**
+ * Refuse a mutating connector call from a read-only tool.
+ *
+ * `ctx.db` has been read-only three ways since MCP shipped — the type has no
+ * write verbs, a runtime Proxy throws on them, and ESLint blocks the raw client.
+ * Connectors were the acknowledged hole: docs/apps/mcp.md said plainly that the
+ * platform "cannot know which connector methods mutate" and that "a reviewer has
+ * to confirm it."
+ *
+ * Now a connector declares it (`telemetry[].mutates`), so the platform can. What
+ * this does NOT do is guess: a method the connector never declared passes
+ * through, because inferring intent from a method name would be worse than an
+ * honest gap. Declaring a connector's writes is what buys the enforcement.
+ */
+function readOnlyConnectors(
+  connectors: Record<string, BaseConnector>,
+): Record<string, BaseConnector> {
+  const wrapped: Record<string, BaseConnector> = {};
+  for (const [name, connector] of Object.entries(connectors)) {
+    const declared = connectorRegistry.find((c) => c.name === name);
+    const mutating = new Set(
+      (declared?.telemetry ?? []).filter((m) => m.mutates).map((m) => m.method),
+    );
+    if (mutating.size === 0) {
+      wrapped[name] = connector;
+      continue;
+    }
+    wrapped[name] = new Proxy(connector, {
+      get(target, prop) {
+        // `target` as the receiver, not the proxy: a connector's getters read
+        // their own private fields, and routing `this` back through the proxy
+        // turns a working getter into a runtime error.
+        const value = Reflect.get(target, prop, target);
+        if (typeof value !== "function" || !mutating.has(String(prop))) {
+          return value;
+        }
+        return () => {
+          throw new McpToolError(
+            "TOOL_ERROR",
+            `"${name}.${String(prop)}" changes data upstream and cannot be called from an MCP tool. Tools answer questions; they do not act.`,
+          );
+        };
+      },
+    }) as BaseConnector;
+  }
+  return wrapped;
+}
+
+/**
  * Build the app's own context, then narrow it for a tool: swap the scoped DB for
  * a read-only one, drop `notifications` and `hooks`, and stamp the caller.
  *
@@ -213,7 +267,7 @@ async function buildMcpToolContext(
 
   return {
     user: appCtx.user,
-    connectors: appCtx.connectors,
+    connectors: readOnlyConnectors(appCtx.connectors),
     db: appCtx.manifest.database ? createReadOnlyScopedClient(slug) : null,
     telemetry: appCtx.telemetry,
     services: appCtx.services,

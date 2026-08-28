@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { requireReadOnlySession } from "@/lib/auth/session";
 import {
   ensureUser,
@@ -7,6 +11,7 @@ import {
 import { appRegistry } from "@/generated/app-registry";
 import { getRegisteredSlugs } from "@/lib/apps/admin-actions";
 import AppManagerList from "@/components/apps/app-manager-list";
+import SettingsShell from "@/components/settings/settings-shell";
 
 export default async function AppsPage() {
   const session = await requireReadOnlySession();
@@ -24,8 +29,12 @@ export default async function AppsPage() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
-      <h1 className="text-2xl font-bold">App Manager</h1>
+    // App Manager is a settings page, so it gets the settings shell — the same
+    // sidebar as Administration and the account pages, which link to it.
+    // Applied here rather than as apps/layout.tsx, which would also wrap
+    // /apps/[appSlug] and put a settings sidebar around every installed app.
+    <SettingsShell>
+      <h1 className="text-2xl font-bold text-foreground">App Manager</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Toggle each on to install it on your dashboard.
       </p>
@@ -52,10 +61,6 @@ export default async function AppsPage() {
           missingUserConnectorsBySlug={{}}
         />
       </div>
-
-      <p className="mt-12 text-center text-xs text-muted-foreground">
-        Made in Detroit with 🫶🏽
-      </p>
-    </div>
+    </SettingsShell>
   );
 }

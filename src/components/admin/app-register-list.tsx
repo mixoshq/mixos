@@ -1,6 +1,10 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { ChevronDown, ChevronRight, AlertCircle } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
@@ -42,14 +46,19 @@ export default function AppRegisterList({
   const blockRegistration = !registered && missingConnectors.length > 0;
   const toggleDisabled = isPending || blockRegistration;
 
+  // The in-flight guard is a ref, not state: writing `setSchemaLoading(true)`
+  // synchronously in the effect body is the cascading-render pattern React's
+  // rule flags, and the flag was only ever there to stop a second fetch.
+  const schemaRequested = useRef(false);
   useEffect(() => {
-    if (!expanded || !app.database || schema !== null || schemaLoading) return;
+    if (!expanded || !app.database || schemaRequested.current) return;
+    schemaRequested.current = true;
     setSchemaLoading(true);
     getAppSchema(app.slug)
       .then((s) => setSchema(s))
       .catch((e) => setSchemaError(e instanceof Error ? e.message : String(e)))
       .finally(() => setSchemaLoading(false));
-  }, [expanded, app.database, app.slug, schema, schemaLoading]);
+  }, [expanded, app.database, app.slug]);
 
   function handleToggle(e: React.MouseEvent) {
     e.stopPropagation();
@@ -82,22 +91,22 @@ export default function AppRegisterList({
             <p className="text-sm text-muted-foreground">{app.description}</p>
             <div className="mt-1 flex items-center gap-2">
               {app.global && (
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                <span className="rounded-full bg-success px-2 py-0.5 text-xs font-medium text-success-foreground">
                   Global App
                 </span>
               )}
               {app.hasPages && (
-                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
                   Full App
                 </span>
               )}
               {app.widgets.length > 0 && (
-                <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
+                <span className="rounded-full bg-cat-2 px-2 py-0.5 text-xs font-medium text-background">
                   {app.widgets.length} {app.widgets.length === 1 ? "Widget" : "Widgets"}
                 </span>
               )}
               {(app.hookCounts.actions > 0 || app.hookCounts.filters > 0) && (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                <span className="rounded-full bg-warning px-2 py-0.5 text-xs font-medium text-warning-foreground">
                   {app.hookCounts.actions} {app.hookCounts.actions === 1 ? "Action" : "Actions"}, {app.hookCounts.filters} {app.hookCounts.filters === 1 ? "Filter" : "Filters"}
                 </span>
               )}
@@ -123,11 +132,11 @@ export default function AppRegisterList({
                   : undefined
               }
               className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-                registered ? "bg-mixnavy" : "bg-muted"
+                registered ? "bg-primary" : "bg-muted"
               } ${blockRegistration ? "cursor-not-allowed opacity-50" : ""}`}
             >
               <span
-                className={`absolute top-0.5 block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                className={`absolute top-0.5 block h-5 w-5 rounded-full border border-border bg-background shadow transition-transform ${
                   registered ? "translate-x-5" : "translate-x-0.5"
                 }`}
               />
@@ -144,13 +153,13 @@ export default function AppRegisterList({
 
       {blockRegistration && (
         <div
-          className="border-l-4 border-mixcoral bg-mixcoral/10 px-6 py-2.5 dark:bg-mixcoral/20"
+          className="border-l-4 border-brand-accent bg-brand-accent/10 px-6 py-2.5"
           onClick={(e) => e.stopPropagation()}
         >
           <p className="flex items-start gap-2 text-xs text-foreground">
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-mixcoral" />
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
             <span>
-              <span className="font-semibold">{app.name}</span> can't be
+              <span className="font-semibold">{app.name}</span> can&apos;t be
               registered until{" "}
               {missingConnectors.map((m, i) => (
                 <span key={m.name}>
@@ -161,7 +170,7 @@ export default function AppRegisterList({
               {missingConnectors.length === 1 ? "is" : "are"} configured.{" "}
               <Link
                 href="/admin/connectors"
-                className="font-medium text-mixcoral underline underline-offset-2"
+                className="font-medium text-primary underline underline-offset-2"
               >
                 Open Connector Registry →
               </Link>
@@ -172,10 +181,10 @@ export default function AppRegisterList({
 
       {actionError && (
         <div
-          className="bg-rose-500/15 px-6 py-2.5"
+          className="bg-destructive/10 px-6 py-2.5"
           onClick={(e) => e.stopPropagation()}
         >
-          <p className="flex items-start gap-2 text-xs text-rose-700 dark:text-rose-400">
+          <p className="flex items-start gap-2 text-xs text-foreground">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>{actionError}</span>
           </p>
@@ -259,7 +268,7 @@ export default function AppRegisterList({
                         {t.columns.map((c) => (
                           <li key={c.name} className="text-xs">
                             {c.name}{" "}
-                            <span className="text-muted-foreground/70">
+                            <span className="text-muted-foreground">
                               &mdash; {c.type}
                             </span>
                           </li>

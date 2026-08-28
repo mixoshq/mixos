@@ -57,6 +57,8 @@ you want, and Claude builds it through a few guided commands:
 - **`/mix-help`** (this one) — figure out what to build.
 - **`/mix-app`** — Claude builds your app. (A brand-new bridge, if one's needed, is
   a developer's job via **`/mix-connector`**.)
+- **`/mix-convert`** — already have a tool that works? Claude can bring it over
+  instead of starting from scratch.
 - **`/mix-deploy`** — publish it so the rest of the team can use it.
 
 You can reassure them: they only decide what the app should show and do — the code,
@@ -75,6 +77,11 @@ to their answers):
 3. **How do you picture it?** A small card on a dashboard, or a full page?
 4. **Should it do anything on its own?** For example, run every night, or send a
    notification.
+5. **Does something like this already exist?** A tool you or someone else built —
+   a Retool or Airtable setup, a spreadsheet that does real work, a small internal
+   site, a script that emails a report. If so, ask **where it lives** (a folder on
+   their computer, a link to where the code is kept, or "someone else runs it").
+   Don't ask them to describe how it works — that's Claude's job to figure out.
 
 ## Step 3 — Turn their answer into a recommendation
 
@@ -87,6 +94,16 @@ Work out the shape, in plain terms:
   **connector**) is a more technical job — flag it kindly and say a developer can add
   it with `/mix-connector`, and then their app can use it. Don't send a non-technical
   person off to build a connector.
+
+**If they already have something that works**, recommend **`/mix-convert`** instead
+of starting from scratch. Say it plainly: Claude reads the existing tool, works out
+everything it does, writes up a plan of how it'll come across, and **shows them that
+plan before building anything** — so nothing gets quietly lost or changed. Two honest
+caveats, kindly given: Claude needs to be pointed at where the tool actually lives
+(if someone else runs it, they'll need to loan a copy or a link), and a big tool comes
+across in stages — the most-used parts first, the rest planned out and named so it
+isn't forgotten. Everything below still applies; the conversion just gives Claude a
+head start on what to build.
 
 Then describe, in plain words, what their app will do — mapping each capability to
 the guide Claude will follow (cite the path so it's grounded; they don't need to read
@@ -123,6 +140,8 @@ Write a short, plain-language summary (in chat — don't save a file):
 3. **What happens next:**
    - Not set up on their computer yet? → run **`/mix-init`** first.
    - To build it → run **`/mix-app`**, and Claude will build the app for them.
+   - Bringing over a tool that already exists → run **`/mix-convert`**, pointing it
+     at where that tool lives.
    - Need a brand-new connection first? → a developer runs **`/mix-connector`**.
    - When it's ready for everyone → **`/mix-deploy`** creates the branch and opens
      the request to publish it.

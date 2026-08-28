@@ -1,9 +1,20 @@
 -- ============================================================================
 -- MixOS — consolidated platform schema.
 --
--- Squashed baseline replacing the previous 13 files in db/migrations/. This is
--- the whole platform schema in one transaction-friendly file; every ALTER from
--- the old 002-013 has been folded into its CREATE TABLE.
+-- Squashed baseline: the whole platform schema in one transaction-friendly
+-- file, with every ALTER folded into its CREATE TABLE. MixOS has never been
+-- deployed, so there is no installed base whose migration ledger this could
+-- desync — squashing costs nothing and buys a schema you can read top to
+-- bottom instead of reassembling from a chain of diffs.
+--
+-- Two things are absent by construction rather than by removal:
+--   · SSO. The earlier chain created an `auth_config` table and a
+--     `users.sso_id` column, then dropped both. Email and password is the only
+--     way in, so they are simply never created.
+--   · Any table without RLS. `connector_webhook_events` previously shipped
+--     without it — the one table that missed the rule in the header below —
+--     which left it readable through PostgREST by anyone holding the anon key.
+--     The do-block at the bottom now covers every table in this file.
 --
 -- Applied with the Supabase CLI:  npm run db:push
 --
@@ -26,10 +37,9 @@
 
 -- ── Identity ────────────────────────────────────────────────────────────────
 
--- Users synced from OIDC SSO or created via email/password credentials.
+-- Users, created via email/password credentials.
 create table if not exists public.users (
   id uuid primary key default gen_random_uuid(),
-  sso_id text unique,
   email text unique not null,
   display_name text not null,
   is_admin boolean not null default false,
@@ -38,22 +48,6 @@ create table if not exists public.users (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-
--- Singleton auth configuration: OIDC SSO + admin claim mapping.
--- oidc_client_secret_encrypted is AES-256-GCM via CONNECTOR_ENCRYPTION_KEY.
-create table if not exists public.auth_config (
-  id int primary key default 1 check (id = 1),
-  sso_enabled boolean not null default false,
-  oidc_issuer_url text,
-  oidc_client_id text,
-  oidc_client_secret_encrypted text,
-  admin_claim_name text,
-  admin_claim_values text[] not null default '{}',
-  updated_by uuid references public.users(id),
-  updated_at timestamptz not null default now()
-);
-
-insert into public.auth_config (id) values (1) on conflict (id) do nothing;
 
 -- ── Apps ────────────────────────────────────────────────────────────────────
 
@@ -152,8 +146,38 @@ create table if not exists public.connector_configs (
   encrypted_credentials text not null,
   configured_by        uuid references public.users(id),
   configured_at        timestamptz not null default now(),
-  updated_at           timestamptz not null default now()
+  updated_at           timestamptz not null default now(),
+  -- Last time Test Connection actually succeeded against the upstream, and the
+  -- short non-sensitive line it returned ("Authenticated as support@acme.com").
+  -- Separate from the credential blob on purpose: that blob is handed verbatim
+  -- to a connector's initialize(), and a verification timestamp is not a
+  -- credential. Null means never verified, which the Connector Registry shows
+  -- as an outstanding setup step rather than as a failure.
+  last_verified_at     timestamptz,
+  last_verified_detail text
 );
+
+-- Per-user OAuth grants for connectors declaring `userScoped`.
+--
+-- Only the GRANT is personal. The client id and secret stay in
+-- connector_configs: an admin registers the application once, and each person
+-- then authorises their own account against it. Keeping them apart means a user
+-- row can never contain a credential an admin typed, and revoking one person's
+-- access never touches the application registration.
+--
+-- ON DELETE CASCADE, unlike telemetry: a departing user's tokens are not
+-- history worth keeping, they are live access to a third-party account.
+create table if not exists public.user_connector_oauth (
+  user_id               uuid not null references public.users(id) on delete cascade,
+  connector_name        text not null,
+  encrypted_credentials text not null,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+  primary key (user_id, connector_name)
+);
+
+create index if not exists idx_user_connector_oauth_user
+  on public.user_connector_oauth(user_id);
 
 -- ── Notifications ───────────────────────────────────────────────────────────
 
@@ -228,9 +252,14 @@ create table if not exists public.app_job_runs (
 create index if not exists idx_app_job_runs_lookup
   on public.app_job_runs (app_slug, job_name, started_at desc);
 
--- Platform-wide key/value settings. First key is `scheduler_enabled`: a durable
--- global on/off switch checked by runDueJobs(), so pausing survives restarts
--- and applies to every cron invocation. Explicit "Run now" ignores this flag.
+-- Platform-wide key/value settings. Keys in use:
+--   scheduler_enabled  a durable global on/off switch checked by runDueJobs(),
+--                      so pausing survives restarts and applies to every cron
+--                      invocation. Explicit "Run now" ignores this flag.
+--   theme              slug of the active theme, from themes/<slug>/
+--   theme_mode         light | dark | system
+-- Note the shape: (key, value, updated_at) and nothing else. Anything writing
+-- an extra column here fails at runtime, not at build time.
 create table if not exists public.platform_settings (
   key        text primary key,
   value      text not null,
@@ -274,13 +303,37 @@ create index if not exists idx_app_open_events_user_id    on public.app_open_eve
 create table if not exists public.telemetry_events (
   id              uuid primary key default gen_random_uuid(),
   source_type     text not null
-    check (source_type in ('app', 'connector', 'service', 'mcp')),
+    check (source_type in ('app', 'connector', 'service', 'mcp', 'route')),
   source_slug     text not null,
   caller_app_slug text,
   event_name      text not null,
   user_id         uuid references public.users(id) on delete set null,
+  -- How the call went. Null on rows written before outcomes were recorded, and
+  -- on sources that don't report one — so "no outcome" is a third state, not a
+  -- silent success. `error_category` carries the connector error taxonomy
+  -- (auth_failed, forbidden, rate_limited, ...), which is what makes "denied"
+  -- distinguishable from "throttled" without guessing at HTTP status codes.
+  outcome         text check (outcome in ('ok', 'error')),
+  error_category  text,
   properties      jsonb not null default '{}'::jsonb,
   created_at      timestamptz not null default now()
+);
+
+-- Scope documentation scraped from a provider's own reference page, cached so
+-- the Connector Registry can render permissions in plain English without
+-- reaching out to a third party on every dialog open.
+--
+-- Cache, not source of truth: `scopes` is what a provider's docs page said the
+-- last time it parsed. `last_error` and `last_attempt_at` are kept separately
+-- from `fetched_at` on purpose — a failed refresh must not blank a good
+-- previous read, so the UI can show stale-but-accurate data and say so.
+create table if not exists public.connector_scope_docs (
+  connector_name  text primary key,
+  source_url      text not null,
+  scopes          jsonb not null default '[]'::jsonb,
+  fetched_at      timestamptz,
+  last_attempt_at timestamptz,
+  last_error      text
 );
 
 create index if not exists idx_telemetry_events_source
@@ -291,6 +344,16 @@ create index if not exists idx_telemetry_events_user_id
   on public.telemetry_events(user_id);
 create index if not exists idx_telemetry_events_created_at
   on public.telemetry_events(created_at);
+
+-- Route rows are orders of magnitude more numerous than every other source
+-- combined — one per request rather than one per declared event. The cron tick
+-- prunes them (pruneRouteTelemetry in src/lib/apps/telemetry.ts); this index is
+-- what keeps that delete from being a sequential scan over the whole history,
+-- including the rows it must NOT touch. Deliberately partial: it indexes only
+-- route rows, so it costs nothing on the other inserts and stays small.
+create index if not exists idx_telemetry_events_route_created
+  on public.telemetry_events (created_at)
+  where source_type = 'route';
 
 -- ── MCP server: OAuth 2.1 authorization-server storage ──────────────────────
 --
@@ -379,6 +442,94 @@ create table if not exists public._migrations (
   unique (app_slug, migration_file)
 );
 
+-- ── Rate limiting ───────────────────────────────────────────────────────────
+
+-- One row per (limiter, subject). `subject` carries the limiter's own name as a
+-- `<name>::<identity>` prefix, so two limiters on the same axis with different
+-- budgets (the app gateway at 60/10s and the OAuth token endpoint at 30/0.5s
+-- both key by IP) cannot share a row and quietly drain each other.
+--
+-- `tokens` is double precision because refill is a continuous function of
+-- elapsed time, and it is allowed to go to -1: preserving the deficit is what
+-- stops a hammered bucket from resetting its accrual on every denial.
+--
+-- No surrogate id (the natural key is the identity, as in platform_settings)
+-- and no secondary index: every request UPDATEs a row it just located by
+-- primary key, and an extra index on a hot-updated table costs a HOT update
+-- for nothing.
+create table if not exists public.rate_buckets (
+  scope       text not null
+    check (scope in ('ip', 'user_app', 'route', 'api_key')),
+  subject     text not null,
+  tokens      double precision not null,
+  last_refill timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  primary key (scope, subject)
+);
+
+-- ── Connector webhooks ──────────────────────────────────────────────────────
+
+-- Replay protection for inbound connector webhooks.
+--
+-- A verified signature proves a payload came from the provider; it does not
+-- prove it is being delivered for the first time. Anyone who observes a
+-- delivery can resend it verbatim and the signature still checks out, so the
+-- signature itself is recorded and a repeat is refused.
+--
+-- The key is a digest of the signature, never the signature itself: the row is
+-- a dedupe marker, and there is no reason for a live credential-adjacent value
+-- to sit in a table that outlives the request.
+create table if not exists public.connector_webhook_events (
+  event_key      text primary key,
+  connector_name text        not null,
+  received_at    timestamptz not null default now()
+);
+
+-- Supports the cron sweep. Rows are only useful inside the signature's
+-- freshness window; beyond that the timestamp check already rejects a replay.
+create index if not exists connector_webhook_events_received_at_idx
+  on public.connector_webhook_events (received_at);
+
+-- ── App-scoped settings ─────────────────────────────────────────────────────
+
+create table if not exists public.app_settings (
+  app_slug   text not null,
+  key        text not null,
+  value      text not null,
+  encrypted  boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (app_slug, key)
+);
+
+
+
+-- No foreign key to `apps`: a setting should survive an app being deregistered
+-- and re-registered, matching how telemetry_events and _migrations are keyed.
+
+-- ── App API keys ────────────────────────────────────────────────────────────
+
+create table if not exists public.app_api_keys (
+  id          uuid primary key default gen_random_uuid(),
+  app_slug    text not null,
+  -- Shown in the admin list so a key can be identified without revealing it.
+  label       text not null,
+  -- HMAC-SHA256(key, derived-key). See src/lib/apps/api-keys.ts.
+  digest      text not null unique,
+  -- First 8 chars of the key, for display only. Not enough to authenticate.
+  hint        text not null,
+  -- Route patterns this key may call: `["GET /items", "POST /items"]`, or the
+  -- literal ["*"] for every route the app declares. Default-deny: an empty
+  -- array authorizes nothing.
+  scopes      jsonb not null default '[]'::jsonb,
+  created_by  uuid references public.users(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  expires_at  timestamptz,
+  revoked_at  timestamptz,
+  last_used_at timestamptz
+);
+
+create index if not exists idx_app_api_keys_app on public.app_api_keys (app_slug);
+
 -- ── Row-Level Security ──────────────────────────────────────────────────────
 -- Enable on every table, define no policies. See the header: this is what keeps
 -- PostgREST's anon/authenticated surface closed. The service role, which is how
@@ -387,12 +538,13 @@ do $$
 declare t text;
 begin
   foreach t in array array[
-    'users', 'auth_config', 'apps', 'user_app_grants', 'user_apps',
+    'users', 'apps', 'user_app_grants', 'user_apps',
     'app_passwords', 'dashboard_layouts', 'dashboard_widgets',
     'connector_configs', 'push_subscriptions', 'app_scheduled_jobs',
     'app_job_runs', 'platform_settings', 'app_open_events',
     'telemetry_events', 'oauth_clients', 'oauth_authorization_codes',
-    'oauth_tokens', '_migrations'
+    'oauth_tokens', '_migrations', 'rate_buckets',
+    'connector_webhook_events', 'app_settings', 'app_api_keys'
   ]
   loop
     execute format('alter table public.%I enable row level security', t);

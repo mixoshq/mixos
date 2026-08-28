@@ -1,13 +1,14 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { revalidatePath } from "next/cache";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
 import { appRegistry } from "@/generated/app-registry";
 import { createServiceClient } from "@/lib/db/server";
 import { sql } from "@/lib/db/client";
-import {
-  getSchedulerEnabled,
-  setSchedulerEnabled,
-} from "@/lib/apps/scheduler";
+import { getSchedulerEnabled, setSchedulerEnabled } from "@/lib/apps/scheduler";
 import ScheduledJobsList, {
   type JobView,
   type RunView,
@@ -183,10 +184,7 @@ export default async function ScheduledJobsAdminPage() {
   return (
     <div>
       <div className="mb-6">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Administration
-        </p>
-        <h1 className="mt-1 text-2xl font-bold text-foreground">Scheduled Jobs</h1>
+        <h1 className="text-2xl font-bold text-foreground">Scheduled Jobs</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Per-app jobs run by the platform scheduler (a 5-minute tick). Each job
           runs on its own schedule — a fixed interval or a CRON expression;

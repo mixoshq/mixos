@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -5,7 +9,6 @@ import { createServiceClient } from "@/lib/db/server";
 import { requireServerSession } from "@/lib/auth/session";
 import { getUserById } from "@/lib/apps/access";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
-import { isSsoEnabled } from "@/lib/auth/auth-config-store";
 import { safeErrorMessage } from "@/lib/safe-error";
 import type { AccountActionState } from "@/lib/account/state";
 
@@ -78,13 +81,6 @@ export async function updatePassword(
   formData: FormData
 ): Promise<AccountActionState> {
   try {
-    if (await isSsoEnabled()) {
-      return {
-        error: "Password login is disabled while SSO is enabled.",
-        success: null,
-      };
-    }
-
     const session = await requireServerSession();
     const current = String(formData.get("currentPassword") ?? "");
     const next = String(formData.get("newPassword") ?? "");

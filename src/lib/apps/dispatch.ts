@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * The app API gateway.
  *
@@ -205,6 +209,9 @@ export async function dispatchAppRoute({
       appSlug,
       accepted: declaration.auth,
       mount,
+      request,
+      method,
+      routePattern: routeKey,
     });
   } catch (err) {
     console.error(`[gateway] ${appSlug}: auth resolution failed:`, err);
@@ -319,7 +326,7 @@ function servedHere(accepted: readonly RouteAuth[], mount: AppMount): boolean {
   // mount purely to refuse it a step later.
   const serves = (a: RouteAuth) =>
     mount === "public"
-      ? a === "password" || a === "public"
+      ? a === "password" || a === "key" || a === "public"
       : a === "session" || a === "signed-in" || a === "public";
   return accepted.some(serves);
 }

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { revalidatePath } from "next/cache";
 import { Info } from "lucide-react";
 import { createServiceClient } from "@/lib/db/server";
@@ -60,35 +64,41 @@ export default async function UsersAdminPage() {
   }
 
   const rows: UserRow[] = (users ?? []).map(
-    (u: { id: string; display_name: string; email: string; is_admin: boolean }) => {
-    const explicitGrants = grantsByUser.get(u.id) ?? [];
-    const grantedSet = new Set(explicitGrants);
-    for (const slug of globalRegisteredSlugs) grantedSet.add(slug);
-    const grantedSlugs = Array.from(grantedSet);
-    const grantedActiveCount = grantedSlugs.filter((s) =>
-      registeredSlugs.has(s),
-    ).length;
-    const installedSet = installsByUser.get(u.id) ?? new Set<string>();
-    const installedActiveCount = grantedSlugs.filter(
-      (s) => registeredSlugs.has(s) && installedSet.has(s),
-    ).length;
-    const explicitRoles = roleByUserSlug.get(u.id) ?? {};
-    const roleBySlug: Record<string, string | null> = {};
-    for (const slug of grantedSlugs) {
-      roleBySlug[slug] =
-        explicitRoles[slug] ?? defaultRoleBySlug.get(slug) ?? null;
-    }
-    return {
-      id: u.id,
-      display_name: u.display_name,
-      email: u.email,
-      is_admin: u.is_admin,
-      grantedSlugs,
-      grantedActiveCount,
-      installedActiveCount,
-      roleBySlug,
-    };
-  });
+    (u: {
+      id: string;
+      display_name: string;
+      email: string;
+      is_admin: boolean;
+    }) => {
+      const explicitGrants = grantsByUser.get(u.id) ?? [];
+      const grantedSet = new Set(explicitGrants);
+      for (const slug of globalRegisteredSlugs) grantedSet.add(slug);
+      const grantedSlugs = Array.from(grantedSet);
+      const grantedActiveCount = grantedSlugs.filter((s) =>
+        registeredSlugs.has(s),
+      ).length;
+      const installedSet = installsByUser.get(u.id) ?? new Set<string>();
+      const installedActiveCount = grantedSlugs.filter(
+        (s) => registeredSlugs.has(s) && installedSet.has(s),
+      ).length;
+      const explicitRoles = roleByUserSlug.get(u.id) ?? {};
+      const roleBySlug: Record<string, string | null> = {};
+      for (const slug of grantedSlugs) {
+        roleBySlug[slug] =
+          explicitRoles[slug] ?? defaultRoleBySlug.get(slug) ?? null;
+      }
+      return {
+        id: u.id,
+        display_name: u.display_name,
+        email: u.email,
+        is_admin: u.is_admin,
+        grantedSlugs,
+        grantedActiveCount,
+        installedActiveCount,
+        roleBySlug,
+      };
+    },
+  );
 
   async function toggleUserGrant(formData: FormData) {
     "use server";
@@ -175,13 +185,10 @@ export default async function UsersAdminPage() {
   return (
     <div>
       <div className="mb-6">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Administration
-        </p>
-        <h1 className="mt-1 text-2xl font-bold text-foreground">Users</h1>
+        <h1 className="text-2xl font-bold text-foreground">Users</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Grant users access to apps. Granted apps appear in the user&apos;s
-          App Manager for them to install.
+          Grant users access to apps. Granted apps appear in the user&apos;s App
+          Manager for them to install.
         </p>
       </div>
 
@@ -194,20 +201,13 @@ export default async function UsersAdminPage() {
             <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
               is_admin
             </code>{" "}
-            flag on the user record, not something this page sets. How you change
-            it depends on whether SSO admin mapping is configured on{" "}
-            <strong>Authentication</strong>:
+            flag on the user record, not something this page sets. It is managed
+            in the database:
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
             <li>
-              <strong>Mapping configured</strong> — the flag is synced from the
-              identity provider on every SSO sign-in. Grant or revoke the claim
-              there; it applies the next time the user signs in. Editing the
-              database directly will be overwritten on their next login.
-            </li>
-            <li>
-              <strong>Mapping not configured</strong> — the flag is managed in
-              the database. Set it there, or seed the first admin with{" "}
+              Set the flag directly on the user record, or seed the first admin
+              with{" "}
               <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
                 npm run seed-admin
               </code>

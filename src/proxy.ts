@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
@@ -99,7 +103,22 @@ export const config = {
   // them and falls back to /favicon.ico. That is why the customer portal and the
   // login page both showed the root favicon whatever their <link> tags said.
   // These are logos: public by nature, and never a place a secret can hide.
+  //
+  // `themes/` is exempt for the same reason, and one sharper one: the sign-in
+  // page itself is themed. With the theme's fonts and logo behind the auth
+  // redirect, the one page every user sees before they have a session is the
+  // one page that renders unstyled. A theme asset is a font file, a logo or a
+  // favicon — the same "public by nature" category as the icons above.
+  //
+  // `connector-assets/` is a connector's icon, copied out of
+  // connectors/<name>/assets by the registry generator. Same category again: a
+  // third party's logo, committed in the repo, never a place a secret can hide.
+  // It is deliberately NOT served from `/connectors/`, which is a signed-in
+  // page route (/connectors/guide) — exempting that prefix would take the guard
+  // off a real page, and leaving it unexempted breaks the icons, because
+  // next/image's optimizer fetches the source URL server-side with no cookies
+  // and gets the redirect to /login.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
+    "/((?!_next/static|_next/image|themes/|connector-assets/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
   ],
 };

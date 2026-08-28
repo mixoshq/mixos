@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { redirect } from "next/navigation";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { appRegistry } from "@/generated/app-registry";
@@ -39,11 +43,11 @@ export default async function McpConnectionsPage() {
 
   return (
     <section>
-      <h2 className="text-lg font-semibold">My MCP Connections</h2>
+      <h1 className="text-2xl font-bold text-foreground">My MCP Connections</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Connect Claude to MixOS so it can answer questions using data from
-        your apps. Connections are <strong>read-only</strong> — they can never
-        change anything — and only ever see apps you have access to.
+        Connect Claude to MixOS so it can answer questions using data from your
+        apps. Connections are <strong>read-only</strong> — they can never change
+        anything — and only ever see apps you have access to.
       </p>
 
       <div className="mt-6 rounded-lg border border-border bg-card px-4 py-4">
@@ -57,7 +61,7 @@ export default async function McpConnectionsPage() {
         </code>
       </div>
 
-      <h3 className="mt-8 text-sm font-semibold">Connected clients</h3>
+      <h2 className="mt-8 text-sm font-semibold">Connected clients</h2>
       <div className="mt-3 space-y-3">
         {clients.length === 0 ? (
           <div className="rounded-lg border border-border bg-card px-4 py-6 text-sm text-muted-foreground">
@@ -90,7 +94,7 @@ export default async function McpConnectionsPage() {
                   <input type="hidden" name="client_id" value={c.clientId} />
                   <button
                     type="submit"
-                    className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400"
+                    className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-destructive hover:text-destructive-foreground"
                   >
                     Disconnect
                   </button>
@@ -101,7 +105,7 @@ export default async function McpConnectionsPage() {
         )}
       </div>
 
-      <h3 className="mt-8 text-sm font-semibold">Apps you can share</h3>
+      <h2 className="mt-8 text-sm font-semibold">Apps you can share</h2>
       <p className="mt-1 text-sm text-muted-foreground">
         These apps expose read-only tools over MCP. You choose which ones each
         client gets when you connect it.
@@ -124,8 +128,10 @@ export default async function McpConnectionsPage() {
               <ul className="mt-2 space-y-0.5">
                 {app.mcp.map((t) => (
                   <li key={t.name} className="text-xs text-muted-foreground">
-                    <code className="rounded bg-muted px-1 py-0.5">{t.name}</code> —{" "}
-                    {t.description}
+                    <code className="rounded bg-muted px-1 py-0.5">
+                      {t.name}
+                    </code>{" "}
+                    — {t.description}
                   </li>
                 ))}
               </ul>

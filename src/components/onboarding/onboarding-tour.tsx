@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useCallback, useEffect, useMemo } from "react";
@@ -20,15 +24,18 @@ const STEPS: Step[] = [
     target: '[data-tour="settings-menu"]',
     title: "Open the menu",
     content:
-      "Your settings and the App Manager live in here. Go ahead and open it.",
+      "Your settings live in here. Open it and choose Account to get started.",
     placement: "bottom-end",
   },
   {
+    // App Manager moved out of this menu and into the settings sidebar, so the
+    // tour points at it there. The step before now sends the user into
+    // settings, which is where this target exists.
     target: '[data-tour="app-manager-link"]',
     title: "Click App Manager",
     content:
-      "The App Manager lists every app available to you. Open it to install your first one.",
-    placement: "left",
+      "App Manager is in the sidebar. It lists every app available to you — open it to install your first one.",
+    placement: "right",
   },
   {
     target: `[data-tour-app="${FAVORITES_SLUG}"]`,
@@ -354,7 +361,14 @@ export default function OnboardingTour() {
           skipBeacon: true,
           disableFocusTrap: true,
           spotlightPadding: 8,
-          primaryColor: "#002345",
+          // A CSS variable, not a token class: Joyride takes a colour VALUE and
+          // assigns it straight to backgroundColor / borderTopColor / color as
+          // an inline style, so there is nowhere to put a className. `var()`
+          // resolves against <html data-theme>, which means this follows the
+          // active theme and its light/dark mode instead of pinning the tour to
+          // one brand's hex. (Verified: Joyride does no colour maths on this
+          // value — it only ever assigns it to those three properties.)
+          primaryColor: "var(--primary)",
           zIndex: 10000,
         }}
       />

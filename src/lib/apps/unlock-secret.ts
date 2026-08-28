@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * Signing key for the public passcode-unlock cookies used by app public pages
  * (the platform password-unlock in public-access.ts, plus any per-app variant an

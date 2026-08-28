@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import {
@@ -42,7 +46,6 @@ export default function DashboardGrid({
   const { width, containerRef } = useContainerWidth();
   const { isEditing, setIsEditing } = useDashboardEdit();
   const currentBreakpointRef = useRef<Breakpoint>("lg");
-  const [pencilVisible, setPencilVisible] = useState(true);
   const [isDraggingWidget, setIsDraggingWidget] = useState(false);
   const [isCollapsing, setIsCollapsing] = useState(false);
   const [isExpanding, setIsExpanding] = useState(false);
@@ -58,28 +61,38 @@ export default function DashboardGrid({
 
   // Fade the pencil out after 20s of no cursor motion on the dashboard; any
   // mouse movement re-shows it and resets the timer.
+  //
+  // Visibility is DERIVED from which arming generation last timed out, rather
+  // than reset by a synchronous setState in the effect body. Changing edit mode
+  // or the widget count changes the generation, which makes the pencil visible
+  // again without the effect having to write state on the way in.
+  const armKey = `${isEditing}:${widgetList.length}`;
+  const [idleSince, setIdleSince] = useState<string | null>(null);
+  const pencilVisible =
+    isEditing || widgetList.length === 0 || idleSince !== armKey;
+
   useEffect(() => {
-    if (isEditing || widgetList.length === 0) {
-      setPencilVisible(true);
-      return;
-    }
+    if (isEditing || widgetList.length === 0) return;
     const el = containerRef.current;
     if (!el) return;
 
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const arm = () => {
-      setPencilVisible(true);
+    const scheduleHide = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => setPencilVisible(false), 20_000);
+      timer = setTimeout(() => setIdleSince(armKey), 20_000);
+    };
+    const onMove = () => {
+      setIdleSince(null);
+      scheduleHide();
     };
 
-    arm();
-    el.addEventListener("mousemove", arm);
+    scheduleHide();
+    el.addEventListener("mousemove", onMove);
     return () => {
-      el.removeEventListener("mousemove", arm);
+      el.removeEventListener("mousemove", onMove);
       if (timer) clearTimeout(timer);
     };
-  }, [isEditing, widgetList.length, containerRef]);
+  }, [isEditing, widgetList.length, containerRef, armKey]);
 
   // Dismiss the right-click context menu on outside click, Escape, or scroll.
   useEffect(() => {
@@ -331,7 +344,7 @@ export default function DashboardGrid({
             <button
               onClick={() => setIsEditing(true)}
               data-tour="edit-dashboard-btn"
-              className="flex items-center gap-2 rounded-lg bg-mixcharcoal px-4 py-2 text-sm font-medium text-white hover:bg-mixcharcoal/90"
+              className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
             >
               Edit Dashboard
             </button>
@@ -387,7 +400,7 @@ export default function DashboardGrid({
           onClick={handleEnterEdit}
           aria-label="Edit dashboard"
           title="Edit dashboard"
-          className={`group fixed bottom-6 right-6 z-40 flex h-9 items-center overflow-hidden rounded-full bg-mixgrey px-2.5 text-white shadow-sm backdrop-blur transition-opacity duration-500 hover:bg-mixgrey/90 ${
+          className={`group fixed bottom-6 right-6 z-40 flex h-9 items-center overflow-hidden rounded-full bg-primary px-2.5 text-white shadow-sm backdrop-blur transition-opacity duration-500 hover:bg-primary/90 ${
             pencilVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >
@@ -422,7 +435,7 @@ export default function DashboardGrid({
             onClick={handleDoneEditing}
             data-tour="done-editing-btn"
             disabled={isCollapsing || isExpanding}
-            className={`flex items-center gap-1.5 whitespace-nowrap rounded-full bg-mixgrey px-3 py-1.5 text-sm font-medium text-white hover:bg-mixgrey/90 ${
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded-full bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary/90 ${
               isCollapsing || isExpanding
                 ? "pointer-events-none opacity-0"
                 : "transition-opacity duration-200"

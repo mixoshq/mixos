@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useState } from "react";
@@ -101,7 +105,7 @@ export default function GuideTabsShell({
             onClick={() => setActiveId(t.id)}
             className={`px-4 py-2 text-sm font-medium transition-colors whitespace-nowrap ${
               t.id === active?.id
-                ? "border-b-2 border-mixnavy text-foreground"
+                ? "border-b-2 border-primary text-foreground"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
