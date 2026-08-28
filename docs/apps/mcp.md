@@ -203,11 +203,20 @@ never authorize on it.
 | **Type** | `ctx.db` has no `insert` / `update` / `upsert` / `delete`. Compile error. |
 | **Runtime** | The scoped client is a Proxy that throws on those verbs, surviving `as any` and every `.select().eq()` hop. |
 | **ESLint** | `apps/**/mcp/**` can't import `@/lib/db*`, the App Services broker, or the context builder. |
+| **Connectors** | A method a connector declares as `mutates` throws when called from a tool. |
 
-**Connectors are the gap the platform can't close.** It cannot know which
-connector methods mutate. If your tool calls a connector, every call must be a
-read — and a reviewer has to confirm it. Watch for side effects hiding inside a
-helper you're reusing. If a route's builder fires a hook or writes an audit row
+**Connectors used to be the gap the platform couldn't close**, because it could
+not know which connector methods mutate. A connector now declares that
+(`mutates: true` on a method in its manifest), and the MCP context wraps
+`ctx.connectors` to throw on those calls — so a write from a read-only tool is a
+runtime error, not a blocking review finding somebody has to catch.
+
+**The residue is honest and worth knowing.** The check covers methods a connector
+*declared*. An undeclared method passes through, because inferring intent from a
+method name would be worse than a stated gap. So: declare your connector's
+writes, and keep watching for side effects hiding inside a helper you're
+reusing — a hook fired on the way past is a side effect even when nothing in your
+tool's own code writes anything. If a route's builder fires a hook or writes an audit row
 on the way past, the tool must call a variant that doesn't — firing a hook is a
 side effect even when nothing in the tool's own code writes anything.
 

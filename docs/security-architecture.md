@@ -241,8 +241,8 @@ Output:     base64(IV) : base64(AuthTag) : base64(Ciphertext)
 |     users        |         |      apps        |
 |------------------|         |------------------|
 | id (uuid, PK)   |         | slug (PK)        |
-| sso_id (unique)  |         | name             |
-| email            |         | ...              |
+| email (unique)   |         | name             |
+| display_name     |         | ...              |
 | is_admin         |         |                  |
 +------------------+         +------------------+
         |                            |
@@ -458,7 +458,7 @@ app code can dispatch a push.
 | `SUPABASE_SERVICE_ROLE_KEY` | Full database access; bypasses RLS   | Full read/write to every table                   |
 | `DATABASE_URL`              | Postgres connection (full DB access) | Full read/write to every table                   |
 | `CONNECTOR_ENCRYPTION_KEY`  | Decrypts all connector credentials, AND derives the MCP token HMAC key and the app-unlock cookie key | Exposes every third-party API key; lets an attacker mint MCP tokens and unlock cookies |
-| `APP_UNLOCK_SECRET`         | Signs app password-unlock cookies    | Bypass of every app password                     |
+| `APP_UNLOCK_SECRET`         | Signs app password-unlock cookies    | Bypass of every app password. Note that app **API keys** deliberately do NOT derive from this — they derive from `CONNECTOR_ENCRYPTION_KEY` under their own label, so rotating this secret does not silently invalidate every integration. |
 | `CRON_SECRET`               | Authenticates Vercel Cron -> /api/cron | Attacker can trigger every app background job  |
 | `VAPID_PRIVATE_KEY`         | Signs Web Push messages              | Attacker could send push to existing subscribers; no data read access |
 | `VAPID_PUBLIC_KEY` / `VAPID_SUBJECT` | Client subscribe key / contact URL | Not secret; public key is handed to the browser to subscribe |
@@ -681,8 +681,8 @@ Format:        Comma-separated (e.g. "mix.mysite.com,example.com")
 Behaviour:
   - When set:   Only users whose email domain matches may sign in
   - When unset: Any email domain is accepted
-  - Enforced in: src/lib/auth/config.ts (emailAllowed), applied to BOTH
-                 the credentials provider and the OIDC signIn callback
+  - Enforced in: src/lib/auth/config.ts (emailAllowed), applied in the
+                 credentials provider — the only sign-in path
 ```
 
 The allowlist is a provisioning control, not an authentication control. It

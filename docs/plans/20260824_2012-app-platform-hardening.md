@@ -269,40 +269,64 @@ less, so a cold instance cannot lock anyone out.
 
 ## Structure
 
-> **Status: Phases 0 and 1 are built** (2026-08-24).
+> **Status: all seven phases are built** (2026-08-24). Typecheck, lint and build
+> are clean, and CI is green for the first time — the 11 pre-existing lint errors
+> in `src/components/**` that gated it are fixed.
 >
-> **Phase 0** — `defineRoute` + `runRoute`, the typed error vocabulary, the
-> Postgres-backed limiter, the new manifest fields, and route-contract hoisting.
-> `_template` is converted and the build rejects a bare handler. An adversarial
-> review raised 27 findings; 14 survived refutation and all 14 are fixed.
+> **Phase 0** — `defineRoute`/`runRoute`, the typed error vocabulary, the
+> Postgres-backed limiter, route-contract hoisting. Adversarial review: 27 raised,
+> 14 real, all fixed — including a permanent-lockout bug in the limiter's own
+> token arithmetic.
 >
-> **Phase 1** — one dispatcher (`src/lib/apps/dispatch.ts`) behind both HTTP
-> mounts, which are now 40-line bindings; auth-tier resolution
-> (`src/lib/apps/auth-tier.ts`), strongest-first and narrowed by mount;
-> gateway-enforced roles inside `runRoute`; per-user and per-route rate limits;
-> and automatic route telemetry keyed on the route pattern. Its adversarial
-> review raised 25 findings; 8 were real and fixed during the review (the
-> `signed-in` tier being handed the app's `defaultRole` — a default-ALLOW hole in
-> the new role gate; role-gated routes combining with tiers that carry no roles;
-> catch-all routes being unreachable past one segment; an unguarded auth step;
-> the route resolver matching files as directories). Two live bugs also fell out
-> and are fixed: the mount authorized against `user_apps` (a dashboard
-> install preference) instead of `user_app_grants`, which 403'd every user of
-> every global app; and it called `requireServerSession()`, which `redirect()`s,
-> so an unauthenticated XHR got a 307 to an HTML login page instead of a 401.
+> **Phase 1** — one dispatcher behind both mounts (now 40-line bindings),
+> strongest-first auth-tier resolution, gateway-enforced roles, per-user and
+> per-route limits, pattern-keyed route telemetry. Two live bugs fell out: the
+> mount authorized against `user_apps` (a dashboard install preference) rather
+> than `user_app_grants`, 403'ing every user of every global app; and it called a
+> helper that `redirect()`s, so an unauthenticated XHR got a 307 to an HTML login
+> page instead of a 401. Review: 25 raised, 8 real, all fixed.
 >
-> **Deferred deliberately from Phase 1:** the proxy's public-prefix allowlist is
-> still the hardcoded `/p` + `/api/p` rather than generated per-slug from the
-> registry. Generating it would narrow the surface further (today `/p/<anything>`
-> bypasses the proxy), but `src/proxy.ts` is under concurrent edit by the
-> connector-abstraction work, and the current list is correct — every public
-> surface lives under those two prefixes by construction. `context.env` /
-> `context.http` remain Phase 4 as listed.
+> **Phase 2** — the pipeline split into `executeRoute` behind two transports:
+> HTTP and the in-process `callAppRoute` a server component uses.
+> `RouteDefinition` became generic over its schema, which is what makes the
+> generated `AppRouteTypes` real — and because client types come from the
+> schema's *input* side, a defaulted field stays optional for callers while the
+> handler still gets it guaranteed. Pages and widgets are lint-barred from
+> `lib/server`, connectors and the DB. One structural fix fell out: the generated
+> registry mixed client-safe data with server-only page loaders, so the first
+> server page to import server code broke the whole client build.
 >
-> **Known gap:** route telemetry rows land and `TelemetrySourceType` includes
-> `route`, but the admin Analytics page still rejects a `route:<slug>` source, so
-> the rows are write-only — the exact fate `queries.ts` warns about for `service`
-> rows. The data is being collected correctly and nobody can see it yet.
+> **Phase 3** — the component library: `Button` (where `busy` makes the pending
+> state one prop), `IconButton` (which cannot ship without a label), `Field`
+> (which owns the id), `Input`/`Select`/`Checkbox`/`Switch`, `DataTable` with its
+> matching `TableSkeleton`, `Badge`, `Menu`, `Toast`, `Pagination`, and the
+> `useAppQuery` + `AsyncView` pair that makes the async-state rules structural.
+> Raw `<button>`/`<input>`/`<select>`/`<textarea>`/`<table>` and hand-rolled card
+> shells are now build errors in `apps/**`, and the contrast rule is an `error`
+> — which immediately caught two elements in the new primitives.
+>
+> **Phase 4** — `context.env` and `context.http`, with `process.env` and raw
+> `fetch` lint-banned. The SSRF gap §13 flagged is closed with both halves:
+> allowlist, then resolve-and-recheck, with redirects followed manually.
+>
+> **Phase 5** — declarative sync. The app writes `fetchPage` and `upsert`; the
+> platform owns the watermark, the budget, the window tuning and the empty guard.
+> **The cursor never leaves the run.**
+>
+> **Phase 6** — scoped per-app API keys (the `key` tier is live and per-route
+> scoped), two-sided consent for cross-app hooks, and connector `mutates`
+> declarations that close the one MCP read-only hole the docs called
+> reviewer-enforced.
+>
+> **Phase 7** — the guides rewritten against the new model.
+>
+> **Known gaps, deliberately left:** route telemetry rows land and
+> `TelemetrySourceType` includes `route`, but the admin Analytics page still
+> rejects a `route:<slug>` source, so the rows are write-only — collected
+> correctly, visible to nobody. The proxy's public-prefix allowlist is still the
+> hardcoded `/p` + `/api/p` rather than generated per-slug; the current list is
+> correct, but generating it would narrow the surface further. Neither is a
+> regression; both are follow-ups.
 
 ### Phase 0 — Foundations
 
