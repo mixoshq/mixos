@@ -1,17 +1,55 @@
 {
   "name": "_template",
   "displayName": "Template Connector",
-  "description": "Starter template for an API-key service. Copy this folder, rename it to your service (no leading underscore), and replace the example methods. Setup instructions and required scopes belong in this field — the Connector Registry is the only place an admin ever sees a connector.",
-  "authors": [{ "name": "Your Name", "email": "you@example.com" }],
+  "icon": "icon.svg",
+  "description": "Starter template for a service authenticated with a simple API key.",
+  "setup": {
+    "title": "Create an API key",
+    "steps": [
+      {
+        "text": "Open API keys and create a key with the smallest scope the feature needs.",
+        "link": {
+          "label": "API keys",
+          "url": "https://provider.example.com/settings/api-keys"
+        }
+      }
+    ],
+    "notes": {
+      "credentials": "List here anything specific to pasting THIS provider's key — a prefix to include, an environment to pick. Delete the note if there is nothing to say."
+    },
+    "docs": [
+      {
+        "label": "API reference",
+        "url": "https://docs.provider.example.com/"
+      }
+    ]
+  },
+  "authors": [
+    {
+      "name": "Your Name",
+      "email": "you@example.com"
+    }
+  ],
   "credentialFields": [
-    { "key": "apiKey", "label": "API Key", "type": "password" },
-    { "key": "baseUrl", "label": "Base URL (optional)", "type": "text" }
+    {
+      "key": "apiKey",
+      "label": "API Key",
+      "type": "password"
+    },
+    {
+      "key": "baseUrl",
+      "label": "Base URL (optional)",
+      "type": "text"
+    }
   ],
   "auth": {
     "strategy": "apiKey",
     "in": "header",
     "name": "X-Api-Key",
-    "credentialKeys": ["apiKey"]
+    "credentialKeys": [
+      "apiKey"
+    ],
+    "scopesUrl": "https://docs.provider.example.com/api/scopes"
   },
   "http": {
     "baseUrl": "https://api.example.com",
@@ -26,5 +64,19 @@
       "pageSize": 100
     }
   },
-  "telemetry": [{ "method": "listItems", "description": "Listed items" }]
+  "telemetry": [
+    {
+      "method": "listItems",
+      "description": "Listed items"
+    },
+    {
+      "method": "getItem",
+      "description": "Read one item"
+    },
+    {
+      "method": "createItem",
+      "description": "Created an item",
+      "mutates": true
+    }
+  ]
 }
