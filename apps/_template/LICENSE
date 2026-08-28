@@ -1,0 +1,19 @@
+These template files are dedicated to the public domain under CC0 1.0
+Universal. See https://creativecommons.org/publicdomain/zero/1.0/
+
+They are NOT covered by the Mozilla Public License that governs the rest of
+MixOS, and this is deliberate.
+
+MPL-2.0's copyleft attaches to a FILE. A template exists to be copied — so if
+these files were Covered Software, every app, connector or theme scaffolded
+from them would begin life carrying publication obligations, and the whole
+platform/extension boundary MixOS is licensed around would collapse on first
+use.
+
+Copy them, change them, ship what you build under any licence you like,
+including a proprietary one. You owe nothing for what you write here.
+
+Importing platform code from what you build (`@/lib/apps/route`,
+`@/components/ui/button`, and so on) does not change that: under MPL-2.0 §3.3
+that combination is a Larger Work, and your own files are not Covered
+Software. See LICENSING.md at the repository root.

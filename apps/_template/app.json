@@ -1,33 +1,50 @@
 {
-  "name": "Hello MONTALBANO",
+  "name": "Hello MixOS",
   "description": "A sample app demonstrating the plugin architecture",
   "icon": "box",
   "authors": [
-    { "name": "Your Name", "email": "you@example.com" }
+    {
+      "name": "Your Name",
+      "email": "you@example.com"
+    }
   ],
   "connectors": [],
   "database": false,
   "notifications": false,
   "roles": [
-    { "key": "admin", "label": "Admin" },
-    { "key": "read_only", "label": "Read-Only" }
+    {
+      "key": "admin",
+      "label": "Admin"
+    },
+    {
+      "key": "read_only",
+      "label": "Read-Only"
+    }
   ],
   "defaultRole": "read_only",
   "mcp": [
     {
       "name": "hello",
       "description": "Greets the connected user by name. Returns { message, askedBy }.",
-      "hint": "Only useful as an example — remove this when you add real tools.",
-      "sources": ["mixos"],
+      "hint": "Only useful as an example \u2014 remove this when you add real tools.",
+      "sources": [
+        "mixos"
+      ],
       "notCovered": "Anything real. This entry exists to show the shape of a declaration: what the tool returns, when to reach for it, where the data came from, and where it stops."
     }
   ],
   "widgets": [
     {
-      "name": "Hello MONTALBANO",
+      "name": "Hello MixOS",
       "description": "A simple greeting widget showing the current user's name",
-      "defaultSize": { "w": 3, "h": 2 },
-      "minSize": { "w": 2, "h": 2 },
+      "defaultSize": {
+        "w": 3,
+        "h": 2
+      },
+      "minSize": {
+        "w": 2,
+        "h": 2
+      },
       "component": "widgets/hello-mix.tsx"
     }
   ]
