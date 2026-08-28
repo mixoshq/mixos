@@ -2,7 +2,7 @@
 
 ## Overview
 
-Apps can send **Web Push** notifications — OS-level notifications delivered through a background service worker, so they reach a user even when no MOS tab is focused (or open) — by setting `"notifications": true` in `app.json`. This gives the app a `context.notifications` client in its API routes.
+Apps can send **Web Push** notifications — OS-level notifications delivered through a background service worker, so they reach a user even when no MixOS tab is focused (or open) — by setting `"notifications": true` in `app.json`. This gives the app a `context.notifications` client in its API routes.
 
 ```json
 // app.json
@@ -81,7 +81,7 @@ export async function POST(request: Request, { context }: { context: AppContext 
 | `body` | ✓ | Notification body text. |
 | `url` |  | In-app path focused/opened when the notification is clicked. Defaults to `/`. |
 | `tag` |  | Notifications sharing a tag replace each other in the OS tray. |
-| `icon` |  | Icon URL; defaults to the MOS app icon. |
+| `icon` |  | Icon URL; defaults to the MixOS app icon. |
 
 `send()` returns `{ sent }` — the number of subscriptions the push service accepted (a user with no/expired subscription simply contributes 0). Dead endpoints are pruned automatically.
 

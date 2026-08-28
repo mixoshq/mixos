@@ -1,14 +1,14 @@
 # MCP Tools (letting Claude read your app)
 
 MixOS runs a single **MCP server** at `/api/mcp`. A user connects Claude to it
-once, and from then on Claude can answer questions using data from MOS apps —
+once, and from then on Claude can answer questions using data from MixOS apps —
 "what closed this quarter, and which onboardings are in flight?"
 
 Your app decides what it contributes. Declare **read-only tools** in `app.json`
 and write a handler per tool. Nothing is exposed unless you opt in.
 
 > This is the opposite direction from the [`anthropic` connector](connectors.md),
-> which is MOS calling *out* to Claude. Here Claude calls *in*.
+> which is MixOS calling *out* to Claude. Here Claude calls *in*.
 
 ## The model
 
@@ -16,7 +16,7 @@ A tool is reachable only where three independent gates overlap:
 
 1. **Your app declares it** — `mcp` in `app.json`, handler on disk, validated at
    build time.
-2. **The user consented to your app** for that client, on the MOS consent screen.
+2. **The user consented to your app** for that client, on the MixOS consent screen.
 3. **The user still has your app** — `hasAppGrant`, re-checked on every call.
 
 Consent is a *ceiling*, the live grant is a *floor*. An admin revoking someone's
@@ -203,11 +203,20 @@ never authorize on it.
 | **Type** | `ctx.db` has no `insert` / `update` / `upsert` / `delete`. Compile error. |
 | **Runtime** | The scoped client is a Proxy that throws on those verbs, surviving `as any` and every `.select().eq()` hop. |
 | **ESLint** | `apps/**/mcp/**` can't import `@/lib/db*`, the App Services broker, or the context builder. |
+| **Connectors** | A method a connector declares as `mutates` throws when called from a tool. |
 
-**Connectors are the gap the platform can't close.** It cannot know which
-connector methods mutate. If your tool calls a connector, every call must be a
-read — and a reviewer has to confirm it. Watch for side effects hiding inside a
-helper you're reusing. If a route's builder fires a hook or writes an audit row
+**Connectors used to be the gap the platform couldn't close**, because it could
+not know which connector methods mutate. A connector now declares that
+(`mutates: true` on a method in its manifest), and the MCP context wraps
+`ctx.connectors` to throw on those calls — so a write from a read-only tool is a
+runtime error, not a blocking review finding somebody has to catch.
+
+**The residue is honest and worth knowing.** The check covers methods a connector
+*declared*. An undeclared method passes through, because inferring intent from a
+method name would be worse than a stated gap. So: declare your connector's
+writes, and keep watching for side effects hiding inside a helper you're
+reusing — a hook fired on the way past is a side effect even when nothing in your
+tool's own code writes anything. If a route's builder fires a hook or writes an audit row
 on the way past, the tool must call a variant that doesn't — firing a hook is a
 side effect even when nothing in the tool's own code writes anything.
 

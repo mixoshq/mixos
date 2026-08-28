@@ -28,7 +28,7 @@ All database and connector access from app code (pages, widgets, server handlers
 │  │ 1. Resolve app slug from URL                       │  │
 │  │ 2. Lookup manifest in generated appRegistry        │  │
 │  │ 3. requireServerSession()      → 401 on failure    │  │
-│  │ 4. getUserBySSO + hasAppAccess → 403 on failure    │  │
+│  │ 4. getUserById + hasAppAccess  → 403 on failure    │  │
 │  │ 5. buildAppContext(slug, session, dbUser)          │  │
 │  │ 6. Dynamic import apps/<slug>/api/<path>/route.ts  │  │
 │  │ 7. Invoke GET/POST/etc. with (request, { context })│  │
@@ -57,8 +57,8 @@ The gateway performs seven steps, in order, on every request:
 | 1 | Split the slug path: `["my-app", "items", "42"]` → `appSlug="my-app"`, `apiPath=["items", "42"]` | — |
 | 2 | Look up `appSlug` in the generated `appRegistry`. | 404 if unknown |
 | 3 | **Rate limit** by client IP (token-bucket: 60 burst, 10/s refill). IP extracted from rightmost `x-forwarded-for` to resist spoofing. | 429 + Retry-After header |
-| 4 | `requireServerSession()` — asserts a valid SSO session. | 401 if missing/expired |
-| 5 | `getUserBySSO(session.user.id)` + `hasAppAccess(userId, appSlug)` — asserts the user has registered for this app. | 401 if user not found, 403 if no access |
+| 4 | `requireServerSession()` — asserts a valid session. | 401 if missing/expired |
+| 5 | `getUserById(session.user.id)` + `hasAppAccess(userId, appSlug)` — asserts the user has registered for this app. | 401 if user not found, 403 if no access |
 | 6 | `buildAppContext(appSlug, session, dbUser)` — constructs the `AppContext` passed to the handler (see below). Wrapped in try-catch; returns a generic 500 on failure (e.g. corrupted connector credentials). | 500 on internal failure |
 | 7 | `await import("@apps/<slug>/api/<path>/route")` and invoke the matching HTTP-method export. Path `[]` resolves to `api/index/route.ts`. | 404 if file missing, 405 if method not exported |
 
@@ -74,7 +74,6 @@ Because every app goes through the same gateway, cross-cutting behavior — auth
 interface AppContext {
   user: {
     id: string;           // Database user ID
-    ssoId: string;        // SSO subject
     email: string;
     displayName: string;
     isAdmin: boolean;
@@ -88,7 +87,7 @@ interface AppContext {
 
 ### User
 
-Pulled from the SSO session + the `users` table row.
+Pulled from the session + the `users` table row.
 
 ### Connectors
 

@@ -1,6 +1,6 @@
 # Local development in Docker
 
-The everyday local setup runs MOS and its database entirely on your machine.
+The everyday local setup runs MixOS and its database entirely on your machine.
 This is the reference for how the pieces fit; [README.md](../README.md) has the
 five-minute version.
 
@@ -156,7 +156,7 @@ duplicated by hand, so they cannot drift apart.
 
 | Port | Service | Published by |
 |---|---|---|
-| 3000 | The MOS app | compose (`app-dev` or `app`) |
+| 3000 | The MixOS app | compose (`app-dev` or `app`) |
 | 54321 | Supabase API — Kong, fronting PostgREST at `/rest/v1` | Supabase CLI |
 | 54322 | Postgres | Supabase CLI |
 | 54323 | Supabase Studio | Supabase CLI |
@@ -168,7 +168,7 @@ still holding 3000; find it with `lsof -nP -iTCP:3000 -sTCP:LISTEN`.
 
 ## Which Supabase services run, and why the rest are off
 
-MOS uses a deliberately narrow slice of Supabase. From
+MixOS uses a deliberately narrow slice of Supabase. From
 [src/lib/db/server.ts](../src/lib/db/server.ts) there are exactly two data
 paths: `createServiceClient()` (supabase-js with the service role key, i.e.
 PostgREST over HTTP) and `sql` (a raw `postgres.js` pool). Everything else in
@@ -180,7 +180,7 @@ off.
 | Postgres | **on** | Both data paths end here. |
 | PostgREST + Kong | **on** | `createServiceClient()` is HTTP to `/rest/v1`. Keeping the real Kong means local PostgREST version and behaviour match production. |
 | Studio + pg-meta | **on** | Browsing local data at :54323. Pure convenience; harmless to disable. |
-| GoTrue (`[auth]`) | **on, unused** | MOS has no Supabase Auth — NextAuth owns authentication, and `grep` for `supabase.auth` across `src/`, `scripts/`, `apps/`, and `connectors/` returns nothing. It runs anyway because the CLI only emits `SERVICE_ROLE_KEY` from `supabase status -o json` when auth is enabled; with it off, the boot script has no key to write and every PostgREST call 401s. One container is cheaper than minting and rotating a JWT ourselves. |
+| GoTrue (`[auth]`) | **on, unused** | MixOS has no Supabase Auth — NextAuth owns authentication, and `grep` for `supabase.auth` across `src/`, `scripts/`, `apps/`, and `connectors/` returns nothing. It runs anyway because the CLI only emits `SERVICE_ROLE_KEY` from `supabase status -o json` when auth is enabled; with it off, the boot script has no key to write and every PostgREST call 401s. One container is cheaper than minting and rotating a JWT ourselves. |
 | Storage | **off** | No `supabase.storage` / `.storage.from(` anywhere in the codebase. |
 | Realtime | **off** | No `.channel(` subscriptions anywhere; the UI polls. |
 | Edge Functions (`[edge_runtime]`) | **off** | There is no `supabase/functions/` directory. All server code is Next.js route handlers. |
@@ -315,9 +315,16 @@ breakage.
 
 ## Running Next.js on the host against the container backend
 
-Still supported, and noticeably faster for UI work — Docker's filesystem layer
-on macOS makes hot reload slow, and Next's own docs recommend against
-containerized dev for that reason.
+Still supported, and the right fallback if hot reload is slow on your machine —
+but no longer the default advice.
+
+Next's own docs do recommend against containerized dev, on the grounds that
+Docker's filesystem layer on macOS can push HMR into seconds or minutes. That
+was true under the older gRPC-FUSE file sharing. With **VirtioFS**, which Docker
+Desktop has defaulted to on macOS for several versions, this repo measures
+edit-to-served at roughly **0.2s for an API route and 0.3s for a page
+component**. Reach for the host server when you have measured a problem, not on
+principle.
 
 Boot the backend, then hand port 3000 back to the host. These are two steps,
 and how you sequence them depends on whether the boot is attached:
@@ -402,9 +409,20 @@ side, but this one is an unhandled `readFile` ENOENT, so it surfaces as a real
 `/_next/*` and the hot-reload websocket from origins it doesn't recognize, and
 its allowlist is `localhost`-based. Use `http://localhost:3000`.
 
-**Hot reload is slow.** A known cost of bind mounts on macOS, and there is no
-polling escape hatch under Turbopack. Run `npm run dev` on the host against the
+**Hot reload is slow.** It shouldn't be — expect well under a second, and see
+"Running Next.js on the host against the container backend" above for the
+measured figures. First check that Docker Desktop is using **VirtioFS** rather
+than gRPC-FUSE, under Settings → General; gRPC-FUSE is the configuration Next's
+docs have in mind when they warn about HMR taking minutes. Turbopack exposes no
+polling fallback the way webpack's `watchOptions.poll` did, so if VirtioFS is
+already on and it is still slow, run `npm run dev` on the host against the
 containerized backend instead.
+
+**The first request to a page is slow, but editing it afterwards is fast.** Not
+a watcher problem — that is Turbopack compiling the route on demand the first
+time anything asks for it. The `.next` named volume keeps that work across
+container restarts, so it is a once-per-route cost rather than a
+once-per-restart one.
 
 **The stack is up but the first request after a break takes many seconds.**
 Docker Desktop's Resource Saver pauses the VM after ~5 minutes idle. Turn it off

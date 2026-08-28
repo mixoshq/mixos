@@ -6,8 +6,36 @@ Hooks are scoped by the app's folder name using a `:` separator. Core platform h
 
 - **Core hooks** (`init`, `user-login`, etc.) — no prefix, accessible to all apps
 - **App hooks** — auto-prefixed with your app folder name. `doAction("ready")` in `apps/_example` fires as `_example:ready`
-- **Listening** — any app can listen to any hook by using the full name, e.g. `addAction("_example:ready", fn)`
+- **Listening across apps requires two-sided consent.** An emitter declares who may listen; a listener declares what it listens for. Both halves are build-enforced and default-deny.
 - **Firing** — apps can only fire their own custom hooks (auto-prefix prevents firing another app's hooks) and core hooks
+
+## Cross-app hooks: two-sided consent
+
+Listening to another app's hook used to need nothing at all — any app could
+`addAction("other-app:thing", fn)` with the full prefixed name and observe
+another app's events. [App Services](app-services.md) required two-sided consent
+for a *pull*; a *push* had none. It does now, and the shape is deliberately the
+same:
+
+```jsonc
+// apps/emitter/app.json — the emitter names its consumers
+"emits": [
+  { "name": "thing-happened", "description": "A thing happened.", "consumers": ["reporting"] }
+]
+```
+
+```jsonc
+// apps/reporting/app.json — the listener declares the dependency
+"listensTo": [{ "app": "emitter", "hook": "thing-happened" }]
+```
+
+Either half missing fails the build, naming the app and the hook. `"consumers":
+"*"` opens a hook to any app that declares the dependency — still a declaration,
+just a broad one.
+
+This applies to **cross-app** hooks only. An app firing and listening to its own
+hooks, and any app listening to a **core** hook (`init`, `user-login`), needs no
+declaration.
 
 ## Using Hooks in Your App
 
@@ -47,9 +75,9 @@ hooks.addAction("other-app:data-updated", async (data) => {
 
 | Name | Description | Args |
 | --- | --- | --- |
-| `init` | Fires once when MOS initializes. | (none) |
-| `user-login` | Fires when a user logs in via SSO. | `{ id, email }` |
-| `user-sync` | Fires when a user's profile is synced from SSO. | `{ id, email, name }` |
+| `init` | Fires once when MixOS initializes. | (none) |
+| `user-login` | Declared, but **nothing currently fires it.** Its trigger was the SSO sign-in callback, which no longer exists. | `{ id, email }` |
+| `user-sync` | Declared, but **nothing currently fires it.** Its trigger was the SSO profile sync, which no longer exists. | `{ id, email, name }` |
 
 ### Filters
 

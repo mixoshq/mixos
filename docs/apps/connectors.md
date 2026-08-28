@@ -186,7 +186,7 @@ if (data.connected === false) {
       <p className="text-sm font-medium">Connect your Microsoft account</p>
       <Link
         href="/account/connections"
-        className="mt-3 rounded-md bg-montalbano-navy px-3 py-1.5 text-xs font-medium text-white"
+        className="mt-3 rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground"
       >
         Open Connections
       </Link>
