@@ -1,23 +1,53 @@
-import { isSsoEnabled } from "@/lib/auth/auth-config-store";
-import CredentialsForm from "./credentials-form";
-import SsoButton from "./sso-button";
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-// isSsoEnabled() reads from Postgres via the Supabase client, which Next's
-// static-detection doesn't track. Without this, the page is prerendered at
-// build time with ssoOn=false baked in, so toggling SSO on doesn't surface
-// until the next revalidation.
+import Image from "next/image";
+import { getActiveTheme } from "@/lib/themes/active";
+import CredentialsForm from "./credentials-form";
+
+/**
+ * The active theme is a row in `platform_settings`, so this page has to render
+ * per request: prerendered at build time it would bake in whichever theme was
+ * installed then, and an admin switching themes would never reach the one page
+ * every user sees first.
+ *
+ * It carried `force-dynamic` before for `isSsoEnabled()`; that reason went away
+ * with SSO, this one replaced it.
+ */
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage() {
-  const ssoOn = await isSsoEnabled();
+  const { theme } = await getActiveTheme();
+
+  // The mark comes from the active theme, not from public/ — this page is the
+  // first thing a user sees, and it should carry whatever brand the install is
+  // actually running. When a theme ships no logo the wordmark stands alone,
+  // which is a legitimate treatment rather than a broken state.
+  const logo = theme.assets.logo
+    ? `${theme.assetBase}/${theme.assets.logo}`
+    : null;
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-mixcharcoal px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-brand px-4">
       <div className="w-full max-w-sm rounded-xl border border-white/10 bg-white/5 p-8 text-center shadow-lg backdrop-blur">
-        <h1 className="text-2xl font-bold text-white">MONTALBANO</h1>
-        <p className="mt-1 text-sm text-white/60">Operating System</p>
+        {logo && (
+          <Image
+            src={logo}
+            // Decorative: the <h1> below carries the name, so announcing the
+            // mark as well would just read the product twice.
+            alt=""
+            width={72}
+            height={69}
+            priority
+            className="mx-auto mb-4"
+          />
+        )}
+        <h1 className="font-heading text-2xl font-bold text-brand-foreground">
+          MixOS
+        </h1>
 
-        {ssoOn ? <SsoButton /> : <CredentialsForm />}
+        <CredentialsForm />
       </div>
     </div>
   );

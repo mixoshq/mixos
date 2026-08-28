@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useActionState } from "react";
@@ -52,7 +56,7 @@ export default function CredentialsForm() {
       </div>
 
       {state.error && (
-        <p className="rounded-md bg-rose-500/15 px-3 py-2 text-sm text-rose-400">
+        <p className="rounded-md border border-destructive/60 px-3 py-2 text-sm text-brand-foreground">
           {state.error}
         </p>
       )}
@@ -60,7 +64,7 @@ export default function CredentialsForm() {
       <button
         type="submit"
         disabled={pending}
-        className="flex w-full items-center justify-center gap-2 rounded-lg bg-white px-4 py-2.5 text-sm font-medium text-gray-900 shadow-sm transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-brand-foreground px-4 py-2.5 text-sm font-medium text-brand shadow-sm transition-colors hover:bg-brand-foreground/90 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {pending ? "Signing in…" : "Sign in"}
       </button>

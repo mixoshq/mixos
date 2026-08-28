@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * Card chrome: one shell, one header row, one body.
  *
@@ -39,7 +43,14 @@
 import type { ReactNode } from "react";
 
 /** The shell. No padding of its own — header and body pad themselves. */
-export const CARD_SHELL = "rounded-xl border border-border bg-card";
+/**
+ * `mix-card` is a THEME HOOK, not a style. It carries no rules of its own — it
+ * exists so a theme can reach this surface (see themes/AGENTS.md) without
+ * selecting a utility class that a refactor is free to change. Every hook in
+ * src/components/ui/ works the same way, and the allowlist of legal hooks lives
+ * in src/lib/themes/tokens.ts.
+ */
+export const CARD_SHELL = "mix-card rounded-xl border border-border bg-card";
 /** Header row. The padding AND the type size live here, nowhere else. */
 export const CARD_HEADER = "flex flex-wrap items-center gap-2 px-4 py-3";
 export const CARD_TITLE = "text-lg font-semibold text-foreground";

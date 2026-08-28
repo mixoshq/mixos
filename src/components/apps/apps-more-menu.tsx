@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { forwardRef } from "react";
@@ -61,7 +65,10 @@ const AppsMoreMenu = forwardRef<HTMLDivElement, Props>(function AppsMoreMenu(
                 ? "bg-accent font-medium text-foreground"
                 : "text-foreground"
             } ${isDropTarget ? "bg-accent" : ""} ${
-              isDragging ? "opacity-50" : ""
+              // A ring rather than a fade: dimming the label thins
+              // `text-foreground` to 3.75:1, and "picked up" reads more clearly
+              // as an outline than as a ghost.
+              isDragging ? "bg-accent ring-2 ring-inset ring-ring" : ""
             }`}
           >
             <LucideIcon

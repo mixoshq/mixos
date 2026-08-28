@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Applies per-app migrations from apps/<slug>/migrations/.
 //
 // Scope note: this runner handles APP migrations only. The platform's own
@@ -113,6 +117,43 @@ async function applyMigration(
   });
 }
 
+/**
+ * Create the platform-owned `_sync_state` table for any app declaring a `sync`.
+ *
+ * Watermark, window size and last status are the platform's bookkeeping, not the
+ * app's — `runSync` is the only writer, and `docs/apps/data-freshness.md` lists
+ * "persisting a provider cursor in your state table" as the single most
+ * expensive mistake in this codebase. There is deliberately no cursor column: a
+ * cursor lives inside one run and there is nowhere here to put it.
+ */
+async function ensureSyncState(sql: Sql, slug: string): Promise<void> {
+  const manifestPath = path.join(APPS_DIR, slug, "app.json");
+  if (!fs.existsSync(manifestPath)) return;
+  let declaresSync = false;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as {
+      sync?: unknown[];
+    };
+    declaresSync = Array.isArray(manifest.sync) && manifest.sync.length > 0;
+  } catch {
+    return;
+  }
+  if (!declaresSync) return;
+
+  const table = `_app_${slug.replace(/-/g, "_")}__sync_state`;
+  await sql.unsafe(`
+    create table if not exists public."${table}" (
+      name           text primary key,
+      synced_through timestamptz,
+      window_days    int,
+      last_status    text,
+      last_run_at    timestamptz
+    )
+  `);
+  await sql.unsafe(`alter table public."${table}" enable row level security`);
+  console.log(`  ${slug}: sync state ready`);
+}
+
 async function migrateApps(sql: Sql) {
   if (!fs.existsSync(APPS_DIR)) return;
   const entries = fs.readdirSync(APPS_DIR, { withFileTypes: true });
@@ -122,6 +163,13 @@ async function migrateApps(sql: Sql) {
     if (entry.name.startsWith("_")) continue;
 
     const slug = entry.name;
+
+    // The platform owns the sync watermark table, so an app that declares a
+    // `sync` never writes a migration for it — and never gets the chance to
+    // shape it wrongly. Created before the app's own migrations so one of them
+    // could reference it.
+    await ensureSyncState(sql, slug);
+
     const migrationsDir = path.join(APPS_DIR, slug, "migrations");
     if (!fs.existsSync(migrationsDir)) continue;
 

@@ -1,0 +1,1435 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+"use client";
+
+import { useState, useTransition, type ReactNode } from "react";
+import Image from "next/image";
+import {
+  Check,
+  RefreshCw,
+  X,
+  Copy,
+  ExternalLink,
+  HelpCircle,
+  Link2,
+  Plug,
+  PlugZap,
+} from "lucide-react";
+import { Dialog } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
+import { StatusPill } from "@/components/ui/status";
+import FolderTabs from "@/components/ui/folder-tabs";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { renderAuthors, formatLastUpdated } from "@/lib/apps/display";
+import { useClientValue } from "@/lib/use-client-value";
+import type {
+  ConnectorDocLink,
+  ConnectorSetupStep,
+} from "@/lib/connectors/types";
+import type { ConnectorConfigState } from "@/lib/connectors/status";
+import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
+import { describeDependents } from "@/lib/connectors/dependents";
+import type { ConnectorWithStatus } from "./connector-registry-list";
+
+type DialogTab = "details" | "configure" | "logs";
+
+interface Props {
+  connector: ConnectorWithStatus;
+  open: boolean;
+  onClose: () => void;
+  /**
+   * Which tab to land on. "details" for a normal open; "configure" when the
+   * admin is mid-setup and did not choose to be here — coming back from the
+   * provider's consent screen, where being dropped on Details would read as
+   * having lost their place.
+   */
+  initialTab?: DialogTab;
+  /** Returns whether the connector now holds a usable credential set. */
+  configureAction: (formData: FormData) => Promise<boolean>;
+  testAction: (connectorName: string) => Promise<ConnectorTestOutcome>;
+  refreshScopeDocsAction: (
+    connectorName: string,
+  ) => Promise<{ ok: boolean; error?: string }>;
+}
+
+/** "in 52 minutes" / "3 days ago" — enough for an admin to judge freshness. */
+function formatRelative(epochMs: number): string {
+  const deltaMin = Math.round((epochMs - Date.now()) / 60000);
+  const abs = Math.abs(deltaMin);
+  const unit =
+    abs < 1
+      ? "just now"
+      : abs < 60
+        ? `${abs} min`
+        : abs < 1440
+          ? `${Math.round(abs / 60)} hr`
+          : `${Math.round(abs / 1440)} days`;
+  if (unit === "just now") return unit;
+  return deltaMin >= 0 ? `in ${unit}` : `${unit} ago`;
+}
+
+const STATUS_LABEL: Record<ConnectorConfigState, string> = {
+  ready: "Configured",
+  "needs-authorization": "Needs authorization",
+  unconfigured: "Not configured",
+};
+
+/** Read is neutral; anything that can write is not. */
+const SCOPE_TONE = {
+  read: "neutral",
+  write: "warning",
+  "read-write": "warning",
+} as const;
+
+const SCOPE_LABEL = {
+  read: "Read",
+  write: "Write",
+  "read-write": "Read+Write",
+} as const;
+
+const STATUS_TONE = {
+  ready: "success",
+  "needs-authorization": "warning",
+  unconfigured: "neutral",
+} as const;
+
+/**
+ * External link out to a provider's console. `rel="noreferrer noopener"` on
+ * every one — these point at third-party admin consoles, and the opener
+ * reference is not something to hand across that boundary. The URLs are proven
+ * `https:` at build time by the manifest schema, so nothing sanitizes here.
+ */
+function DocLink({ link }: { link: ConnectorDocLink }) {
+  return (
+    <a
+      href={link.url}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="inline-flex items-baseline gap-1 font-medium text-primary underline underline-offset-2 hover:no-underline"
+    >
+      {link.label}
+      <ExternalLink className="h-3 w-3 shrink-0 self-center" aria-hidden />
+    </a>
+  );
+}
+
+/**
+ * Index of `label` in `text` as a standalone phrase, or -1.
+ *
+ * Word-boundary checked rather than a bare indexOf, so a label like "API" does
+ * not light up the middle of "APIs". Done with adjacency tests instead of a
+ * lookbehind regex — the same result, without depending on a regex feature for
+ * something this small.
+ */
+function findPhrase(text: string, label: string): number {
+  const isWord = (c: string) => /\w/.test(c);
+  for (let from = 0; ;) {
+    const i = text.indexOf(label, from);
+    if (i === -1) return -1;
+    const before = i === 0 ? "" : text[i - 1];
+    const after = text[i + label.length] ?? "";
+    if (!isWord(before) && !isWord(after)) return i;
+    from = i + 1;
+  }
+}
+
+/**
+ * A step's sentence, with its link woven in and its values emboldened.
+ *
+ * Both decorations are the same problem — find a phrase, wrap that span — so
+ * they are collected as ranges and applied in one pass. Doing them as two
+ * successive string replacements is what produces the classic bug where a value
+ * sitting inside a link label gets a `<strong>` spliced through the anchor.
+ *
+ * Where the sentence names the link's destination — "On the OAuth consent
+ * screen, set User type to Internal" — that phrase becomes the link, because
+ * that is the thing being pointed at and the reader's eye is already on it. A
+ * trailing "OAuth consent screen ↗" after the full stop makes them read the
+ * name twice and click the second one. Where the label does not appear, the
+ * link trails the sentence: a legitimate outcome for a destination the sentence
+ * never names, not a fallback for a mistake.
+ */
+function StepText({ step }: { step: ConnectorSetupStep }) {
+  const { text, link, values } = step;
+
+  type Span = { start: number; end: number; kind: "link" | "value" };
+  const spans: Span[] = [];
+  const overlaps = (start: number, end: number) =>
+    spans.some((sp) => start < sp.end && end > sp.start);
+
+  // The link claims its range first: an anchor that also happens to be a value
+  // should stay an anchor rather than being split by a nested <strong>.
+  if (link) {
+    const at = findPhrase(text, link.label);
+    if (at >= 0)
+      spans.push({ start: at, end: at + link.label.length, kind: "link" });
+  }
+  for (const value of values ?? []) {
+    const at = findPhrase(text, value);
+    if (at >= 0 && !overlaps(at, at + value.length)) {
+      spans.push({ start: at, end: at + value.length, kind: "value" });
+    }
+  }
+  spans.sort((a, b) => a.start - b.start);
+
+  const linkInline = spans.some((sp) => sp.kind === "link");
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  spans.forEach((sp, i) => {
+    if (sp.start > cursor) parts.push(text.slice(cursor, sp.start));
+    parts.push(
+      sp.kind === "link" ? (
+        <DocLink key={i} link={link!} />
+      ) : (
+        <strong key={i} className="font-semibold text-foreground">
+          {text.slice(sp.start, sp.end)}
+        </strong>
+      ),
+    );
+    cursor = sp.end;
+  });
+  if (cursor < text.length) parts.push(text.slice(cursor));
+
+  return (
+    <>
+      {parts}
+      {link && !linkInline && (
+        <>
+          {" "}
+          <DocLink link={link} />
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * A log timestamp, rendered only on the client.
+ *
+ * Both the relative phrasing and the local-time formatting depend on the
+ * reader's clock and zone, so neither can be produced during the server pass —
+ * and this dialog IS server-rendered when the OAuth return reopens it.
+ * `useClientValue` is the sanctioned way to defer that without a hydration
+ * mismatch; the dash is what the server renders.
+ */
+function LogTime({ at }: { at: number }) {
+  const text = useClientValue(() => formatRelative(at), null);
+  const exact = useClientValue(() => new Date(at).toLocaleString(), null);
+  return <span title={exact ?? undefined}>{text ?? "—"}</span>;
+}
+
+/**
+ * The identifying tail of a scope, without the boilerplate.
+ *
+ * `https://www.googleapis.com/auth/gmail.readonly` is fourteen characters of
+ * information wrapped in thirty of prefix that is identical on every row — and
+ * the prefix is what wraps onto a second line in a dialog. The last path
+ * segment is what a provider's own docs call the scope.
+ *
+ * Falls back to the host for a scope that is a bare origin
+ * (`https://mail.google.com/`), and returns the input untouched for a provider
+ * whose scopes are not URLs at all — Slack's `channels:read`, for instance.
+ */
+function shortScopeId(scope: string): string {
+  try {
+    const url = new URL(scope);
+    // `new URL("channels:read")` does NOT throw — it parses as protocol
+    // `channels:` with pathname `read`, so an unguarded version returned "read"
+    // for a Slack scope and silently discarded half of it.
+    if (url.protocol !== "https:" && url.protocol !== "http:") return scope;
+    const segments = url.pathname.split("/").filter(Boolean);
+    return segments.at(-1) ?? url.host;
+  } catch {
+    return scope;
+  }
+}
+
+type ScopeVerdict = "held" | "refused" | "unused";
+
+/**
+ * Whether one documented scope actually works for this connector.
+ *
+ * Answered from the grant, which is the only thing that can answer it. The
+ * provider's docs list every scope the API offers; what this deployment can
+ * actually do is the intersection of that list with what was granted at the
+ * consent screen.
+ *
+ * "unused" is the third state and carries most of the rows: a scope this
+ * connector never asks for is not broken, it is simply not part of what this
+ * connector does. Rendering that as a cross would report a dozen failures on a
+ * perfectly healthy connector.
+ */
+function scopeVerdict(
+  scope: string,
+  opts: { granted: string[]; grantedKnown: boolean; requested: string[] },
+): ScopeVerdict {
+  const requested = opts.requested.includes(scope);
+  if (!requested) return "unused";
+  if (!opts.grantedKnown) return "unused";
+  return opts.granted.includes(scope) ? "held" : "refused";
+}
+
+function ScopeStatusIcon({ verdict }: { verdict: ScopeVerdict }) {
+  if (verdict === "held") {
+    return (
+      <Check
+        role="img"
+        aria-label="Granted by the provider"
+        className="h-4 w-4 shrink-0 text-success"
+      />
+    );
+  }
+  if (verdict === "refused") {
+    return (
+      <X
+        role="img"
+        aria-label="Requested but not granted — calls needing this will be refused"
+        className="h-4 w-4 shrink-0 text-destructive"
+      />
+    );
+  }
+  return (
+    <HelpCircle
+      role="img"
+      aria-label="Not requested by this connector"
+      className="h-4 w-4 shrink-0 text-muted-foreground"
+    />
+  );
+}
+
+/** A note the manifest attaches to one step, shown at the control it concerns. */
+function StepNote({ children }: { children: ReactNode }) {
+  return (
+    <p className="rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">
+      {children}
+    </p>
+  );
+}
+
+interface Step {
+  id: string;
+  title: string;
+  done: boolean;
+  /**
+   * This step must be finished before any later step opens.
+   *
+   * True for the steps that take a value or prove something — credentials,
+   * authorization, verification — and false for the one that only tells you
+   * what to do in someone else's console, which has nothing to complete and so
+   * has no business blocking anything.
+   */
+  mustComplete?: boolean;
+  body: ReactNode;
+  /**
+   * The step's primary control, rendered bottom-right of the panel — always the
+   * same corner, whether it is "Save credentials", "Connect" or "Verify". A
+   * wizard whose button moves per step makes the reader hunt for it four times.
+   *
+   * Omitted by a step with nothing to validate, which gets a plain "Next"
+   * instead: that is the difference between a step the platform can check and
+   * one it cannot.
+   */
+  action?: ReactNode;
+}
+
+/** Ties the submit button, which lives in the action row, to the form above it. */
+const CREDENTIALS_FORM_ID = "connector-credentials-form";
+
+/**
+ * The progress rail: every step as a circle, only one panel below it.
+ *
+ * WHY A RAIL AND NOT A LIST OF COLLAPSED ROWS. Showing one step at a time is
+ * the point — an admin pasting a client secret does not need three other steps
+ * in view — but hiding the others costs the two things a list gave for free:
+ * where am I, and how much is left. The rail gives both back in one line, and
+ * it is where the green ticks live, so progress stays visible while content
+ * does not.
+ *
+ * Circles are buttons. Going back to re-copy a redirect URI or replace a leaked
+ * secret has to be possible, and this is the only way back once a step is no
+ * longer rendered.
+ */
+function StepRail({
+  steps,
+  currentId,
+  maxReachable,
+  onSelect,
+}: {
+  steps: Step[];
+  currentId: string;
+  /** Index of the furthest step that can be opened. Later ones are locked. */
+  maxReachable: number;
+  onSelect: (id: string) => void;
+}) {
+  const blocker = steps[maxReachable];
+  return (
+    <ol className="flex items-center">
+      {steps.map((step, i) => {
+        const isCurrent = step.id === currentId;
+        const locked = i > maxReachable;
+        return (
+          <li key={step.id} className="flex flex-1 items-center last:flex-none">
+            <button
+              type="button"
+              onClick={() => onSelect(step.id)}
+              disabled={locked}
+              aria-current={isCurrent ? "step" : undefined}
+              // The number/tick is decorative next to this: the label is what
+              // carries the step's name and its state to a screen reader —
+              // including *why* a locked step cannot be opened, which a greyed
+              // circle communicates to nobody.
+              aria-label={`Step ${i + 1} of ${steps.length}: ${step.title}${
+                step.done
+                  ? " (completed)"
+                  : locked && blocker
+                    ? ` (locked — finish "${blocker.title}" first)`
+                    : ""
+              }`}
+              title={
+                locked && blocker
+                  ? `Finish "${blocker.title}" first`
+                  : step.title
+              }
+              // Dimming is legal here and almost nowhere else: WCAG 1.4.3
+              // exempts inactive controls. See docs/apps/ux.md#never-dim-a-token.
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-semibold tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${
+                step.done
+                  ? "border-success bg-success text-success-foreground"
+                  : isCurrent
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : locked
+                      ? "cursor-not-allowed border-border bg-muted text-foreground disabled:opacity-50"
+                      : "border-border bg-muted text-foreground hover:border-primary"
+              }`}
+            >
+              {step.done ? <Check className="h-4 w-4" aria-hidden /> : i + 1}
+            </button>
+            {i < steps.length - 1 && (
+              // The connector turns green only once the step behind it is done,
+              // so the rail reads as a filling progress bar rather than as
+              // decoration between circles.
+              <span
+                aria-hidden
+                className={`mx-1.5 h-0.5 flex-1 rounded-full ${
+                  step.done ? "bg-success" : "bg-border"
+                }`}
+              />
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export default function ConnectorConfigureDialog({
+  connector,
+  open,
+  onClose,
+  initialTab = "details",
+  configureAction,
+  testAction,
+  refreshScopeDocsAction,
+}: Props) {
+  const [tab, setTab] = useState<DialogTab>(initialTab);
+  const [saving, startSave] = useTransition();
+  const [testing, startTest] = useTransition();
+  const [outcome, setOutcome] = useState<ConnectorTestOutcome | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [refreshing, startRefresh] = useTransition();
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [showDependents, setShowDependents] = useState(false);
+  /**
+   * Which step the admin has navigated to, or `undefined` to follow the
+   * checklist — the first unfinished step. Clearing it after a successful
+   * action is what makes the wizard advance on its own: save the credentials
+   * and the next render lands on authorizing.
+   *
+   * There is no "closed" state. Exactly one step is always showing, so the
+   * tri-state this replaced has nothing left to represent.
+   */
+  const [pinnedStep, setPinnedStep] = useState<string | undefined>(undefined);
+  const [showDone, setShowDone] = useState(false);
+
+  const { oauth, setup, state, verification } = connector;
+  const isOAuth = oauth !== null;
+
+  const credentialsSaved = state !== "unconfigured";
+  const authorized = isOAuth ? oauth.connected : true;
+  const verified = verification.verifiedAt !== null;
+
+  /*
+    Both of these are relative to *now*, so neither can be computed during the
+    server pass — this dialog is server-rendered whenever `initialOpen` is set,
+    which is exactly what happens on the way back from the OAuth round trip.
+  */
+  const expiryText = useClientValue(
+    () => (oauth?.expiresAt ? formatRelative(oauth.expiresAt) : null),
+    null,
+  );
+  const verifiedText = useClientValue(
+    () =>
+      verification.verifiedAt ? formatRelative(verification.verifiedAt) : null,
+    null,
+  );
+  const configuredText = useClientValue(
+    () =>
+      verification.configuredAt
+        ? formatRelative(verification.configuredAt)
+        : null,
+    null,
+  );
+
+  async function copyRedirectUri() {
+    if (!oauth?.redirectUri) return;
+    try {
+      await navigator.clipboard.writeText(oauth.redirectUri);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can be refused (permissions, insecure origin). The
+      // input is readOnly-and-selectable precisely so this stays recoverable by
+      // hand rather than being a dead end.
+    }
+  }
+
+  const credentialNames = connector.credentialFields
+    .map((f) => f.label)
+    .join(" and ");
+
+  const steps: Step[] = [];
+
+  /*
+    Move forward to a named step.
+
+    NEVER by clearing the pin. "Follow the checklist" resolves to the first
+    unfinished step, and immediately after a save the revalidated props have not
+    landed yet — so the checklist still says step one, the wizard snaps back
+    there, and then jumps forward again a moment later. Pinning the next step by
+    id is the only form of advancing that cannot go backwards.
+  */
+  function advanceFrom(stepId: string) {
+    const i = steps.findIndex((st) => st.id === stepId);
+    const next = i >= 0 ? steps[i + 1] : undefined;
+    if (next) setPinnedStep(next.id);
+  }
+
+  /*
+    Step one is the provider's own console, which we cannot check — nothing here
+    can tell whether the Gmail API got enabled. It ticks when the credentials
+    arrive instead: you cannot hold a Client ID you never created an app for. An
+    inferred tick beats a checkbox the admin ticks themselves, which records
+    only that they clicked it.
+  */
+  if (setup) {
+    steps.push({
+      id: "provider",
+      title: setup.title ?? "Get your credentials",
+      done: credentialsSaved,
+      body: (
+        <>
+          <ol className="space-y-2">
+            {setup.steps.map((step, i) => (
+              <li key={i} className="flex gap-2.5 text-sm">
+                <span
+                  aria-hidden
+                  className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold tabular-nums text-foreground"
+                >
+                  {i + 1}
+                </span>
+                <span className="text-foreground">
+                  <StepText step={step} />
+                  {/*
+                    The rationale sits behind the "?" rather than in the
+                    sentence. InfoTooltip opens on focus as well as hover, so
+                    this is not a mouse-only explanation the way a `title=`
+                    would be.
+                  */}
+                  {step.why && (
+                    <>
+                      {" "}
+                      <InfoTooltip tip={step.why} className="align-text-bottom">
+                        <HelpCircle
+                          aria-label={`Why: ${step.text}`}
+                          role="img"
+                          className="h-4 w-4 text-muted-foreground hover:text-foreground"
+                        />
+                      </InfoTooltip>
+                    </>
+                  )}
+
+                  {/*
+                    Directly under the step that asks for it. This is the only
+                    value in the guide the manifest cannot carry — it is built
+                    from this deployment's origin — and it is worth nothing
+                    anywhere except beside the field it gets pasted into.
+                  */}
+                  {step.showRedirectUri && isOAuth && (
+                    <span className="mt-2 block">
+                      {oauth.redirectUri ? (
+                        <span className="flex gap-2">
+                          <input
+                            readOnly
+                            value={oauth.redirectUri}
+                            aria-label="Redirect URI"
+                            onFocus={(e) => e.currentTarget.select()}
+                            className="min-w-0 flex-1 rounded-md border border-input bg-muted px-3 py-2 font-mono text-xs text-foreground shadow-sm"
+                          />
+                          <Button
+                            size="sm"
+                            onClick={copyRedirectUri}
+                            icon={
+                              copied ? (
+                                <Check className="h-4 w-4" aria-hidden />
+                              ) : (
+                                <Copy className="h-4 w-4" aria-hidden />
+                              )
+                            }
+                          >
+                            {copied ? "Copied" : "Copy"}
+                          </Button>
+                        </span>
+                      ) : (
+                        <span className="block rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground">
+                          Set{" "}
+                          <code className="font-mono text-xs">
+                            NEXTAUTH_URL
+                          </code>{" "}
+                          to this deployment&apos;s public URL — the redirect
+                          URI is built from it and cannot be shown until it is
+                          set.
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </>
+      ),
+    });
+  }
+
+  steps.push({
+    id: "credentials",
+    title: `Save your ${credentialNames}`,
+    done: credentialsSaved,
+    mustComplete: true,
+    body: (
+      <>
+        {setup?.notes?.credentials && (
+          <StepNote>{setup.notes.credentials}</StepNote>
+        )}
+        <form
+          id={CREDENTIALS_FORM_ID}
+          action={(formData) =>
+            startSave(async () => {
+              const saved = await configureAction(formData);
+              // Only a save that actually stored something completes this step.
+              // Advancing regardless is how an empty submit used to skip
+              // straight past it.
+              if (saved) advanceFrom("credentials");
+            })
+          }
+          className="space-y-4"
+        >
+          <input type="hidden" name="connectorName" value={connector.name} />
+          {connector.credentialFields.map((field) => (
+            <Field
+              key={field.key}
+              label={field.label}
+              // Required only while nothing is stored. Once it is, blank means
+              // "keep what is there", which is the hint below.
+              required={!credentialsSaved}
+              hint={
+                credentialsSaved
+                  ? "Already saved. Leave blank to keep the current value."
+                  : undefined
+              }
+            >
+              {(args) => (
+                <input
+                  {...args}
+                  type={field.type === "password" ? "password" : "text"}
+                  name={field.key}
+                  required={!credentialsSaved}
+                  autoComplete="off"
+                  placeholder={
+                    credentialsSaved ? "••••••••" : `Enter ${field.label}`
+                  }
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              )}
+            </Field>
+          ))}
+        </form>
+      </>
+    ),
+    action: (
+      <Button
+        type="submit"
+        form={CREDENTIALS_FORM_ID}
+        variant="primary"
+        size="sm"
+        busy={saving}
+        busyLabel="Saving…"
+      >
+        {credentialsSaved ? "Update credentials" : "Save credentials"}
+      </Button>
+    ),
+  });
+
+  if (isOAuth) {
+    steps.push({
+      id: "authorize",
+      title: "Authorize access",
+      done: authorized,
+      mustComplete: true,
+      body: (
+        <>
+          <p className="text-sm text-muted-foreground">
+            You will be sent to the provider to sign in and approve. The token
+            comes back encrypted and refreshes itself; there is one credential
+            set for the whole deployment, not one per person.
+          </p>
+          {setup?.notes?.authorize && (
+            <StepNote>{setup.notes.authorize}</StepNote>
+          )}
+
+          {oauth.scopes.length > 0 && (
+            <div>
+              <p className="text-xs text-muted-foreground">Access requested:</p>
+              <ul className="mt-1 space-y-0.5">
+                {oauth.scopes.map((scope) => (
+                  <li
+                    key={scope}
+                    className="break-all font-mono text-[11px] text-muted-foreground"
+                  >
+                    {scope}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {authorized && expiryText && (
+            <p className="text-sm text-muted-foreground">
+              Connected — the access token expires {expiryText} and refreshes
+              itself.
+            </p>
+          )}
+
+          {!credentialsSaved && (
+            <p className="text-sm text-warning">
+              Save the {credentialNames} first — the authorization request is
+              built from them.
+            </p>
+          )}
+        </>
+      ),
+      action: (
+        <>
+          {/*
+            Two elements, one control. When it works it must be a plain anchor:
+            this starts a full-page navigation out to the provider and back, and
+            `return` carries the connector name so the dialog reopens on the way
+            back. When it cannot work yet it is a real disabled <button>, which
+            is both the honest semantics and the only legal way to render an
+            inactive control here — dimming a token is allowed for a genuinely
+            disabled control and nowhere else (docs/apps/ux.md#never-dim-a-token).
+          */}
+          {credentialsSaved ? (
+            <a
+              href={`/api/connectors/${encodeURIComponent(connector.name)}/oauth/start?return=${encodeURIComponent(
+                `/admin/connectors?connector=${connector.name}`,
+              )}`}
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Link2 className="h-4 w-4" aria-hidden />
+              {authorized ? "Reconnect" : "Connect"}
+            </a>
+          ) : (
+            <Button
+              size="sm"
+              variant="primary"
+              disabled
+              icon={<Link2 className="h-4 w-4" aria-hidden />}
+            >
+              Connect
+            </Button>
+          )}
+        </>
+      ),
+    });
+  }
+
+  steps.push({
+    id: "verify",
+    title: "Verify the connection",
+    done: verified,
+    mustComplete: true,
+    body: (
+      <>
+        <p className="text-sm text-muted-foreground">
+          Makes one real call to the service. This is what turns
+          &ldquo;configured&rdquo; from a claim into a fact — a key pasted with
+          a trailing space fails here instead of through a broken widget next
+          week.
+        </p>
+        {setup?.notes?.verify && <StepNote>{setup.notes.verify}</StepNote>}
+
+        {outcome && !testing && (
+          <StatusPill tone={outcome.ok ? "success" : "danger"}>
+            {outcome.ok ? "Connection works" : "Connection failed"}
+          </StatusPill>
+        )}
+
+        {outcome && !testing && (
+          <div className="space-y-1">
+            <p className="text-sm text-muted-foreground">
+              {outcome.ok
+                ? (outcome.detail ?? "The service accepted our credentials.")
+                : outcome.message}
+            </p>
+            {!outcome.ok && outcome.adminHint && (
+              <p className="text-xs text-muted-foreground">
+                {outcome.adminHint}
+              </p>
+            )}
+            {!outcome.ok && outcome.upstreamRequestId && (
+              <p className="font-mono text-[11px] text-muted-foreground">
+                Reference: {outcome.upstreamRequestId}
+              </p>
+            )}
+          </div>
+        )}
+
+        {verified && !outcome && verifiedText && (
+          <p className="text-xs text-muted-foreground">
+            Last verified {verifiedText}
+            {verification.detail ? ` — ${verification.detail}` : ""}.
+          </p>
+        )}
+      </>
+    ),
+    action: (
+      <Button
+        size="sm"
+        variant={verified ? "secondary" : "primary"}
+        onClick={() =>
+          startTest(async () => {
+            const result = await testAction(connector.name);
+            setOutcome(result);
+            // Nothing to advance to — verify is the last step. A pass makes
+            // `allDone` true, which swaps the wizard for the completed summary
+            // on its own; clearing the pin here would only risk a flash of step
+            // one while the revalidated props are still in flight.
+          })
+        }
+        busy={testing}
+        busyLabel="Testing…"
+        icon={<PlugZap className="h-4 w-4" aria-hidden />}
+      >
+        {verified ? "Verify again" : "Verify connection"}
+      </Button>
+    ),
+  });
+
+  /** The provider's scope reference page, cited under the capability list. */
+  const scopesUrl = connector.auth?.scopesUrl;
+  const dependentsText = describeDependents(connector.dependents);
+  const hasDependents =
+    connector.dependents.required.length > 0 ||
+    connector.dependents.optional.length > 0;
+  const docsFetchedText = useClientValue(
+    () =>
+      connector.scopeDocs.fetchedAt
+        ? formatRelative(connector.scopeDocs.fetchedAt)
+        : null,
+    null,
+  );
+
+  const tabs: Array<{ key: DialogTab; label: string }> = [
+    { key: "details", label: "Details" },
+    { key: "configure", label: "Configure" },
+    { key: "logs", label: "Usage Logs" },
+  ];
+
+  const allDone = steps.every((s) => s.done);
+  const firstUnfinished = steps.find((s) => !s.done)?.id;
+
+  /*
+    How far the wizard is open. The first step that must complete and has not
+    is itself reachable — you have to be able to work on it — and everything
+    after it is locked, because it cannot be attempted yet anyway: Connect
+    without a client secret is a request the provider rejects, and Verify
+    without a grant is a call that cannot be made.
+
+    Enforced on the CONTROLS — the rail's buttons and the Next button — rather
+    than by clamping the open step. Clamping would fight the moment right after
+    a save, when the server has confirmed the write but the revalidated props
+    have not arrived, and the wizard would snap backwards again.
+  */
+  const blockedAt = steps.findIndex((st) => st.mustComplete && !st.done);
+  const maxReachable = blockedAt === -1 ? steps.length - 1 : blockedAt;
+  const currentId = pinnedStep ?? firstUnfinished ?? steps[0].id;
+  const currentIndex = Math.max(
+    0,
+    steps.findIndex((s) => s.id === currentId),
+  );
+  const current = steps[currentIndex];
+  const nextStep = steps[currentIndex + 1];
+  const wizardVisible = !allDone || showDone;
+
+  /*
+    Step one is the only step with nothing to validate — its tick is inferred
+    from the credentials arriving later — so it is the only one that needs an
+    explicit way forward. Every other step advances by succeeding at its own
+    action, which is the whole reason the others do not carry a Next.
+  */
+  const canAdvance = nextStep != null && currentIndex < maxReachable;
+  const advance: ReactNode = canAdvance ? (
+    <Button
+      variant="primary"
+      size="sm"
+      onClick={() => setPinnedStep(nextStep!.id)}
+    >
+      Next
+    </Button>
+  ) : null;
+
+  /** Open one step from outside the wizard, revealing it if it is collapsed. */
+  function jumpTo(stepId: string) {
+    setTab("configure");
+    setShowDone(true);
+    setPinnedStep(stepId);
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      size="lg"
+      title={connector.displayName}
+      subtitle={connector.description}
+      fixedHeight
+      footer={
+        <span className="flex flex-wrap justify-center gap-x-10 gap-y-1.5 text-center">
+          <span>
+            <strong className="font-semibold">Updated</strong>{" "}
+            {formatLastUpdated(connector.lastUpdated, "Not yet committed")}
+          </span>
+          {connector.authors && connector.authors.length > 0 && (
+            <span>
+              <strong className="font-semibold">By</strong>{" "}
+              {renderAuthors(connector.authors)}
+            </span>
+          )}
+        </span>
+      }
+      tabs={
+        // The band, not a panel: status belongs to the connection rather than to
+        // any one tab, so it stays put while the tabs switch beneath it.
+        <div className="flex items-center justify-between gap-3">
+          <FolderTabs
+            items={tabs}
+            active={tab}
+            onChange={setTab}
+            surface="card"
+          />
+          <StatusPill tone={STATUS_TONE[state]}>
+            {STATUS_LABEL[state]}
+          </StatusPill>
+        </div>
+      }
+      icon={
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-background">
+          {connector.icon ? (
+            <Image
+              src={connector.icon}
+              alt=""
+              width={32}
+              height={32}
+              className="h-6 w-6 object-contain"
+            />
+          ) : (
+            <Plug className="h-4 w-4 text-muted-foreground" aria-hidden />
+          )}
+        </span>
+      }
+    >
+      <div className="space-y-4">
+        {tab === "details" && (
+          <div className="space-y-5">
+            {/*
+              The way in, and only while there is a way in to offer. Right
+              justified so the button lands where every other primary action in
+              this dialog does.
+            */}
+            {!credentialsSaved ? (
+              /*
+                Loud on purpose. Everything else on this tab describes a
+                connector that works; until it does, the only thing worth
+                looking at is the way to make it work — and the dependency
+                count says what is waiting on that.
+              */
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">
+                    Not configured yet
+                  </p>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {dependentsText}
+                  </p>
+                </div>
+                <Button variant="primary" onClick={() => setTab("configure")}>
+                  Configure
+                </Button>
+              </div>
+            ) : (
+              <dl className="space-y-1 text-sm">
+                {configuredText && (
+                  <div className="flex flex-wrap gap-x-2">
+                    <dt className="text-muted-foreground">Configured</dt>
+                    <dd className="text-foreground">
+                      {configuredText}
+                      {verification.configuredBy
+                        ? ` by ${verification.configuredBy}`
+                        : ""}
+                    </dd>
+                  </div>
+                )}
+                {verified && verifiedText && (
+                  <div className="flex flex-wrap gap-x-2">
+                    <dt className="text-muted-foreground">Last verified</dt>
+                    <dd className="text-foreground">
+                      {verifiedText}
+                      {verification.detail ? ` — ${verification.detail}` : ""}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            )}
+
+            {/* ── Who is waiting on this ──────────────────────────────────── */}
+            {credentialsSaved && (
+              <section>
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  Apps using this connector
+                </h3>
+                <p className="mt-1 text-sm text-foreground">{dependentsText}</p>
+                {/*
+                  Counts first, names on request. Someone about to replace a
+                  client secret needs to know what they are about to affect, and
+                  "4 apps" does not tell them that — but four names inline on
+                  every connector would bury the rest of the tab.
+                */}
+                {hasDependents && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowDependents((v) => !v)}
+                      aria-expanded={showDependents}
+                      className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary underline underline-offset-2 hover:no-underline"
+                    >
+                      {showDependents ? "Hide" : "Show"} apps
+                    </button>
+                    {showDependents && (
+                      <dl className="mt-2 space-y-1 text-sm">
+                        {connector.dependents.required.length > 0 && (
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="text-muted-foreground">
+                              Required by
+                            </dt>
+                            <dd className="text-foreground">
+                              {connector.dependents.required.join(" · ")}
+                            </dd>
+                          </div>
+                        )}
+                        {connector.dependents.optional.length > 0 && (
+                          <div className="flex flex-wrap gap-x-2">
+                            <dt className="text-muted-foreground">
+                              Optional for
+                            </dt>
+                            <dd className="text-foreground">
+                              {connector.dependents.optional.join(" · ")}
+                            </dd>
+                          </div>
+                        )}
+                      </dl>
+                    )}
+                  </>
+                )}
+              </section>
+            )}
+
+            {/* ── What this connector's own code offers ───────────────────── */}
+            <section>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  What this connector offers
+                </h3>
+                {/*
+                  Inline with the heading: the icons mean nothing on first read,
+                  and a key you meet after scanning fourteen rows is a key you
+                  needed fourteen rows ago.
+                */}
+                {connector.scopeDocs.scopes.length > 0 && (
+                  <span className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    {[
+                      {
+                        verdict: "held" as const,
+                        label: "Granted",
+                        tip: "This connector asks for it and the provider granted it. Calls needing it will work.",
+                      },
+                      {
+                        verdict: "refused" as const,
+                        label: "Refused",
+                        tip: "This connector asks for it and the provider did not grant it — most often because it was unticked on the consent screen. Anything relying on it will be refused. Reconnect and approve every permission.",
+                      },
+                      {
+                        verdict: "unused" as const,
+                        label: "Unknown",
+                        tip: "This API documents it, but this connector never asks for it. Not a fault — simply not part of what this connector does.",
+                      },
+                    ].map((item) => (
+                      <InfoTooltip key={item.verdict} tip={item.tip}>
+                        <span className="inline-flex items-center gap-1">
+                          <ScopeStatusIcon verdict={item.verdict} />
+                          {item.label}
+                        </span>
+                      </InfoTooltip>
+                    ))}
+                  </span>
+                )}
+              </div>
+
+              {connector.scopeDocs.scopes.length === 0 ? (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Not read yet. Press Refresh to read the permissions this API
+                  documents.
+                </p>
+              ) : (
+                /* Striped rather than spaced: fourteen two-line rows read as
+                   one wall of text, and a band per row is what lets the eye
+                   carry a scope across to its verdict on the right. Dividers as
+                   well as tint, because the tint alone cannot go any darker —
+                   see the row class below. */
+                <ul className="mt-2 divide-y divide-border overflow-hidden rounded-md border border-border">
+                  {connector.scopeDocs.scopes.map((sc, i) => {
+                    const verdict = scopeVerdict(sc.scope, {
+                      granted: connector.access.granted,
+                      grantedKnown: connector.access.grantedKnown,
+                      requested: oauth?.scopes ?? [],
+                    });
+                    return (
+                      <li
+                        key={sc.scope}
+                        /*
+                          60% is the ceiling, not a taste call. Measured against
+                          this theme's tokens, `text-muted-foreground` — which
+                          both the description and an unused row's id use — sits
+                          on the stripe at 4.51:1 here, 4.46:1 at 75%, and
+                          4.34:1 on solid `bg-muted`. The floor is 4.5:1, so a
+                          darker band would push the very text it is meant to
+                          make readable under it. Dark themes have far more
+                          headroom; the light one is what binds.
+
+                          Alpha over a known ground is what the colour rule
+                          permits — it bans opaque fills posing as theme
+                          surfaces.
+                        */
+                        className={`flex items-start gap-2 px-3 py-2 ${
+                          i % 2 === 1 ? "bg-muted/60" : ""
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            {/* The id leads: it is what the provider's console
+                                and its docs both call this scope, so it is what
+                                someone scanning for a particular one is looking
+                                for. `title` carries the full string, since this
+                                is a cut of it. */}
+                            <span
+                              title={sc.scope}
+                              className={`break-all font-mono text-sm ${
+                                verdict === "unused"
+                                  ? "text-muted-foreground"
+                                  : "text-foreground"
+                              }`}
+                            >
+                              {shortScopeId(sc.scope)}
+                            </span>
+                            <StatusPill tone={SCOPE_TONE[sc.access]}>
+                              {SCOPE_LABEL[sc.access]}
+                            </StatusPill>
+                          </span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">
+                            {sc.description}
+                          </span>
+                        </span>
+                        <span className="mt-0.5">
+                          <ScopeStatusIcon verdict={verdict} />
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {(refreshError ?? connector.scopeDocs.lastError) && (
+                <p className="mt-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground">
+                  Couldn&apos;t re-read the documentation page:{" "}
+                  {refreshError ?? connector.scopeDocs.lastError}
+                </p>
+              )}
+
+              {/*
+                The control sits with the line it acts on: "read 2 min ago" is
+                what Refresh changes, and in the heading it was the length of
+                the list away from any evidence it had done something.
+              */}
+              {scopesUrl && (
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    Source:{" "}
+                    <DocLink
+                      link={{
+                        label: `${connector.displayName} API scopes documentation`,
+                        url: scopesUrl,
+                      }}
+                    />
+                    {docsFetchedText && !connector.scopeDocs.lastError
+                      ? ` · read ${docsFetchedText}`
+                      : ""}
+                  </p>
+                  {/*
+                    `size="sm"` is the smallest the design system offers, and
+                    deliberately so — both sizes clear the touch-target floor
+                    ux.md sets, so this goes quieter rather than shorter.
+                  */}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    busy={refreshing}
+                    busyLabel="Refreshing…"
+                    icon={<RefreshCw className="h-4 w-4" aria-hidden />}
+                    onClick={() =>
+                      startRefresh(async () => {
+                        const r = await refreshScopeDocsAction(connector.name);
+                        setRefreshError(
+                          r.ok ? null : (r.error ?? "The refresh failed."),
+                        );
+                      })
+                    }
+                  >
+                    Refresh
+                  </Button>
+                </div>
+              )}
+              {!isOAuth && (
+                <p className="mt-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">
+                  This connector authenticates with an API key. What that key is
+                  permitted to do was decided in the provider&apos;s own console
+                  and is not visible here — check it there.
+                </p>
+              )}
+            </section>
+          </div>
+        )}
+
+        {tab === "logs" && (
+          <section>
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Last {connector.access.log.length || 100} requests
+            </h3>
+            {connector.access.log.length === 0 ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                Nothing recorded yet. No app has called this connector.
+              </p>
+            ) : (
+              /*
+                Scrolls inside itself rather than growing the dialog: the panel
+                is a fixed height, and a hundred rows must not be the thing that
+                decides how tall it is.
+              */
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+                      <th scope="col" className="py-1.5 pr-3 font-semibold">
+                        When
+                      </th>
+                      <th scope="col" className="py-1.5 pr-3 font-semibold">
+                        App
+                      </th>
+                      <th scope="col" className="py-1.5 pr-3 font-semibold">
+                        User
+                      </th>
+                      <th scope="col" className="py-1.5 pr-3 font-semibold">
+                        Method
+                      </th>
+                      <th scope="col" className="py-1.5 font-semibold">
+                        Result
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {connector.access.log.map((row, i) => (
+                      <tr key={`${row.at}-${i}`} className="align-top">
+                        <td className="whitespace-nowrap py-1.5 pr-3 text-muted-foreground">
+                          <LogTime at={row.at} />
+                        </td>
+                        <td className="py-1.5 pr-3 text-foreground">
+                          {row.appSlug ?? "—"}
+                        </td>
+                        <td className="py-1.5 pr-3 text-muted-foreground">
+                          {/* No user means a scheduled job or a public surface
+                              call, not a missing record. */}
+                          {row.userName ?? "System"}
+                        </td>
+                        <td className="py-1.5 pr-3 font-mono text-xs text-foreground">
+                          {row.method}
+                        </td>
+                        <td className="py-1.5">
+                          {row.outcome === "ok" ? (
+                            <Check
+                              role="img"
+                              aria-label="Succeeded"
+                              className="h-4 w-4 text-success"
+                            />
+                          ) : row.outcome === "error" ? (
+                            <StatusPill tone="danger">
+                              {row.errorCategory ?? "failed"}
+                            </StatusPill>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              —
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+
+        <section hidden={tab !== "configure"}>
+          {/*
+            Configured: the wizard has nothing left to walk anyone through, so
+            it gives way to the one fact worth having — when, and by whom — and
+            a way back in. Re-reading four completed steps is not what someone
+            opens this tab for.
+          */}
+          {allDone && !showDone && (
+            <div className="rounded-lg border border-success/40 bg-success/10 p-4">
+              <p className="flex flex-wrap items-center gap-2 text-sm text-foreground">
+                <Check className="h-4 w-4 shrink-0 text-success" aria-hidden />
+                <span className="font-medium">Configured</span>
+                {configuredText && (
+                  <span className="text-muted-foreground">
+                    {configuredText}
+                    {verification.configuredBy
+                      ? ` by ${verification.configuredBy}`
+                      : ""}
+                  </span>
+                )}
+              </p>
+              {verified && verifiedText && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Last verified {verifiedText}
+                  {verification.detail ? ` — ${verification.detail}` : ""}.
+                </p>
+              )}
+              <Button
+                variant="primary"
+                size="sm"
+                className="mt-3"
+                onClick={() => {
+                  setShowDone(true);
+                  setPinnedStep(steps[0].id);
+                }}
+              >
+                Update configuration
+              </Button>
+            </div>
+          )}
+
+          {wizardVisible && (
+            <>
+              <div className={allDone ? "mt-3" : ""}>
+                <StepRail
+                  steps={steps}
+                  currentId={currentId}
+                  maxReachable={maxReachable}
+                  onSelect={setPinnedStep}
+                />
+
+                <div className="mt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      {current.title}
+                    </h3>
+                    {/* The green tick again, in words, for the step you are
+                        actually looking at — the rail's tick is 8px of glyph. */}
+                    {current.done && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-success">
+                        <Check className="h-3.5 w-3.5" aria-hidden />
+                        Completed
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-3 space-y-3">{current.body}</div>
+
+                  {/* Always this corner, every step. */}
+                  <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3">
+                    {currentIndex > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="mr-auto"
+                        onClick={() =>
+                          setPinnedStep(steps[currentIndex - 1].id)
+                        }
+                      >
+                        Back
+                      </Button>
+                    )}
+                    {current.action}
+                    {(current.action == null || current.done) && advance}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+          {/* The three things an admin opens a working connector for. Each
+              jumps to the step that owns it rather than duplicating its
+              controls. */}
+          {allDone && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => jumpTo("credentials")}>
+                Update credentials
+              </Button>
+              {isOAuth && (
+                <Button size="sm" onClick={() => jumpTo("authorize")}>
+                  Reconnect
+                </Button>
+              )}
+              <Button size="sm" onClick={() => jumpTo("verify")}>
+                Verify again
+              </Button>
+            </div>
+          )}
+        </section>
+      </div>
+    </Dialog>
+  );
+}

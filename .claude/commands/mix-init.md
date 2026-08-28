@@ -376,8 +376,19 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
    - **Not sure what to build?** Run **`/mix-help`** — it explains how apps and
      connectors relate and recommends what to build.
    - **`/mix-app`** builds something under `apps/`; **`/mix-connector`** builds
-     an integration under `connectors/`; **`/mix-deploy`** makes the branch and
+     an integration under `connectors/`; **`/mix-theme`** changes how the whole
+     install looks, under `themes/`; **`/mix-deploy`** makes the branch and
      opens the pull request when you're ready. Never commit straight to `main`.
+   - **Your edits appear on save; brand-new apps, connectors and themes do not.** The
+     container runs `next dev` over your working tree, so editing a page, a
+     component, or an API route is live in about two seconds — no restart, no
+     rebuild. The one exception is the generated registry: `apps/`,
+     `connectors/` and `themes/` are scanned once at container start by the
+     `predev` hook, so a **newly created** app, connector, or theme stays
+     invisible until you run `npm run registry`. That writes `src/generated/`,
+     which then hot-reloads like any other file. `/mix-app`, `/mix-connector`
+     and `/mix-theme` already run the generator as their first verification
+     step, so this mostly bites when you add a directory by hand.
    - **Everyday commands:** `npm run dev:docker` to start — it stays in the
      foreground streaming logs, and Ctrl-C ends the session by stopping the app
      container while the database keeps running. `npm run docker:down` stops

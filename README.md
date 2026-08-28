@@ -252,13 +252,19 @@ them to yours.
 To build on MixOS, work from a feature branch and use the guided skills (Claude in
 VSCode):
 
-- **`/mix-help`** — new here or unsure what to build? It explains how apps and
-  connectors relate, asks what you're trying to do, and recommends what to build
-  and which docs to read.
+- **`/mix-help`** — new here or unsure what to build? It explains how apps,
+  connectors, and themes relate, asks what you're trying to do, and recommends
+  what to build and which docs to read.
 - **`/mix-app`** — create or update an app under `apps/`. Spec:
   [apps/AGENTS.md](apps/AGENTS.md).
+- **`/mix-convert`** — turn an existing application (a local folder, a git URL,
+  or code you've staged here) into a MixOS app. It inventories the original,
+  writes a conversion plan to `apps/<slug>/plans/`, stops for your approval, then
+  builds the first slice.
 - **`/mix-connector`** — create or update a connector under `connectors/`. Spec:
   [connectors/AGENTS.md](connectors/AGENTS.md).
+- **`/mix-theme`** — create or update a theme under `themes/` — the colours, type,
+  and logo every app renders through. Spec: [themes/AGENTS.md](themes/AGENTS.md).
 - **`/mix-deploy`** — create your feature branch and, when you're ready, open the
   Pull Request (with a detailed description) for you.
 
@@ -269,9 +275,9 @@ Anthony or another developer to open it for you.
 
 There is no publish step. `.githooks/pre-commit` runs
 [`scripts/stamp-updated.ts`](scripts/stamp-updated.ts), which stamps `lastUpdated`
-on every app or connector with a file in the commit and re-stages the manifest —
-so the date shown in the App Manager and Connector Registry always matches the
-last commit that touched it. Preview what would be stamped with
+on every app, connector, or theme with a file in the commit and re-stages the
+manifest — so the date shown in the App Manager and Connector Registry always
+matches the last commit that touched it. Preview what would be stamped with
 `npx tsx scripts/stamp-updated.ts --dry-run`.
 
 Recent, developer-facing changes are summarized in [WHATS-NEW.md](WHATS-NEW.md);
@@ -369,3 +375,16 @@ One-time setup:
 `vercel.json` registers the scheduler cron (`/api/cron`, every 5 minutes). Note
 that Vercel's Hobby plan only permits **daily** cron schedules — the 5-minute
 cadence needs a Pro plan.
+
+## Licence
+
+MixOS is licensed under the **Mozilla Public License 2.0** ([`LICENSE`](LICENSE)).
+
+The platform is copyleft; **what you build on it is yours.** Apps, connectors
+and themes under `apps/`, `connectors/` and `themes/` are not Covered Software
+and may be licensed however you like, including proprietary — importing
+platform code does not change that. The scaffolding templates are public domain
+(CC0) so a copied template never carries obligations into your work.
+
+See [`LICENSING.md`](LICENSING.md) for the boundary in detail, why MPL was
+chosen over GPL and AGPL, and the trademark and contribution terms.

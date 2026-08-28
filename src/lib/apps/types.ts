@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * How a caller may authenticate to a page or API route.
  *
@@ -62,6 +66,8 @@ export function publicGateFor(
   if (!auths || auths.length === 0) return "none";
   if (auths.includes("public")) return "open";
   if (auths.includes("password")) return "password";
+  // `key` is authenticated by a header, not a cookie, so the public mount serves
+  // it without a gate of its own — `resolveAuthTier` does the checking.
   if (auths.includes("key")) return "key";
   return "none";
 }
@@ -78,6 +84,12 @@ export interface AppManifest {
    * users. An admin must configure each one before the app can be registered.
    */
   connectors: string[];
+  /**
+   * Connectors a part of this app uses but which it works without. Never gates
+   * registration; present in `context.connectors` only when configured, so app
+   * code must handle the entry being missing.
+   */
+  optionalConnectors: string[];
   database: boolean;
   /** When true, the app can send Web Push via `context.notifications`. */
   notifications: boolean;
@@ -184,6 +196,13 @@ export interface AppManifest {
    * Defaults to `[]`.
    */
   consumes: ServiceDependency[];
+  /**
+   * Hooks this app fires and who may listen. Two-sided consent, default-deny —
+   * the generator rejects a listener the emitter did not allow. Defaults to `[]`.
+   */
+  emits: HookEmit[];
+  /** Hooks from other apps this app listens for. Defaults to `[]`. */
+  listensTo: HookListen[];
   /**
    * Read-only tools this app contributes to the MixOS MCP server. Each entry's
    * `name` maps to a handler at `apps/<slug>/mcp/<name>.ts` (default export
@@ -470,6 +489,24 @@ export interface McpToolDefinition {
    * no Gong calls") over a hedge ("may be incomplete").
    */
   notCovered?: string;
+}
+
+/**
+ * A hook this app fires, and the apps allowed to listen.
+ *
+ * The push counterpart of `provides`. Before this, cross-app hook listening was
+ * the only channel between two apps with no consent on either side.
+ */
+export interface HookEmit {
+  name: string;
+  description?: string;
+  consumers: string[] | "*";
+}
+
+/** A hook this app listens for, declared by the listener. */
+export interface HookListen {
+  app: string;
+  hook: string;
 }
 
 /** A dependency on another app's service, declared by the consumer. */

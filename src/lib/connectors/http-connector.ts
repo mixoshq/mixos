@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { connectorRegistry } from "@/generated/connector-registry";
 import { ConnectorError, RETRYABLE_CATEGORIES } from "./errors";
 import type { ConnectorErrorCategory } from "./errors";
@@ -10,6 +14,7 @@ import {
   parseRetryAfter,
 } from "./status-map";
 import { TOKEN_KEYS, requestToken } from "./oauth";
+import { connectorConfigState } from "./status";
 import type {
   BaseConnector,
   ConnectorAuthPolicy,
@@ -101,25 +106,13 @@ export abstract class HttpConnector implements BaseConnector {
    * `auth.credentialKeys` when declared, so most connectors never write it.
    * `testConnection()` is the live proof — keeping the two separate is what
    * makes invariant 12 checkable instead of aspirational.
+   *
+   * The rule itself lives in `./status.ts`, because the Connector Registry has
+   * to answer the same question about credentials it has read but not
+   * instantiated. Two copies of it drifted once already — see that file.
    */
   get configured(): boolean {
-    // A three-legged connector with client credentials but no grant yet is
-    // *not* configured: an admin has filled the form but never pressed Connect,
-    // and no call can succeed. Invariant 12 means saying so.
-    if (this.auth.strategy === "oauth2_authorization_code") {
-      const [idKey, secretKey] = this.auth.credentialKeys ?? ["clientId", "clientSecret"];
-      return (
-        this.hasCredentials(idKey, secretKey) &&
-        (this.hasCredentials(TOKEN_KEYS.refresh) || this.hasCredentials(TOKEN_KEYS.access))
-      );
-    }
-
-    const keys = this.auth.credentialKeys;
-    if (keys && keys.length > 0) {
-      return keys.every((k) => (this.credentials[k] ?? "").length > 0);
-    }
-    // No declaration to go on: any credential at all counts as configured.
-    return Object.values(this.credentials).some((v) => (v ?? "").length > 0);
+    return connectorConfigState(this.auth, this.credentials) === "ready";
   }
 
   /**

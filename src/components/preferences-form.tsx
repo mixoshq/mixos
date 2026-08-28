@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import {
@@ -42,15 +46,15 @@ export default function PreferencesForm() {
           Chrome Extension
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
-          Replace your Chrome new tab page with Montalbano OS. Click the toolbar icon
+          Replace your Chrome new tab page with MixOS. Click the toolbar icon
           to toggle the privacy filter, which covers the screen so your data
-          stays hidden while you're screensharing.
+          stays hidden while you&apos;re screensharing.
         </p>
 
         <a
           href="/mixos-extension.zip"
           download
-          className="inline-flex items-center gap-2 rounded-md bg-mixnavy px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-mixnavy/90"
+          className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand/90"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -96,7 +100,7 @@ export default function PreferencesForm() {
               and select the unzipped folder
             </li>
             <li>
-              Open a new tab — Montalbano OS loads inside the tab, and the address
+              Open a new tab — MixOS loads inside the tab, and the address
               bar stays focused so you can keep typing
             </li>
           </ol>
@@ -137,7 +141,7 @@ function Field({
                 onClick={() => onChange(opt.value)}
                 className={`px-3 py-1.5 text-sm transition-colors ${
                   active
-                    ? "bg-mixnavy text-white"
+                    ? "bg-brand text-brand-foreground"
                     : "bg-card text-foreground hover:bg-accent"
                 }`}
               >

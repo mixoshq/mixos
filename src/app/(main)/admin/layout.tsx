@@ -1,14 +1,13 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+import SettingsShell from "@/components/settings/settings-shell";
+
 export default function AdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <div className="p-8">
-      {children}
-      <p className="mt-12 text-center text-xs text-muted-foreground">
-        Made in Detroit with 🫶🏽
-      </p>
-    </div>
-  );
+  return <SettingsShell>{children}</SettingsShell>;
 }

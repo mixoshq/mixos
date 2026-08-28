@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
 import {
@@ -57,7 +61,10 @@ function parseSource(
 ): { type: TelemetrySourceType; slug: string } | null {
   if (!raw) return null;
   const [type, slug] = raw.split(":");
-  if (type === "app" && appRegistry.some((a) => a.slug === slug && appHasAnalytics(a))) {
+  if (
+    type === "app" &&
+    appRegistry.some((a) => a.slug === slug && appHasAnalytics(a))
+  ) {
     return { type: "app", slug };
   }
   if (
@@ -114,12 +121,15 @@ function Bar({
   return (
     <div className="py-1.5">
       <div className="flex items-center gap-3">
-        <div className="w-56 shrink-0 truncate text-sm text-foreground" title={label}>
+        <div
+          className="w-56 shrink-0 truncate text-sm text-foreground"
+          title={label}
+        >
           {label}
         </div>
         <div className="h-2.5 flex-1 rounded-full bg-muted">
           <div
-            className="h-2.5 rounded-full bg-mixnavy"
+            className="h-2.5 rounded-full bg-brand"
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -374,10 +384,7 @@ function Header({
   return (
     <div className="flex items-start justify-between gap-4">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Administration
-        </p>
-        <h1 className="mt-1 text-2xl font-bold text-foreground">Analytics</h1>
+        <h1 className="text-2xl font-bold text-foreground">Analytics</h1>
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
@@ -411,7 +418,8 @@ export default async function AnalyticsAdminPage({ searchParams }: Props) {
       selected.type === "app"
         ? appRegistry.find((a) => a.slug === selected.slug)
         : undefined;
-    const showTelemetry = selected.type !== "app" || !!manifest?.telemetry.length;
+    const showTelemetry =
+      selected.type !== "app" || !!manifest?.telemetry.length;
     const showMcp = selected.type === "app" && !!manifest?.mcp.length;
     return (
       <div className="space-y-6">
@@ -429,7 +437,11 @@ export default async function AnalyticsAdminPage({ searchParams }: Props) {
         {/* An app with `mcp` but no declared telemetry events would otherwise
             render three empty sections — skip them and show only MCP. */}
         {showTelemetry && (
-          <TelemetryView type={selected.type} slug={selected.slug} days={days} />
+          <TelemetryView
+            type={selected.type}
+            slug={selected.slug}
+            days={days}
+          />
         )}
         {showMcp && <McpView slug={selected.slug} days={days} />}
       </div>
@@ -437,14 +449,15 @@ export default async function AnalyticsAdminPage({ searchParams }: Props) {
   }
 
   // Overview (default).
-  const [installs, widgets, opens, topUsers, trend, mcpByApp] = await Promise.all([
-    getAppInstallCounts(),
-    getWidgetSetupCounts(),
-    getAppOpenCounts(days),
-    getTopUsers(days),
-    getOpenTrend(days),
-    ANY_MCP_APPS ? getMcpCallCountsByApp(days) : Promise.resolve([]),
-  ]);
+  const [installs, widgets, opens, topUsers, trend, mcpByApp] =
+    await Promise.all([
+      getAppInstallCounts(),
+      getWidgetSetupCounts(),
+      getAppOpenCounts(days),
+      getTopUsers(days),
+      getOpenTrend(days),
+      ANY_MCP_APPS ? getMcpCallCountsByApp(days) : Promise.resolve([]),
+    ]);
 
   const maxInstalls = Math.max(1, ...installs.map((r) => r.installs));
   const maxWidgets = Math.max(1, ...widgets.map((r) => r.instances));

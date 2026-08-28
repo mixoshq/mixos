@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { NextResponse, type NextRequest } from "next/server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { McpToolError, callTool } from "@/lib/mcp/broker";

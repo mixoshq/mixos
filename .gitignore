@@ -60,3 +60,10 @@ src/generated/
 # CLI's scratch dirs (linked project ref, branch metadata, local stack volumes).
 supabase/.temp/
 supabase/.branches/
+
+# theme and connector assets, copied out of themes/<slug>/assets and
+# connectors/<name>/assets by scripts/generate-project-registry.ts. Generated,
+# like src/generated — keeping it would commit every font and icon twice and let
+# the copy drift from source.
+/public/themes/
+/public/connector-assets/

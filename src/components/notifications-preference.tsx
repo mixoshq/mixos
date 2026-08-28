@@ -1,6 +1,11 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useEffect, useState } from "react";
+import { useClientValue } from "@/lib/use-client-value";
 import {
   disablePushNotifications,
   enablePushNotifications,
@@ -17,29 +22,42 @@ import {
  * shows the matching control + guidance.
  */
 export default function NotificationsPreference() {
-  const [supported, setSupported] = useState<boolean | null>(null);
-  const [permission, setPermission] = useState<NotificationPermission | null>(
+  // `null` until hydration, so the server and the first client render agree.
+  const supported = useClientValue<boolean | null>(() => isPushSupported(), null);
+  const permission = useClientValue<NotificationPermission | null>(
+    () => getPushPermission(),
     null,
   );
-  const [subscribed, setSubscribed] = useState<boolean | null>(null);
+  const [fetchedSubscription, setSubscribed] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   // Set when an enable attempt surfaces a state the booleans don't capture.
   const [lastResult, setLastResult] = useState<PushEnableResult | null>(null);
 
+  // Capability and permission are browser state, read directly rather than
+  // copied into React state by an effect. Only the subscription lookup is
+  // genuinely async, so only that one stays an effect.
+  // Derived, not written by the effect: an unsupported browser is definitionally
+  // unsubscribed, and only the genuinely async lookup needs an effect.
+  const subscribed = supported === false ? false : fetchedSubscription;
+
   useEffect(() => {
-    const ok = isPushSupported();
-    setSupported(ok);
-    setPermission(getPushPermission());
-    if (ok) isPushSubscribed().then(setSubscribed);
-    else setSubscribed(false);
-  }, []);
+    if (!supported) return;
+    let active = true;
+    isPushSubscribed().then((v) => {
+      if (active) setSubscribed(v);
+    });
+    return () => {
+      active = false;
+    };
+  }, [supported]);
 
   async function enable() {
     setBusy(true);
     try {
       const result = await enablePushNotifications();
       setLastResult(result);
-      setPermission(getPushPermission());
+      // `permission` needs no explicit refresh: useSyncExternalStore re-reads
+      // its snapshot on every render, and the two setState calls here cause one.
       setSubscribed(await isPushSubscribed());
     } finally {
       setBusy(false);
@@ -81,8 +99,8 @@ export default function NotificationsPreference() {
         </Note>
       ) : enabled ? (
         <div className="flex flex-wrap items-center gap-3">
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-sm font-medium text-emerald-900">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-success/40 bg-success/10 px-2.5 py-1.5 text-sm font-medium text-foreground">
+            <span className="h-2 w-2 rounded-full bg-success" />
             Enabled on this browser
           </span>
           <button
@@ -104,7 +122,7 @@ export default function NotificationsPreference() {
           <button
             onClick={enable}
             disabled={busy}
-            className="inline-flex items-center gap-2 rounded-md bg-mixnavy px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-mixnavy/90 disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand/90 disabled:opacity-50"
           >
             🔔 {busy ? "Enabling…" : "Enable notifications"}
           </button>
@@ -134,7 +152,7 @@ function Note({
 }) {
   const cls =
     tone === "warning"
-      ? "border-amber-300 bg-amber-50 text-amber-900"
+      ? "border-warning/40 bg-warning/10 text-foreground"
       : "border-border bg-muted/50 text-muted-foreground";
   return (
     <div className={`rounded-md border p-3 text-xs ${cls}`}>{children}</div>

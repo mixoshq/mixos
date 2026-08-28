@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useSyncExternalStore } from "react";
@@ -34,10 +38,10 @@ export default function OfflineBreakOverlay() {
       role="dialog"
       aria-modal="true"
       aria-label="You're offline"
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-8 bg-montalbano-navy px-6 text-center text-white"
+      className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-8 bg-brand px-6 text-center text-brand-foreground"
     >
       <h1 className="text-4xl font-extrabold tracking-tight sm:text-6xl">
-        WE&apos;RE ON A <span className="text-montalbano-coral">BREAK!</span>
+        WE&apos;RE ON A <span className="text-brand-accent">BREAK!</span>
       </h1>
       {/* Raw <img> with a root-absolute src (public/we_are_on_a_break.png),
           matching the asset convention in src/components/dashboard/grid.tsx.

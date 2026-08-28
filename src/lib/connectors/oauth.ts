@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { getAppOrigin } from "@/lib/env/origin";
 import { decrypt, encrypt } from "./encryption";
@@ -71,6 +75,14 @@ export function redirectUriFor(connectorName: string): string {
 
 export interface OAuthFlowState {
   connector: string;
+  /**
+   * Who started this flow, for a user-scoped connector. Checked against the
+   * session at the callback: without it, a session that changes mid-round-trip
+   * writes one person's grant onto another person's row, which is the worst
+   * failure available in this file. Null for a tenant flow, which has no owner
+   * beyond "an admin".
+   */
+  userId: string | null;
   /** Opaque value echoed by the provider; the CSRF binding. */
   state: string;
   /** S256 verifier. Stays server-side. */
@@ -79,9 +91,14 @@ export interface OAuthFlowState {
   exp: number;
 }
 
-export function newFlowState(connector: string, returnTo: string): OAuthFlowState {
+export function newFlowState(
+  connector: string,
+  returnTo: string,
+  userId: string | null = null,
+): OAuthFlowState {
   return {
     connector,
+    userId,
     state: randomBytes(32).toString("base64url"),
     // RFC 7636 allows 43–128 chars; 43 bytes of entropy encodes to 43+.
     codeVerifier: randomBytes(48).toString("base64url"),

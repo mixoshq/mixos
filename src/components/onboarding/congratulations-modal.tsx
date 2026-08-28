@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useMemo, useSyncExternalStore, type CSSProperties } from "react";
@@ -8,13 +12,19 @@ const subscribeNoop = () => () => {};
 const getTrue = () => true;
 const getFalse = () => false;
 
+/**
+ * The categorical ramp, not raw hexes. Confetti is the textbook case for
+ * `cat-*`: six colours whose only job is to be distinguishable from one
+ * another. Reading them as vars also means the celebration follows the active
+ * theme rather than pinning hexes that go stale the moment the brand moves.
+ */
 const CONFETTI_COLORS = [
-  "#002345", // mixcharcoal
-  "#F05237", // mixgrey
-  "#FFD166",
-  "#06D6A0",
-  "#118AB2",
-  "#EF476F",
+  "var(--cat-1)",
+  "var(--cat-2)",
+  "var(--cat-3)",
+  "var(--cat-4)",
+  "var(--cat-5)",
+  "var(--cat-6)",
 ];
 
 // A popper has two cones (bottom corners) shooting confetti up and outward.
@@ -147,8 +157,8 @@ export default function CongratulationsModal() {
           })}
         </div>
 
-        <div className="relative bg-mixcharcoal px-8 pb-10 pt-10 text-center text-white">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-mixgrey">
+        <div className="relative bg-brand px-8 pb-10 pt-10 text-center text-brand-foreground">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             You did it
           </p>
           <h2 className="mt-3 text-3xl font-bold tracking-tight">
@@ -164,7 +174,7 @@ export default function CongratulationsModal() {
           <button
             type="button"
             onClick={dismissCongratulations}
-            className="rounded-md bg-mixgrey px-5 py-2 text-sm font-semibold text-white hover:bg-mixgrey/90"
+            className="rounded-md bg-primary px-5 py-2 text-sm font-semibold text-white hover:bg-primary/90"
           >
             Let&apos;s go
           </button>

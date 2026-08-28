@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * Resolving which auth tier a caller actually presents.
  *
@@ -21,6 +25,11 @@
 import { getReadOnlySession } from "@/lib/auth/session";
 import { getUserById, hasAppGrant } from "@/lib/apps/access";
 import { isAppUnlocked } from "@/lib/apps/public-access";
+import {
+  keyAllows,
+  presentedApiKey,
+  resolveApiKey,
+} from "@/lib/apps/api-keys";
 import type { RouteAuth } from "@/lib/apps/types";
 
 export type AppMount = "authenticated" | "public";
@@ -41,11 +50,14 @@ type DbUser = NonNullable<Awaited<ReturnType<typeof getUserById>>>;
  * public route to a signed-in user gives away nothing that wasn't already given
  * away.
  *
- * `key` is on neither list until the tier exists (Phase 6). See `resolveAuthTier`.
+ * `key` is served on the PUBLIC mount only. Not a policy choice: `/api/apps` sits
+ * behind the proxy's cookie-presence check, so a machine-to-machine caller with
+ * no cookie is redirected to /login before any of this runs. `/api/p` is the
+ * non-cookie surface, which is exactly what an integration needs.
  */
 const ELIGIBLE_BY_MOUNT: Record<AppMount, readonly RouteAuth[]> = {
   authenticated: ["session", "signed-in", "public"],
-  public: ["password", "public"],
+  public: ["password", "key", "public"],
 };
 
 /** Strongest first. Resolution walks this order and stops at the first match. */
@@ -59,7 +71,7 @@ const STRENGTH: readonly RouteAuth[] = [
 
 export type AuthResolution =
   | { kind: "resolved"; tier: "session" | "signed-in"; dbUser: DbUser }
-  | { kind: "resolved"; tier: "password" | "public"; dbUser: null }
+  | { kind: "resolved"; tier: "password" | "key" | "public"; dbUser: null }
   /** The route wants an identity and the caller presented none. */
   | { kind: "unauthenticated" }
   /** The caller is known and holds no grant, and no weaker tier is declared. */
@@ -79,19 +91,16 @@ export async function resolveAuthTier(opts: {
   /** The route's declared auth set. */
   accepted: readonly RouteAuth[];
   mount: AppMount;
+  /** Needed to read a presented API key, and to scope-check it. */
+  request?: Request;
+  method?: string;
+  routePattern?: string;
 }): Promise<AuthResolution> {
-  const { appSlug, accepted, mount } = opts;
+  const { appSlug, accepted, mount, request, method, routePattern } = opts;
   const eligible = ELIGIBLE_BY_MOUNT[mount];
   const candidates = STRENGTH.filter(
     (tier) => accepted.includes(tier) && eligible.includes(tier),
   );
-
-  // A route whose only declared auth is `key` is unreachable rather than open.
-  // There is no key implementation yet, and a tier that silently falls through
-  // to a weaker one is exactly how an unimplemented gate becomes a hole.
-  if (accepted.length > 0 && accepted.every((a) => a === "key")) {
-    return { kind: "not-served" };
-  }
 
   if (candidates.length === 0) return { kind: "not-served" };
 
@@ -135,10 +144,21 @@ export async function resolveAuthTier(opts: {
         break;
       }
 
-      case "key":
-        // Skipped, not honoured. Reaching here means the route declares other
-        // tiers too, so resolution continues past it.
-        break;
+      case "key": {
+        if (!request) break;
+        const resolved = await resolveApiKey(presentedApiKey(request), appSlug);
+        if (!resolved) break;
+        // A valid key still has to be SCOPED to this route. A key minted for
+        // one endpoint must not become a key for the whole app.
+        if (
+          method &&
+          routePattern !== undefined &&
+          !keyAllows(resolved.scopes, method, routePattern)
+        ) {
+          break;
+        }
+        return { kind: "resolved", tier, dbUser: null };
+      }
 
       case "public":
         return { kind: "resolved", tier, dbUser: null };

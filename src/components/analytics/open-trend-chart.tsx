@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useState } from "react";
@@ -49,8 +53,8 @@ export default function OpenTrendChart({
               <div
                 className={
                   active
-                    ? "w-full rounded-t-[4px] bg-mixnavy"
-                    : "w-full rounded-t-[4px] bg-mixnavy/60"
+                    ? "w-full rounded-t-[4px] bg-brand"
+                    : "w-full rounded-t-[4px] bg-brand/60"
                 }
                 style={{ height: `${Math.max(heightPct, d.opens > 0 ? 2 : 0)}%` }}
                 title={`${d.day}: ${d.opens} ${noun}${d.opens === 1 ? "" : "s"}`}

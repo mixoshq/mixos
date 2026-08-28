@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
@@ -66,6 +70,44 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  // ── Security: a page or widget must not reach its app's own server tier ──
+  //
+  // `apps/**/lib/server/**` is allowlisted to import connectors, which is what
+  // makes it the app's server tier. A page importing it reaches connectors and
+  // the database WITHOUT passing the gateway — no auth-tier resolution, no role
+  // gate, no input or output validation, no budget, no telemetry. That is the
+  // second authorization surface Phase 1 existed to delete, and the reason
+  // `docs/secure-edge-gateway-architecture.md` and `eslint.config.mjs`
+  // contradicted each other for so long.
+  //
+  // A server page gets its data the same way a browser does — through its own
+  // declared route:
+  //
+  //   const { items } = await callAppRoute("my-app", "GET /items", { limit: 20 });
+  //
+  // Same pipeline, no network hop. See docs/apps/api-routes.md#server-components.
+  {
+    files: ["apps/**/pages/**/*.{ts,tsx}", "apps/**/widgets/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/lib/server/**", "**/lib/server"],
+              message:
+                "A page or widget must not import its app's server tier — that reaches connectors and the DB without the gateway (no roles, no validation, no budget, no telemetry). Server pages: await callAppRoute(slug, \"GET /path\", input). Widgets: createAppClient(appSlug).call(...).",
+            },
+            {
+              group: ["@/lib/db", "@/lib/db/*", "@connectors/*", "@/lib/connectors/*"],
+              message:
+                "Direct DB or connector access is not allowed in a page or widget. Go through your app's declared routes.",
+            },
+          ],
+        },
+      ],
+    },
+  },
   // ── Security: server-side app code (routes, service handlers, lib/server, mcp) ──
   // These run behind the gateway and may import connectors (type-only), but must
   // NOT touch the RAW DB client — that bypasses per-app scoping and could read
@@ -116,11 +158,22 @@ const eslintConfig = defineConfig([
   //    repo at 3.76:1 — below the 4.5:1 floor for body text. Use text-success /
   //    text-warning / text-destructive / text-muted-foreground instead.
   //
-  // 2. COLOURS FORK IN globals.css, NEVER IN AN APP. The platform is light-only
-  //    today — nothing applies the `.dark` class — but that block is kept
-  //    complete and AA-correct so shipping dark mode stays a one-file change.
-  //    Per-app `dark:` variants are precisely what would destroy that: twenty
-  //    apps each half-supporting a theme none of them can test.
+  // 2. THERE IS NO `dark:` VARIANT TO WRITE. A theme declares ONE palette, and
+  //    a dark look is a different theme an admin selects — `mixos` and
+  //    `mixos-dark` are two themes, not two modes of one. So a `dark:` variant
+  //    is not "the wrong place to fork colour", it is a fork with nothing on the
+  //    other side: it hard-codes a second answer somewhere the contrast gate
+  //    cannot see, and it is wrong the moment a third theme appears.
+  //
+  // WHY src/ IS IN SCOPE AS OF THE THEME ABSTRACTION. This block used to read
+  // "the platform is light-only today — nothing applies the `.dark` class", and
+  // was scoped to apps/** on the strength of it. `feat/theme-abstraction` made a
+  // dark palette reachable and that assumption expired: the platform's own
+  // chrome had accumulated ~120 raw palette utilities and 13 `dark:` variants
+  // that apps/ had been forbidden from writing for years. Extending the glob is
+  // what makes that a one-time repair rather than a recurring cleanup — the
+  // platform is now held to the rule it wrote. See
+  // docs/plans/20260826_1959-dark-mode-legibility.md.
   //
   // OPAQUE FILLS ONLY. `bg-white/10` as a hover on a navy panel and
   // `bg-black/70` as a modal scrim are alpha over a *known* ground and stay
@@ -134,43 +187,136 @@ const eslintConfig = defineConfig([
   //
   // See docs/apps/ux.md and apps/AGENTS.md invariant 22.
   {
-    files: ["apps/**/*.{ts,tsx}"],
+    files: ["apps/**/*.{ts,tsx}", "src/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-syntax": [
         "error",
         {
           selector:
-            "Literal[value=/(?:^|[\\s\"'`])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
+            "Literal[value=/(?:^|[\\s\"'`:])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
           message:
             "Raw palette colours dodge the contrast guarantee. Use semantic tokens: text-foreground, text-muted-foreground, text-success, text-warning, text-destructive, bg-card, bg-muted, bg-primary. See docs/apps/ux.md#color--contrast.",
         },
         {
           selector:
-            "TemplateElement[value.raw=/(?:^|[\\s\"'`])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
+            "TemplateElement[value.raw=/(?:^|[\\s\"'`:])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
           message:
             "Raw palette colours dodge the contrast guarantee. Use semantic tokens: text-foreground, text-muted-foreground, text-success, text-warning, text-destructive, bg-card, bg-muted, bg-primary. See docs/apps/ux.md#color--contrast.",
         },
         {
           selector:
-            "Literal[value=/(?:^|[\\s\"'`])bg-(?:white|black)(?![\\w\\/-])/]",
+            "Literal[value=/(?:^|[\\s\"'`:])bg-(?:white|black)(?![\\w\\/-])/]",
           message:
             "An opaque bg-white / bg-black is a theme surface in disguise. Use bg-card, bg-background, or bg-muted. Alpha over a known ground (bg-white/10, bg-black/70) is fine and is not flagged.",
         },
         {
           selector:
-            "TemplateElement[value.raw=/(?:^|[\\s\"'`])bg-(?:white|black)(?![\\w\\/-])/]",
+            "TemplateElement[value.raw=/(?:^|[\\s\"'`:])bg-(?:white|black)(?![\\w\\/-])/]",
           message:
             "An opaque bg-white / bg-black is a theme surface in disguise. Use bg-card, bg-background, or bg-muted. Alpha over a known ground (bg-white/10, bg-black/70) is fine and is not flagged.",
         },
         {
-          selector: "Literal[value=/(?:^|[\\s\"'`])dark:/]",
+          selector: "Literal[value=/(?:^|[\\s\"'`:])dark:/]",
           message:
-            "Colours fork in src/app/globals.css, never in an app. Drop the dark: variant and use a semantic token — the token already carries both themes. See docs/apps/ux.md#the-platform-is-light-only-today.",
+            "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (mixos / mixos-dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.",
         },
         {
-          selector: "TemplateElement[value.raw=/(?:^|[\\s\"'`])dark:/]",
+          selector: "TemplateElement[value.raw=/(?:^|[\\s\"'`:])dark:/]",
           message:
-            "Colours fork in src/app/globals.css, never in an app. Drop the dark: variant and use a semantic token — the token already carries both themes. See docs/apps/ux.md#the-platform-is-light-only-today.",
+            "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (mixos / mixos-dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.",
+        },
+      ],
+    },
+  },
+  // ── Containment: an app reaches the environment and the network by declaration ──
+  //
+  // `process.env` in app code can read CONNECTOR_ENCRYPTION_KEY and
+  // SUPABASE_SERVICE_ROLE_KEY — the keys that decrypt every third-party
+  // credential and bypass RLS on every table. `context.env` can read only what
+  // the manifest declared and an admin filled in.
+  //
+  // A raw `fetch` is the SSRF hole docs/security-architecture.md §13 flagged as
+  // "a gap to close BEFORE the next feature that fetches a URL", while app
+  // routes could already do it. `context.http` checks the hostname against the
+  // manifest's `egress`, resolves it, re-checks every returned address, and
+  // repeats both on each redirect hop. Fixed, admin-configured hosts belong in a
+  // connector instead.
+  //
+  // Both are escapable — `process-env` and `raw-fetch` in the manifest's
+  // `escapes` — but only on the record, with a reason a reviewer can act on.
+  {
+    files: ["apps/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "process",
+          property: "env",
+          message:
+            "Apps must not read process.env — it carries the platform's own secrets. Declare what you need under `env` in app.json and read it as context.env.<KEY>.",
+        },
+      ],
+      "no-restricted-globals": [
+        "error",
+        {
+          name: "fetch",
+          message:
+            "Apps must not call fetch directly — that is the SSRF hole. Use context.http (bounded by the manifest's `egress` allowlist, with a resolve-and-recheck against private ranges), or a connector for a fixed upstream.",
+        },
+      ],
+    },
+  },
+  // ── Design system: apps compose from the primitives, not from raw elements ──
+  //
+  // A hand-rolled `<button>` is where ux.md's rules go to die: the pending state
+  // nobody remembered, the focus ring somebody restyled away, the icon button
+  // with no accessible name. A hand-rolled `<table>` loses the card chrome its
+  // skeleton must mirror and pushes the page into horizontal scroll. A bare
+  // `<input>` has no label wired to it.
+  //
+  // None of that is a review problem any more. `Button` takes `busy` and makes
+  // the disabled/spinner/aria-busy trio one fact; `IconButton` requires a
+  // `label`; `Field` owns the id so `htmlFor` cannot point at nothing;
+  // `DataTable` ships `TableSkeleton` built from the same constants.
+  //
+  // The 86 hand-rolled `rounded-xl border border-border bg-card` shells that
+  // drifted across 16 apps are the other half: `Card`/`SectionCard` export
+  // CARD_SHELL, and a literal copy of it is now an error rather than the 87th.
+  {
+    files: ["apps/**/*.tsx"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXOpeningElement[name.name='button']",
+          message:
+            "Use <Button> / <IconButton> from @/components/ui/button. A raw <button> loses the busy state (ux.md requires one), the focus ring, and — for an icon button — the accessible name.",
+        },
+        {
+          selector: "JSXOpeningElement[name.name='input']",
+          message:
+            "Use <Input> / <Checkbox> / <Switch> from @/components/ui/input, inside a <Field> from @/components/ui/field. Field owns the id, so the label can never point at nothing.",
+        },
+        {
+          selector: "JSXOpeningElement[name.name='select']",
+          message:
+            "Use <Select> from @/components/ui/input, inside a <Field>.",
+        },
+        {
+          selector: "JSXOpeningElement[name.name='textarea']",
+          message:
+            "Use <Textarea> from @/components/ui/input, inside a <Field>.",
+        },
+        {
+          selector: "JSXOpeningElement[name.name='table']",
+          message:
+            "Use <DataTable> from @/components/ui/data-table. It owns the card chrome, the horizontal scroll container, and a TableSkeleton built from the same constants — a hand-rolled table's skeleton drifts from it immediately.",
+        },
+        {
+          selector:
+            "Literal[value=/rounded-xl\\s+border\\s+border-border\\s+bg-card/]",
+          message:
+            "That is CARD_SHELL. Use <Card> or <SectionCard> from @/components/ui — 86 hand-rolled copies of this string across 16 apps drifted on padding, header size and heading level. See docs/apps/app-shell.md#cards.",
         },
       ],
     },
@@ -181,11 +327,10 @@ const eslintConfig = defineConfig([
   // elements across 16 apps pass CI. Read the rule file for the measurements and
   // the deliberate blind spots.
   //
-  // WARN, NOT ERROR — for now. It flags real failures in 16 existing apps, and
-  // the fix for each (drop the tint? raise the text? re-tone the token?) is a
-  // visual decision belonging to that app's owner, not something to force in a
-  // platform PR. Flip to "error" once the backlog is worked down; new code
-  // should be written to it today.
+  // ERROR. It shipped as a warning because it flagged ~215 pre-existing elements
+  // across 16 apps whose fix was a visual decision for each app's owner. Those
+  // apps are not in this repository, so the backlog the exemption existed for no
+  // longer exists — and a floor that only warns is not a floor.
   //
   // src/ is in scope too: a floor the platform's own components don't clear is
   // not a floor.
@@ -194,7 +339,7 @@ const eslintConfig = defineConfig([
     plugins: {
       "mixos-design": { rules: { "no-low-contrast-token-pairs": noLowContrastTokenPairs } },
     },
-    rules: { "mixos-design/no-low-contrast-token-pairs": "warn" },
+    rules: { "mixos-design/no-low-contrast-token-pairs": "error" },
   },
 ]);
 

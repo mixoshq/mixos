@@ -1,0 +1,90 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+import {
+  AppWindow,
+  BarChart3,
+  Bot,
+  Clock,
+  LayoutGrid,
+  Palette,
+  Plug,
+  Settings,
+  UserCog,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
+
+/**
+ * The navigable sections of the settings area, in the order they are shown.
+ *
+ * ONE definition, read by the admin sidebar, the account sidebar and the header
+ * menu. They were each written out separately, which is the arrangement where a
+ * new page gets added to one and not the others — and the one it misses is
+ * whichever the author did not happen to be looking at.
+ *
+ * `/admin` itself is absent deliberately: it only redirects to the first real
+ * page.
+ */
+export interface NavSection {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  /**
+   * Hook for the onboarding tour to point at this entry. Only App Manager needs
+   * one: the tour used to target it in the header menu, and it moved here.
+   */
+  dataTour?: string;
+}
+
+export const ADMIN_SECTIONS: NavSection[] = [
+  { label: "User Management", href: "/admin/users", icon: Users },
+  { label: "App Registry", href: "/admin/apps", icon: AppWindow },
+  { label: "Connectors", href: "/admin/connectors", icon: Plug },
+  { label: "Themes", href: "/admin/themes", icon: Palette },
+  { label: "Scheduled Jobs", href: "/admin/scheduled-jobs", icon: Clock },
+  { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
+];
+
+/**
+ * The signed-in user's own settings. App Manager belongs here rather than with
+ * Administration: installing an app is a personal choice, where the App
+ * Registry decides what exists to install at all.
+ */
+export const ACCOUNT_SECTIONS: NavSection[] = [
+  { label: "Account", href: "/account", icon: UserCog },
+  { label: "Preferences", href: "/account/preferences", icon: Settings },
+  {
+    label: "App Manager",
+    href: "/apps",
+    icon: LayoutGrid,
+    dataTour: "app-manager-link",
+  },
+  { label: "My Connections", href: "/account/connections", icon: Plug },
+  { label: "MCP Connections", href: "/account/mcp", icon: Bot },
+];
+
+/**
+ * The section a path belongs to: the LONGEST href that matches it.
+ *
+ * Longest wins because these hrefs nest. `/account` is a prefix of
+ * `/account/preferences`, so a plain `startsWith` lights up two entries at once
+ * while the user is on one page — which the hand-written navs each worked
+ * around with their own `href !== "/account"` special case. Comparing lengths
+ * needs no special case and cannot be forgotten by the next nested route.
+ */
+export function activeHref(
+  pathname: string,
+  sections: NavSection[],
+): string | null {
+  let best: string | null = null;
+  for (const section of sections) {
+    const matches =
+      pathname === section.href || pathname.startsWith(`${section.href}/`);
+    if (matches && (best === null || section.href.length > best.length)) {
+      best = section.href;
+    }
+  }
+  return best;
+}

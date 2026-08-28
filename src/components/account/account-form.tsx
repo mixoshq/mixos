@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
@@ -16,20 +20,19 @@ import {
 interface Props {
   initialEmail: string;
   initialDisplayName: string;
-  passwordEnabled: boolean;
 }
 
 function Banner({ state }: { state: AccountActionState }) {
   if (state.error) {
     return (
-      <p className="mt-2 rounded-md bg-rose-500/15 px-3 py-2 text-sm text-rose-700 dark:text-rose-400">
+      <p className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-foreground">
         {state.error}
       </p>
     );
   }
   if (state.success) {
     return (
-      <p className="mt-2 rounded-md bg-emerald-500/15 px-3 py-2 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+      <p className="mt-2 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm font-semibold text-foreground">
         {state.success}
       </p>
     );
@@ -40,14 +43,18 @@ function Banner({ state }: { state: AccountActionState }) {
 export default function AccountForm({
   initialEmail,
   initialDisplayName,
-  passwordEnabled,
 }: Props) {
   const router = useRouter();
   const { update: updateSession } = useSession();
   // Pin update() in a ref — useSession returns a new function reference on
   // every render, which would otherwise re-fire the effects below in a loop.
   const updateSessionRef = useRef(updateSession);
-  updateSessionRef.current = updateSession;
+  // Assigned in an effect, not during render: React treats a render-phase ref
+  // write as a side effect, and it is one — a re-render triggered elsewhere
+  // would observe a half-updated ref.
+  useEffect(() => {
+    updateSessionRef.current = updateSession;
+  });
 
   const [nameState, nameAction, namePending] = useActionState(
     updateDisplayName,
@@ -98,12 +105,12 @@ export default function AccountForm({
             type="text"
             required
             defaultValue={initialDisplayName}
-            className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-mixnavy focus:outline-none"
+            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none"
           />
           <button
             type="submit"
             disabled={namePending}
-            className="rounded-md bg-mixnavy px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-mixnavy/90 disabled:opacity-60"
+            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand/90 disabled:opacity-60"
           >
             {namePending ? "Saving…" : "Save"}
           </button>
@@ -126,12 +133,12 @@ export default function AccountForm({
               type="email"
               required
               defaultValue={initialEmail}
-              className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-mixnavy focus:outline-none"
+              className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none"
             />
             <button
               type="submit"
               disabled={emailPending}
-              className="rounded-md bg-mixnavy px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-mixnavy/90 disabled:opacity-60"
+              className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand/90 disabled:opacity-60"
             >
               {emailPending ? "Saving…" : "Save"}
             </button>
@@ -140,51 +147,42 @@ export default function AccountForm({
         </form>
       </div>
 
-      {passwordEnabled ? (
-        <div className="border-t border-border pt-6">
-          <form action={pwAction} className="space-y-2">
-            <p className="text-sm font-medium text-foreground">Change password</p>
-            <input
-              name="currentPassword"
-              type="password"
-              autoComplete="current-password"
-              placeholder="Current password"
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-mixnavy focus:outline-none"
-            />
-            <input
-              name="newPassword"
-              type="password"
-              autoComplete="new-password"
-              placeholder="New password (min 10 characters)"
-              required
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-mixnavy focus:outline-none"
-            />
-            <input
-              name="confirmPassword"
-              type="password"
-              autoComplete="new-password"
-              placeholder="Confirm new password"
-              required
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-mixnavy focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={pwPending}
-              className="rounded-md bg-mixnavy px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-mixnavy/90 disabled:opacity-60"
-            >
-              {pwPending ? "Saving…" : "Update password"}
-            </button>
-            <Banner state={pwState} />
-          </form>
-        </div>
-      ) : (
-        <div className="border-t border-border pt-6">
-          <p className="text-sm text-muted-foreground">
-            Password login is disabled because an administrator has enabled SSO.
-            Sign in with your identity provider instead.
-          </p>
-        </div>
-      )}
+      <div className="border-t border-border pt-6">
+        <form action={pwAction} className="space-y-2">
+          <p className="text-sm font-medium text-foreground">Change password</p>
+          <input
+            name="currentPassword"
+            type="password"
+            autoComplete="current-password"
+            placeholder="Current password"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none"
+          />
+          <input
+            name="newPassword"
+            type="password"
+            autoComplete="new-password"
+            placeholder="New password (min 10 characters)"
+            required
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none"
+          />
+          <input
+            name="confirmPassword"
+            type="password"
+            autoComplete="new-password"
+            placeholder="Confirm new password"
+            required
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={pwPending}
+            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand/90 disabled:opacity-60"
+          >
+            {pwPending ? "Saving…" : "Update password"}
+          </button>
+          <Banner state={pwState} />
+        </form>
+      </div>
     </div>
   );
 }

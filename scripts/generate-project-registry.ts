@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
@@ -20,14 +24,23 @@ import { MIXOS_SOURCE } from "../src/lib/apps/types";
 import type {
   ConnectorAuthPolicy,
   ConnectorHttpPolicy,
+  ConnectorSetupGuide,
   ConnectorTelemetryDefinition,
   ConnectorWebhookPolicy,
 } from "../src/lib/connectors/types";
 import {
   RawAppManifestSchema,
   RawConnectorManifestSchema,
+  RawThemeManifestSchema,
   formatZodError,
 } from "./manifest-schemas";
+import type {
+  ThemeAssets,
+  ThemeFontFace,
+  ThemeManifest,
+} from "../src/lib/themes/types";
+import { compileTheme, ThemeError } from "./theme-css";
+import * as ts from "typescript";
 
 /**
  * Thrown when an app's manifest contains an invalid visibility declaration.
@@ -75,7 +88,19 @@ const APPS_DIR = path.resolve(__dirname, "../apps");
 const CONNECTORS_DIR = path.resolve(__dirname, "../connectors");
 const OUTPUT_DIR = path.resolve(__dirname, "../src/generated");
 const APP_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "app-registry.ts");
+const APP_CLIENTS_FILE = path.resolve(OUTPUT_DIR, "app-clients.ts");
+const APP_PAGE_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-page-loaders.ts");
 const CONNECTOR_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "connector-registry.ts");
+const THEMES_DIR = path.resolve(__dirname, "../themes");
+const THEME_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "theme-registry.ts");
+const THEMES_CSS_FILE = path.resolve(OUTPUT_DIR, "themes.css");
+const THEME_TOKENS_FILE = path.resolve(OUTPUT_DIR, "theme-tokens.json");
+const PUBLIC_THEMES_DIR = path.resolve(__dirname, "../public/themes");
+// NOT public/connectors: `/connectors/*` is already a signed-in page route
+// (/connectors/guide), so assets served from there redirect to /login for
+// anyone without a session — including next/image's optimizer, which fetches
+// the source URL server-side with no cookies and would fail on every icon.
+const PUBLIC_CONNECTORS_DIR = path.resolve(__dirname, "../public/connector-assets");
 
 function scanPages(dir: string, slug: string, prefix: string, out: string[]) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -568,6 +593,42 @@ function validateRouteContracts(
  * and the closed rule set are already schema-validated; a duplicate would leave
  * two different reasons on the record for one exception.
  */
+/**
+ * Two-sided consent for cross-app hooks, mirroring `validateServiceWiring`.
+ *
+ * A listener must declare what it listens for, and the emitter must allow that
+ * listener. Either half missing is a build failure — the same default-deny App
+ * Services has had all along, applied to the one channel that never had it.
+ */
+function validateHookWiring(manifests: AppManifest[]): void {
+  const bySlug = new Map(manifests.map((m) => [m.slug, m]));
+
+  for (const consumer of manifests) {
+    for (const dep of consumer.listensTo ?? []) {
+      const provider = bySlug.get(dep.app);
+      if (!provider) {
+        throw new FatalManifestError(
+          `apps/${consumer.slug}/app.json: listensTo names app "${dep.app}", which does not exist.`,
+        );
+      }
+      const emit = (provider.emits ?? []).find((e) => e.name === dep.hook);
+      if (!emit) {
+        throw new FatalManifestError(
+          `apps/${consumer.slug}/app.json: listensTo "${dep.app}:${dep.hook}", but "${dep.app}" does not declare that hook under \`emits\`.`,
+        );
+      }
+      const allowed =
+        emit.consumers === "*" || emit.consumers.includes(consumer.slug);
+      if (!allowed) {
+        throw new FatalManifestError(
+          `apps/${dep.app} does not allow "${consumer.slug}" to listen to "${dep.hook}". ` +
+            `Add it to that hook's \`consumers\`, or use "*".`,
+        );
+      }
+    }
+  }
+}
+
 function validateEscapes(
   raw: { rule: string; reason: string }[] | undefined,
   slug: string,
@@ -880,6 +941,162 @@ function validateConnectorTelemetry(
   }));
 }
 
+// ── themes ───────────────────────────────────────────────────────────────────
+
+/** Recursively copy a theme's assets into public/themes/<slug>/. */
+function copyDir(from: string, to: string): void {
+  if (!fs.existsSync(from)) return;
+  fs.mkdirSync(to, { recursive: true });
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const src = path.join(from, entry.name);
+    const dst = path.join(to, entry.name);
+    if (entry.isDirectory()) copyDir(src, dst);
+    else fs.copyFileSync(src, dst);
+  }
+}
+
+/**
+ * Every path in `assets` must resolve to a real file. A manifest naming a
+ * missing logo does not degrade gracefully — it ships a broken <img> into the
+ * menu bar of every page in the install.
+ */
+function validateThemeAssets(
+  assets: ThemeAssets,
+  slug: string,
+  dir: string,
+): ThemeAssets {
+  for (const [key, rel] of Object.entries(assets)) {
+    if (typeof rel !== "string") continue;
+    if (!fs.existsSync(path.join(dir, "assets", rel))) {
+      throw new ThemeError(
+        `themes/${slug}/theme.json: assets.${key} is "${rel}", which does not exist. ` +
+          `Expected it at themes/${slug}/assets/${rel}.`,
+      );
+    }
+  }
+  return assets;
+}
+
+/**
+ * A declared font must exist AND be referenced by an @font-face in theme.css.
+ * A manifest font nobody @font-faces is a file shipped to every user for
+ * nothing; an @font-face with no manifest entry hides a dependency from review.
+ */
+function validateThemeFonts(
+  fonts: ThemeFontFace[],
+  slug: string,
+  dir: string,
+  css: string,
+): ThemeFontFace[] {
+  for (const font of fonts) {
+    if (!fs.existsSync(path.join(dir, "assets", font.file))) {
+      throw new ThemeError(
+        `themes/${slug}/theme.json: fonts[] names "${font.file}", which does not exist. ` +
+          `Expected it at themes/${slug}/assets/${font.file}.`,
+      );
+    }
+    if (!css.includes(font.file)) {
+      throw new ThemeError(
+        `themes/${slug}/theme.json: fonts[] declares "${font.file}", but no @font-face in ` +
+          `theme.css loads it. A font file shipped to every user and never used is pure weight.`,
+      );
+    }
+  }
+  return fonts;
+}
+
+async function scanThemes(): Promise<{
+  themes: ThemeManifest[];
+  css: string;
+  tokens: Record<string, Record<string, string>>;
+}> {
+  if (!fs.existsSync(THEMES_DIR)) {
+    return { themes: [], css: "", tokens: {} };
+  }
+
+  const themes: ThemeManifest[] = [];
+  const cssParts: string[] = [];
+  const tokens: Record<string, Record<string, string>> = {};
+
+  const entries = fs
+    .readdirSync(THEMES_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith("_"))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const entry of entries) {
+    const slug = entry.name;
+    const dir = path.join(THEMES_DIR, slug);
+
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+      throw new ThemeError(
+        `themes/${slug}: a theme folder name is its slug and appears in a CSS attribute ` +
+          `selector — use lowercase letters, digits and hyphens.`,
+      );
+    }
+
+    const manifestPath = path.join(dir, "theme.json");
+    if (!fs.existsSync(manifestPath)) {
+      // As with apps: plans/ may precede the thing it plans.
+      if (fs.existsSync(path.join(dir, "plans"))) {
+        console.log(`  themes/${slug}/ — planned, not yet built (plans/ only)`);
+      } else {
+        console.warn(`  Skipping themes/${slug}/ — no theme.json`);
+      }
+      continue;
+    }
+
+    const parsed = RawThemeManifestSchema.safeParse(
+      JSON.parse(fs.readFileSync(manifestPath, "utf-8")),
+    );
+    if (!parsed.success) {
+      throw new ThemeError(
+        `themes/${slug}/theme.json failed validation:\n${formatZodError(parsed.error)}`,
+      );
+    }
+    const r = parsed.data;
+
+    const compiled = compileTheme({
+      slug,
+      dir,
+      escapes: r.escapes ?? [],
+      declaredSurfaces: r.surfaces ?? [],
+    });
+
+    const rawCss = fs.readFileSync(path.join(dir, "theme.css"), "utf-8");
+    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir, rawCss);
+    const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
+
+    copyDir(path.join(dir, "assets"), path.join(PUBLIC_THEMES_DIR, slug));
+
+    cssParts.push(`/* ── ${slug} ─────────────────────────────── */\n${compiled.css}`);
+    tokens[slug] = compiled.tokens;
+
+    themes.push({
+      slug,
+      name: r.name,
+      description: r.description,
+      ...(r.tagline != null ? { tagline: r.tagline } : {}),
+      authors: normalizeAuthors(r.authors),
+      fonts,
+      assets,
+      surfaces: compiled.surfaces,
+      escapes: r.escapes ?? [],
+      assetBase: `/themes/${slug}`,
+      swatches: compiled.swatches,
+      lastUpdated: parseLastUpdated(r.lastUpdated),
+    });
+
+    const escaped = (r.escapes ?? []).length;
+    console.log(
+      `  ${slug} — ${compiled.report.length} contrast pairs verified` +
+        (escaped > 0 ? `, ${escaped} escaped` : ""),
+    );
+    if (process.env.THEME_REPORT) console.log(compiled.report.join("\n"));
+  }
+
+  return { themes, css: cssParts.join("\n\n"), tokens };
+}
+
 async function scanApps(): Promise<AppManifest[]> {
   if (!fs.existsSync(APPS_DIR)) {
     fs.mkdirSync(APPS_DIR, { recursive: true });
@@ -901,7 +1118,14 @@ async function scanApps(): Promise<AppManifest[]> {
       continue;
     }
     if (!raw) {
-      console.warn(`  Skipping ${entry.name}/ — no app.ts or app.json found`);
+      // A folder holding only plans/ is a legitimate state: a build plan is
+      // written where the app will live, before the app exists. Reporting that
+      // as a warning trains people to ignore warnings. See docs/plans/README.md.
+      if (fs.existsSync(path.join(appDir, "plans"))) {
+        console.log(`  apps/${entry.name}/ — planned, not yet built (plans/ only)`);
+      } else {
+        console.warn(`  Skipping ${entry.name}/ — no app.ts or app.json found`);
+      }
       continue;
     }
 
@@ -957,6 +1181,7 @@ async function scanApps(): Promise<AppManifest[]> {
         description: r.description ?? "",
         icon: r.icon ?? "box",
         connectors: r.connectors ?? [],
+        optionalConnectors: r.optionalConnectors ?? [],
         database: r.database ?? false,
         notifications: r.notifications ?? false,
         hasPages,
@@ -973,7 +1198,12 @@ async function scanApps(): Promise<AppManifest[]> {
           return { ...w, id: filename, component, defaultSize: w.defaultSize ?? { w: 4, h: 3 } };
         }),
         schedules,
-        sync: validateSyncs(r.sync, entry.name, appDir, r.connectors ?? []),
+        sync: validateSyncs(r.sync, entry.name, appDir, [
+          ...(r.connectors ?? []),
+          ...(r.optionalConnectors ?? []),
+        ]),
+        emits: r.emits ?? [],
+        listensTo: r.listensTo ?? [],
         escapes: validateEscapes(r.escapes, entry.name),
         env: validateEnv(r.env, entry.name),
         egress: r.egress ?? [],
@@ -981,7 +1211,10 @@ async function scanApps(): Promise<AppManifest[]> {
         telemetry: validateAppTelemetry(r.telemetry, entry.name),
         provides: validateProvides(r.provides, entry.name, appDir),
         consumes: normalizeConsumes(r.consumes),
-        mcp: validateMcpTools(r.mcp, entry.name, appDir, r.connectors ?? []),
+        mcp: validateMcpTools(r.mcp, entry.name, appDir, [
+          ...(r.connectors ?? []),
+          ...(r.optionalConnectors ?? []),
+        ]),
         ...(pageVisibility ? { pageVisibility } : {}),
         ...(apiVisibility ? { apiVisibility } : {}),
       };
@@ -997,6 +1230,7 @@ async function scanApps(): Promise<AppManifest[]> {
 
   // App Services two-sided consent: every consumes ↔ provides pair must agree.
   validateServiceWiring(manifests);
+  validateHookWiring(manifests);
 
   return manifests;
 }
@@ -1004,7 +1238,11 @@ async function scanApps(): Promise<AppManifest[]> {
 interface ConnectorManifestOut {
   name: string;
   displayName: string;
+  /** Public URL of the copied icon, or absent when the connector ships none. */
+  icon?: string;
+  userScoped?: boolean;
   description: string;
+  setup?: ConnectorSetupGuide;
   credentialFields: { key: string; label: string; type: string }[];
   authors: AppAuthor[];
   lastUpdated: number | null;
@@ -1012,6 +1250,273 @@ interface ConnectorManifestOut {
   auth?: ConnectorAuthPolicy;
   http?: ConnectorHttpPolicy;
   webhook?: ConnectorWebhookPolicy;
+}
+
+/**
+ * Base-class contract, not app-callable surface. The platform calls these; an
+ * app never can, so they are not capabilities and are not declared.
+ */
+const CONNECTOR_RESERVED_METHODS = new Set([
+  "initialize",
+  "testConnection",
+  "handleWebhook",
+]);
+
+/**
+ * Every public method on a connector class must be declared in `telemetry`.
+ *
+ * WHY THIS IS A BUILD ERROR AND NOT A LINT. The Connector Registry's Access tab
+ * answers "what can this reach, and can it change anything" from `telemetry`
+ * plus each entry's `mutates`. That answer is only trustworthy if the list is
+ * COMPLETE — and `telemetry` was designed as opt-in instrumentation, so nothing
+ * made it so. A connector could ship a `sendMessage()`, leave it undeclared,
+ * and the tab would report "no method changes anything upstream" about a
+ * connector that sends mail.
+ *
+ * Under-reporting is the one failure a permissions view cannot have: the whole
+ * reason an admin opens it is to find out what this thing could do to their
+ * data. Over-reporting is a nuisance; under-reporting is a false assurance.
+ *
+ * Parsed from the AST rather than by regex, because the answer has to be right:
+ * a regex cannot tell a method on the connector class from one on a helper
+ * class in the same file, nor see the `private` that makes it not count.
+ */
+function validateConnectorMethods(
+  name: string,
+  dir: string,
+  telemetry: ConnectorTelemetryDefinition[],
+): void {
+  const entry = path.join(dir, "index.ts");
+  if (!fs.existsSync(entry)) return;
+
+  const source = ts.createSourceFile(
+    entry,
+    fs.readFileSync(entry, "utf-8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+
+  const declared = new Set(telemetry.map((t) => t.method));
+  const undeclared: string[] = [];
+
+  for (const statement of source.statements) {
+    if (!ts.isClassDeclaration(statement)) continue;
+    // Only a class that extends something — i.e. the connector, not a local
+    // helper or a plain data class defined alongside it.
+    const extendsClause = statement.heritageClauses?.some(
+      (h) => h.token === ts.SyntaxKind.ExtendsKeyword,
+    );
+    if (!extendsClause) continue;
+
+    for (const member of statement.members) {
+      if (!ts.isMethodDeclaration(member) || !ts.isIdentifier(member.name)) continue;
+      const modifiers = ts.getModifiers(member) ?? [];
+      const hidden = modifiers.some(
+        (m) =>
+          m.kind === ts.SyntaxKind.PrivateKeyword ||
+          m.kind === ts.SyntaxKind.ProtectedKeyword ||
+          m.kind === ts.SyntaxKind.StaticKeyword,
+      );
+      const methodName = member.name.text;
+      if (
+        hidden ||
+        methodName.startsWith("#") ||
+        CONNECTOR_RESERVED_METHODS.has(methodName) ||
+        declared.has(methodName)
+      ) {
+        continue;
+      }
+      undeclared.push(methodName);
+    }
+  }
+
+  if (undeclared.length > 0) {
+    throw new Error(
+      `connector.json: these public methods are not declared in "telemetry": ` +
+        `${undeclared.join(", ")}.\n` +
+        `  The Connector Registry reports what a connector can do from that list, ` +
+        `so an undeclared method is one an admin is never told about — and if it ` +
+        `writes, the registry says this connector changes nothing.\n` +
+        `  Add each with a description and, when it changes anything upstream, ` +
+        `"mutates": true. Make it private if apps should not call it.`,
+    );
+  }
+}
+
+/**
+ * The Connector Registry contract: what a connector must declare for its admin
+ * experience to exist at all.
+ *
+ * These are not stylistic preferences. Each one is a specific hole in the
+ * registry when it is absent:
+ *
+ *   · no `icon`         — an unidentifiable tile in a grid of tiles
+ *   · no `setup`        — a Configure wizard whose first step is blank, so the
+ *                         admin is asked for a Client ID with no idea where to
+ *                         get one
+ *   · no `scopesUrl`    — a permissions list that can never be populated, and
+ *                         no way to answer "what can this reach"
+ *
+ * Reported together rather than one per run: an author adding a connector
+ * should learn everything that is missing in one build, not discover it three
+ * builds in a row.
+ *
+ * See docs/connectors/registry-ux.md.
+ */
+function validateRegistryContract(
+  name: string,
+  raw: {
+    icon?: string;
+    auth?: { scopesUrl?: string };
+    setup?: { title?: string; steps?: unknown[] };
+  },
+): void {
+  const missing: string[] = [];
+
+  if (!raw.icon) {
+    missing.push(
+      '"icon" — a square PNG/WebP/SVG of at least 512x512 in this connector\'s assets/',
+    );
+  }
+  if (!raw.auth?.scopesUrl) {
+    missing.push(
+      '"auth.scopesUrl" — the provider\'s scope reference page, which the registry parses to list permissions in plain English',
+    );
+  }
+  if (!raw.setup?.title) {
+    missing.push(
+      '"setup.title" — the label for the provider-side step, e.g. "Create a Google Cloud OAuth app"',
+    );
+  }
+  if (!raw.setup?.steps || raw.setup.steps.length === 0) {
+    missing.push(
+      '"setup.steps" — at least one step covering what the admin does in the provider\'s own console',
+    );
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `connector.json is missing what the Connector Registry needs:\n` +
+        missing.map((m) => `    - ${m}`).join("\n") +
+        `\n  Every connector ships a configuration experience; these are the parts ` +
+        `the platform cannot invent. See docs/connectors/registry-ux.md.`,
+    );
+  }
+}
+
+/** Smallest edge a connector icon may have, and it must be square. */
+const CONNECTOR_ICON_MIN = 512;
+
+/**
+ * Read an image's pixel dimensions from its header.
+ *
+ * Deliberately not an image library. The only fact needed here is width and
+ * height, both of which sit in the first few dozen bytes of a PNG or WebP, and
+ * `sharp` is present in this tree only as a transitive dependency of Next —
+ * importing it in the build would be depending on someone else's dependency.
+ *
+ * Returns null for a format whose header isn't parsed here, which the caller
+ * treats as "cannot measure", not as "passes".
+ */
+function readImageSize(buf: Buffer): { width: number; height: number } | null {
+  // PNG: 8-byte signature, then IHDR carrying two big-endian uint32s.
+  if (buf.length >= 24 && buf.readUInt32BE(0) === 0x89504e47) {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+
+  // WebP: RIFF container, and three sub-formats that each store size differently.
+  if (
+    buf.length >= 30 &&
+    buf.toString("ascii", 0, 4) === "RIFF" &&
+    buf.toString("ascii", 8, 12) === "WEBP"
+  ) {
+    const chunk = buf.toString("ascii", 12, 16);
+    if (chunk === "VP8 ") {
+      // Lossy: 14-bit dimensions after the 3-byte start code.
+      return {
+        width: buf.readUInt16LE(26) & 0x3fff,
+        height: buf.readUInt16LE(28) & 0x3fff,
+      };
+    }
+    if (chunk === "VP8L") {
+      // Lossless: 14 bits each, packed across a 32-bit little-endian read.
+      const bits = buf.readUInt32LE(21);
+      return {
+        width: (bits & 0x3fff) + 1,
+        height: ((bits >> 14) & 0x3fff) + 1,
+      };
+    }
+    if (chunk === "VP8X") {
+      // Extended: 24-bit canvas size, stored minus one.
+      const u24 = (o: number) => buf[o] | (buf[o + 1] << 8) | (buf[o + 2] << 16);
+      return { width: u24(24) + 1, height: u24(27) + 1 };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Prove a declared icon exists and is the shape the registry grid assumes.
+ *
+ * A wrong-sized icon does not degrade gracefully: the grid scales every tile
+ * identically, so a 40x40 mark ships visibly blurred and a non-square one ships
+ * stretched. Both are cheaper to catch here, where the message can name the
+ * measured size, than in review.
+ *
+ * SVG is exempt from the pixel check — it has no intrinsic pixel size — but is
+ * required to declare a viewBox, without which it cannot scale into the tile at
+ * all.
+ */
+function validateConnectorIcon(icon: string, name: string, dir: string): void {
+  const file = path.join(dir, "assets", icon);
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      `connector.json: icon is "${icon}", which does not exist. ` +
+        `Expected it at connectors/${name}/assets/${icon}.`,
+    );
+  }
+
+  const ext = path.extname(icon).toLowerCase();
+  if (![".png", ".webp", ".svg"].includes(ext)) {
+    throw new Error(
+      `connector.json: icon "${icon}" is a ${ext || "extensionless"} file. ` +
+        `Connector icons must be .png, .webp or .svg.`,
+    );
+  }
+
+  if (ext === ".svg") {
+    const svg = fs.readFileSync(file, "utf-8");
+    if (!/\bviewBox\s*=/.test(svg)) {
+      throw new Error(
+        `connectors/${name}/assets/${icon} has no viewBox, so it cannot scale ` +
+          `into the registry tile. Add one to the <svg> element.`,
+      );
+    }
+    return;
+  }
+
+  const size = readImageSize(fs.readFileSync(file));
+  if (!size) {
+    throw new Error(
+      `connectors/${name}/assets/${icon} could not be read as a ${ext.slice(1)} ` +
+        `image. Re-export it, or ship an .svg instead.`,
+    );
+  }
+  if (size.width !== size.height) {
+    throw new Error(
+      `connectors/${name}/assets/${icon} is ${size.width}x${size.height}. ` +
+        `A connector icon must be square — the registry grid renders every tile ` +
+        `at the same aspect, so this one would ship stretched.`,
+    );
+  }
+  if (size.width < CONNECTOR_ICON_MIN) {
+    throw new Error(
+      `connectors/${name}/assets/${icon} is ${size.width}x${size.height}, below ` +
+        `the ${CONNECTOR_ICON_MIN}x${CONNECTOR_ICON_MIN} minimum. Smaller than ` +
+        `that visibly blurs on a high-DPI display.`,
+    );
+  }
 }
 
 async function scanConnectors(): Promise<ConnectorManifestOut[]> {
@@ -1051,10 +1556,33 @@ async function scanConnectors(): Promise<ConnectorManifestOut[]> {
         );
       }
 
+      // Icon: proven to exist and to be a square >= 512x512 before anything
+      // references it, then copied out with the rest of the connector's assets.
+      // The registry contract first: a missing icon and a missing setup guide
+      // are one report, not a build each.
+      validateRegistryContract(entry.name, raw);
+      if (raw.icon) validateConnectorIcon(raw.icon, entry.name, connectorDir);
+      // Completeness of the capability list, which the Access tab presents as
+      // exhaustive. Runs before the manifest is emitted so a gap cannot ship.
+      validateConnectorMethods(
+        entry.name,
+        connectorDir,
+        validateConnectorTelemetry(raw.telemetry, entry.name),
+      );
+      copyDir(
+        path.join(connectorDir, "assets"),
+        path.join(PUBLIC_CONNECTORS_DIR, entry.name),
+      );
+
       const manifest: ConnectorManifestOut = {
         name: raw.name,
         displayName: raw.displayName,
+        // Stored as the URL the browser will request, not the authoring path,
+        // so no call site has to know where assets get copied to.
+        ...(raw.icon ? { icon: `/connector-assets/${entry.name}/${raw.icon}` } : {}),
+        ...(raw.userScoped ? { userScoped: true } : {}),
         description: raw.description ?? "",
+        ...(raw.setup ? { setup: raw.setup as ConnectorSetupGuide } : {}),
         credentialFields: raw.credentialFields ?? [],
         authors: normalizeAuthors(raw.authors),
         lastUpdated: parseLastUpdated(raw.lastUpdated),
@@ -1079,6 +1607,45 @@ async function scanConnectors(): Promise<ConnectorManifestOut[]> {
   }
 
   return connectors;
+}
+
+/**
+ * A scheduled job runs with no user, so it can never resolve a user-scoped
+ * connector's grant — the connector would simply be absent at 3am and present
+ * in a page request, which is the kind of difference nobody finds by reading.
+ *
+ * Rejected at build time rather than logged at runtime: a job that quietly does
+ * nothing is the most expensive way to learn this.
+ */
+function validateUserScopedUsage(
+  apps: AppManifest[],
+  connectors: ConnectorManifestOut[],
+): void {
+  const userScoped = new Set(
+    connectors.filter((c) => c.userScoped).map((c) => c.name),
+  );
+  if (userScoped.size === 0) return;
+
+  for (const app of apps) {
+    const declared = [...app.connectors, ...(app.optionalConnectors ?? [])];
+    const offending = declared.filter((name) => userScoped.has(name));
+    if (offending.length === 0) continue;
+
+    const jobs = [
+      ...(app.schedules ?? []).map((s) => `schedule "${s.name}"`),
+      ...(app.sync ?? []).map((s) => `sync "${s.name}"`),
+    ];
+    if (jobs.length === 0) continue;
+
+    throw new Error(
+      `apps/${app.slug}/app.json declares the user-scoped connector(s) ` +
+        `${offending.join(", ")} and also ${jobs.join(", ")}.\n` +
+        `  A scheduled job runs with no user, so there is no grant to resolve ` +
+        `and the connector would be absent every time the job ran.\n` +
+        `  Use a tenant-scoped connector for background work, or move the ` +
+        `connector-dependent part into a request the user makes.`,
+    );
+  }
 }
 
 async function main() {
@@ -1123,14 +1690,17 @@ export const appRegistry: AppManifest[] = ${JSON.stringify(apps, null, 2)};
 export const appSlugs = [${slugs}] as const;
 export type AppSlug = (typeof appSlugs)[number];
 
-// Static import maps — Turbopack requires statically analyzable imports
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const pageLoaders: Record<string, () => Promise<{ default: ComponentType<any> }>> = {
-${pageImports.join("\n")}
-};
-
-// Widget modules may also export an optional \`resolveConfig\` that the
-// config modal calls to fill in dynamic options/defaults at open time.
+// NOTE: \`pageLoaders\` deliberately lives in ./app-page-loaders, NOT here.
+//
+// Client components import this file for \`appRegistry\` and \`widgetLoaders\`.
+// If the page loaders lived alongside them, every app PAGE would be pulled into
+// the client graph too — and a page is a server component, free to reach the
+// database or a connector through \`callAppRoute\`. That made a single
+// server-rendered page fail the whole client build with a module-not-found
+// several layers deep in the platform.
+//
+// Widget modules may also export an optional \`resolveConfig\` that the config
+// modal calls to fill in dynamic options/defaults at open time.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const widgetLoaders: Record<string, () => Promise<{ default: ComponentType<any>; resolveConfig?: (args: { appSlug: string }) => Promise<ResolvedConfig> | ResolvedConfig }>> = {
 ${widgetImports.join("\n")}
@@ -1139,6 +1709,90 @@ ${widgetImports.join("\n")}
 
   fs.writeFileSync(APP_REGISTRY_FILE, appOutput, "utf-8");
   console.log(`\nGenerated app registry with ${apps.length} app(s)`);
+
+  // Server-only. See the note in the registry above.
+  const pageLoadersOutput = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+//
+// SERVER ONLY. App pages are server components and may reach the database or a
+// connector via callAppRoute, so this map must never enter the client graph.
+// Its single consumer is src/lib/apps/loader.ts.
+import type { ComponentType } from "react";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const pageLoaders: Record<string, () => Promise<{ default: ComponentType<any> }>> = {
+${pageImports.join("\n")}
+};
+`;
+  fs.writeFileSync(APP_PAGE_LOADERS_FILE, pageLoadersOutput, "utf-8");
+
+  // ── Typed client surface ──────────────────────────────────────────────────
+  //
+  // A TYPE-ONLY map from `<slug>` → `"<METHOD> /<pattern>"` → the route's own
+  // `defineRoute` result. `typeof import(...)` is an inline type query, so
+  // nothing here survives compilation and no app module is loaded at runtime.
+  //
+  // This is what turns `client.get<T>()` — an assertion the author could get
+  // wrong silently — into `client.call("GET /items", …)` with the input and
+  // output inferred from the schemas the route actually declared. It only works
+  // because `RouteDefinition` is generic in those two shapes; a non-generic one
+  // would erase them at the export boundary.
+  // Templates are skipped by the registry (they are scaffolds, not apps) but
+  // they ARE the canonical worked example, and an example that does not compile
+  // as written teaches the wrong thing. So their routes get type entries here —
+  // type-only, so nothing is registered and nothing loads at runtime.
+  const templateRoutes: { slug: string; routes: RouteContract[] }[] = [];
+  for (const entry of fs.readdirSync(APPS_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith("_")) continue;
+    const dir = path.join(APPS_DIR, entry.name);
+    if (!fs.existsSync(path.join(dir, "app.json")) && !fs.existsSync(path.join(dir, "app.ts"))) {
+      continue;
+    }
+    try {
+      templateRoutes.push({ slug: entry.name, routes: await scanApiRoutes(dir, entry.name) });
+    } catch (err) {
+      console.warn(
+        `  Skipping types for template ${entry.name}/ — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  const clientEntries = [
+    ...apps.map((a) => ({ slug: a.slug, routes: a.routes ?? [] })),
+    ...templateRoutes,
+  ]
+    .map((app) => {
+      const routes = app.routes.flatMap((route) =>
+        route.methods.map((m) => {
+          const modulePath = route.path === "" ? "index" : route.path;
+          return `    "${m.method} /${route.path}": typeof import("@apps/${app.slug}/api/${modulePath}/route").${m.method};`;
+        }),
+      );
+      if (routes.length === 0) return `  "${app.slug}": Record<string, never>;`;
+      return `  "${app.slug}": {\n${routes.join("\n")}\n  };`;
+    })
+    .join("\n");
+
+  const clientsOutput = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+//
+// Type-only. Every entry is an inline \`typeof import(...)\` query, so this file
+// compiles away entirely and never loads an app module at runtime.
+
+/**
+ * Every app's declared routes, keyed by slug and then by \`"<METHOD> /<pattern>"\`.
+ * The pattern keeps its \`[param]\` segments — values travel in the call's input,
+ * never in the key.
+ */
+export interface AppRouteTypes {
+${clientEntries || "  // no apps"}
+}
+
+export type AppWithRoutes = keyof AppRouteTypes;
+`;
+
+  fs.writeFileSync(APP_CLIENTS_FILE, clientsOutput, "utf-8");
+  console.log(
+    `Generated typed client surface for ${apps.reduce((n, a) => n + (a.routes?.length ?? 0), 0)} route(s)`,
+  );
 
   console.log("\nScanning connectors...");
   const connectors = await scanConnectors();
@@ -1155,6 +1809,70 @@ export type ConnectorName = (typeof connectorNames)[number];
   fs.writeFileSync(CONNECTOR_REGISTRY_FILE, connectorOutput, "utf-8");
   console.log(`Generated connector registry with ${connectors.length} connector(s)`);
 
+  // Both registries are in hand here, which is what this check needs.
+  validateUserScopedUsage(apps, connectors);
+
+  console.log("\nScanning themes...");
+  const { themes, css: themeCss, tokens: themeTokens } = await scanThemes();
+
+  if (themes.length === 0) {
+    throw new ThemeError(
+      "No themes found under themes/. The platform renders entirely through theme tokens, " +
+        "so an install with no theme has no colours, no type and no radii at all.",
+    );
+  }
+
+  // The fallback when the database has no active-theme row yet — a fresh
+  // install, or a row naming a theme that has since been uninstalled.
+  // Alphabetically first, so the choice is deterministic rather than dependent
+  // on directory iteration order.
+  const fallbackTheme = themes[0].slug;
+
+  fs.writeFileSync(
+    THEMES_CSS_FILE,
+    `/* AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+ *
+ * Every installed theme, each scoped to [data-theme="<slug>"]. All of them are
+ * bundled so that switching the active theme is a database write and an
+ * attribute swap on <html>, not a rebuild and a redeploy.
+ */
+${themeCss}
+`,
+    "utf-8",
+  );
+
+  const themeOutput = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+import type { ThemeManifest } from "@/lib/themes/types";
+
+export const themeRegistry: ThemeManifest[] = ${JSON.stringify(themes, null, 2)};
+
+export const themeSlugs = [${themes.map((t) => `"${t.slug}"`).join(", ")}] as const;
+export type ThemeSlug = (typeof themeSlugs)[number];
+
+/**
+ * Used when the database has no active-theme row, or names a theme that is no
+ * longer installed. Alphabetically first among installed themes.
+ */
+export const FALLBACK_THEME: ThemeSlug = "${fallbackTheme}";
+
+export function getTheme(slug: string): ThemeManifest {
+  return themeRegistry.find((t) => t.slug === slug) ?? themeRegistry[0];
+}
+`;
+  fs.writeFileSync(THEME_REGISTRY_FILE, themeOutput, "utf-8");
+
+  // Read by eslint-rules/no-low-contrast-token-pairs.mjs, which cannot import
+  // TypeScript and must not re-parse CSS. It lints against the fallback theme:
+  // which theme is *active* is a runtime database value the build cannot know.
+  fs.writeFileSync(
+    THEME_TOKENS_FILE,
+    JSON.stringify({ fallback: fallbackTheme, tokens: themeTokens }, null, 2),
+    "utf-8",
+  );
+
+  console.log(
+    `Generated theme registry with ${themes.length} theme(s); fallback is "${fallbackTheme}"`,
+  );
 }
 
 main().catch((err) => {
