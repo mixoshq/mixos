@@ -6,7 +6,7 @@ import Link from "next/link";
 import { appRegistry } from "@/generated/app-registry";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
-import { getRegisteredSlugs } from "@/lib/apps/admin-actions";
+import { getAppGrantCounts, getAppTableCounts } from "@/lib/apps/admin-actions";
 import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
 import AppRegistryList from "@/components/admin/app-registry-list";
 
@@ -14,11 +14,17 @@ export default async function AppsAdminPage() {
   const session = await requireReadOnlySession();
   await requireAdmin(session);
 
-  const registeredSlugs = await getRegisteredSlugs();
+  // Who actually holds each app. One scan for the whole page — see
+  // getAppGrantCounts.
+  const grantCountsBySlug = await getAppGrantCounts();
+  // Live table counts for the tile pills. One RPC for the registry — see
+  // getAppTableCounts.
+  const tableCountsBySlug = await getAppTableCounts();
 
-  // Precompute the missing-connector map once per page load. Surfaced in the
-  // toggle UI as a disabled state + inline warning so admins can't try to
-  // register an app whose connectors aren't configured.
+  // Precompute the missing-connector map once per page load. Shown here as a
+  // warning only — it is not a gate on this page any more. An app that needs an
+  // unconfigured connector still exists and is still valid; what it cannot do
+  // is be granted to anyone, which is enforced in /admin/users.
   const missingEntries = await Promise.all(
     appRegistry.map(
       async (app) =>
@@ -33,8 +39,12 @@ export default async function AppsAdminPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">App Registry</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Register apps to make them available for users. Deregistering
-            removes access for all users.
+            Every app in this repository, validated at build time. Grant an app
+            to a user in{" "}
+            <Link href="/admin/users" className="underline underline-offset-2">
+              Users
+            </Link>{" "}
+            to make it available to them.
           </p>
         </div>
         <Link
@@ -46,8 +56,9 @@ export default async function AppsAdminPage() {
       </div>
       <AppRegistryList
         apps={appRegistry}
-        registeredSlugs={registeredSlugs}
         missingConnectorsBySlug={missingConnectorsBySlug}
+        grantCountsBySlug={grantCountsBySlug}
+        tableCountsBySlug={tableCountsBySlug}
       />
     </div>
   );

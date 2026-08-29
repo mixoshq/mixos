@@ -65,6 +65,16 @@ const eslintConfig = defineConfig([
               message:
                 "The App Services broker and context builder are platform-internal. Use the injected context.services client from your API route/service handler instead.",
             },
+            {
+              group: ["@/lib/apps/scoped-db"],
+              // The NAMES, not the module: `import type { ScopedClient }` is how
+              // an app types a handler that receives `context.db`, and a type
+              // cannot construct anything. It is the factory that must not be
+              // reachable.
+              importNames: ["createScopedClient", "createReadOnlyScopedClient"],
+              message:
+                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a service-role client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
+            },
           ],
         },
       ],
@@ -96,12 +106,37 @@ const eslintConfig = defineConfig([
             {
               group: ["**/lib/server/**", "**/lib/server"],
               message:
-                "A page or widget must not import its app's server tier — that reaches connectors and the DB without the gateway (no roles, no validation, no budget, no telemetry). Server pages: await callAppRoute(slug, \"GET /path\", input). Widgets: createAppClient(appSlug).call(...).",
+                'A page or widget must not import its app\'s server tier — that reaches connectors and the DB without the gateway (no roles, no validation, no budget, no telemetry). Server pages: await callAppRoute(slug, "GET /path", input). Widgets: createAppClient(appSlug).call(...).',
             },
             {
-              group: ["@/lib/db", "@/lib/db/*", "@connectors/*", "@/lib/connectors/*"],
+              group: [
+                "@/lib/db",
+                "@/lib/db/*",
+                "@connectors/*",
+                "@/lib/connectors/*",
+              ],
               message:
                 "Direct DB or connector access is not allowed in a page or widget. Go through your app's declared routes.",
+            },
+            // RESTATED, not inherited. ESLint flat config REPLACES a rule's
+            // options rather than merging them, so this block overrides the
+            // `apps/**` one above wholesale. Anything omitted here is permitted
+            // in pages and widgets — which is how the most client-facing tier
+            // ended up the only one able to import the context builder.
+            {
+              group: ["@/lib/apps/services", "@/lib/apps/context"],
+              message:
+                "The App Services broker and context builder are platform-internal and server-only. A page or widget must not import them: use callAppRoute() from a server page, or createAppClient() from a widget.",
+            },
+            {
+              group: ["@/lib/apps/scoped-db"],
+              // The NAMES, not the module: `import type { ScopedClient }` is how
+              // an app types a handler that receives `context.db`, and a type
+              // cannot construct anything. It is the factory that must not be
+              // reachable.
+              importNames: ["createScopedClient", "createReadOnlyScopedClient"],
+              message:
+                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a service-role client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
             },
           ],
         },
@@ -143,6 +178,16 @@ const eslintConfig = defineConfig([
               group: ["@/lib/apps/services", "@/lib/apps/context"],
               message:
                 "The App Services broker and context builder are platform-internal. Use the injected context.services client instead.",
+            },
+            {
+              group: ["@/lib/apps/scoped-db"],
+              // The NAMES, not the module: `import type { ScopedClient }` is how
+              // an app types a handler that receives `context.db`, and a type
+              // cannot construct anything. It is the factory that must not be
+              // reachable.
+              importNames: ["createScopedClient", "createReadOnlyScopedClient"],
+              message:
+                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a service-role client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
             },
           ],
         },
@@ -299,8 +344,7 @@ const eslintConfig = defineConfig([
         },
         {
           selector: "JSXOpeningElement[name.name='select']",
-          message:
-            "Use <Select> from @/components/ui/input, inside a <Field>.",
+          message: "Use <Select> from @/components/ui/input, inside a <Field>.",
         },
         {
           selector: "JSXOpeningElement[name.name='textarea']",
@@ -313,10 +357,13 @@ const eslintConfig = defineConfig([
             "Use <DataTable> from @/components/ui/data-table. It owns the card chrome, the horizontal scroll container, and a TableSkeleton built from the same constants — a hand-rolled table's skeleton drifts from it immediately.",
         },
         {
+          // Any radius, not just rounded-xl: the drift this rule exists to stop
+          // arrived as rounded-lg and rounded-md, which the xl-only pattern
+          // waved straight through.
           selector:
-            "Literal[value=/rounded-xl\\s+border\\s+border-border\\s+bg-card/]",
+            "Literal[value=/rounded-(?:md|lg|xl|2xl|3xl)\\s+border\\s+border-border\\s+bg-card/]",
           message:
-            "That is CARD_SHELL. Use <Card> or <SectionCard> from @/components/ui — 86 hand-rolled copies of this string across 16 apps drifted on padding, header size and heading level. See docs/apps/app-shell.md#cards.",
+            "That is CARD_SHELL. Use <Card> or <SectionCard> from @/components/ui — hand-rolled copies of this string drifted on radius, padding, header size and heading level. Cards are flat (no shadow-*) and inset by p-5. A bordered group INSIDE a card is a different thing: rounded-md border border-border p-4, no bg-card. See docs/apps/app-shell.md#cards-one-shell-per-thing-and-every-card-says-who-owns-it.",
         },
       ],
     },
@@ -337,7 +384,9 @@ const eslintConfig = defineConfig([
   {
     files: ["apps/**/*.{ts,tsx}", "src/**/*.{ts,tsx}"],
     plugins: {
-      "mixos-design": { rules: { "no-low-contrast-token-pairs": noLowContrastTokenPairs } },
+      "mixos-design": {
+        rules: { "no-low-contrast-token-pairs": noLowContrastTokenPairs },
+      },
     },
     rules: { "mixos-design/no-low-contrast-token-pairs": "error" },
   },

@@ -28,21 +28,41 @@
  *
  * See docs/apps/ux.md#accessibility-floor.
  */
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
+import { CARD_SURFACE } from "@/components/ui/card";
 
-/** Panel widths. `md` suits a form or a message; `lg` a table or a diff. */
+/**
+ * Panel widths. `md` suits a form or a message; `lg` a table or a diff; `xl` a
+ * record browser — several tabs of multi-column reference content, where `lg`
+ * would reflow a four-column grid into a column of stubs.
+ *
+ * `xl` is 5xl rather than 6xl: two columns of facts and a rail-plus-table both
+ * fit comfortably at 1024px, and the step beyond that stopped reading as a
+ * dialog on a laptop — it filled the screen edge to edge, which loses the sense
+ * of a panel over a page that a modal depends on.
+ */
 const WIDTHS = {
   sm: "max-w-md",
   md: "max-w-xl",
   lg: "max-w-3xl",
+  xl: "max-w-5xl",
 } as const;
+
+/**
+ * The height `fixedHeight` holds, per size.
+ *
+ * Tied to the width rather than exposed as its own prop: a panel's height only
+ * needs to be stated because its tabs differ in length, and how long they run is
+ * a function of how wide the panel is. A caller free to pair `sm` with `46rem`
+ * would only ever be describing a mistake.
+ */
+const FIXED_HEIGHTS: Record<keyof typeof WIDTHS, string> = {
+  sm: "h-[38rem]",
+  md: "h-[38rem]",
+  lg: "h-[38rem]",
+  xl: "h-[46rem]",
+};
 
 export function Dialog({
   open,
@@ -55,6 +75,7 @@ export function Dialog({
   size = "md",
   children,
   footer,
+  footerAside,
 }: {
   open: boolean;
   onClose: () => void;
@@ -101,6 +122,15 @@ export function Dialog({
   children: ReactNode;
   /** Action row, pinned below the scrolling content. */
   footer?: ReactNode;
+  /**
+   * Right-aligned content in the footer band, opposite the centred `footer`.
+   *
+   * For the record's address — the path its source lives at — which is what
+   * someone reads a footer to find when they are about to go and edit it. Only
+   * meaningful alongside `tabs`, since that is the branch that renders a band
+   * rather than an action row.
+   */
+  footerAside?: ReactNode;
 }) {
   const titleId = useId();
   const subtitleId = useId();
@@ -175,8 +205,8 @@ export function Dialog({
         aria-labelledby={titleId}
         aria-describedby={subtitle != null ? subtitleId : undefined}
         tabIndex={-1}
-        className={`mix-modal relative flex w-full ${WIDTHS[size]} flex-col rounded-xl border border-border bg-card shadow-xl ${
-          fixedHeight ? "h-[38rem] max-h-[85vh]" : "max-h-[85vh]"
+        className={`mix-modal ${CARD_SURFACE} relative flex w-full ${WIDTHS[size]} flex-col shadow-xl ${
+          fixedHeight ? `${FIXED_HEIGHTS[size]} max-h-[85vh]` : "max-h-[85vh]"
         }`}
       >
         {/*
@@ -193,11 +223,11 @@ export function Dialog({
             subtitle != null ? "items-start" : "items-center"
           } ${
             tabs != null
-              // rounded-t-xl matches the panel's own radius: the panel is not
-              // overflow-hidden (that would clip focus rings and any tooltip
-              // that escapes its row), so the first child carrying a fill has
-              // to round its own top corners or it squares off the dialog's.
-              ? "rounded-t-xl bg-muted/40"
+              ? // rounded-t-xl matches the panel's own radius: the panel is not
+                // overflow-hidden (that would clip focus rings and any tooltip
+                // that escapes its row), so the first child carrying a fill has
+                // to round its own top corners or it squares off the dialog's.
+                "rounded-t-xl bg-muted/40"
               : "border-b border-border"
           }`}
         >
@@ -211,7 +241,10 @@ export function Dialog({
               {title}
             </h2>
             {subtitle != null && (
-              <p id={subtitleId} className="mt-0.5 text-sm text-muted-foreground">
+              <p
+                id={subtitleId}
+                className="mt-0.5 text-sm text-muted-foreground"
+              >
                 {subtitle}
               </p>
             )}
@@ -231,7 +264,9 @@ export function Dialog({
           <div className="border-b border-border bg-muted/40 px-4">{tabs}</div>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {children}
+        </div>
         {/*
           Two footers, chosen by whether this dialog has tabs.
 
@@ -243,7 +278,7 @@ export function Dialog({
           reason the header rounds its top — the panel is not overflow-hidden,
           so a filled last child has to round its own corners.
         */}
-        {footer && (
+        {(footer || footerAside) && (
           <div
             className={
               tabs != null
@@ -251,7 +286,21 @@ export function Dialog({
                 : "flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3"
             }
           >
-            {footer}
+            {/*
+              Provenance left, path right — the band reads as one line starting
+              at the panel's edge, aligned with the header and the panels above
+              it. This was a three-column grid holding the provenance centred on
+              the PANEL; centring bought symmetry at the cost of a ragged left
+              edge that shifted with the text's own width.
+            */}
+            {footerAside != null && tabs != null ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className="min-w-0">{footer}</span>
+                <span className="min-w-0 shrink-0">{footerAside}</span>
+              </div>
+            ) : (
+              footer
+            )}
           </div>
         )}
       </div>

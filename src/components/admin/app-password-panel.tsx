@@ -19,9 +19,9 @@ interface Props {
 }
 
 /**
- * Admin-only panel for managing the app-wide unlock password. Shown inside
- * the expanded row of an app that has any `pageVisibility` or `apiVisibility`
- * entry set to `"password"`. The hash is never exposed — we only fetch
+ * Admin-only panel for managing the app-wide unlock password. Shown on the
+ * Access tab of the app's details dialog, for an app with any `pageVisibility`
+ * or `apiVisibility` entry set to `"password"`. The hash is never exposed — we only fetch
  * whether one exists and when it was last updated. Existing 24h unlock
  * cookies remain valid after a rotation (they're stateless signed tokens);
  * clearing the password is the only way to force fail-closed immediately.
@@ -37,9 +37,7 @@ export default function AppPasswordPanel({ slug, appName }: Props) {
   useEffect(() => {
     getAppPasswordStatus(slug)
       .then(setStatus)
-      .catch((e) =>
-        setStatusError(e instanceof Error ? e.message : String(e)),
-      );
+      .catch((e) => setStatusError(e instanceof Error ? e.message : String(e)));
   }, [slug]);
 
   function handleSet(e: React.FormEvent) {
@@ -128,7 +126,10 @@ export default function AppPasswordPanel({ slug, appName }: Props) {
         </p>
       )}
 
-      <form onSubmit={handleSet} className="mt-3 flex flex-wrap items-end gap-2">
+      <form
+        onSubmit={handleSet}
+        className="mt-3 flex flex-wrap items-end gap-2"
+      >
         <div className="flex-1 min-w-[16rem]">
           <label
             htmlFor={`pwd-${slug}`}

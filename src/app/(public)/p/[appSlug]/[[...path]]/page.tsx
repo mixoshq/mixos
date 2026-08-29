@@ -10,6 +10,8 @@ import { loadAppPage } from "@/lib/apps/loader";
 import { isAppUnlocked } from "@/lib/apps/public-access";
 import { hasAppPassword } from "@/lib/apps/app-password-store";
 import PasswordGate from "@/components/apps/password-gate";
+import { CARD_SHELL } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface Props {
   params: Promise<{ appSlug: string; path?: string[] }>;
@@ -59,7 +61,7 @@ export default async function PublicAppPage({ params }: Props) {
         );
         return (
           <div className="flex min-h-screen items-center justify-center bg-muted px-4">
-            <div className="max-w-sm rounded-xl border border-border bg-card p-8 text-center shadow-sm">
+            <div className={cn(CARD_SHELL, "max-w-sm p-5 text-center")}>
               <h1 className="text-lg font-semibold text-card-foreground">
                 This app is not available
               </h1>

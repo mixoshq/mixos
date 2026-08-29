@@ -26,6 +26,8 @@ import WidgetCatalog from "./widget-catalog";
 import { useDashboardEdit } from "./edit-mode-context";
 
 import "react-grid-layout/css/styles.css";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Breakpoint = "lg" | "md" | "sm";
 
@@ -50,9 +52,10 @@ export default function DashboardGrid({
   const [isCollapsing, setIsCollapsing] = useState(false);
   const [isExpanding, setIsExpanding] = useState(false);
   const pillRef = useRef<HTMLDivElement>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(
-    null,
-  );
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const handleBreakpointChange = useCallback((newBreakpoint: Breakpoint) => {
@@ -130,35 +133,29 @@ export default function DashboardGrid({
     [isEditing],
   );
 
-  const handleLayoutChange = useCallback(
-    (newLayout: RGLLayout) => {
-      // Only persist changes made at the `lg` breakpoint. Smaller breakpoints
-      // render an auto-compacted view; saving those would overwrite the user's
-      // real layout and fail to restore it when the browser resizes back up.
-      if (currentBreakpointRef.current !== "lg") return;
-      const mapped: LayoutItem[] = newLayout.map((item: RGLLayoutItem) => ({
-        i: item.i,
-        x: item.x,
-        y: item.y,
-        w: item.w,
-        h: item.h,
-        minW: item.minW,
-        minH: item.minH,
-      }));
-      setLayout(mapped);
-      saveLayout(mapped);
-    },
-    []
-  );
+  const handleLayoutChange = useCallback((newLayout: RGLLayout) => {
+    // Only persist changes made at the `lg` breakpoint. Smaller breakpoints
+    // render an auto-compacted view; saving those would overwrite the user's
+    // real layout and fail to restore it when the browser resizes back up.
+    if (currentBreakpointRef.current !== "lg") return;
+    const mapped: LayoutItem[] = newLayout.map((item: RGLLayoutItem) => ({
+      i: item.i,
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+      minW: item.minW,
+      minH: item.minH,
+    }));
+    setLayout(mapped);
+    saveLayout(mapped);
+  }, []);
 
-  const handleRemoveWidget = useCallback(
-    async (instanceId: string) => {
-      await removeWidget(instanceId);
-      setWidgetList((prev) => prev.filter((w) => w.id !== instanceId));
-      setLayout((prev) => prev.filter((item) => item.i !== instanceId));
-    },
-    []
-  );
+  const handleRemoveWidget = useCallback(async (instanceId: string) => {
+    await removeWidget(instanceId);
+    setWidgetList((prev) => prev.filter((w) => w.id !== instanceId));
+    setLayout((prev) => prev.filter((item) => item.i !== instanceId));
+  }, []);
 
   // Click the pencil → mount the pill but immediately animate it FROM the
   // pencil's slot TO its natural centered position. Mirror of the collapse so
@@ -315,12 +312,12 @@ export default function DashboardGrid({
         );
       }
     },
-    []
+    [],
   );
 
   const resolveWidgetDef = (
     appSlug: string,
-    widgetId: string
+    widgetId: string,
   ): { app: AppManifest; def: WidgetDefinition } | null => {
     const app = availableApps.find((a) => a.slug === appSlug);
     if (!app) return null;
@@ -373,7 +370,7 @@ export default function DashboardGrid({
             {widgetList.map((widget) => {
               const resolved = resolveWidgetDef(
                 widget.app_slug,
-                widget.widget_id
+                widget.widget_id,
               );
               return (
                 <div
@@ -450,7 +447,11 @@ export default function DashboardGrid({
         <div
           ref={contextMenuRef}
           role="menu"
-          className="fixed z-50 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-lg"
+          className={cn(
+            "mix-popover",
+            CARD_SURFACE,
+            "fixed z-50 min-w-[160px] py-1 shadow-lg",
+          )}
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >
           <button

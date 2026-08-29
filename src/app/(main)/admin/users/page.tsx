@@ -3,40 +3,56 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { revalidatePath } from "next/cache";
-import { Info } from "lucide-react";
 import { createServiceClient } from "@/lib/db/server";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin, isGlobalApp, setUserAppRole } from "@/lib/apps/access";
 import { appRegistry } from "@/generated/app-registry";
-import { getRegisteredSlugs } from "@/lib/apps/admin-actions";
+import {
+  getMissingTenantConfigConnectors,
+  formatMissingList,
+} from "@/lib/apps/connector-gates";
 import { removeAppWidgetsForUser } from "@/lib/dashboard/cleanup";
-import UserAccordionList, {
-  type UserRow,
-} from "@/components/admin/user-accordion-list";
+import UserTable, { type UserRow } from "@/components/admin/user-table";
+import { recordAdminAction } from "@/lib/apps/admin-audit";
 
 export default async function UsersAdminPage() {
   const pageSession = await requireReadOnlySession();
-  await requireAdmin(pageSession);
+  const pageAdmin = await requireAdmin(pageSession);
 
   const supabase = createServiceClient();
 
-  const [
-    { data: users },
-    { data: grants },
-    { data: installs },
-    registeredSlugsList,
-  ] = await Promise.all([
-    supabase.from("users").select("*").order("display_name"),
-    supabase.from("user_app_grants").select("user_id, app_slug, role"),
-    supabase.from("user_apps").select("user_id, app_slug"),
-    getRegisteredSlugs(),
-  ]);
+  const [{ data: users }, { data: grants }, { data: installs }, missingByApp] =
+    await Promise.all([
+      supabase.from("users").select("*").order("display_name"),
+      supabase.from("user_app_grants").select("user_id, app_slug, role"),
+      supabase.from("user_apps").select("user_id, app_slug"),
+      /*
+        THE CONNECTOR GATE LIVES HERE NOW.
 
-  const registeredSlugs = new Set(registeredSlugsList);
-  const registeredApps = appRegistry.filter((a) => registeredSlugs.has(a.slug));
-  const globalRegisteredSlugs = registeredApps
-    .filter((a) => a.global)
-    .map((a) => a.slug);
+        It used to sit on registration: an app whose declared connectors had no
+        credentials could not be switched on, so nobody could be given it. With
+        registration gone, granting is where that consequence has to land —
+        every connector is tenant-scoped, so an app missing one does not work
+        for the person you just gave it to, whoever they are.
+      */
+      Promise.all(
+        appRegistry.map(
+          async (a) =>
+            [a.slug, await getMissingTenantConfigConnectors(a.slug)] as const,
+        ),
+      ),
+    ]);
+
+  const blockedBySlug = new Map(
+    missingByApp
+      .filter(([, missing]) => missing.length > 0)
+      .map(([slug, missing]) => [slug, formatMissingList(missing)]),
+  );
+
+  // Every app in the registry. Being in it IS being valid — it passed
+  // build-time validation — so there is nothing further to filter by.
+  const grantableApps = appRegistry;
+  const globalSlugs = grantableApps.filter((a) => a.global).map((a) => a.slug);
 
   const grantsByUser = new Map<string, string[]>();
   const roleByUserSlug = new Map<string, Record<string, string | null>>();
@@ -53,7 +69,7 @@ export default async function UsersAdminPage() {
   // Effective role per granted slug, defaulting to each app's manifest default
   // when no explicit role is stored (covers existing grants and global apps).
   const defaultRoleBySlug = new Map<string, string | null>(
-    registeredApps.map((a) => [a.slug, a.defaultRole]),
+    grantableApps.map((a) => [a.slug, a.defaultRole]),
   );
 
   const installsByUser = new Map<string, Set<string>>();
@@ -72,14 +88,17 @@ export default async function UsersAdminPage() {
     }) => {
       const explicitGrants = grantsByUser.get(u.id) ?? [];
       const grantedSet = new Set(explicitGrants);
-      for (const slug of globalRegisteredSlugs) grantedSet.add(slug);
+      for (const slug of globalSlugs) grantedSet.add(slug);
       const grantedSlugs = Array.from(grantedSet);
+      // A grant for a slug no longer in the registry is not counted: the app is
+      // gone from the repo and the row is on its way out on the next sync.
+      const inRegistry = new Set(grantableApps.map((a) => a.slug));
       const grantedActiveCount = grantedSlugs.filter((s) =>
-        registeredSlugs.has(s),
+        inRegistry.has(s),
       ).length;
       const installedSet = installsByUser.get(u.id) ?? new Set<string>();
       const installedActiveCount = grantedSlugs.filter(
-        (s) => registeredSlugs.has(s) && installedSet.has(s),
+        (s) => inRegistry.has(s) && installedSet.has(s),
       ).length;
       const explicitRoles = roleByUserSlug.get(u.id) ?? {};
       const roleBySlug: Record<string, string | null> = {};
@@ -114,6 +133,19 @@ export default async function UsersAdminPage() {
 
     if (isGlobalApp(slug)) {
       throw new Error("Global apps cannot be granted or revoked per-user.");
+    }
+
+    // Re-checked server-side, not just disabled in the UI: the disabled control
+    // is a courtesy and a form post is not obliged to respect it. Revoking is
+    // always allowed — an app that stopped working is one you want to be able
+    // to take away.
+    if (!granted) {
+      const missing = await getMissingTenantConfigConnectors(slug);
+      if (missing.length > 0) {
+        throw new Error(
+          `Configure these connectors first: ${formatMissingList(missing)}`,
+        );
+      }
     }
 
     if (granted) {
@@ -153,6 +185,18 @@ export default async function UsersAdminPage() {
       }
     }
 
+    // The question this table exists to answer: who gave this person access to
+    // this app, and when.
+    await recordAdminAction(
+      { id: adminUser.id, email: adminUser.email },
+      {
+        action: granted ? "user.grant.revoke" : "user.grant.add",
+        targetType: "user",
+        targetId: userId,
+        details: { appSlug: slug },
+      },
+    );
+
     revalidatePath("/admin/users");
     revalidatePath("/apps");
     revalidatePath("/");
@@ -167,7 +211,7 @@ export default async function UsersAdminPage() {
     if (!userId || !slug) return;
 
     const session = await requireReadOnlySession();
-    await requireAdmin(session);
+    const roleAdmin = await requireAdmin(session);
 
     // Guard against arbitrary values: the role must be one the app declares.
     const manifest = appRegistry.find((a) => a.slug === slug);
@@ -178,6 +222,15 @@ export default async function UsersAdminPage() {
     }
 
     await setUserAppRole(userId, slug, role);
+    await recordAdminAction(
+      { id: roleAdmin.id, email: roleAdmin.email },
+      {
+        action: "user.role.set",
+        targetType: "user",
+        targetId: userId,
+        details: { appSlug: slug, role },
+      },
+    );
 
     revalidatePath("/admin/users");
   }
@@ -187,44 +240,28 @@ export default async function UsersAdminPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">Users</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Grant users access to apps. Granted apps appear in the user&apos;s App
-          Manager for them to install.
+          Add people, set what they can sign in with, and grant them access to
+          apps. Granted apps appear in the user&apos;s App Manager for them to
+          install.
         </p>
       </div>
 
-      <div className="mb-6 flex gap-3 rounded-lg border border-border bg-muted/40 p-4 text-sm">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        <div>
-          <p className="font-medium text-foreground">Granting admin access</p>
-          <p className="mt-1 text-muted-foreground">
-            Admin is the{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-              is_admin
-            </code>{" "}
-            flag on the user record, not something this page sets. It is managed
-            in the database:
-          </p>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
-            <li>
-              Set the flag directly on the user record, or seed the first admin
-              with{" "}
-              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-                npm run seed-admin
-              </code>
-              .
-            </li>
-          </ul>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-border bg-card shadow-sm">
-        <UserAccordionList
-          users={rows}
-          registeredApps={registeredApps}
-          toggleAction={toggleUserGrant}
-          setRoleAction={setUserGrantRole}
-        />
-      </div>
+      {/*
+        The "admin is a database flag, set it yourself" notice that used to sit
+        here is gone: the Profile tab sets it now, with the guards that a hand
+        edit never had — you cannot demote yourself, and you cannot remove the
+        last administrator. `npm run seed-admin` is still how the FIRST one is
+        made, which is a bootstrap concern and belongs in the setup guide rather
+        than on a page you can only reach by already being an admin.
+      */}
+      <UserTable
+        users={rows}
+        registeredApps={grantableApps}
+        blockedBySlug={Object.fromEntries(blockedBySlug)}
+        currentAdminId={pageAdmin.id}
+        toggleAction={toggleUserGrant}
+        setRoleAction={setUserGrantRole}
+      />
     </div>
   );
 }

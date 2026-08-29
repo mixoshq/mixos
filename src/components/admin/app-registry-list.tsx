@@ -7,7 +7,9 @@
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
-import AppRegisterList from "./app-register-list";
+import AppTile from "./app-tile";
+import { CARD_SHELL } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface MissingConnector {
   name: string;
@@ -16,31 +18,28 @@ interface MissingConnector {
 
 interface Props {
   apps: AppManifest[];
-  registeredSlugs: string[];
   missingConnectorsBySlug: Record<string, MissingConnector[]>;
+  /** Grant holders per slug. A slug with no grants is absent, meaning 0. */
+  grantCountsBySlug: Record<string, number>;
+  /** Live table counts per slug. A slug with no tables is absent, meaning 0. */
+  tableCountsBySlug: Record<string, number>;
 }
-
-type StatusFilter = "all" | "registered" | "unregistered";
-
-const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
-  { value: "all", label: "All" },
-  { value: "registered", label: "Registered" },
-  { value: "unregistered", label: "Unregistered" },
-];
 
 export default function AppRegistryList({
   apps,
-  registeredSlugs,
   missingConnectorsBySlug,
+  grantCountsBySlug,
+  tableCountsBySlug,
 }: Props) {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("all");
-  const registeredSet = useMemo(
-    () => new Set(registeredSlugs),
-    [registeredSlugs],
-  );
   const lower = query.toLowerCase();
-  const searchMatches = useMemo(
+  /*
+    Search is the only filter left. The status tabs it sat beside — All /
+    Registered / Unregistered — partitioned the list by a state that no longer
+    exists: every app in this list is in the registry, and being in the registry
+    is the whole of being valid.
+  */
+  const filtered = useMemo(
     () =>
       apps.filter((a) => {
         if (!query) return true;
@@ -52,20 +51,6 @@ export default function AppRegistryList({
       }),
     [apps, query, lower],
   );
-  const counts = useMemo(() => {
-    let registered = 0;
-    let unregistered = 0;
-    for (const a of searchMatches) {
-      if (registeredSet.has(a.slug)) registered++;
-      else unregistered++;
-    }
-    return { all: searchMatches.length, registered, unregistered };
-  }, [searchMatches, registeredSet]);
-  const filtered = searchMatches.filter((a) => {
-    if (status === "registered") return registeredSet.has(a.slug);
-    if (status === "unregistered") return !registeredSet.has(a.slug);
-    return true;
-  });
 
   return (
     <>
@@ -75,67 +60,40 @@ export default function AppRegistryList({
           <input
             type="text"
             placeholder="Search apps..."
+            aria-label="Search apps"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-full rounded-lg border border-input bg-background py-2 pl-9 pr-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
+      </div>
+      {/*
+        The same grid the connector and theme registries use — three columns at
+        lg, two at sm — so the three registries are one layout an admin learns
+        once. This was a divided list of full-width rows, which is why apps felt
+        like a different kind of object from the other two.
+      */}
+      {filtered.length > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((app) => (
+            <AppTile
+              key={app.slug}
+              app={app}
+              missingConnectors={missingConnectorsBySlug[app.slug] ?? []}
+              grantCount={grantCountsBySlug[app.slug] ?? 0}
+              tableCount={tableCountsBySlug[app.slug] ?? 0}
+            />
+          ))}
+        </div>
+      ) : (
         <div
-          role="tablist"
-          aria-label="Filter by registration status"
-          className="inline-flex shrink-0 rounded-lg border border-border bg-background p-0.5 shadow-sm"
+          className={cn(CARD_SHELL, "p-5 text-center text-muted-foreground")}
         >
-          {STATUS_OPTIONS.map((opt) => {
-            const active = status === opt.value;
-            const count = counts[opt.value];
-            return (
-              <button
-                key={opt.value}
-                role="tab"
-                type="button"
-                aria-selected={active}
-                onClick={() => setStatus(opt.value)}
-                className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${
-                  active
-                    ? "bg-brand text-brand-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <span>{opt.label}</span>
-                <span
-                  className={`rounded px-1.5 py-px text-xs tabular-nums ${
-                    active
-                      ? "bg-white/20 text-white"
-                      : "bg-muted text-foreground"
-                  }`}
-                >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
+          {query
+            ? "No apps match your search."
+            : "No apps found. Add an app to the /apps directory."}
         </div>
-      </div>
-      <div className="rounded-xl border border-border bg-card shadow-sm">
-        <div className="divide-y divide-border">
-          {filtered.length > 0 ? (
-            filtered.map((app) => (
-              <AppRegisterList
-                key={app.slug}
-                app={app}
-                registered={registeredSet.has(app.slug)}
-                missingConnectors={missingConnectorsBySlug[app.slug] ?? []}
-              />
-            ))
-          ) : (
-            <div className="px-6 py-8 text-center text-muted-foreground">
-              {query || status !== "all"
-                ? "No apps match your filters."
-                : "No apps found. Add an app to the /apps directory."}
-            </div>
-          )}
-        </div>
-      </div>
+      )}
     </>
   );
 }

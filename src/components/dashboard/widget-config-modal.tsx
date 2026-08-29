@@ -11,6 +11,8 @@ import type { WidgetDefinition, WidgetConfigField } from "@/lib/apps/types";
 import type { ResolvedConfig } from "@/lib/hooks/types";
 import { widgetLoaders } from "@/generated/app-registry";
 import { useListReorder } from "@/lib/dnd/use-list-reorder";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface WidgetConfigModalProps {
   appSlug: string;
@@ -38,7 +40,10 @@ export default function WidgetConfigModal({
       try {
         const key = `${appSlug}/${widget.component}`;
         const loader = widgetLoaders[key];
-        if (!loader) { setLoading(false); return; }
+        if (!loader) {
+          setLoading(false);
+          return;
+        }
         const mod = await loader();
         if (mod.resolveConfig) {
           const resolved = await mod.resolveConfig({ appSlug });
@@ -197,7 +202,11 @@ export default function WidgetConfigModal({
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div
         data-tour="widget-config-modal"
-        className="mx-4 w-full max-w-md rounded-xl border border-border bg-card shadow-xl"
+        className={cn(
+          "mix-modal",
+          CARD_SURFACE,
+          "mx-4 w-full max-w-md shadow-xl",
+        )}
       >
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-lg font-semibold">Configure {widget.name}</h2>

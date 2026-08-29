@@ -25,11 +25,10 @@ import { assertValidCron } from "../src/lib/apps/cron";
  * `src/lib/connectors/types.ts`; keep these schemas in step with them.
  */
 
-const authorSchema = z
-  .strictObject({
-    name: z.string().min(1),
-    email: z.string().min(1),
-  });
+const authorSchema = z.strictObject({
+  name: z.string().min(1),
+  email: z.string().min(1),
+});
 
 const sizeSchema = z.strictObject({
   w: z.number(),
@@ -76,7 +75,9 @@ const cadenceSchema = z
       .number()
       .int()
       .min(5)
-      .refine((n) => n % 5 === 0, { message: "everyMinutes must be a multiple of 5" })
+      .refine((n) => n % 5 === 0, {
+        message: "everyMinutes must be a multiple of 5",
+      })
       .optional(),
     // Standard 5-field CRON expression, evaluated at 5-minute tick resolution.
     cron: z.string().min(1).optional(),
@@ -348,7 +349,8 @@ const JURISDICTION_CLAIMS: { pattern: RegExp; why: string }[] = [
     why: "it claims a subject area, which is always wider than the data",
   },
   {
-    pattern: /\b(?:always|by default)\s+(?:use|call|prefer|reach for|start with)\b/i,
+    pattern:
+      /\b(?:always|by default)\s+(?:use|call|prefer|reach for|start with)\b/i,
     why: "an unconditional routing instruction leaves no room for a better source",
   },
   {
@@ -356,7 +358,8 @@ const JURISDICTION_CLAIMS: { pattern: RegExp; why: string }[] = [
     why: "ranking this tool against others is a claim a description cannot support",
   },
   {
-    pattern: /\b(?:authoritative|canonical|definitive|single|sole|only)\s+source\b/i,
+    pattern:
+      /\b(?:authoritative|canonical|definitive|single|sole|only)\s+source\b/i,
     why: "a sole-source claim suppresses tools that may be better suited",
   },
   {
@@ -524,11 +527,15 @@ export const RawAppManifestSchema = z
       )
       .optional(),
   })
-  .refine((m) => m.defaultRole == null || !!m.roles?.some((r) => r.key === m.defaultRole), {
-    message:
-      'defaultRole must match one of the declared roles[].key (and roles must be declared)',
-    path: ["defaultRole"],
-  })
+  .refine(
+    (m) =>
+      m.defaultRole == null || !!m.roles?.some((r) => r.key === m.defaultRole),
+    {
+      message:
+        "defaultRole must match one of the declared roles[].key (and roles must be declared)",
+      path: ["defaultRole"],
+    },
+  )
   .superRefine((m, ctx) => {
     // A page is loaded by a browser following a link; there is nowhere to put a
     // bearer token. Accepting `key` there would read as an exposed surface and
@@ -586,15 +593,38 @@ const connectorAuthSchema = z
     tokenUrl: z.url().optional(),
     tokenAuth: z.enum(["basic", "post"]).optional(),
     authorizeUrl: z.url().optional(),
-    scopes: z.array(z.string().min(1)).optional(),
+    /**
+     * Every scope this API documents, each flagged with whether this connector
+     * asks for it. Written by the dev-time scopes refresh
+     * (`scripts/check-scopes.ts <connector> --write`), which reads `scopesUrl`;
+     * the registry never fetches it.
+     *
+     * One array rather than two because the catalogue and the request are the
+     * same list seen from two angles, and keeping them apart is how they drift.
+     * `requested` is REQUIRED and never inferred: the refresh writes far more
+     * entries than a connector asks for, so a missing flag defaulting to true
+     * would silently request the provider's entire catalogue.
+     */
+    scopes: z
+      .array(
+        z.strictObject({
+          scope: z.string().min(1),
+          /** The provider's own wording, as shown on their consent screen. */
+          description: z.string().min(1).optional(),
+          access: z.enum(["read", "write", "read-write"]).optional(),
+          /** Does this connector ask for it at authorization time? */
+          requested: z.boolean(),
+        }),
+      )
+      .optional(),
     /**
      * The provider's own scope/permission reference page.
      *
-     * The Connector Registry reads it to render permissions in the provider's
-     * words — "View your email messages and settings" instead of
-     * `.../auth/gmail.readonly`, which tells a non-technical admin nothing.
+     * The dev-time scopes refresh reads it to render permissions in the
+     * provider's words — "View your records and settings" instead of
+     * `.../auth/records.readonly`, which tells a non-technical admin nothing.
      * Point it at the page that TABULATES scopes against descriptions, not at
-     * the API home page: the registry parses table rows out of it.
+     * the API home page: the parser reads table rows out of it.
      */
     scopesUrl: z
       .url()
@@ -602,7 +632,11 @@ const connectorAuthSchema = z
       .optional(),
   })
   .superRefine((a, ctx) => {
-    if (a.strategy === "apiKey" && (a.in === "header" || a.in === "query") && !a.name) {
+    if (
+      a.strategy === "apiKey" &&
+      (a.in === "header" || a.in === "query") &&
+      !a.name
+    ) {
       ctx.addIssue({
         code: "custom",
         message: `auth.in "${a.in}" requires auth.name (the header or query-parameter to send the key in)`,
@@ -723,70 +757,75 @@ const connectorDocLinkSchema = z.strictObject({
     .refine((u) => u.startsWith("https://"), "must be an https:// URL"),
 });
 
-const connectorSetupStepSchema = z.strictObject({
-  /**
-   * The instruction, and only the instruction — one imperative sentence. The UI
-   * numbers these, so don't number them here.
-   */
-  text: z.string().min(1),
-  /**
-   * Why the step is that way, behind a "?" the reader opens if they care.
-   *
-   * This is where the paragraph goes that a careful author wants to include and
-   * a reader following instructions does not want in their way — Gmail's step
-   * "set User type to Internal" is four words of instruction carrying thirty
-   * words of justification about CASA assessments and 7-day refresh tokens.
-   * Inline, that buries the instruction; deleted, the next person changes the
-   * setting back. A tooltip is the shape that fits: available, not in the way.
-   *
-   * Rationale only. Anything the reader must DO belongs in `text`, because a
-   * tooltip is not somewhere an instruction can live.
-   */
-  why: z
-    .string()
-    .min(1)
-    .max(300, "a tooltip, not an essay — put anything longer in the connector's docs")
-    .optional(),
-  /** Where this step is carried out, when it happens somewhere else. */
-  link: connectorDocLinkSchema.optional(),
-  /**
-   * Literal values the step tells the admin to choose — "Internal", "Web
-   * application". Each is emboldened where it appears in `text`, so the thing
-   * to type or pick is findable without reading the sentence twice.
-   *
-   * Values, not emphasis: this is for a string the admin must match exactly in
-   * someone else's form, and every entry must actually appear in `text`, which
-   * the build checks.
-   */
-  values: z.array(z.string().min(1)).optional(),
-  /**
-   * Render this deployment's redirect URI, with a copy button, directly beneath
-   * this step.
-   *
-   * Declared rather than inferred: the redirect URI is the one value in the
-   * whole guide the manifest cannot contain — it is built from the running
-   * deployment's origin — and it is useless anywhere except beside the step
-   * that asks you to paste it into someone else's form.
-   */
-  showRedirectUri: z.boolean().optional(),
-}).superRefine((step, ctx) => {
-  for (const value of step.values ?? []) {
-    // Same whole-phrase rule the UI uses to find them; a value that is not in
-    // the sentence would simply never render, which is a silent no-op.
-    const pattern = new RegExp(
-      `(^|[^\\w])${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w])`,
-    );
-    if (!pattern.test(step.text)) {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          `values entry ${JSON.stringify(value)} does not appear in this step's text, ` +
-          "so nothing would be emboldened. Match it exactly, or drop it.",
-        path: ["values"],
-      });
+const connectorSetupStepSchema = z
+  .strictObject({
+    /**
+     * The instruction, and only the instruction — one imperative sentence. The UI
+     * numbers these, so don't number them here.
+     */
+    text: z.string().min(1),
+    /**
+     * Why the step is that way, behind a "?" the reader opens if they care.
+     *
+     * This is where the paragraph goes that a careful author wants to include and
+     * a reader following instructions does not want in their way — Gmail's step
+     * "set User type to Internal" is four words of instruction carrying thirty
+     * words of justification about CASA assessments and 7-day refresh tokens.
+     * Inline, that buries the instruction; deleted, the next person changes the
+     * setting back. A tooltip is the shape that fits: available, not in the way.
+     *
+     * Rationale only. Anything the reader must DO belongs in `text`, because a
+     * tooltip is not somewhere an instruction can live.
+     */
+    why: z
+      .string()
+      .min(1)
+      .max(
+        300,
+        "a tooltip, not an essay — put anything longer in the connector's docs",
+      )
+      .optional(),
+    /** Where this step is carried out, when it happens somewhere else. */
+    link: connectorDocLinkSchema.optional(),
+    /**
+     * Literal values the step tells the admin to choose — "Internal", "Web
+     * application". Each is emboldened where it appears in `text`, so the thing
+     * to type or pick is findable without reading the sentence twice.
+     *
+     * Values, not emphasis: this is for a string the admin must match exactly in
+     * someone else's form, and every entry must actually appear in `text`, which
+     * the build checks.
+     */
+    values: z.array(z.string().min(1)).optional(),
+    /**
+     * Render this deployment's redirect URI, with a copy button, directly beneath
+     * this step.
+     *
+     * Declared rather than inferred: the redirect URI is the one value in the
+     * whole guide the manifest cannot contain — it is built from the running
+     * deployment's origin — and it is useless anywhere except beside the step
+     * that asks you to paste it into someone else's form.
+     */
+    showRedirectUri: z.boolean().optional(),
+  })
+  .superRefine((step, ctx) => {
+    for (const value of step.values ?? []) {
+      // Same whole-phrase rule the UI uses to find them; a value that is not in
+      // the sentence would simply never render, which is a silent no-op.
+      const pattern = new RegExp(
+        `(^|[^\\w])${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w])`,
+      );
+      if (!pattern.test(step.text)) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `values entry ${JSON.stringify(value)} does not appear in this step's text, ` +
+            "so nothing would be emboldened. Match it exactly, or drop it.",
+          path: ["values"],
+        });
+      }
     }
-  }
-});
+  });
 
 /**
  * Provisioning instructions, structured so the admin page can render them as a
@@ -836,121 +875,134 @@ const connectorSetupSchema = z.strictObject({
 /**
  * Path to the connector's icon, relative to its own `assets/` directory.
  *
- * Constrained to a plain relative filename: the generator copies `assets/` into
- * `public/connectors/<name>/` and builds a URL from this value, so an absolute
- * path, a `..` segment or a URL would either escape that directory or silently
- * produce a broken `<img>`. The generator additionally proves the file exists
- * and is a square of at least 512x512 — see validateConnectorIcon().
+ * Written as the real relative path — `assets/icon.svg`, not `icon.svg` — so
+ * the manifest says where the file actually is rather than leaving `assets/`
+ * implied. Constrained to that directory: the generator copies `assets/` into
+ * `public/connector-assets/<name>/` and builds a URL from this value, so an
+ * absolute path, a `..` segment or a URL would either escape that directory or
+ * silently produce a broken `<img>`. The generator additionally proves the file
+ * exists, and that a raster icon is a square of at least 512x512 or an SVG
+ * carries a viewBox — see validateConnectorIcon().
  */
 const connectorIconSchema = z
   .string()
   .min(1)
-  .refine((v) => !v.startsWith("/") && !v.includes("..") && !/^[a-z][a-z0-9+.-]*:/i.test(v),
-    "must be a path inside the connector's assets/ directory, e.g. \"icon.png\"");
+  .refine(
+    (v) =>
+      v.startsWith("assets/") &&
+      !v.includes("..") &&
+      !/^[a-z][a-z0-9+.-]*:/i.test(v) &&
+      v.length > "assets/".length,
+    'must be a path inside the connector\'s own assets/ directory, written out in full — e.g. "assets/icon.svg"',
+  );
 
-export const RawConnectorManifestSchema = z.strictObject({
-  name: z.string().min(1),
-  displayName: z.string().min(1),
-  icon: connectorIconSchema.optional(),
-  /**
-   * Each person signs into their own account, rather than everyone sharing one
-   * the admin connected.
-   *
-   * The default — and the right answer for most connectors — is tenant-scoped:
-   * one credential set, one grant, and every user of every app sees the same
-   * response. Set this only when one shared account is genuinely wrong, as it
-   * is for a person's own mail or calendar. It costs the property that made the
-   * tenant model easy to reason about, so it is opt-in and narrow.
-   *
-   * Three-legged OAuth only. See docs/connectors/architecture.md.
-   */
-  userScoped: z.boolean().optional(),
-  /** ISO 8601 date-time, stamped by scripts/stamp-updated.ts. Never hand-edited. */
-  lastUpdated: z.iso.datetime().optional(),
-  /**
-   * What the SERVICE is — "Highly popular email service by Google" — not what
-   * this connector does with it, and not how to set it up.
-   *
-   * Capped because this field is where a 1,400-character block of numbered
-   * setup steps once lived, for want of anywhere better; `setup` is that
-   * somewhere now, and a limit is what stops the prose migrating back. 140 is
-   * two real sentences — and the registry tile shows the first 15 words of it,
-   * so the cap also bounds how far a tile can be from the whole truth.
-   */
-  description: z
-    .string()
-    .max(
-      140,
-      "keep it to ~2 sentences about the service itself. Provisioning steps go in \"setup\"",
-    )
-    .optional(),
-  setup: connectorSetupSchema.optional(),
-  credentialFields: z.array(credentialFieldSchema).optional(),
-  authors: z.array(authorSchema).optional(),
-  telemetry: z.array(connectorTelemetryEventSchema).optional(),
-  auth: connectorAuthSchema.optional(),
-  http: connectorHttpSchema.optional(),
-  webhook: connectorWebhookSchema.optional(),
-}).superRefine((m, ctx) => {
-  // Per-user credentials only mean something for a flow where each person can
-  // present their own identity. An API key is one string an admin pastes; a
-  // "user-scoped" one would be the tenant key wearing a label.
-  if (m.userScoped && m.auth?.strategy !== "oauth2_authorization_code") {
-    ctx.addIssue({
-      code: "custom",
-      message:
-        `"userScoped" requires auth.strategy "oauth2_authorization_code"; ` +
-        `this connector uses "${m.auth?.strategy ?? "none"}". There is no ` +
-        `per-user equivalent of an API key an admin pastes once.`,
-      path: ["userScoped"],
-    });
-  }
-
-  // The redirect URI belongs to the three-legged flow and nothing else, and an
-  // OAuth connector that never shows it strands the admin: it cannot be
-  // guessed, and the provider rejects the authorization without it. So it is
-  // required exactly once, and rejected everywhere else.
-  const redirectSteps = (m.setup?.steps ?? []).filter((s) => s.showRedirectUri);
-  const isThreeLegged = m.auth?.strategy === "oauth2_authorization_code";
-  if (redirectSteps.length > 0 && !isThreeLegged) {
-    ctx.addIssue({
-      code: "custom",
-      message:
-        "showRedirectUri is only meaningful for auth.strategy " +
-        `"oauth2_authorization_code"; this connector uses "${m.auth?.strategy ?? "none"}".`,
-      path: ["setup", "steps"],
-    });
-  }
-  if (isThreeLegged && m.setup && redirectSteps.length !== 1) {
-    ctx.addIssue({
-      code: "custom",
-      message:
-        `exactly one setup step must set "showRedirectUri": true (found ${redirectSteps.length}). ` +
-        "A three-legged connector cannot be configured without registering the redirect URI upstream.",
-      path: ["setup", "steps"],
-    });
-  }
-
-  // Every credential key the policy reads must be a field the admin is
-  // actually asked for. A mismatch here is invariant 10 failing silently: the
-  // connector reads a key nobody ever filled in.
-  const declared = new Set((m.credentialFields ?? []).map((f) => f.key));
-  const referenced = [
-    ...(m.auth?.credentialKeys ?? []),
-    ...(m.webhook ? [m.webhook.secretKey] : []),
-  ];
-  for (const key of referenced) {
-    if (!declared.has(key)) {
+export const RawConnectorManifestSchema = z
+  .strictObject({
+    name: z.string().min(1),
+    displayName: z.string().min(1),
+    icon: connectorIconSchema.optional(),
+    /**
+     * Each person signs into their own account, rather than everyone sharing one
+     * the admin connected.
+     *
+     * The default — and the right answer for most connectors — is tenant-scoped:
+     * one credential set, one grant, and every user of every app sees the same
+     * response. Set this only when one shared account is genuinely wrong, as it
+     * is for a person's own mail or calendar. It costs the property that made the
+     * tenant model easy to reason about, so it is opt-in and narrow.
+     *
+     * Three-legged OAuth only. See docs/connectors/architecture.md.
+     */
+    userScoped: z.boolean().optional(),
+    /** ISO 8601 date-time, stamped by scripts/stamp-updated.ts. Never hand-edited. */
+    lastUpdated: z.iso.datetime().optional(),
+    /**
+     * What the SERVICE is — "Highly popular email service by Google" — not what
+     * this connector does with it, and not how to set it up.
+     *
+     * Capped because this field is where a 1,400-character block of numbered
+     * setup steps once lived, for want of anywhere better; `setup` is that
+     * somewhere now, and a limit is what stops the prose migrating back. 140 is
+     * two real sentences — and the registry tile shows the first 15 words of it,
+     * so the cap also bounds how far a tile can be from the whole truth.
+     */
+    description: z
+      .string()
+      .max(
+        140,
+        'keep it to ~2 sentences about the service itself. Provisioning steps go in "setup"',
+      )
+      .optional(),
+    setup: connectorSetupSchema.optional(),
+    credentialFields: z.array(credentialFieldSchema).optional(),
+    authors: z.array(authorSchema).optional(),
+    telemetry: z.array(connectorTelemetryEventSchema).optional(),
+    auth: connectorAuthSchema.optional(),
+    http: connectorHttpSchema.optional(),
+    webhook: connectorWebhookSchema.optional(),
+  })
+  .superRefine((m, ctx) => {
+    // Per-user credentials only mean something for a flow where each person can
+    // present their own identity. An API key is one string an admin pastes; a
+    // "user-scoped" one would be the tenant key wearing a label.
+    if (m.userScoped && m.auth?.strategy !== "oauth2_authorization_code") {
       ctx.addIssue({
         code: "custom",
         message:
-          `references credential "${key}", which is not in credentialFields. ` +
-          `Declared: ${declared.size ? [...declared].join(", ") : "(none)"}.`,
-        path: ["credentialFields"],
+          `"userScoped" requires auth.strategy "oauth2_authorization_code"; ` +
+          `this connector uses "${m.auth?.strategy ?? "none"}". There is no ` +
+          `per-user equivalent of an API key an admin pastes once.`,
+        path: ["userScoped"],
       });
     }
-  }
-});
+
+    // The redirect URI belongs to the three-legged flow and nothing else, and an
+    // OAuth connector that never shows it strands the admin: it cannot be
+    // guessed, and the provider rejects the authorization without it. So it is
+    // required exactly once, and rejected everywhere else.
+    const redirectSteps = (m.setup?.steps ?? []).filter(
+      (s) => s.showRedirectUri,
+    );
+    const isThreeLegged = m.auth?.strategy === "oauth2_authorization_code";
+    if (redirectSteps.length > 0 && !isThreeLegged) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "showRedirectUri is only meaningful for auth.strategy " +
+          `"oauth2_authorization_code"; this connector uses "${m.auth?.strategy ?? "none"}".`,
+        path: ["setup", "steps"],
+      });
+    }
+    if (isThreeLegged && m.setup && redirectSteps.length !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `exactly one setup step must set "showRedirectUri": true (found ${redirectSteps.length}). ` +
+          "A three-legged connector cannot be configured without registering the redirect URI upstream.",
+        path: ["setup", "steps"],
+      });
+    }
+
+    // Every credential key the policy reads must be a field the admin is
+    // actually asked for. A mismatch here is invariant 10 failing silently: the
+    // connector reads a key nobody ever filled in.
+    const declared = new Set((m.credentialFields ?? []).map((f) => f.key));
+    const referenced = [
+      ...(m.auth?.credentialKeys ?? []),
+      ...(m.webhook ? [m.webhook.secretKey] : []),
+    ];
+    for (const key of referenced) {
+      if (!declared.has(key)) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `references credential "${key}", which is not in credentialFields. ` +
+            `Declared: ${declared.size ? [...declared].join(", ") : "(none)"}.`,
+          path: ["credentialFields"],
+        });
+      }
+    }
+  });
 
 // ── themes ───────────────────────────────────────────────────────────────────
 
@@ -990,7 +1042,6 @@ const themeEscapeSchema = z.strictObject({
 export const RawThemeManifestSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
-  tagline: z.string().optional(),
   authors: z.array(authorSchema).optional(),
   /** ISO 8601 date-time, stamped by scripts/stamp-updated.ts. Never hand-edited. */
   lastUpdated: z.iso.datetime().optional(),

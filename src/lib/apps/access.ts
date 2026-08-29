@@ -67,16 +67,31 @@ const ALLOWED_DOMAINS = process.env.ALLOWED_EMAIL_DOMAINS
   ? process.env.ALLOWED_EMAIL_DOMAINS.split(",").map((d) => d.trim().toLowerCase())
   : null;
 
+/**
+ * Whether this deployment will provision an account for this address.
+ *
+ * Exported because the policy has to hold on BOTH ways in — sign-in
+ * provisioning and an admin creating an account by hand. A gate enforced on one
+ * path is a gate with a door next to it.
+ */
+export function isAllowedEmailDomain(email: string): boolean {
+  if (!ALLOWED_DOMAINS) return true;
+  const domain = email.trim().toLowerCase().split("@")[1]?.toLowerCase();
+  return !!domain && ALLOWED_DOMAINS.includes(domain);
+}
+
+/** The domains this deployment accepts, for an error message. Empty if any. */
+export function allowedEmailDomains(): string[] {
+  return ALLOWED_DOMAINS ? [...ALLOWED_DOMAINS] : [];
+}
+
 export async function ensureUser(args: {
   email: string;
   name: string;
 }): Promise<string> {
   const email = args.email.trim().toLowerCase();
-  if (ALLOWED_DOMAINS) {
-    const domain = email.split("@")[1]?.toLowerCase();
-    if (!domain || !ALLOWED_DOMAINS.includes(domain)) {
-      throw new Error("User email domain is not allowed");
-    }
+  if (!isAllowedEmailDomain(email)) {
+    throw new Error("User email domain is not allowed");
   }
 
   const supabase = createServiceClient();

@@ -5,6 +5,7 @@
 import { createServiceClient } from "@/lib/db/supabase";
 import { decrypt, encrypt } from "@/lib/connectors/encryption";
 import type { AppEnvField } from "@/lib/apps/types";
+import { platformKey } from "@/lib/env/keys";
 
 /**
  * App-scoped settings, read as `context.env.<KEY>`.
@@ -53,7 +54,9 @@ export async function loadAppEnv(
       continue;
     }
     try {
-      env[field.key] = row.encrypted ? decrypt(row.value) : row.value;
+      env[field.key] = row.encrypted
+        ? decrypt(row.value, platformKey("appSettingsEncryption"))
+        : row.value;
     } catch {
       // A value that will not decrypt is treated as unset rather than as an
       // error: an app guarding `if (!ctx.env.X)` already handles "not
@@ -78,7 +81,9 @@ export async function setAppSetting(
     {
       app_slug: appSlug,
       key: field.key,
-      value: shouldEncrypt ? encrypt(value) : value,
+      value: shouldEncrypt
+        ? encrypt(value, platformKey("appSettingsEncryption"))
+        : value,
       encrypted: shouldEncrypt,
       updated_at: new Date().toISOString(),
     },

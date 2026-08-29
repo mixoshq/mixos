@@ -36,7 +36,7 @@ import { isDefinedSync, runSync } from "@/lib/apps/sync";
  * be a worse job than the hand-rolled one it replaces.
  */
 const SYNC_JOB_PREFIX = "sync:";
-import type { ScheduleCadence, ScheduleDefinition } from "./types";
+import type { ScheduleCadence } from "./types";
 import { type Cadence, computeNextRun } from "./cron";
 import { buildSystemAppContext } from "./context";
 

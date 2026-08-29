@@ -8,6 +8,7 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { resetOnboarding } from "@/lib/onboarding/actions";
 import { usePreferences } from "@/components/preferences-context";
+import { Card } from "@/components/ui/card";
 
 export default function ReplayTourButton() {
   const [isPending, startTransition] = useTransition();
@@ -24,7 +25,10 @@ export default function ReplayTourButton() {
   }
 
   return (
-    <div className="mt-6 rounded-lg border border-border bg-card p-6">
+    // Half width, matching the Preferences card it sits directly beneath —
+    // the two are one column on the page, so a full-width card here would
+    // hang off the end of the stack.
+    <Card className="mt-6 w-full p-4 shadow-sm md:w-1/2">
       <div className="mb-1 text-sm font-medium text-foreground">
         Welcome tour
       </div>
@@ -40,6 +44,6 @@ export default function ReplayTourButton() {
       >
         {isPending ? "Starting…" : "Replay welcome tour"}
       </button>
-    </div>
+    </Card>
   );
 }

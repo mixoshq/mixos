@@ -8,6 +8,7 @@ import { ConnectorError } from "./errors";
 import { TOKEN_KEYS, refreshWithToken, tokensToCredentials } from "./oauth";
 import type { TokenSet } from "./oauth";
 import type { ConnectorAuthPolicy } from "./types";
+import { platformKey } from "@/lib/env/keys";
 
 /**
  * Per-user OAuth grants, for connectors declaring `userScoped`.
@@ -46,7 +47,9 @@ export async function getUserTokens(
      where user_id = ${userId} and connector_name = ${connectorName}
   `;
   if (!rows[0]) return null;
-  return JSON.parse(decrypt(rows[0].encrypted_credentials)) as Record<string, string>;
+  return JSON.parse(
+    decrypt(rows[0].encrypted_credentials, platformKey("userOauthEncryption")),
+  ) as Record<string, string>;
 }
 
 /**
@@ -77,14 +80,22 @@ async function mutateUserTokens(
        where user_id = ${userId} and connector_name = ${connectorName}
     `;
     const current: Record<string, string> = rows[0]
-      ? (JSON.parse(decrypt(rows[0].encrypted_credentials)) as Record<string, string>)
+      ? (JSON.parse(
+          decrypt(
+            rows[0].encrypted_credentials,
+            platformKey("userOauthEncryption"),
+          ),
+        ) as Record<string, string>)
       : {};
 
     const patch = await mutate(current);
     if (patch === null) return current;
 
     const merged = { ...current, ...patch };
-    const encrypted = encrypt(JSON.stringify(merged));
+    const encrypted = encrypt(
+      JSON.stringify(merged),
+      platformKey("userOauthEncryption"),
+    );
 
     await tx`
       insert into public.user_connector_oauth
@@ -103,7 +114,9 @@ export async function saveUserTokens(
   connectorName: string,
   tokens: TokenSet,
 ): Promise<void> {
-  await mutateUserTokens(userId, connectorName, () => tokensToCredentials(tokens));
+  await mutateUserTokens(userId, connectorName, () =>
+    tokensToCredentials(tokens),
+  );
 }
 
 /** Forget one person's grant. The application registration is untouched. */
@@ -133,8 +146,15 @@ export async function refreshUserTokens(opts: {
   /** Treat a token expiring within this window as already expired. */
   skewMs: number;
 }): Promise<Record<string, string>> {
-  const { userId, connectorName, subject, policy, clientId, clientSecret, skewMs } =
-    opts;
+  const {
+    userId,
+    connectorName,
+    subject,
+    policy,
+    clientId,
+    clientSecret,
+    skewMs,
+  } = opts;
 
   return mutateUserTokens(userId, connectorName, async (current) => {
     const expiresAt = Number(current[TOKEN_KEYS.expiresAt] ?? 0);
@@ -168,11 +188,17 @@ export async function refreshUserTokens(opts: {
 }
 
 /** Which user-scoped connectors this person has actually connected. */
-export async function listUserConnections(userId: string): Promise<
+export async function listUserConnections(
+  userId: string,
+): Promise<
   { connectorName: string; connectedAt: number; expiresAt: number | null }[]
 > {
   const rows = await sql<
-    { connector_name: string; encrypted_credentials: string; updated_at: Date }[]
+    {
+      connector_name: string;
+      encrypted_credentials: string;
+      updated_at: Date;
+    }[]
   >`
     select connector_name, encrypted_credentials, updated_at
       from public.user_connector_oauth
@@ -182,7 +208,9 @@ export async function listUserConnections(userId: string): Promise<
     // Only an expiry timestamp is derived here; no token ever leaves this file.
     let expiresAt: number | null = null;
     try {
-      const creds = JSON.parse(decrypt(r.encrypted_credentials)) as Record<string, string>;
+      const creds = JSON.parse(
+        decrypt(r.encrypted_credentials, platformKey("userOauthEncryption")),
+      ) as Record<string, string>;
       const raw = Number(creds[TOKEN_KEYS.expiresAt] ?? 0);
       expiresAt = Number.isFinite(raw) && raw > 0 ? raw : null;
     } catch {

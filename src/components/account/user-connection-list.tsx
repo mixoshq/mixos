@@ -8,6 +8,7 @@ import { useTransition } from "react";
 import Image from "next/image";
 import { Link2, Plug, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CARD_SHELL } from "@/components/ui/card";
 import { StatusPill } from "@/components/ui/status";
 import { useClientValue } from "@/lib/use-client-value";
 
@@ -55,7 +56,8 @@ export default function UserConnectionList({
 
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
+      // Same empty-state shell as the connector registry's: px-6 py-8, centred.
+      <Card className="px-6 py-8 text-center shadow-sm">
         <UserRound
           className="mx-auto h-8 w-8 text-muted-foreground"
           aria-hidden
@@ -73,7 +75,7 @@ export default function UserConnectionList({
           rather than sharing one. None are set up yet — when there are, they
           appear here for you to connect.
         </p>
-      </div>
+      </Card>
     );
   }
 
@@ -82,9 +84,12 @@ export default function UserConnectionList({
       {items.map((item) => {
         const connected = item.connectedAt !== null;
         return (
+          // CARD_SHELL rather than <Card>: these rows are list items, and Card
+          // only renders block-level tags. The constant is the same one Card
+          // uses, so the shell cannot drift from it.
           <li
             key={item.name}
-            className="flex flex-wrap items-center gap-4 rounded-xl border border-border bg-card p-4"
+            className={`${CARD_SHELL} flex flex-wrap items-center gap-4 p-4 shadow-sm`}
           >
             <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-background">
               {item.icon ? (

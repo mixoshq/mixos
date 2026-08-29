@@ -56,7 +56,6 @@ class FatalManifestError extends Error {
   }
 }
 
-
 /**
  * Manifests store `lastUpdated` as an ISO 8601 string (legible in a diff);
  * the runtime registry carries epoch millis so the UI can do date arithmetic
@@ -90,7 +89,10 @@ const OUTPUT_DIR = path.resolve(__dirname, "../src/generated");
 const APP_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "app-registry.ts");
 const APP_CLIENTS_FILE = path.resolve(OUTPUT_DIR, "app-clients.ts");
 const APP_PAGE_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-page-loaders.ts");
-const CONNECTOR_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "connector-registry.ts");
+const CONNECTOR_REGISTRY_FILE = path.resolve(
+  OUTPUT_DIR,
+  "connector-registry.ts",
+);
 const THEMES_DIR = path.resolve(__dirname, "../themes");
 const THEME_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "theme-registry.ts");
 const THEMES_CSS_FILE = path.resolve(OUTPUT_DIR, "themes.css");
@@ -100,17 +102,49 @@ const PUBLIC_THEMES_DIR = path.resolve(__dirname, "../public/themes");
 // (/connectors/guide), so assets served from there redirect to /login for
 // anyone without a session — including next/image's optimizer, which fetches
 // the source URL server-side with no cookies and would fail on every icon.
-const PUBLIC_CONNECTORS_DIR = path.resolve(__dirname, "../public/connector-assets");
+const PUBLIC_CONNECTORS_DIR = path.resolve(
+  __dirname,
+  "../public/connector-assets",
+);
 
 function scanPages(dir: string, slug: string, prefix: string, out: string[]) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      scanPages(path.join(dir, entry.name), slug, prefix + entry.name + "/", out);
+      scanPages(
+        path.join(dir, entry.name),
+        slug,
+        prefix + entry.name + "/",
+        out,
+      );
     } else if (entry.name === "Main.tsx" || entry.name === "Main.ts") {
       const key = `${slug}/pages/${prefix}Main`;
-      out.push(`  "${key}": () => import("@apps/${slug}/pages/${prefix}${entry.name}"),`);
+      out.push(
+        `  "${key}": () => import("@apps/${slug}/pages/${prefix}${entry.name}"),`,
+      );
     }
   }
+}
+
+/**
+ * How many pages an app serves.
+ *
+ * Same rule `scanPages` uses to build the loader map, and the same terminal
+ * files `validateVisibilityMap` resolves a `pageVisibility` key against: a page
+ * IS a directory holding `Main.tsx`/`Main.ts`, at any depth. Counting entries in
+ * `pages/` instead would count the folders on the way down, and counting the
+ * `pageVisibility` keys would count only the pages whose auth was overridden —
+ * usually none of them.
+ */
+function countPages(dir: string): number {
+  let n = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      n += countPages(path.join(dir, entry.name));
+    } else if (entry.name === "Main.tsx" || entry.name === "Main.ts") {
+      n++;
+    }
+  }
+  return n;
 }
 
 // Core hook names are never slug-prefixed. Keep in sync with CORE_HOOKS in
@@ -239,7 +273,9 @@ function validateVisibilityMap(
     );
   }
   const out: Record<string, RouteAuth[]> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, RouteAuth[]>)) {
+  for (const [key, value] of Object.entries(
+    raw as Record<string, RouteAuth[]>,
+  )) {
     // Reject obvious key mistakes early so paths stay POSIX-shaped.
     if (key.startsWith("/") || key.endsWith("/") || key.includes("\\")) {
       throw new FatalManifestError(
@@ -342,7 +378,12 @@ function paramsForPath(routePath: string): string[] {
   return routePath
     .split("/")
     .filter((seg) => seg.startsWith("[") && seg.endsWith("]"))
-    .map((seg) => seg.slice(1, -1).replace(/^\.\.\./, "").replace(/^\[|\]$/g, ""));
+    .map((seg) =>
+      seg
+        .slice(1, -1)
+        .replace(/^\.\.\./, "")
+        .replace(/^\[|\]$/g, ""),
+    );
 }
 
 /**
@@ -379,7 +420,9 @@ async function scanApiRoutes(
     // an existence check on `route.ts` alone, so a `.tsx` route would be hoisted
     // into the registry, be declarable as public, and 404 forever. Rejecting it
     // at build time beats shipping a route that reads as live and is not.
-    const routeFile = [path.join(dir, "route.ts")].find((f) => fs.existsSync(f));
+    const routeFile = [path.join(dir, "route.ts")].find((f) =>
+      fs.existsSync(f),
+    );
     const strayTsx = path.join(dir, "route.tsx");
     if (!routeFile && fs.existsSync(strayTsx)) {
       throw new FatalManifestError(
@@ -403,7 +446,8 @@ async function scanApiRoutes(
 
       // The root route is `api/index/route.ts`, and its declaration key is the
       // empty string, matching `apiVisibility`.
-      const routePath = segments.join("/") === "index" ? "" : segments.join("/");
+      const routePath =
+        segments.join("/") === "index" ? "" : segments.join("/");
 
       // Optional catch-alls are rejected rather than half-supported. Stripping
       // the brackets off `[[...rest]]` yields the param name `...rest`, which a
@@ -648,7 +692,14 @@ function validateEscapes(
 
 /** Carry through declared app settings, failing on a duplicate key. */
 function validateEnv(
-  raw: { key: string; label: string; type: "text" | "password"; required?: boolean }[] | undefined,
+  raw:
+    | {
+        key: string;
+        label: string;
+        type: "text" | "password";
+        required?: boolean;
+      }[]
+    | undefined,
   slug: string,
 ): AppEnvField[] {
   if (!raw || raw.length === 0) return [];
@@ -1068,14 +1119,15 @@ async function scanThemes(): Promise<{
 
     copyDir(path.join(dir, "assets"), path.join(PUBLIC_THEMES_DIR, slug));
 
-    cssParts.push(`/* ── ${slug} ─────────────────────────────── */\n${compiled.css}`);
+    cssParts.push(
+      `/* ── ${slug} ─────────────────────────────── */\n${compiled.css}`,
+    );
     tokens[slug] = compiled.tokens;
 
     themes.push({
       slug,
       name: r.name,
       description: r.description,
-      ...(r.tagline != null ? { tagline: r.tagline } : {}),
       authors: normalizeAuthors(r.authors),
       fonts,
       assets,
@@ -1083,6 +1135,7 @@ async function scanThemes(): Promise<{
       escapes: r.escapes ?? [],
       assetBase: `/themes/${slug}`,
       swatches: compiled.swatches,
+      typefaces: compiled.typefaces,
       lastUpdated: parseLastUpdated(r.lastUpdated),
     });
 
@@ -1114,7 +1167,9 @@ async function scanApps(): Promise<AppManifest[]> {
     try {
       raw = await loadAppManifest(appDir);
     } catch (err) {
-      console.warn(`  Skipping ${entry.name}/ — failed to load manifest: ${err}`);
+      console.warn(
+        `  Skipping ${entry.name}/ — failed to load manifest: ${err}`,
+      );
       continue;
     }
     if (!raw) {
@@ -1122,7 +1177,9 @@ async function scanApps(): Promise<AppManifest[]> {
       // written where the app will live, before the app exists. Reporting that
       // as a warning trains people to ignore warnings. See docs/plans/README.md.
       if (fs.existsSync(path.join(appDir, "plans"))) {
-        console.log(`  apps/${entry.name}/ — planned, not yet built (plans/ only)`);
+        console.log(
+          `  apps/${entry.name}/ — planned, not yet built (plans/ only)`,
+        );
       } else {
         console.warn(`  Skipping ${entry.name}/ — no app.ts or app.json found`);
       }
@@ -1131,7 +1188,11 @@ async function scanApps(): Promise<AppManifest[]> {
 
     try {
       const pagesDir = path.join(APPS_DIR, entry.name, "pages");
-      const hasPages = fs.existsSync(pagesDir) && fs.readdirSync(pagesDir).length > 0;
+      const hasPages =
+        fs.existsSync(pagesDir) && fs.readdirSync(pagesDir).length > 0;
+      // Zero is possible while `hasPages` is true — a `pages/` directory
+      // holding only a component with no `Main.tsx` beside it serves nothing.
+      const pageCount = hasPages ? countPages(pagesDir) : 0;
 
       // Schema-validate the on-disk manifest: types, required fields, unknown
       // keys, and the defaultRole↔roles cross-check. A violation aborts the
@@ -1185,6 +1246,7 @@ async function scanApps(): Promise<AppManifest[]> {
         database: r.database ?? false,
         notifications: r.notifications ?? false,
         hasPages,
+        pageCount,
         global: r.global ?? false,
         roles: r.roles ?? [],
         defaultRole: r.defaultRole ?? null,
@@ -1195,7 +1257,12 @@ async function scanApps(): Promise<AppManifest[]> {
         widgets: (r.widgets ?? []).map((w) => {
           const component = w.component;
           const filename = path.basename(component, path.extname(component));
-          return { ...w, id: filename, component, defaultSize: w.defaultSize ?? { w: 4, h: 3 } };
+          return {
+            ...w,
+            id: filename,
+            component,
+            defaultSize: w.defaultSize ?? { w: 4, h: 3 },
+          };
         }),
         schedules,
         sync: validateSyncs(r.sync, entry.name, appDir, [
@@ -1309,7 +1376,8 @@ function validateConnectorMethods(
     if (!extendsClause) continue;
 
     for (const member of statement.members) {
-      if (!ts.isMethodDeclaration(member) || !ts.isIdentifier(member.name)) continue;
+      if (!ts.isMethodDeclaration(member) || !ts.isIdentifier(member.name))
+        continue;
       const modifiers = ts.getModifiers(member) ?? [];
       const hidden = modifiers.some(
         (m) =>
@@ -1448,7 +1516,8 @@ function readImageSize(buf: Buffer): { width: number; height: number } | null {
     }
     if (chunk === "VP8X") {
       // Extended: 24-bit canvas size, stored minus one.
-      const u24 = (o: number) => buf[o] | (buf[o + 1] << 8) | (buf[o + 2] << 16);
+      const u24 = (o: number) =>
+        buf[o] | (buf[o + 1] << 8) | (buf[o + 2] << 16);
       return { width: u24(24) + 1, height: u24(27) + 1 };
     }
   }
@@ -1469,11 +1538,13 @@ function readImageSize(buf: Buffer): { width: number; height: number } | null {
  * all.
  */
 function validateConnectorIcon(icon: string, name: string, dir: string): void {
-  const file = path.join(dir, "assets", icon);
+  // `icon` already carries its "assets/" prefix, so resolve it against the
+  // connector root rather than re-adding the directory.
+  const file = path.join(dir, icon);
   if (!fs.existsSync(file)) {
     throw new Error(
       `connector.json: icon is "${icon}", which does not exist. ` +
-        `Expected it at connectors/${name}/assets/${icon}.`,
+        `Expected it at connectors/${name}/${icon}.`,
     );
   }
 
@@ -1489,7 +1560,7 @@ function validateConnectorIcon(icon: string, name: string, dir: string): void {
     const svg = fs.readFileSync(file, "utf-8");
     if (!/\bviewBox\s*=/.test(svg)) {
       throw new Error(
-        `connectors/${name}/assets/${icon} has no viewBox, so it cannot scale ` +
+        `connectors/${name}/${icon} has no viewBox, so it cannot scale ` +
           `into the registry tile. Add one to the <svg> element.`,
       );
     }
@@ -1579,7 +1650,13 @@ async function scanConnectors(): Promise<ConnectorManifestOut[]> {
         displayName: raw.displayName,
         // Stored as the URL the browser will request, not the authoring path,
         // so no call site has to know where assets get copied to.
-        ...(raw.icon ? { icon: `/connector-assets/${entry.name}/${raw.icon}` } : {}),
+        ...(raw.icon
+          ? {
+              // `assets/` is where the file lives in the repo; the copy lands
+              // directly under the connector's public directory, so strip it.
+              icon: `/connector-assets/${entry.name}/${raw.icon.replace(/^assets\//, "")}`,
+            }
+          : {}),
         ...(raw.userScoped ? { userScoped: true } : {}),
         description: raw.description ?? "",
         ...(raw.setup ? { setup: raw.setup as ConnectorSetupGuide } : {}),
@@ -1592,7 +1669,9 @@ async function scanConnectors(): Promise<ConnectorManifestOut[]> {
         // here — the registry records what was declared, not what was assumed.
         ...(raw.auth ? { auth: raw.auth as ConnectorAuthPolicy } : {}),
         ...(raw.http ? { http: raw.http as ConnectorHttpPolicy } : {}),
-        ...(raw.webhook ? { webhook: raw.webhook as ConnectorWebhookPolicy } : {}),
+        ...(raw.webhook
+          ? { webhook: raw.webhook as ConnectorWebhookPolicy }
+          : {}),
       };
 
       connectors.push(manifest);
@@ -1674,7 +1753,7 @@ async function main() {
       if (fs.existsSync(widgetFile)) {
         const key = `${app.slug}/${widget.component}`;
         widgetImports.push(
-          `  "${key}": () => import("@apps/${app.slug}/${widget.component}"),`
+          `  "${key}": () => import("@apps/${app.slug}/${widget.component}"),`,
         );
       }
     }
@@ -1744,11 +1823,17 @@ ${pageImports.join("\n")}
   for (const entry of fs.readdirSync(APPS_DIR, { withFileTypes: true })) {
     if (!entry.isDirectory() || !entry.name.startsWith("_")) continue;
     const dir = path.join(APPS_DIR, entry.name);
-    if (!fs.existsSync(path.join(dir, "app.json")) && !fs.existsSync(path.join(dir, "app.ts"))) {
+    if (
+      !fs.existsSync(path.join(dir, "app.json")) &&
+      !fs.existsSync(path.join(dir, "app.ts"))
+    ) {
       continue;
     }
     try {
-      templateRoutes.push({ slug: entry.name, routes: await scanApiRoutes(dir, entry.name) });
+      templateRoutes.push({
+        slug: entry.name,
+        routes: await scanApiRoutes(dir, entry.name),
+      });
     } catch (err) {
       console.warn(
         `  Skipping types for template ${entry.name}/ — ${err instanceof Error ? err.message : String(err)}`,
@@ -1807,7 +1892,9 @@ export type ConnectorName = (typeof connectorNames)[number];
 `;
 
   fs.writeFileSync(CONNECTOR_REGISTRY_FILE, connectorOutput, "utf-8");
-  console.log(`Generated connector registry with ${connectors.length} connector(s)`);
+  console.log(
+    `Generated connector registry with ${connectors.length} connector(s)`,
+  );
 
   // Both registries are in hand here, which is what this check needs.
   validateUserScopedUsage(apps, connectors);

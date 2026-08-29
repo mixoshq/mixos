@@ -13,6 +13,8 @@ import type { WidgetProps } from "@/lib/hooks/types";
 import { widgetLoaders } from "@/generated/app-registry";
 import { useDashboardEdit } from "./edit-mode-context";
 import WidgetConfigModal from "./widget-config-modal";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface WidgetWrapperProps {
   widget: DashboardWidget;
@@ -27,7 +29,10 @@ interface WidgetWrapperProps {
  * `lazy()` does not invoke its loader — it only wraps it — so this is cheap, and
  * doing it here means no component is ever created during render.
  */
-const LAZY_WIDGETS: Record<string, ComponentType<WidgetProps>> = Object.fromEntries(
+const LAZY_WIDGETS: Record<
+  string,
+  ComponentType<WidgetProps>
+> = Object.fromEntries(
   Object.entries(widgetLoaders).map(([key, loader]) => [
     key,
     lazy(loader) as unknown as ComponentType<WidgetProps>,
@@ -69,7 +74,13 @@ export default function WidgetWrapper({
 
   if (!definition) {
     return (
-      <div className="mix-widget relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div
+        className={cn(
+          "mix-widget",
+          CARD_SURFACE,
+          "relative flex h-full flex-col overflow-hidden",
+        )}
+      >
         <div className={barClass}>
           <span className="text-xs font-medium text-white/70">
             Unknown Widget
@@ -89,11 +100,19 @@ export default function WidgetWrapper({
   }
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+    <div
+      className={cn(
+        "mix-widget",
+        CARD_SURFACE,
+        "relative flex h-full flex-col overflow-hidden",
+      )}
+    >
       <div className={barClass}>
         <div className="flex items-center gap-2">
           <GripVertical className="h-3.5 w-3.5 text-white/70" />
-          <span className="text-xs font-medium text-white">{definition.name}</span>
+          <span className="text-xs font-medium text-white">
+            {definition.name}
+          </span>
         </div>
         <div className="flex items-center gap-1">
           {definition.config && definition.config.length > 0 && (
