@@ -173,9 +173,17 @@ const GROUND_TOKEN_FOR = {
   "brand-accent": "brand",
 };
 
-/** The ground an element's text sits on when it declares no fill of its own. */
-function impliedGround(textToken) {
-  const via = GROUND_TOKEN_FOR[textToken];
+/**
+ * The ground a token is defined against: the page background for almost
+ * everything, `--brand` for the two that exist to sit on the brand surface.
+ *
+ * This applies to a *fill* as much as to text. `bg-brand-foreground/10` is the
+ * menu bar's own hover tint — a 10% wash of the bar's text colour over the bar
+ * — so compositing it over the page background reports a near-white fill that
+ * nothing on the bar could sit on.
+ */
+function groundFor(token) {
+  const via = GROUND_TOKEN_FOR[token];
   const rgb = via && TOKENS?.get(via);
   return rgb ?? GROUND;
 }
@@ -283,7 +291,11 @@ function isLarge(state) {
  * suggested.
  */
 function swapSuggestion(state) {
-  const fill = composite(TOKENS.get(state.bg.token), GROUND, state.bg.alpha);
+  const fill = composite(
+    TOKENS.get(state.bg.token),
+    groundFor(state.bg.token),
+    state.bg.alpha,
+  );
   const floor = isLarge(state) ? 3 : 4.5;
   for (const token of [`${state.bg.token}-foreground`, "foreground"]) {
     if (token === state.text.token) continue;
@@ -320,9 +332,13 @@ function failuresIn(classString) {
     // maths assumes. An element with no fill of its own isn't pair-checked at
     // all (see the header), but a *dimmed* token fails on any light ground.
     const ownFill = state.bg != null && state.bg !== "unknown"
-      ? composite(TOKENS.get(state.bg.token), GROUND, state.bg.alpha)
+      ? composite(
+          TOKENS.get(state.bg.token),
+          groundFor(state.bg.token),
+          state.bg.alpha,
+        )
       : null;
-    const pageGround = impliedGround(state.text.token);
+    const pageGround = groundFor(state.text.token);
 
     // ── DIM: a text token thinned by /N or a bare opacity-N ──
     const dim = state.text.alpha < 1 ? state.text.alpha : null;

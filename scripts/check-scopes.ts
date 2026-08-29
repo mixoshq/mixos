@@ -3,27 +3,80 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Prove a connector's `auth.scopesUrl` actually parses, and show what it yields.
+ * Read a connector's `auth.scopesUrl` and report — or write — its scope catalogue.
  *
- *   npx tsx scripts/check-scopes.ts gmail
+ *   npx tsx scripts/check-scopes.ts <connector>            # report only
+ *   npx tsx scripts/check-scopes.ts <connector> --write    # rewrite auth.scopes
  *
- * An AUTHORING step, deliberately not a build step. The registry reads that
- * page at an admin's request and caches the result, so a wrong URL is not a
- * broken build — it is an empty Permissions list nobody notices for a week.
- * This catches it while the author is still holding the manifest. Putting it in
- * the build instead would make `npm run build` fail whenever a third party has
- * a bad afternoon.
+ * This is the ONLY way `auth.scopes` changes. The registry never fetches that
+ * page: the catalogue is committed to `connector.json`, so it is reviewable in
+ * a diff, identical across installs, and cannot degrade because a third party
+ * had a bad afternoon. The cost is that a provider adding a scope needs a
+ * developer to run this and ship the result — which is the trade, deliberately.
+ *
+ * `--write` PRESERVES the `requested` flags already in the manifest. A refresh
+ * must never change what a connector asks for; it only refreshes the catalogue
+ * those flags are attached to. Adding a scope to the request is a hand edit,
+ * because it is a security decision (invariant 17: minimum scopes only).
  *
  * Read the output. "14 scopes parsed" is not the test; the test is whether the
  * descriptions are English sentences and the read/write split looks right.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { connectorRegistry } from "../src/generated/connector-registry";
 import { fetchScopeDocs } from "../src/lib/connectors/scope-docs";
+import type { DocumentedScope } from "../src/lib/connectors/scope-docs";
+
+interface ManifestScope {
+  scope: string;
+  description?: string;
+  access?: string;
+  requested: boolean;
+}
+
+/**
+ * Merge a fresh parse over the manifest's existing entries.
+ *
+ * Every documented scope survives; `requested` comes from the old entry when it
+ * had one and defaults to false otherwise. A requested scope the page no longer
+ * documents is KEPT rather than dropped — silently un-requesting a scope the
+ * connector actually needs would break authorization at the next reconnect, and
+ * a provider reorganising their docs is not consent to change what we ask for.
+ */
+function merge(
+  existing: ManifestScope[],
+  parsed: DocumentedScope[],
+): { scopes: ManifestScope[]; orphans: string[] } {
+  const wasRequested = new Map(existing.map((e) => [e.scope, e.requested]));
+  const documented = new Set(parsed.map((p) => p.scope));
+
+  const scopes: ManifestScope[] = parsed.map((p) => ({
+    scope: p.scope,
+    description: p.description,
+    access: p.access,
+    requested: wasRequested.get(p.scope) ?? false,
+  }));
+
+  const orphans = existing
+    .filter((e) => e.requested && !documented.has(e.scope))
+    .map((e) => e.scope);
+  for (const scope of orphans) {
+    scopes.push({ scope, requested: true });
+  }
+
+  return { scopes, orphans };
+}
 
 async function main() {
-  const name = process.argv[2];
+  const args = process.argv.slice(2);
+  const write = args.includes("--write");
+  const name = args.find((a) => !a.startsWith("--"));
+
   if (!name) {
-    console.error("Usage: npx tsx scripts/check-scopes.ts <connector-name>");
+    console.error(
+      "Usage: npx tsx scripts/check-scopes.ts <connector-name> [--write]",
+    );
     process.exit(1);
   }
 
@@ -37,16 +90,20 @@ async function main() {
 
   const url = connector.auth?.scopesUrl;
   if (!url) {
-    console.error(`connectors/${name}/connector.json declares no auth.scopesUrl.`);
+    console.error(
+      `connectors/${name}/connector.json declares no auth.scopesUrl.`,
+    );
     process.exit(1);
   }
 
   console.log(`Reading ${url}\n`);
-  let scopes;
+  let parsed: DocumentedScope[];
   try {
-    scopes = await fetchScopeDocs(url);
+    parsed = await fetchScopeDocs(url);
   } catch (err) {
-    console.error(`FAILED: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(
+      `FAILED: ${err instanceof Error ? err.message : String(err)}`,
+    );
     console.error(
       "\nA page that tabulates scopes against descriptions is what this needs — " +
         "not an API overview or a quickstart.",
@@ -54,33 +111,56 @@ async function main() {
     process.exit(1);
   }
 
-  const requested = new Set(connector.auth?.scopes ?? []);
+  const existing = (connector.auth?.scopes ?? []) as ManifestScope[];
+  const { scopes, orphans } = merge(existing, parsed);
+  const requestedCount = scopes.filter((s) => s.requested).length;
+
   for (const s of scopes) {
-    const mark = requested.has(s.scope) ? "*" : " ";
+    const mark = s.requested ? "*" : " ";
+    const short = s.scope.replace(/\/$/, "").split("/").pop()!;
     console.log(
-      `${mark} ${s.access.padEnd(11)} ${s.scope.replace(/\/$/, "").split("/").pop()!.slice(0, 34).padEnd(36)} ${s.description.slice(0, 60)}`,
+      `${mark} ${(s.access ?? "?").padEnd(11)} ${short.slice(0, 34).padEnd(36)} ${(s.description ?? "").slice(0, 60)}`,
     );
   }
 
   const count = (a: string) => scopes.filter((s) => s.access === a).length;
   console.log(
-    `\n${scopes.length} scopes parsed — ${count("read")} read, ${count("write")} write, ` +
+    `\n${parsed.length} scopes parsed — ${count("read")} read, ${count("write")} write, ` +
       `${count("read-write")} read+write.`,
   );
-  console.log(`${requested.size} requested by this connector, marked *.`);
+  console.log(`${requestedCount} requested by this connector, marked *.`);
 
-  // A scope this connector asks for that the page never documents is usually a
-  // typo in `auth.scopes`, and it would render as an unexplained row.
-  const undocumented = [...requested].filter(
-    (r) => !scopes.some((s) => s.scope === r),
-  );
-  if (undocumented.length > 0) {
+  if (orphans.length > 0) {
     console.log(
       `\nWARNING: requested but not found on that page:\n` +
-        undocumented.map((u) => `  - ${u}`).join("\n") +
-        `\n  Check auth.scopes for a typo, or point scopesUrl at the page that documents them.`,
+        orphans.map((u) => `  - ${u}`).join("\n") +
+        `\n  Kept as-is. Check auth.scopes for a typo, or point scopesUrl at the` +
+        `\n  page that documents them.`,
     );
   }
+
+  if (!write) {
+    console.log(`\nReport only. Re-run with --write to update connector.json.`);
+    return;
+  }
+
+  // Rewrite in place. Read the file rather than the registry so comments,
+  // key order and formatting elsewhere in the manifest survive untouched.
+  const file = path.join(process.cwd(), "connectors", name, "connector.json");
+  const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+  manifest.auth.scopes = scopes;
+  fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const added = scopes.length - existing.length;
+  console.log(
+    `\nWrote ${scopes.length} scopes to connectors/${name}/connector.json` +
+      (added === 0
+        ? " (no change in count)."
+        : ` (${added > 0 ? "+" : ""}${added}).`),
+  );
+  console.log(
+    "Review the diff — and re-run the registry generator so the change is picked up.",
+  );
 }
 
 void main();

@@ -26,14 +26,20 @@ export function NavGroup({
   id,
   label,
   sections,
-  pathname,
+  active,
 }: {
   id: string;
   label: string;
   sections: NavSection[];
-  pathname: string;
+  /**
+   * The one href highlighted across the whole sidebar, resolved by the parent.
+   *
+   * Resolved once for both groups rather than per group: `/apps/guide` matches
+   * App Registry by alias and App Manager by prefix, and two groups each
+   * picking their own best would light up both at once.
+   */
+  active: string | null;
 }) {
-  const active = activeHref(pathname, sections);
   return (
     <div>
       <h2
@@ -84,6 +90,7 @@ export function NavGroup({
  */
 export default function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
+  const active = activeHref(pathname, [...ADMIN_SECTIONS, ...ACCOUNT_SECTIONS]);
   return (
     <div className="flex flex-col gap-6">
       {isAdmin && (
@@ -91,14 +98,14 @@ export default function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
           id="admin-nav-label"
           label="Administration"
           sections={ADMIN_SECTIONS}
-          pathname={pathname}
+          active={active}
         />
       )}
       <NavGroup
         id="account-nav-label"
         label="My Account"
         sections={ACCOUNT_SECTIONS}
-        pathname={pathname}
+        active={active}
       />
     </div>
   );

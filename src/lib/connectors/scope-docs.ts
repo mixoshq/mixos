@@ -2,21 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { sql } from "@/lib/db/client";
-
 /**
- * Plain-English permissions, read off a provider's own scope reference page.
+ * Plain-English permissions, parsed off a provider's own scope reference page.
  *
- * WHY SCRAPE AT ALL. `https://www.googleapis.com/auth/gmail.readonly` tells a
- * non-technical admin nothing. "View your email messages and settings" tells
- * them everything. The provider already writes that sentence — it is the string
+ * WHY PARSE AT ALL. `https://api.example.com/auth/records.readonly` tells a
+ * non-technical admin nothing. "View your records and settings" tells them
+ * everything. The provider already writes that sentence — it is the string
  * shown on their consent screen — and nowhere else has it.
  *
- * WHY IT IS A CACHE AND NOT A SOURCE OF TRUTH. A third party's HTML is not a
- * contract. This will break, quietly, the day Google reshapes that page. So a
- * failed refresh never blanks a good previous read (see `last_error`), and this
- * list sits *beside* the connector's own declared capability list rather than
- * replacing it — that one the build can actually verify.
+ * WHY THIS RUNS AT AUTHORING TIME, NOT AT RUNTIME. A third party's HTML is not
+ * a contract; it will break, quietly, the day the provider reshapes the page.
+ * So the parse happens when a developer runs
+ * `scripts/check-scopes.ts <connector> --write`, and the result is committed to
+ * `connector.json` — reviewable in a diff, identical across installs, and
+ * incapable of degrading because someone else had a bad afternoon. Nothing here
+ * touches the database, and no page load depends on a third party being up.
  */
 
 export type ScopeAccess = "read" | "write" | "read-write";
@@ -25,17 +25,6 @@ export interface DocumentedScope {
   scope: string;
   description: string;
   access: ScopeAccess;
-}
-
-export interface ScopeDocs {
-  sourceUrl: string | null;
-  scopes: DocumentedScope[];
-  /** When a parse last succeeded. Null means it never has. */
-  fetchedAt: number | null;
-  /** When a refresh was last attempted, successful or not. */
-  lastAttemptAt: number | null;
-  /** Why the last attempt failed, or null if it succeeded. */
-  lastError: string | null;
 }
 
 /** Refuse a page that is not plausibly a docs page, rather than parse garbage. */
@@ -93,7 +82,9 @@ export function parseScopeDocs(html: string): DocumentedScope[] {
     const cells = (row.match(/<t[dh][\s\S]*?<\/t[dh]>/gi) ?? []).map(stripTags);
     if (cells.length < 2) continue;
 
-    const scopeCell = cells.find((c) => scopePattern.test(c) && /\s/.test(c) === false);
+    const scopeCell = cells.find(
+      (c) => scopePattern.test(c) && /\s/.test(c) === false,
+    );
     const scope = scopeCell?.match(scopePattern)?.[0];
     if (!scope) continue;
 
@@ -106,7 +97,11 @@ export function parseScopeDocs(html: string): DocumentedScope[] {
     // First row wins: a page that lists a scope twice is documenting it once
     // and cross-referencing it elsewhere.
     if (!out.has(scope)) {
-      out.set(scope, { scope, description, access: classifyScope(description) });
+      out.set(scope, {
+        scope,
+        description,
+        access: classifyScope(description),
+      });
     }
   }
   return [...out.values()];
@@ -114,7 +109,8 @@ export function parseScopeDocs(html: string): DocumentedScope[] {
 
 /** Fetch and parse, with a timeout and a size cap. Throws a readable message. */
 export async function fetchScopeDocs(url: string): Promise<DocumentedScope[]> {
-  if (!url.startsWith("https://")) throw new Error("Reference URL is not https.");
+  if (!url.startsWith("https://"))
+    throw new Error("Reference URL is not https.");
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -139,7 +135,8 @@ export async function fetchScopeDocs(url: string): Promise<DocumentedScope[]> {
     if (length > MAX_BYTES) throw new Error("The page is too large to parse.");
 
     const body = await res.text();
-    if (body.length > MAX_BYTES) throw new Error("The page is too large to parse.");
+    if (body.length > MAX_BYTES)
+      throw new Error("The page is too large to parse.");
 
     const scopes = parseScopeDocs(body);
     if (scopes.length === 0) {
@@ -150,115 +147,5 @@ export async function fetchScopeDocs(url: string): Promise<DocumentedScope[]> {
     return scopes;
   } finally {
     clearTimeout(timer);
-  }
-}
-
-/**
- * Read the cached array back, tolerating a row written as a JSON *string*.
- *
- * `${JSON.stringify(scopes)}::jsonb` looked right and was not: postgres.js sees
- * a JS string bound to a jsonb column and encodes it as a JSON string, so the
- * column ended up holding `"[{...}]"` — a scalar — rather than the array. The
- * write is fixed to use `sql.json`, and this keeps rows written the old way
- * from silently reading as "no scopes found", which is exactly how the bug
- * presented: a refresh that reported success and displayed nothing.
- */
-function coerceScopes(raw: unknown): DocumentedScope[] {
-  if (Array.isArray(raw)) return raw as DocumentedScope[];
-  if (typeof raw === "string") {
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? (parsed as DocumentedScope[]) : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-const ms = (d: Date | null | undefined) => {
-  const t = d ? new Date(d).getTime() : NaN;
-  return Number.isFinite(t) ? t : null;
-};
-
-export async function getScopeDocs(connectorName: string): Promise<ScopeDocs> {
-  try {
-    const rows = await sql<
-      {
-        source_url: string;
-        scopes: DocumentedScope[];
-        fetched_at: Date | null;
-        last_attempt_at: Date | null;
-        last_error: string | null;
-      }[]
-    >`
-      select source_url, scopes, fetched_at, last_attempt_at, last_error
-        from public.connector_scope_docs
-       where connector_name = ${connectorName}
-    `;
-    const row = rows[0];
-    if (!row) {
-      return {
-        sourceUrl: null,
-        scopes: [],
-        fetchedAt: null,
-        lastAttemptAt: null,
-        lastError: null,
-      };
-    }
-    return {
-      sourceUrl: row.source_url,
-      scopes: coerceScopes(row.scopes),
-      fetchedAt: ms(row.fetched_at),
-      lastAttemptAt: ms(row.last_attempt_at),
-      lastError: row.last_error,
-    };
-  } catch {
-    return {
-      sourceUrl: null,
-      scopes: [],
-      fetchedAt: null,
-      lastAttemptAt: null,
-      lastError: null,
-    };
-  }
-}
-
-/**
- * Refresh one connector's cached scope docs.
- *
- * A failure records the reason and the attempt time but leaves `scopes` and
- * `fetched_at` untouched, so the dialog keeps showing the last good read and
- * says how old it is. Blanking a permissions list because a docs page moved
- * would be a worse outcome than showing accurate but dated information.
- */
-export async function refreshScopeDocs(
-  connectorName: string,
-  url: string,
-): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const scopes = await fetchScopeDocs(url);
-    await sql`
-      insert into public.connector_scope_docs
-        (connector_name, source_url, scopes, fetched_at, last_attempt_at, last_error)
-      values (${connectorName}, ${url}, ${sql.json(scopes as never)}, now(), now(), null)
-      on conflict (connector_name) do update
-        set source_url = excluded.source_url,
-            scopes = excluded.scopes,
-            fetched_at = now(),
-            last_attempt_at = now(),
-            last_error = null
-    `;
-    return { ok: true };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "The refresh failed.";
-    await sql`
-      insert into public.connector_scope_docs
-        (connector_name, source_url, last_attempt_at, last_error)
-      values (${connectorName}, ${url}, now(), ${message})
-      on conflict (connector_name) do update
-        set last_attempt_at = now(), last_error = ${message}
-    `.catch(() => {});
-    return { ok: false, error: message };
   }
 }

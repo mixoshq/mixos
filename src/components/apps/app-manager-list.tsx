@@ -8,6 +8,8 @@ import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import AppToggleList from "./app-toggle-list";
+import { CARD_SHELL } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface MissingConnector {
   name: string;
@@ -38,10 +40,7 @@ export default function AppManagerList({
   const [widgetsOnly, setWidgetsOnly] = useState(false);
   const [status, setStatus] = useState<StatusFilter>("all");
 
-  const installedSet = useMemo(
-    () => new Set(installedSlugs),
-    [installedSlugs],
-  );
+  const installedSet = useMemo(() => new Set(installedSlugs), [installedSlugs]);
   const lower = query.toLowerCase();
   const baseFiltered = useMemo(
     () =>
@@ -147,7 +146,7 @@ export default function AppManagerList({
           </label>
         </div>
       </div>
-      <div className="rounded-xl border border-border bg-card shadow-sm">
+      <div className={cn(CARD_SHELL, "overflow-hidden")}>
         <div className="divide-y divide-border">
           {filtered.length > 0 ? (
             filtered.map((app) => (
@@ -155,7 +154,9 @@ export default function AppManagerList({
                 key={app.slug}
                 app={app}
                 installed={installedSet.has(app.slug)}
-                missingUserConnectors={missingUserConnectorsBySlug[app.slug] ?? []}
+                missingUserConnectors={
+                  missingUserConnectorsBySlug[app.slug] ?? []
+                }
               />
             ))
           ) : (

@@ -155,7 +155,9 @@ Some connectors authenticate each logged-in user against an external IdP (e.g. M
 }
 ```
 
-The platform looks up each connector's class. If it exposes an `oauth` object, the connector is user-scoped: each request merges the **logged-in user's** stored access token into the credentials passed to `initialize()`, after refreshing on the fly if needed. Otherwise it's tenant-scoped: the admin-configured shared credentials are passed straight through. See the generated `userScopedConnectorNames` list in [`src/generated/connector-registry.ts`](../../src/generated/connector-registry.ts) for the resolved set.
+A connector declares this itself: **`"userScoped": true` in its `connector.json`**. There is no inference from the class, and no naming convention — the manifest field is the whole answer, and the schema requires `auth.strategy` to be `oauth2_authorization_code` alongside it, since a shared API key cannot represent "each person's own account".
+
+When it is set, each request merges the **logged-in user's** stored access token into the credentials passed to `initialize()`, refreshing on the fly if needed; the client id and secret stay tenant-wide, so the *application* is registered once and only the *grant* is personal. When it is absent, the connector is tenant-scoped and the admin-configured shared credentials are passed straight through. The flag is read in [`src/lib/apps/context.ts`](../../src/lib/apps/context.ts) when the context is built, and in the OAuth [start](../../src/app/api/connectors/%5Bname%5D/oauth/start/route.ts) and [callback](../../src/app/api/connectors/%5Bname%5D/oauth/callback/route.ts) routes, which use it to decide whether `requireAdmin()` applies and where the resulting grant is stored.
 
 ### Required UX pattern
 

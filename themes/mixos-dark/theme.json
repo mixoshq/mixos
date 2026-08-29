@@ -1,7 +1,6 @@
 {
   "name": "MixOS Dark",
-  "description": "The MixOS palette drawn for a dark ground. Slate and cyan with Plus Jakarta Sans, Inter and JetBrains Mono, from the MixOS brand guidelines v1.0. A separate theme, not a mode.",
-  "tagline": "Where Apps and Connectors Flow Together — after dark.",
+  "description": "Slate and cyan on a dark ground, drawn from the MixOS brand guidelines v1.0.",
   "authors": [
     {
       "name": "MixOS Core Team",
@@ -39,5 +38,5 @@
   },
   "surfaces": [],
   "escapes": [],
-  "lastUpdated": "2026-08-28T05:31:37.354Z"
+  "lastUpdated": "2026-08-29T15:30:02.322Z"
 }

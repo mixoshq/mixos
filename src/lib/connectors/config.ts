@@ -9,9 +9,10 @@ import { ConnectorError } from "./errors";
 import { TOKEN_KEYS, refreshWithToken, tokensToCredentials } from "./oauth";
 import type { TokenSet } from "./oauth";
 import type { ConnectorAuthPolicy } from "./types";
+import { platformKey } from "@/lib/env/keys";
 
 export async function getDecryptedConfig(
-  connectorName: string
+  connectorName: string,
 ): Promise<Record<string, string> | null> {
   const supabase = createServiceClient();
   const { data } = await supabase
@@ -21,7 +22,9 @@ export async function getDecryptedConfig(
     .single();
 
   if (!data) return null;
-  return JSON.parse(decrypt(data.encrypted_credentials));
+  return JSON.parse(
+    decrypt(data.encrypted_credentials, platformKey("connectorEncryption")),
+  );
 }
 
 /**
@@ -48,7 +51,7 @@ export async function getDecryptedConfig(
 export async function saveConnectorConfig(
   connectorName: string,
   credentials: Record<string, string>,
-  userId: string
+  userId: string,
 ): Promise<void> {
   await mutateConnectorCredentials(connectorName, () => credentials, {
     configuredBy: userId,
@@ -56,7 +59,7 @@ export async function saveConnectorConfig(
 }
 
 export async function isConnectorConfigured(
-  connectorName: string
+  connectorName: string,
 ): Promise<boolean> {
   const supabase = createServiceClient();
   const { data } = await supabase
@@ -207,14 +210,22 @@ export async function mutateConnectorCredentials(
     `;
 
     const current: Record<string, string> = rows[0]
-      ? (JSON.parse(decrypt(rows[0].encrypted_credentials)) as Record<string, string>)
+      ? (JSON.parse(
+          decrypt(
+            rows[0].encrypted_credentials,
+            platformKey("connectorEncryption"),
+          ),
+        ) as Record<string, string>)
       : {};
 
     const patch = await mutate(current);
     if (patch === null) return current;
 
     const merged = { ...current, ...patch };
-    const encrypted = encrypt(JSON.stringify(merged));
+    const encrypted = encrypt(
+      JSON.stringify(merged),
+      platformKey("connectorEncryption"),
+    );
 
     const configuredBy = opts?.configuredBy;
     if (rows[0]) {
@@ -259,7 +270,9 @@ export async function saveConnectorTokens(
   connectorName: string,
   tokens: TokenSet,
 ): Promise<void> {
-  await mutateConnectorCredentials(connectorName, () => tokensToCredentials(tokens));
+  await mutateConnectorCredentials(connectorName, () =>
+    tokensToCredentials(tokens),
+  );
 }
 
 /**
@@ -278,7 +291,10 @@ export async function refreshConnectorTokens(opts: {
   skewMs: number;
 }): Promise<Record<string, string>> {
   const { connectorName, subject, policy, skewMs } = opts;
-  const [idKey, secretKey] = policy.credentialKeys ?? ["clientId", "clientSecret"];
+  const [idKey, secretKey] = policy.credentialKeys ?? [
+    "clientId",
+    "clientSecret",
+  ];
 
   return mutateConnectorCredentials(connectorName, async (current) => {
     const expiresAt = Number(current[TOKEN_KEYS.expiresAt] ?? 0);

@@ -1,7 +1,15 @@
 ---
 description: Start a feature branch, open a deploy PR, or cut a production release tag
-argument-hint: [deploy|release] [notes]
+argument-hint: [deploy|release] [notes] [-q]
 ---
+
+## Clarify gate
+
+If $ARGUMENTS contains `-q` (anywhere), then before doing anything else:
+ask me 3-5 clarifying questions and stop. Do not read ahead, plan, or write
+code until I answer. Ignore the rest of this skill until then.
+
+Strip `-q` from the task description before acting on it.
 
 You are managing git branches, pull requests, and production releases for a
 developer building on **MixOS**, so they don't have to do it by hand. One

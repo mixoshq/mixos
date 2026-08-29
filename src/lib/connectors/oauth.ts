@@ -14,6 +14,7 @@ import {
   parseRetryAfter,
 } from "./status-map";
 import type { ConnectorAuthPolicy } from "./types";
+import { platformKey } from "@/lib/env/keys";
 
 /**
  * Tenant-level three-legged OAuth.
@@ -113,14 +114,19 @@ export function codeChallengeFor(verifier: string): string {
 
 /** Encrypted (AES-256-GCM) so the cookie is opaque and tamper-evident. */
 export function sealFlowState(flow: OAuthFlowState): string {
-  return encrypt(JSON.stringify(flow));
+  return encrypt(JSON.stringify(flow), platformKey("connectorEncryption"));
 }
 
-export function openFlowState(sealed: string | undefined): OAuthFlowState | null {
+export function openFlowState(
+  sealed: string | undefined,
+): OAuthFlowState | null {
   if (!sealed) return null;
   try {
-    const flow = JSON.parse(decrypt(sealed)) as OAuthFlowState;
-    if (typeof flow.state !== "string" || typeof flow.codeVerifier !== "string") return null;
+    const flow = JSON.parse(
+      decrypt(sealed, platformKey("connectorEncryption")),
+    ) as OAuthFlowState;
+    if (typeof flow.state !== "string" || typeof flow.codeVerifier !== "string")
+      return null;
     if (!Number.isFinite(flow.exp) || flow.exp < Date.now()) return null;
     return flow;
   } catch {
@@ -131,7 +137,10 @@ export function openFlowState(sealed: string | undefined): OAuthFlowState | null
 }
 
 /** Constant-time compare of the echoed `state` against the sealed one. */
-export function stateMatches(fromProvider: string, fromCookie: string): boolean {
+export function stateMatches(
+  fromProvider: string,
+  fromCookie: string,
+): boolean {
   const a = Buffer.from(fromProvider);
   const b = Buffer.from(fromCookie);
   if (a.length !== b.length) return false;
@@ -154,21 +163,40 @@ export function safeReturnPath(input: string | null | undefined): string {
 
 // ── Authorize URL ───────────────────────────────────────────────────────────
 
+/**
+ * The scopes actually sent at authorization time.
+ *
+ * `auth.scopes` carries every scope the provider documents so the registry can
+ * show what an API offers; only entries flagged `requested` are ones this
+ * connector asks for.
+ */
+export function requestedScopes(policy: ConnectorAuthPolicy): string[] {
+  return (policy.scopes ?? []).filter((s) => s.requested).map((s) => s.scope);
+}
+
 export function buildAuthorizeUrl(
   policy: ConnectorAuthPolicy,
   opts: { connector: string; clientId: string; flow: OAuthFlowState },
 ): string {
   if (!policy.authorizeUrl) {
-    throw new Error(`connector "${opts.connector}" declares no auth.authorizeUrl.`);
+    throw new Error(
+      `connector "${opts.connector}" declares no auth.authorizeUrl.`,
+    );
   }
   const url = new URL(policy.authorizeUrl);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", opts.clientId);
   url.searchParams.set("redirect_uri", redirectUriFor(opts.connector));
   url.searchParams.set("state", opts.flow.state);
-  url.searchParams.set("code_challenge", codeChallengeFor(opts.flow.codeVerifier));
+  url.searchParams.set(
+    "code_challenge",
+    codeChallengeFor(opts.flow.codeVerifier),
+  );
   url.searchParams.set("code_challenge_method", "S256");
-  if (policy.scopes?.length) url.searchParams.set("scope", policy.scopes.join(" "));
+  // Only the requested subset. `scopes` is the provider's whole catalogue, so
+  // sending it unfiltered would ask consent for every permission the API has.
+  const requested = requestedScopes(policy);
+  if (requested.length) url.searchParams.set("scope", requested.join(" "));
   return url.toString();
 }
 
@@ -192,7 +220,8 @@ interface TokenRequest {
  * recurse straight back into the auth layer it exists to serve.
  */
 export async function requestToken(req: TokenRequest): Promise<TokenSet> {
-  const { policy, clientId, clientSecret, params, connectorName, subject } = req;
+  const { policy, clientId, clientSecret, params, connectorName, subject } =
+    req;
   if (!policy.tokenUrl) {
     throw new Error(`connector "${connectorName}" declares no auth.tokenUrl.`);
   }
@@ -221,7 +250,8 @@ export async function requestToken(req: TokenRequest): Promise<TokenSet> {
     });
   } catch (err) {
     const aborted =
-      err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+      err instanceof Error &&
+      (err.name === "TimeoutError" || err.name === "AbortError");
     throw new ConnectorError({
       category: aborted ? "timeout" : "network_error",
       connectorName,

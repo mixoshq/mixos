@@ -14,12 +14,14 @@ import {
   Settings,
   ChevronDown,
   UserCog,
-  LayoutDashboard,
+  Gauge,
   LogOut,
   Pencil,
 } from "lucide-react";
 import AppsDropdown from "@/components/apps/apps-dropdown";
 import { useDashboardEdit } from "@/components/dashboard/edit-mode-context";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 export default function Header({ logo }: { logo?: string | null }) {
   const { data: session, status } = useSession();
@@ -119,9 +121,9 @@ export default function Header({ logo }: { logo?: string | null }) {
             e.preventDefault();
             setDashMenu({ x: e.clientX, y: e.clientY });
           }}
-          className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-brand-foreground/60 transition-colors hover:bg-white/10 hover:text-brand-foreground"
+          className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-brand-foreground transition-colors hover:bg-brand-foreground/10"
         >
-          <LayoutDashboard className="h-4 w-4" />
+          <Gauge className="h-4 w-4" />
           <span className="text-sm font-medium">Dashboard</span>
         </Link>
 
@@ -133,7 +135,7 @@ export default function Header({ logo }: { logo?: string | null }) {
           <button
             onClick={() => setMenuOpen(!menuOpen)}
             data-tour="settings-menu"
-            className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-brand-foreground/80 transition-colors hover:bg-white/10 hover:text-brand-foreground"
+            className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-foreground/10"
           >
             {status === "authenticated" && user && (
               <span className="hidden text-sm text-brand-foreground/70 sm:inline">
@@ -145,7 +147,13 @@ export default function Header({ logo }: { logo?: string | null }) {
           </button>
 
           {menuOpen && (
-            <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-card py-1 shadow-lg">
+            <div
+              className={cn(
+                "mix-popover",
+                CARD_SURFACE,
+                "absolute right-0 top-full z-50 mt-1 w-56 py-1 shadow-lg",
+              )}
+            >
               {isAdmin && (
                 <>
                   <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -201,7 +209,11 @@ export default function Header({ logo }: { logo?: string | null }) {
         <div
           ref={dashMenuRef}
           role="menu"
-          className="fixed z-50 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-lg"
+          className={cn(
+            "mix-popover",
+            CARD_SURFACE,
+            "fixed z-50 min-w-[160px] py-1 shadow-lg",
+          )}
           style={{ top: dashMenu.y, left: dashMenu.x }}
         >
           <button

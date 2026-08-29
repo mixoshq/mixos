@@ -7,7 +7,10 @@ import { requireReadOnlySession } from "@/lib/auth/session";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getDecryptedConfig } from "@/lib/connectors/config";
 import { connectorConfigState } from "@/lib/connectors/status";
-import { deleteUserTokens, listUserConnections } from "@/lib/connectors/user-config";
+import {
+  deleteUserTokens,
+  listUserConnections,
+} from "@/lib/connectors/user-config";
 import UserConnectionList from "@/components/account/user-connection-list";
 
 /**
@@ -64,6 +67,10 @@ export default async function ConnectionsPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold text-foreground">My Connections</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Sign in to the services that act as you, rather than through the shared
+        account an admin connects.
+      </p>
       <div className="mt-6">
         <UserConnectionList items={items} disconnectAction={disconnect} />
       </div>

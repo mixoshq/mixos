@@ -8,6 +8,8 @@ import Link from "next/link";
 import { Plug, RefreshCw, TriangleAlert } from "lucide-react";
 import type { ConnectorErrorEnvelope } from "@/lib/connectors/response";
 import { isAdminActionable } from "@/lib/connectors/response";
+import { CARD_SHELL } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /**
  * The screen a widget shows when its connector failed.
@@ -37,7 +39,9 @@ export default function ConnectorErrorState({
   const { error } = envelope;
   const needsAdmin = isAdminActionable(error.category);
   const retryable =
-    !needsAdmin && error.category !== "not_found" && error.category !== "invalid_request";
+    !needsAdmin &&
+    error.category !== "not_found" &&
+    error.category !== "invalid_request";
 
   const Icon = needsAdmin ? Plug : TriangleAlert;
   const waitHint =
@@ -46,7 +50,12 @@ export default function ConnectorErrorState({
       : "";
 
   return (
-    <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-card p-10 text-center">
+    <div
+      className={cn(
+        CARD_SHELL,
+        "flex flex-1 items-center justify-center border-dashed p-5 text-center",
+      )}
+    >
       <div className="max-w-md">
         <Icon
           aria-hidden
@@ -68,7 +77,9 @@ export default function ConnectorErrorState({
         {error.adminActionUrl && (
           <div className="mt-4 space-y-2">
             {error.adminHint && (
-              <p className="mx-auto text-xs text-muted-foreground">{error.adminHint}</p>
+              <p className="mx-auto text-xs text-muted-foreground">
+                {error.adminHint}
+              </p>
             )}
             <Link
               href={error.adminActionUrl}
