@@ -7,6 +7,8 @@
 import { useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { usePreferences } from "@/components/preferences-context";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface Slide {
   eyebrow: string;
@@ -62,7 +64,13 @@ export default function WelcomeModal() {
 
   return createPortal(
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="relative mx-4 w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+      <div
+        className={cn(
+          "mix-modal",
+          CARD_SURFACE,
+          "relative mx-4 w-full max-w-lg overflow-hidden shadow-xl",
+        )}
+      >
         <div className="bg-brand px-8 pb-10 pt-8 text-brand-foreground">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             {slide.eyebrow}
@@ -100,7 +108,9 @@ export default function WelcomeModal() {
             {!isLast ? (
               <button
                 type="button"
-                onClick={() => setIndex((i) => Math.min(SLIDES.length - 1, i + 1))}
+                onClick={() =>
+                  setIndex((i) => Math.min(SLIDES.length - 1, i + 1))
+                }
                 className="rounded-md bg-brand px-4 py-1.5 text-sm font-medium text-brand-foreground hover:bg-brand/90"
               >
                 Next

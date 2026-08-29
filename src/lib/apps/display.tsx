@@ -46,7 +46,7 @@ export function formatLastUpdated(
  * their name is wrapped in a mailto: link.
  */
 export function renderAuthors(
-  authors: AppAuthor[] | undefined
+  authors: AppAuthor[] | undefined,
 ): ReactNode | null {
   if (!authors || authors.length === 0) return null;
   const items = authors
@@ -68,6 +68,44 @@ export function renderAuthors(
       return node;
     });
   return items.flatMap((node, i) =>
-    i === 0 ? [node] : [<span key={`sep-${i}`}>, </span>, node]
+    i === 0 ? [node] : [<span key={`sep-${i}`}>, </span>, node],
   );
+}
+
+/**
+ * "1 table" / "3 tables" — a count that says what it counted.
+ *
+ * Shared because the same phrasing has to appear in two places that must agree:
+ * the pills on a registry row and the facts panel inside that app's dialog. Two
+ * copies is how "1 widgets" ships on one of them.
+ */
+export function formatCount(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * Words of an item's description shown on a registry tile. The details dialog
+ * shows all of it.
+ *
+ * Shared so the apps and connectors grids cut at the same length: two tiles of
+ * the same size, side by side in an admin's memory, should not disagree about
+ * how much of a description is "the gist".
+ */
+export const TILE_DESCRIPTION_WORDS = 15;
+
+/**
+ * Cut to a whole-word boundary.
+ *
+ * By word rather than by character because this is prose being cut mid-sentence
+ * — a character cut lands inside a word and reads as a rendering fault, where a
+ * word cut reads as a deliberate "there's more". Trailing punctuation goes with
+ * it, so the join is `…` and never `.…`.
+ */
+export function truncateWords(text: string, max: number): string {
+  const words = text.trim().split(/\s+/);
+  if (words.length <= max) return text;
+  return `${words
+    .slice(0, max)
+    .join(" ")
+    .replace(/[.,;:!?]+$/, "")}…`;
 }

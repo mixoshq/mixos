@@ -88,6 +88,19 @@ export type ConnectorAuthStrategy =
   | "oauth2_client_credentials"
   | "oauth2_authorization_code";
 
+/** How a scope's own description classifies it. Derived, never hand-written. */
+export type ConnectorScopeAccess = "read" | "write" | "read-write";
+
+/** One row of a provider's documented scope table. */
+export interface ConnectorScope {
+  scope: string;
+  /** The provider's own wording, as shown on their consent screen. */
+  description?: string;
+  access?: ConnectorScopeAccess;
+  /** Does this connector ask for it at authorization time? */
+  requested: boolean;
+}
+
 export interface ConnectorAuthPolicy {
   strategy: ConnectorAuthStrategy;
   /** apiKey: where the credential goes. Default "bearer". */
@@ -112,8 +125,17 @@ export interface ConnectorAuthPolicy {
   tokenAuth?: "basic" | "post";
   /** oauth2_authorization_code: authorization endpoint. */
   authorizeUrl?: string;
-  /** oauth2_*: scopes requested at provisioning time. Minimum set only. */
-  scopes?: string[];
+  /**
+   * oauth2_*: every scope this API documents, each flagged with whether this
+   * connector asks for it. Only the `requested` ones are sent at authorization
+   * time — minimum set only, per invariant 17.
+   *
+   * Written by `scripts/check-scopes.ts <connector> --write` from `scopesUrl`.
+   * The catalogue lives here, in the manifest, rather than in a database row an
+   * admin populated: it is a property of the connector, it travels with the
+   * code, and it shows up in a diff.
+   */
+  scopes?: ConnectorScope[];
   /**
    * The provider's scope reference page, parsed by the Connector Registry to
    * show permissions in plain English. Must be a page that tabulates scopes
@@ -143,10 +165,7 @@ export interface ConnectorHttpPolicy {
 }
 
 export type ConnectorPaginationStyle =
-  | "cursor"
-  | "offset"
-  | "page"
-  | "link-header";
+  "cursor" | "offset" | "page" | "link-header";
 
 export interface ConnectorPaginationPolicy {
   style: ConnectorPaginationStyle;

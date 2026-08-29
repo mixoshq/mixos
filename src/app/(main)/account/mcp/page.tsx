@@ -10,6 +10,7 @@ import { consentableApps } from "@/lib/mcp/tools";
 import { listAuthorizedClients } from "@/lib/mcp/store";
 import { formatLastUpdated } from "@/lib/apps/display";
 import LucideIcon from "@/components/lucide-icon";
+import { Card } from "@/components/ui/card";
 import { revokeMcpClient } from "./revoke-action";
 
 /**
@@ -50,7 +51,7 @@ export default async function McpConnectionsPage() {
         anything — and only ever see apps you have access to.
       </p>
 
-      <div className="mt-6 rounded-lg border border-border bg-card px-4 py-4">
+      <Card className="mt-6 p-4 shadow-sm">
         <p className="text-sm font-medium">Connect a client</p>
         <p className="mt-1 text-sm text-muted-foreground">
           In Claude, add a custom connector with this URL. You&apos;ll be sent
@@ -59,20 +60,17 @@ export default async function McpConnectionsPage() {
         <code className="mt-3 block overflow-x-auto rounded bg-muted px-3 py-2 text-xs">
           {mcpUrl}
         </code>
-      </div>
+      </Card>
 
       <h2 className="mt-8 text-sm font-semibold">Connected clients</h2>
       <div className="mt-3 space-y-3">
         {clients.length === 0 ? (
-          <div className="rounded-lg border border-border bg-card px-4 py-6 text-sm text-muted-foreground">
+          <Card className="px-6 py-8 text-center text-sm text-muted-foreground shadow-sm">
             Nothing is connected yet.
-          </div>
+          </Card>
         ) : (
           clients.map((c) => (
-            <div
-              key={c.clientId}
-              className="rounded-lg border border-border bg-card px-4 py-3"
-            >
+            <Card key={c.clientId} className="p-4 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="font-medium">{c.clientName}</p>
@@ -100,7 +98,7 @@ export default async function McpConnectionsPage() {
                   </button>
                 </form>
               </div>
-            </div>
+            </Card>
           ))
         )}
       </div>
@@ -112,15 +110,12 @@ export default async function McpConnectionsPage() {
       </p>
       <div className="mt-3 space-y-3">
         {available.length === 0 ? (
-          <div className="rounded-lg border border-border bg-card px-4 py-6 text-sm text-muted-foreground">
+          <Card className="px-6 py-8 text-center text-sm text-muted-foreground shadow-sm">
             None of your apps expose data over MCP yet.
-          </div>
+          </Card>
         ) : (
           available.map((app) => (
-            <div
-              key={app.slug}
-              className="rounded-lg border border-border bg-card px-4 py-3"
-            >
+            <Card key={app.slug} className="p-4 shadow-sm">
               <p className="flex items-center gap-2 font-medium">
                 <LucideIcon name={app.icon} className="h-4 w-4 shrink-0" />
                 {app.name}
@@ -135,7 +130,7 @@ export default async function McpConnectionsPage() {
                   </li>
                 ))}
               </ul>
-            </div>
+            </Card>
           ))
         )}
       </div>

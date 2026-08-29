@@ -1,7 +1,6 @@
 {
   "name": "Template",
   "description": "Copy this folder to themes/<your-slug>/ and edit. The folder name becomes the slug — it appears in a CSS attribute selector, so use lowercase letters, digits and hyphens.",
-  "tagline": "A one-line description of the look.",
   "authors": [{ "name": "Your Name", "email": "you@example.com" }],
   "fonts": [],
   "assets": {},

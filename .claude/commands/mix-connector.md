@@ -1,7 +1,15 @@
 ---
 description: Create or update a connector under connectors/
-argument-hint: <create|update> <connector-name> [notes]
+argument-hint: <create|update> <connector-name> [notes] [-q]
 ---
+
+## Clarify gate
+
+If $ARGUMENTS contains `-q` (anywhere), then before doing anything else:
+ask me 3-5 clarifying questions and stop. Do not read ahead, plan, or write
+code until I answer. Ignore the rest of this skill until then.
+
+Strip `-q` from the task description before acting on it.
 
 You are creating or modifying a connector under `connectors/`.
 
@@ -42,7 +50,7 @@ dialog.
 three-tab dialog for every connector — Details, Configure, Usage Logs — and you
 do not design, choose or reorder them. **Details and Usage Logs need no
 authoring at all**: dependency counts come from other apps' manifests,
-permissions from the scrape, status from the credential row, and the log from
+permissions from the manifest's own scope catalogue, status from the credential row, and the log from
 telemetry you already declare. What you write is:
 
 1. **`setup`** — the Configure wizard's provider-side steps.
@@ -55,12 +63,53 @@ These fields are required and the build rejects a connector without them:
 
 | Field | What it drives |
 | --- | --- |
-| `icon` | The registry tile. Square, ≥512x512 |
+| `icon` | The registry tile. Written as a full path — `"assets/icon.svg"`. Square, ≥512x512 for raster; a `viewBox` for SVG |
 | `setup.title` | The provider-side step's name — "Create a Google Cloud OAuth app" |
 | `setup.steps[]` | What the admin does in the provider's console |
 | `auth.scopesUrl` | The page the permissions list is read from |
 
 Three-legged OAuth also requires `showRedirectUri` on **exactly one** step.
+
+### Scopes refresh
+
+`auth.scopes` is the provider's whole documented catalogue, each entry flagged
+with whether this connector asks for it:
+
+```jsonc
+"scopes": [
+  { "scope": "…/records.readonly", "description": "View your records and settings",
+    "access": "read",  "requested": true },
+  { "scope": "…/records.modify",   "description": "Create, edit and delete your records",
+    "access": "write", "requested": false }
+]
+```
+
+**The refresh is the only thing that writes it.** When a user asks for a scopes
+refresh, or when you add `auth.scopesUrl` to a new connector:
+
+```
+npx tsx scripts/check-scopes.ts <name>            # report only — read this first
+npx tsx scripts/check-scopes.ts <name> --write    # rewrite auth.scopes in place
+npx tsx scripts/generate-project-registry.ts      # pick the change up
+```
+
+Then **show the user the diff**. That diff is the whole point of keeping the
+catalogue in the manifest: a provider quietly adding a write scope is something
+a human should see, and there is no admin-facing Refresh button that could
+introduce it behind everyone's back.
+
+Two rules the refresh follows, and you must not work around:
+
+- **It preserves `requested`.** Refreshing the catalogue never changes what the
+  connector asks for. Adding a scope to the request is a **hand edit**, and it
+  is a security decision — invariant 17, minimum scopes only. Say so in the PR.
+- **It keeps a requested scope the page no longer documents** rather than
+  dropping it. Silently un-requesting a scope the connector needs would break
+  authorization at the next reconnect; a provider reorganising their docs is not
+  consent to change what we ask for. The script warns instead.
+
+Read the output. "14 scopes parsed" is not the test — whether the descriptions
+are English sentences and the read/write split looks right is the test.
 
 ### Getting the icon
 

@@ -44,7 +44,7 @@ themes/<slug>/theme.css
         │    · rewrite url() → /themes/<slug>/…
         ▼
 src/generated/themes.css        every installed theme, concatenated
-src/generated/theme-registry.ts names, fonts, assets, swatches
+src/generated/theme-registry.ts names, fonts, assets, swatches, typefaces
 src/generated/theme-tokens.json resolved values, read by the lint rule
 public/themes/<slug>/…          assets, copied
         │

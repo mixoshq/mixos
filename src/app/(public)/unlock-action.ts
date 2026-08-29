@@ -17,10 +17,7 @@ import {
   hasAppPassword,
   verifyAppPassword,
 } from "@/lib/apps/app-password-store";
-import {
-  getClientIp,
-  setUnlockCookies,
-} from "@/lib/apps/public-access";
+import { getClientIp, setUnlockCookies } from "@/lib/apps/public-access";
 import {
   checkUnlockAttempt,
   clearUnlockFailures,
@@ -78,7 +75,7 @@ export async function unlockApp(
 
   // 1. Brute-force gate. Check BEFORE bcrypt so a locked-out attacker
   //    cannot extract timing signal or pin CPU on bcrypt rounds.
-  const gate = checkUnlockAttempt(ip, appSlug);
+  const gate = await checkUnlockAttempt(ip, appSlug);
   if (!gate.allowed) {
     const minutes = Math.ceil(gate.retryAfterMs / 60_000);
     return {
@@ -101,7 +98,7 @@ export async function unlockApp(
   //    false on missing row; the prior check is for clear messaging.
   const ok = await verifyAppPassword(appSlug, password);
   if (!ok) {
-    recordUnlockFailure(ip, appSlug);
+    await recordUnlockFailure(ip, appSlug);
     return { error: "Incorrect password." };
   }
 
@@ -112,7 +109,7 @@ export async function unlockApp(
   //    raw server crash. `redirect()` MUST be outside the try/catch —
   //    it works by throwing NEXT_REDIRECT, which the runtime expects to
   //    propagate up.
-  clearUnlockFailures(ip, appSlug);
+  await clearUnlockFailures(ip, appSlug);
   try {
     await setUnlockCookies(appSlug);
   } catch (err) {

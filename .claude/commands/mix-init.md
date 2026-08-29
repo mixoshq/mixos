@@ -400,6 +400,45 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
      in the database. The real keys live in the team's **MixOS 1Password vault** —
      request access from Anthony (amix@gmail.com), and never share them.
      This isn't needed to boot MixOS; it can wait.
+   - **Platform encryption keys are already set for local dev.** The Docker path
+     reads them from the committed `.env.docker`, which is fine because that file
+     is dev-only and the values are fixed on purpose — they decrypt data already
+     sitting in the local database, so regenerating them on each boot would break
+     every saved credential. Nothing to do here.
+
+## Deploying somewhere real — generate the platform keys
+
+Only when setting up a deployment that is not the local Docker stack. MixOS has
+**six** independent cryptographic keys, each protecting exactly one thing so that
+rotating one has a bounded blast radius rather than breaking everything at once.
+
+Generate all six, paste into the deployment's environment:
+
+```bash
+npm run keys:generate
+```
+
+Or fill only what is missing from an existing environment:
+
+```bash
+npx tsx scripts/generate-keys.ts --missing
+```
+
+Then confirm nothing is missing or malformed — this exits non-zero and names each
+offender, so it belongs in a deploy check:
+
+```bash
+npm run keys:check
+```
+
+The generator enumerates the inventory in
+[`src/lib/env/keys.ts`](../../src/lib/env/keys.ts), so it cannot fall behind when
+a key is added. Each printed key carries a comment saying what rotating it costs.
+
+**Do not point two of them at the same value**, and do not derive one from
+another. That is what the previous arrangement did, and it made the base key
+impossible to rotate: changing it broke every connector credential, every MCP
+token, every app API key and every unlock cookie simultaneously.
 
 ## Notes
 

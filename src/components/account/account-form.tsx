@@ -7,6 +7,7 @@
 import { useActionState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { Card } from "@/components/ui/card";
 import {
   updateDisplayName,
   updateEmail,
@@ -58,15 +59,15 @@ export default function AccountForm({
 
   const [nameState, nameAction, namePending] = useActionState(
     updateDisplayName,
-    INITIAL_ACCOUNT_STATE
+    INITIAL_ACCOUNT_STATE,
   );
   const [emailState, emailAction, emailPending] = useActionState(
     updateEmail,
-    INITIAL_ACCOUNT_STATE
+    INITIAL_ACCOUNT_STATE,
   );
   const [pwState, pwAction, pwPending] = useActionState(
     updatePassword,
-    INITIAL_ACCOUNT_STATE
+    INITIAL_ACCOUNT_STATE,
   );
 
   // After a name or email change:
@@ -77,7 +78,6 @@ export default function AccountForm({
   //     useSession()-driven name updates without a sign-out.
   useEffect(() => {
     if (nameState.success) {
-      console.log("[account-form] name save succeeded, refreshing session + router");
       updateSessionRef.current({});
       router.refresh();
     }
@@ -90,7 +90,11 @@ export default function AccountForm({
   }, [emailState, router]);
 
   return (
-    <div className="mt-8 space-y-6 rounded-lg border border-border bg-card p-6">
+    // Half the settings content column, left-aligned. Every row here is one
+    // short field plus a Save button, and the full column stretched the inputs
+    // far wider than anything anyone types into them. Full width below `md`,
+    // where half a phone is not a usable form.
+    <Card className="mt-8 w-full space-y-6 p-4 shadow-sm md:w-1/2">
       <form action={nameAction} className="space-y-2">
         <label
           htmlFor="displayName"
@@ -183,6 +187,6 @@ export default function AccountForm({
           <Banner state={pwState} />
         </form>
       </div>
-    </div>
+    </Card>
   );
 }

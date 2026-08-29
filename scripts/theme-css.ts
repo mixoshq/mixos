@@ -44,7 +44,11 @@ import {
   contrastRatio,
   ratioText,
 } from "../src/lib/themes/color";
-import type { ThemeEscape, ThemeSwatch } from "../src/lib/themes/types";
+import type {
+  ThemeEscape,
+  ThemeSwatch,
+  ThemeTypeface,
+} from "../src/lib/themes/types";
 
 /** Aborts the whole generator run, exactly as a malformed app manifest does. */
 export class ThemeError extends Error {
@@ -68,7 +72,12 @@ const TOKEN_SELECTOR = ":root";
 /** Recognised only to give its author a message that names the replacement. */
 const LEGACY_DARK_SELECTOR = ':root[data-mode="dark"]';
 
-const ALLOWED_AT_RULES = new Set(["font-face", "media", "supports", "keyframes"]);
+const ALLOWED_AT_RULES = new Set([
+  "font-face",
+  "media",
+  "supports",
+  "keyframes",
+]);
 
 const SURFACES = new Set<string>(SURFACE_ALLOWLIST);
 
@@ -86,12 +95,52 @@ const SWATCH_TOKENS = [
   "destructive",
 ];
 
+/**
+ * The type roles shown in the admin picker, in the order they read on a card.
+ * These are the `--type-*` tokens, which is the only place a theme says which
+ * of its families is the heading face and which is body text — `fonts[]` is a
+ * list of files and carries no roles.
+ */
+const TYPEFACE_ROLES: Array<{ token: string; label: string }> = [
+  { token: "type-heading", label: "Heading" },
+  { token: "type-sans", label: "Body" },
+  { token: "type-mono", label: "Code" },
+];
+
+/**
+ * CSS generic families and system keywords. A stack that begins with one of
+ * these names no real typeface, so the picker says "System" rather than
+ * printing `ui-sans-serif` at an admin as though it were a font choice.
+ */
+const GENERIC_FAMILIES = new Set([
+  "ui-sans-serif",
+  "ui-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "system-ui",
+  "-apple-system",
+  "blinkmacsystemfont",
+  "sans-serif",
+  "serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+]);
+
+/** The first named family in a font stack, or "System" if there isn't one. */
+function primaryFamily(stack: string): string {
+  const first = stack.split(",")[0]?.trim() ?? "";
+  const bare = first.replace(/^["']|["']$/g, "");
+  return GENERIC_FAMILIES.has(bare.toLowerCase()) ? "System" : bare;
+}
+
 export interface CompiledTheme {
   /** CSS scoped to `[data-theme="<slug>"]`, ready to concatenate. */
   css: string;
   /** Allowlisted surfaces the CSS actually styles. */
   surfaces: string[];
   swatches: ThemeSwatch[];
+  typefaces: ThemeTypeface[];
   /** Every resolved token. Consumed by the contrast lint rule. */
   tokens: Record<string, string>;
   /** Human-readable ratio lines, echoed by the generator so CI shows the maths. */
@@ -183,11 +232,14 @@ function assertLocalUrls(decl: Declaration, slug: string, dir: string): void {
 }
 
 function rewriteUrls(value: string, slug: string): string {
-  return value.replace(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g, (whole, ref: string) => {
-    const r = ref.trim();
-    if (r.startsWith("data:")) return whole;
-    return `url("/themes/${slug}/${r.replace(/^\.?\//, "")}")`;
-  });
+  return value.replace(
+    /url\(\s*['"]?([^'")]+)['"]?\s*\)/g,
+    (whole, ref: string) => {
+      const r = ref.trim();
+      if (r.startsWith("data:")) return whole;
+      return `url("/themes/${slug}/${r.replace(/^\.?\//, "")}")`;
+    },
+  );
 }
 
 /** Resolve a block's declarations to concrete values, following `var()` chains. */
@@ -270,7 +322,9 @@ export function compileTheme(args: {
   const file = path.join(dir, "theme.css");
 
   if (!fs.existsSync(file)) {
-    throw new ThemeError(`themes/${slug}/theme.css is missing. Every theme needs one.`);
+    throw new ThemeError(
+      `themes/${slug}/theme.css is missing. Every theme needs one.`,
+    );
   }
 
   const source = fs.readFileSync(file, "utf-8");
@@ -402,8 +456,12 @@ export function compileTheme(args: {
   if (undeclared.length > 0 || unstyled.length > 0) {
     throw new ThemeError(
       `themes/${slug}/theme.json: "surfaces" does not match theme.css.` +
-        (undeclared.length ? `\n  styled but not declared: ${undeclared.join(", ")}` : "") +
-        (unstyled.length ? `\n  declared but not styled: ${unstyled.join(", ")}` : "") +
+        (undeclared.length
+          ? `\n  styled but not declared: ${undeclared.join(", ")}`
+          : "") +
+        (unstyled.length
+          ? `\n  declared but not styled: ${unstyled.join(", ")}`
+          : "") +
         `\nThe manifest is how a reviewer sees a theme's reach without reading its CSS; it has to be ` +
         `accurate to be worth anything.`,
     );
@@ -423,15 +481,28 @@ export function compileTheme(args: {
     });
   });
 
-  const swatches: ThemeSwatch[] = SWATCH_TOKENS.filter((t) => resolved.has(t)).map(
-    (token) => ({ token, value: resolved.get(token)! }),
-  );
+  const swatches: ThemeSwatch[] = SWATCH_TOKENS.filter((t) =>
+    resolved.has(t),
+  ).map((token) => ({ token, value: resolved.get(token)! }));
+
+  const typefaces: ThemeTypeface[] = TYPEFACE_ROLES.filter((r) =>
+    resolved.has(r.token),
+  ).map((r) => {
+    const stack = resolved.get(r.token)!;
+    return {
+      token: r.token,
+      label: r.label,
+      family: primaryFamily(stack),
+      stack,
+    };
+  });
 
   return {
     tokens: Object.fromEntries(resolved),
     css: root.toString(),
     surfaces: styled,
     swatches,
+    typefaces,
     report,
   };
 }

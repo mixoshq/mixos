@@ -6,6 +6,8 @@
 
 import { useActionState } from "react";
 import { unlockApp, type UnlockState } from "@/app/(public)/unlock-action";
+import { CARD_SHELL } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 const INITIAL: UnlockState = { error: null };
 
@@ -24,8 +26,10 @@ export default function PasswordGate({
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted px-4">
-      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-8 shadow-sm">
-        <h1 className="text-lg font-semibold text-card-foreground">{appName}</h1>
+      <div className={cn(CARD_SHELL, "w-full max-w-sm p-5")}>
+        <h1 className="text-lg font-semibold text-card-foreground">
+          {appName}
+        </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           This page is password protected. Enter the app password to continue.
         </p>

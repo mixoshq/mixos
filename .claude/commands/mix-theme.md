@@ -1,7 +1,15 @@
 ---
 description: Create, update, or review a theme under themes/
-argument-hint: <create|update|review> <theme-name> [brand book path or notes]
+argument-hint: <create|update|review> <theme-name> [brand book path or notes] [-q]
 ---
+
+## Clarify gate
+
+If $ARGUMENTS contains `-q` (anywhere), then before doing anything else:
+ask me 3-5 clarifying questions and stop. Do not read ahead, plan, or write
+code until I answer. Ignore the rest of this skill until then.
+
+Strip `-q` from the task description before acting on it.
 
 You are creating or modifying a theme under `themes/`.
 

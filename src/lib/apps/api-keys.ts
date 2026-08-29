@@ -4,7 +4,7 @@
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServiceClient } from "@/lib/db/supabase";
-
+import { platformKey } from "@/lib/env/keys";
 
 /**
  * Per-app scoped API keys — the `key` auth tier.
@@ -27,28 +27,18 @@ import { createServiceClient } from "@/lib/db/supabase";
  */
 
 const PREFIX = "mixk_";
-const DERIVE_LABEL = "mixos-app-api-key-v1";
 
 /**
- * The HMAC key, derived from `CONNECTOR_ENCRYPTION_KEY` under a label of its own.
+ * The HMAC key for API-key digests: its own environment variable
+ * (`APP_API_KEY_SECRET`).
  *
- * DELIBERATELY NOT `getUnlockSigningKey()`. That key can be pinned by setting
- * `APP_UNLOCK_SECRET`, and an operator rotating the app-password secret has no
- * reason to expect every integration's API key to stop working at the same
- * moment. Deriving here under a distinct label keeps the two lifecycles
- * independent while still introducing no new environment secret — the same
- * PRF-separation pattern the MCP token store uses.
+ * DELIBERATELY NOT the unlock key. An operator rotating the app-password secret
+ * has no reason to expect every integration's API key to stop working at the
+ * same moment, and the reverse is equally true. Rotating this one invalidates
+ * app API keys and nothing else. See `src/lib/env/keys.ts`.
  */
 function signingKey(): Buffer {
-  const enc = process.env.CONNECTOR_ENCRYPTION_KEY;
-  if (!enc || enc.length < 32) {
-    throw new Error(
-      "Cannot mint or verify app API keys: CONNECTOR_ENCRYPTION_KEY is unset.",
-    );
-  }
-  return createHmac("sha256", Buffer.from(enc, "hex"))
-    .update(DERIVE_LABEL)
-    .digest();
+  return platformKey("appApiKey");
 }
 
 function digestOf(key: string): string {
@@ -147,7 +137,11 @@ export async function resolveApiKey(
 }
 
 /** `["*"]` covers every route; otherwise the exact `"<METHOD> /<pattern>"`. */
-export function keyAllows(scopes: string[], method: string, pattern: string): boolean {
+export function keyAllows(
+  scopes: string[],
+  method: string,
+  pattern: string,
+): boolean {
   if (scopes.includes("*")) return true;
   return scopes.includes(`${method} /${pattern}`);
 }

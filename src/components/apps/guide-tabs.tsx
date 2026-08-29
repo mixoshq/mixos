@@ -6,7 +6,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { appRegistry } from "@/generated/app-registry";
 import { Expander } from "@/components/guide-primitives";
-import GuideTabsShell, { type GuideTabDef } from "@/components/guide-tabs-shell";
+import { type GuideTabDef } from "@/components/guide-tabs-shell";
+import { splitGuideSections } from "@/lib/guides/sections";
 
 const TABS: Array<{ id: string; label: string; file: string }> = [
   { id: "architecture", label: "Architecture", file: "architecture.md" },
@@ -33,30 +34,28 @@ async function readDoc(file: string): Promise<string> {
   return fs.readFile(filePath, "utf8");
 }
 
-interface GuideTabsProps {
-  registeredSlugs: string[];
-}
-
-export default async function GuideTabs({ registeredSlugs }: GuideTabsProps) {
+/**
+ * The app guide's sections, with the live registry appended to the three that
+ * document something the registry can answer for.
+ */
+export async function loadAppGuideTabs(): Promise<GuideTabDef[]> {
   const markdowns = await Promise.all(TABS.map((t) => readDoc(t.file)));
 
-  const registeredApps = appRegistry
-    .filter((a) => registeredSlugs.includes(a.slug))
-    .filter(
-      (a) =>
-        a.hooks.emits.actions.length > 0 ||
-        a.hooks.emits.filters.length > 0 ||
-        a.hooks.listens.actions.length > 0 ||
-        a.hooks.listens.filters.length > 0,
-    );
+  const documentedApps = appRegistry.filter(
+    (a) =>
+      a.hooks.emits.actions.length > 0 ||
+      a.hooks.emits.filters.length > 0 ||
+      a.hooks.listens.actions.length > 0 ||
+      a.hooks.listens.filters.length > 0,
+  );
 
   const hooksAppend =
-    registeredApps.length > 0 ? (
-      <div className="mt-6 space-y-2">
+    documentedApps.length > 0 ? (
+      <div className="space-y-2">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Registered Apps
         </p>
-        {registeredApps.map((app) => {
+        {documentedApps.map((app) => {
           const listens = [
             ...app.hooks.listens.actions,
             ...app.hooks.listens.filters,
@@ -130,13 +129,13 @@ export default async function GuideTabs({ registeredSlugs }: GuideTabsProps) {
       </div>
     ) : null;
 
-  const serviceApps = appRegistry
-    .filter((a) => registeredSlugs.includes(a.slug))
-    .filter((a) => a.provides.length > 0 || a.consumes.length > 0);
+  const serviceApps = appRegistry.filter(
+    (a) => a.provides.length > 0 || a.consumes.length > 0,
+  );
 
   const appServicesAppend =
     serviceApps.length > 0 ? (
-      <div className="mt-6 space-y-2">
+      <div className="space-y-2">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Registered Apps
         </p>
@@ -184,13 +183,11 @@ export default async function GuideTabs({ registeredSlugs }: GuideTabsProps) {
       </div>
     ) : null;
 
-  const mcpApps = appRegistry
-    .filter((a) => registeredSlugs.includes(a.slug))
-    .filter((a) => a.mcp.length > 0);
+  const mcpApps = appRegistry.filter((a) => a.mcp.length > 0);
 
   const mcpAppend =
     mcpApps.length > 0 ? (
-      <div className="mt-6 space-y-2">
+      <div className="space-y-2">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Registered Apps
         </p>
@@ -203,7 +200,9 @@ export default async function GuideTabs({ registeredSlugs }: GuideTabsProps) {
                     <code className="rounded bg-muted px-1 py-0.5 text-xs">
                       {app.slug}__{t.name}
                     </code>
-                    <p className="mt-0.5 text-muted-foreground">{t.description}</p>
+                    <p className="mt-0.5 text-muted-foreground">
+                      {t.description}
+                    </p>
                     {t.hint && (
                       <p className="mt-0.5 text-xs italic text-muted-foreground">
                         {t.hint}
@@ -218,10 +217,10 @@ export default async function GuideTabs({ registeredSlugs }: GuideTabsProps) {
       </div>
     ) : null;
 
-  const tabs: GuideTabDef[] = TABS.map((t, i) => ({
+  return TABS.map((t, i) => ({
     id: t.id,
     label: t.label,
-    markdown: markdowns[i],
+    ...splitGuideSections(markdowns[i]),
     append:
       t.id === "hooks"
         ? hooksAppend
@@ -231,6 +230,4 @@ export default async function GuideTabs({ registeredSlugs }: GuideTabsProps) {
             ? mcpAppend
             : undefined,
   }));
-
-  return <GuideTabsShell tabs={tabs} />;
 }

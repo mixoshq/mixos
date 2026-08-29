@@ -6,6 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { runDueJobs } from "@/lib/apps/scheduler";
 import { pruneRateBuckets } from "@/lib/rate-limit";
+import { pruneUnlockFailures } from "@/lib/apps/unlock-rate-limit";
 import { pruneRouteTelemetry } from "@/lib/apps/telemetry";
 import { pruneWebhookEvents } from "@/lib/connectors/webhook";
 
@@ -69,12 +70,14 @@ export async function GET(request: NextRequest) {
   const prunedBuckets = await pruneRateBuckets();
   const prunedRouteEvents = await pruneRouteTelemetry();
   const prunedWebhookEvents = await pruneWebhookEvents();
+  const prunedUnlockFailures = await pruneUnlockFailures();
 
   return NextResponse.json({
     ok: true,
     durationMs: Date.now() - startedAt,
     prunedBuckets,
     prunedRouteEvents,
+    prunedUnlockFailures,
     prunedWebhookEvents,
   });
 }

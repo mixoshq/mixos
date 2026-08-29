@@ -34,7 +34,8 @@ export function toNum(s: string): number | null {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
 }
 
-export const numStr = (n: number | null): string => (n == null ? "" : String(n));
+export const numStr = (n: number | null): string =>
+  n == null ? "" : String(n);
 
 const FIELD_CLASS =
   "mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-foreground disabled:opacity-70";
@@ -122,10 +123,12 @@ export function TextField({
  *  - **`Card` is a dashboard panel.** `text-lg` title, a right-hand status slot,
  *    no footer, no save semantics.
  *
- * It borrows `CARD_SHELL` so the two can't drift on radius, border or fill, but
- * keeps its own header and body padding on purpose: those are tuned for stacked
- * form rows, and adopting the dashboard paddings would restyle every settings page
- * in the product.
+ * It borrows `CARD_SHELL` **and the `5` padding scale** from [`./card.tsx`](./card.tsx),
+ * so the two can't drift on radius, border, fill or inset. What stays different is
+ * only what makes this a form section and not a panel: the `h3 text-sm` label, the
+ * hint line, the rule under the header, and the footer. A settings page and a
+ * dashboard now sit on the same rhythm; they still read as different kinds of
+ * surface.
  */
 export function SectionCard({
   title,
@@ -141,7 +144,7 @@ export function SectionCard({
 }) {
   return (
     <section className={CARD_SHELL}>
-      <div className="border-b border-border px-4 py-3">
+      <div className="border-b border-border p-5">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
         {hint && (
           <p className="mt-0.5 text-xs leading-snug text-muted-foreground">
@@ -149,9 +152,9 @@ export function SectionCard({
           </p>
         )}
       </div>
-      <div className="px-4 py-4">{children}</div>
+      <div className="p-5">{children}</div>
       {footer && (
-        <div className="flex items-center gap-3 border-t border-border px-4 py-3">
+        <div className="flex items-center gap-3 border-t border-border p-5">
           {footer}
         </div>
       )}

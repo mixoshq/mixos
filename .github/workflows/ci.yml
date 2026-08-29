@@ -36,19 +36,31 @@ jobs:
 
       - run: npm ci
 
-      # NON-BLOCKING, deliberately and temporarily. `npm run lint` currently
-      # reports 10 pre-existing errors that predate the Vercel migration — 7x
-      # react-hooks/set-state-in-effect, 1x react-hooks/refs, 1x
-      # react-hooks/static-components, plus an unescaped entity — spread across
-      # 9 dashboard/admin components. Fixing them means reworking component
-      # render logic, which was out of scope for this change.
+      # BLOCKING. It was `continue-on-error` while 10 pre-existing react-hooks
+      # errors were outstanding; those are fixed and the count is zero, so the
+      # exemption is gone.
       #
-      # Typecheck and build below ARE blocking and both pass. Once the 10 are
-      # fixed, delete this comment and the `continue-on-error` line so lint
-      # gates PRs like the others.
+      # This matters more than a style gate. `eslint.config.mjs` is where the
+      # client/server boundary is enforced — no raw `fetch` in app code, no
+      # `process.env`, no connector or DB client outside the server tier, no
+      # constructing a scoped DB client for another app's prefix. Every one of
+      # those is an `error`, and while this step could not fail a PR, all of them
+      # were advisory. docs/security-architecture.md §3.3 calls this layer "Build
+      # fails on violation"; this line is what makes that sentence true.
+      #
+      # Warnings stay non-fatal: eslint exits non-zero on errors only.
       - name: Lint
         run: npm run lint
-        continue-on-error: true
+
+      # Dependency advisories. `--audit-level=high` rather than a clean slate:
+      # a low advisory in a dev-only transitive must not block a release, and a
+      # threshold nobody can meet is a threshold everybody learns to ignore.
+      #
+      # This step is the point of the exercise. The first audit run against this
+      # repo returned 2 critical and 6 high — both criticals in the auth library
+      # — not because anything regressed, but because nothing was looking.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
       - name: Typecheck
         run: npm run typecheck

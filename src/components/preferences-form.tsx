@@ -10,13 +10,16 @@ import {
   type MenuBarAppDisplay,
 } from "./preferences-context";
 import NotificationsPreference from "./notifications-preference";
+import { Card } from "./ui/card";
 
 export default function PreferencesForm() {
   const { menuBar, menuBarAppDisplay, setMenuBar, setMenuBarAppDisplay } =
     usePreferences();
 
   return (
-    <div className="mt-8 space-y-6 rounded-lg border border-border bg-card p-6">
+    // Half the settings content column, matching the Account card. See the note
+    // there: full width below `md`.
+    <Card className="mt-8 w-full space-y-6 p-4 shadow-sm md:w-1/2">
       <Field
         label="Menu Bar"
         description="Always show the top menu bar, or auto-hide it until you hover the top of the screen."
@@ -46,9 +49,9 @@ export default function PreferencesForm() {
           Chrome Extension
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
-          Replace your Chrome new tab page with MixOS. Click the toolbar icon
-          to toggle the privacy filter, which covers the screen so your data
-          stays hidden while you&apos;re screensharing.
+          Replace your Chrome new tab page with MixOS. Click the toolbar icon to
+          toggle the privacy filter, which covers the screen so your data stays
+          hidden while you&apos;re screensharing.
         </p>
 
         <a
@@ -100,13 +103,13 @@ export default function PreferencesForm() {
               and select the unzipped folder
             </li>
             <li>
-              Open a new tab — MixOS loads inside the tab, and the address
-              bar stays focused so you can keep typing
+              Open a new tab — MixOS loads inside the tab, and the address bar
+              stays focused so you can keep typing
             </li>
           </ol>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 

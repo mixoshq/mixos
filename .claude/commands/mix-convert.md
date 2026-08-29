@@ -1,7 +1,15 @@
 ---
 description: Convert an existing application into a MixOS app under apps/
-argument-hint: <source-path|git-url|plan-path> [app-slug] [notes]
+argument-hint: <source-path|git-url|plan-path> [app-slug] [notes] [-q]
 ---
+
+## Clarify gate
+
+If $ARGUMENTS contains `-q` (anywhere), then before doing anything else:
+ask me 3-5 clarifying questions and stop. Do not read ahead, plan, or write
+code until I answer. Ignore the rest of this skill until then.
+
+Strip `-q` from the task description before acting on it.
 
 You are converting an **existing, non-MixOS application** into a MixOS app under `apps/`.
 
