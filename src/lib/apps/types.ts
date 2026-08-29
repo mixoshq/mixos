@@ -40,7 +40,11 @@ export const ALL_ROUTE_AUTHS: readonly RouteAuth[] = [
  * from — so "what is reachable without signing in" stays answerable from one
  * generated file rather than from reading every manifest.
  */
-export const ANONYMOUS_AUTHS: readonly RouteAuth[] = ["password", "key", "public"];
+export const ANONYMOUS_AUTHS: readonly RouteAuth[] = [
+  "password",
+  "key",
+  "public",
+];
 
 export function isAnonymousAuth(auth: RouteAuth): boolean {
   return ANONYMOUS_AUTHS.includes(auth);
@@ -94,6 +98,15 @@ export interface AppManifest {
   /** When true, the app can send Web Push via `context.notifications`. */
   notifications: boolean;
   hasPages: boolean;
+  /**
+   * How many pages the app serves — every directory under `pages/` holding a
+   * `Main.tsx`, at any depth. Derived by the registry generator; never set in
+   * app.json.
+   *
+   * Can be 0 while `hasPages` is true: a `pages/` directory with a shared
+   * component in it and no `Main.tsx` is non-empty but serves nothing.
+   */
+  pageCount: number;
   /** When true, the app is implicitly granted to every user and cannot be revoked. */
   global: boolean;
   /**

@@ -59,7 +59,7 @@ Omit them and `public/` keeps serving the existing icons. The layout deliberatel
 "assets": { "preview": "preview.png" }
 ```
 
-Optional. The admin picker already renders a live swatch row from the theme's own resolved tokens, which is more honest than a screenshot and can never go stale. A preview image is worth adding only when the theme's distinction is something swatches cannot show — a texture, a shadow treatment, a type pairing.
+Optional. The admin picker already renders a live swatch row from the theme's own resolved tokens, plus a specimen of each `--type-*` role set in its own family — both more honest than a screenshot, and neither can go stale. A preview image is worth adding only when the theme's distinction is something colour and type cannot show: a texture, a shadow treatment, a border language.
 
 ## Verification
 

@@ -1,7 +1,6 @@
 {
   "name": "MixOS",
-  "description": "The default MixOS theme. Slate and cyan with Plus Jakarta Sans, Inter and JetBrains Mono, from the MixOS brand guidelines v1.0. Ships the light palette; the dark look is a sibling theme, mixos-dark.",
-  "tagline": "Where Apps and Connectors Flow Together.",
+  "description": "The default MixOS theme. Slate and cyan on a light ground, drawn from the MixOS brand guidelines v1.0.",
   "authors": [
     {
       "name": "MixOS Core Team",
@@ -39,5 +38,5 @@
   },
   "surfaces": [],
   "escapes": [],
-  "lastUpdated": "2026-08-28T05:31:37.354Z"
+  "lastUpdated": "2026-08-29T15:30:02.322Z"
 }

@@ -11,6 +11,8 @@ import type { DashboardWidget, LayoutItem } from "@/lib/dashboard/actions";
 import { addWidget } from "@/lib/dashboard/actions";
 import WidgetConfigModal from "./widget-config-modal";
 import LucideIcon from "@/components/lucide-icon";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface WidgetCatalogProps {
   apps: AppManifest[];
@@ -109,7 +111,13 @@ export default function WidgetCatalog({
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="mx-4 w-full max-w-5xl rounded-xl border border-border bg-card shadow-xl">
+        <div
+          className={cn(
+            "mix-modal",
+            CARD_SURFACE,
+            "mx-4 w-full max-w-5xl shadow-xl",
+          )}
+        >
           {/* Header */}
           <div className="flex items-center justify-between rounded-t-xl bg-brand px-6 py-4">
             <h2 className="text-lg font-semibold text-white">Add Widget</h2>

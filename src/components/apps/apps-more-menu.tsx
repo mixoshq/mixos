@@ -12,6 +12,8 @@ import type {
   ListReorderItemProps,
   ListReorderDropTargetProps,
 } from "@/lib/dnd/use-list-reorder";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Props = {
   apps: AppManifest[];
@@ -42,7 +44,11 @@ const AppsMoreMenu = forwardRef<HTMLDivElement, Props>(function AppsMoreMenu(
     <div
       ref={ref}
       role="menu"
-      className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-card py-1 shadow-lg"
+      className={cn(
+        "mix-popover",
+        CARD_SURFACE,
+        "absolute right-0 top-full z-50 mt-1 w-56 py-1 shadow-lg",
+      )}
       {...getDropTargetProps(offset + apps.length)}
     >
       {apps.map((app, m) => {

@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { IconButton } from "@/components/ui/button";
-import { CARD_SHELL } from "@/components/ui/card";
+import { CARD_SURFACE } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 /**
@@ -73,8 +73,8 @@ export function Menu({
         <div
           role="menu"
           className={cn(
-            CARD_SHELL,
             "mix-popover",
+            CARD_SURFACE,
             "absolute z-30 mt-1 min-w-48 overflow-hidden p-1 shadow-lg",
             align === "right" ? "right-0" : "left-0",
           )}

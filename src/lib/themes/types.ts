@@ -77,12 +77,32 @@ export interface ThemeSwatch {
   value: string;
 }
 
+/**
+ * One type role, surfaced in the admin picker for the same reason swatches are:
+ * a theme should be legible before it is applied, and that includes its
+ * typography. Derived from the `--type-*` tokens rather than from `fonts[]`,
+ * because the manifest lists files with no notion of which family is the
+ * heading face and which is body text — the tokens are where that is declared.
+ */
+export interface ThemeTypeface {
+  /** The token this role resolves from, e.g. "type-heading". */
+  token: string;
+  /** Short role label for the picker: "Heading", "Body", "Code". */
+  label: string;
+  /**
+   * The first named family in the stack — what the card prints. "System" when
+   * the theme self-hosts nothing and the stack is generic keywords only.
+   */
+  family: string;
+  /** The whole stack, applied as the specimen's own `font-family`. */
+  stack: string;
+}
+
 export interface ThemeManifest {
   /** Derived from the folder name. Never declared in theme.json. */
   slug: string;
   name: string;
   description: string;
-  tagline?: string;
   authors: ThemeAuthor[];
   fonts: ThemeFontFace[];
   assets: ThemeAssets;
@@ -92,5 +112,6 @@ export interface ThemeManifest {
   /** Public URL prefix for this theme's copied assets: `/themes/<slug>`. */
   assetBase: string;
   swatches: ThemeSwatch[];
+  typefaces: ThemeTypeface[];
   lastUpdated: number | null;
 }

@@ -18,6 +18,7 @@ import fs from "fs";
 import path from "path";
 import { type Sql } from "postgres";
 import { createPgClient } from "../src/lib/db/pg-options";
+import { syncAppRegistry } from "./sync-app-registry";
 import { loadEnv } from "./load-env";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -36,34 +37,33 @@ loadEnv();
  * UPDATE, DELETE FROM, CREATE INDEX ... ON, and REFERENCES.
  */
 function addTablePrefix(sql: string, prefix: string): string {
-  return sql
-    // CREATE TABLE [IF NOT EXISTS] <name>
-    .replace(
-      /\b(create\s+table\s+(?:if\s+not\s+exists\s+)?)(\w+)/gi,
-      `$1${prefix}$2`
-    )
-    // ALTER TABLE <name>
-    .replace(/\b(alter\s+table\s+)(\w+)/gi, `$1${prefix}$2`)
-    // DROP TABLE [IF EXISTS] <name>
-    .replace(
-      /\b(drop\s+table\s+(?:if\s+exists\s+)?)(\w+)/gi,
-      `$1${prefix}$2`
-    )
-    // CREATE [UNIQUE] INDEX ... ON <name>
-    .replace(/\b(on\s+)(\w+)(\s*\()/gi, `$1${prefix}$2$3`)
-    // CREATE INDEX <name> — prefix the index name too
-    .replace(
-      /\b(create\s+(?:unique\s+)?index\s+(?:if\s+not\s+exists\s+)?)(\w+)/gi,
-      `$1${prefix}$2`
-    )
-    // INSERT INTO <name>
-    .replace(/\b(insert\s+into\s+)(\w+)/gi, `$1${prefix}$2`)
-    // UPDATE <name>
-    .replace(/\b(update\s+)(\w+)(\s+set\b)/gi, `$1${prefix}$2$3`)
-    // DELETE FROM <name>
-    .replace(/\b(delete\s+from\s+)(\w+)/gi, `$1${prefix}$2`)
-    // REFERENCES <name>
-    .replace(/\b(references\s+)(\w+)(\s*\()/gi, `$1${prefix}$2$3`);
+  return (
+    sql
+      // CREATE TABLE [IF NOT EXISTS] <name>
+      .replace(
+        /\b(create\s+table\s+(?:if\s+not\s+exists\s+)?)(\w+)/gi,
+        `$1${prefix}$2`,
+      )
+      // ALTER TABLE <name>
+      .replace(/\b(alter\s+table\s+)(\w+)/gi, `$1${prefix}$2`)
+      // DROP TABLE [IF EXISTS] <name>
+      .replace(/\b(drop\s+table\s+(?:if\s+exists\s+)?)(\w+)/gi, `$1${prefix}$2`)
+      // CREATE [UNIQUE] INDEX ... ON <name>
+      .replace(/\b(on\s+)(\w+)(\s*\()/gi, `$1${prefix}$2$3`)
+      // CREATE INDEX <name> — prefix the index name too
+      .replace(
+        /\b(create\s+(?:unique\s+)?index\s+(?:if\s+not\s+exists\s+)?)(\w+)/gi,
+        `$1${prefix}$2`,
+      )
+      // INSERT INTO <name>
+      .replace(/\b(insert\s+into\s+)(\w+)/gi, `$1${prefix}$2`)
+      // UPDATE <name>
+      .replace(/\b(update\s+)(\w+)(\s+set\b)/gi, `$1${prefix}$2$3`)
+      // DELETE FROM <name>
+      .replace(/\b(delete\s+from\s+)(\w+)/gi, `$1${prefix}$2`)
+      // REFERENCES <name>
+      .replace(/\b(references\s+)(\w+)(\s*\()/gi, `$1${prefix}$2$3`)
+  );
 }
 
 /**
@@ -75,7 +75,7 @@ function addTablePrefix(sql: string, prefix: string): string {
  */
 async function getAppliedMigrations(
   sql: Sql,
-  appSlug: string
+  appSlug: string,
 ): Promise<Set<string>> {
   try {
     const rows = await sql<{ migration_file: string }[]>`
@@ -106,7 +106,7 @@ async function applyMigration(
   sql: Sql,
   appSlug: string,
   file: string,
-  sqlText: string
+  sqlText: string,
 ) {
   await sql.begin(async (tx) => {
     await tx.unsafe(sqlText);
@@ -154,6 +154,52 @@ async function ensureSyncState(sql: Sql, slug: string): Promise<void> {
   console.log(`  ${slug}: sync state ready`);
 }
 
+/**
+ * Enable RLS on every table in `public` that lacks it, and report what changed.
+ *
+ * The platform schema states the rule in its own header: RLS on, zero policies,
+ * because Supabase publishes `public` through PostgREST to the `anon` role and
+ * the anon key is publishable rather than secret. A table with RLS off is
+ * readable by anyone holding it.
+ *
+ * App tables were never covered. `applyMigration` runs an app's own SQL with the
+ * table names rewritten, so whatever `create table` it contains lands in
+ * `public` exactly as written — with no RLS. `_app_<slug>_*` tables have been
+ * reachable through PostgREST for as long as apps have had migrations. The only
+ * `enable row level security` this script used to emit was for `__sync_state`,
+ * which the platform creates itself.
+ *
+ * Sweeping the catalog rather than tracking names is deliberate: the platform
+ * schema tried the hand-kept list and the list is what rotted. Idempotent, so
+ * running migrations twice hardens nothing the second time.
+ */
+async function hardenRowLevelSecurity(sql: Sql) {
+  const rows = await sql<{ relname: string }[]>`
+    select c.relname
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relkind = 'r'
+      and not c.relrowsecurity
+      and not exists (
+        select 1
+        from pg_depend d
+        where d.objid = c.oid
+          and d.deptype = 'e'
+      )
+    order by c.relname
+  `;
+
+  for (const { relname } of rows) {
+    await sql.unsafe(
+      `alter table public."${relname}" enable row level security`,
+    );
+    console.log(`  RLS enabled: ${relname}`);
+  }
+
+  return rows.length;
+}
+
 async function migrateApps(sql: Sql) {
   if (!fs.existsSync(APPS_DIR)) return;
   const entries = fs.readdirSync(APPS_DIR, { withFileTypes: true });
@@ -199,8 +245,33 @@ async function migrateApps(sql: Sql) {
 async function main() {
   const sql = createPgClient({ max: 1 });
   try {
-    console.log("Applying app migrations...");
+    // Before the per-app SQL, because an app's own migration may insert seed
+    // rows into a table that references public.apps — and the parent row has to
+    // exist by then.
+    console.log("Syncing the app registry into public.apps...");
+    const sync = await syncAppRegistry(sql);
+    console.log(`  ${sync.upserted} app(s) in the registry`);
+    for (const slug of sync.removed) {
+      // Loud, because the cascade behind this line deletes that app's grants,
+      // installs, password and dashboard widgets.
+      console.log(
+        `  ${slug}: no longer in the registry — removed, along with its grants, installs, password and widgets`,
+      );
+    }
+
+    console.log("\nApplying app migrations...");
     await migrateApps(sql);
+
+    // After the app SQL, never before: a table created by this run has to be
+    // hardened by this run. See hardenRowLevelSecurity for why it sweeps.
+    console.log("\nChecking row-level security...");
+    const hardened = await hardenRowLevelSecurity(sql);
+    console.log(
+      hardened === 0
+        ? "  all tables already protected"
+        : `  hardened ${hardened} table(s)`,
+    );
+
     console.log("\nApp migrations complete.");
   } finally {
     await sql.end();

@@ -9,12 +9,15 @@ import { Search } from "lucide-react";
 import type { ConnectorManifest } from "@/lib/connectors/types";
 import type { ConnectorVerification } from "@/lib/connectors/config";
 import type { ConnectorAccess } from "@/lib/connectors/access";
-import type { ScopeDocs } from "@/lib/connectors/scope-docs";
+import type { ScopeStatusRow } from "@/lib/connectors/scope-status";
+import type { ConnectorScope } from "@/lib/connectors/types";
 import type { ConnectorDependents } from "@/lib/connectors/dependents";
 import type { ConnectorConfigState } from "@/lib/connectors/status";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import ConnectorTile from "./connector-tile";
 import ConnectorConfigureDialog from "./connector-configure-dialog";
+import { CARD_SHELL } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /** Connection state for a three-legged connector; null for every other kind. */
 export interface ConnectorOAuthStatus {
@@ -23,8 +26,12 @@ export interface ConnectorOAuthStatus {
   expiresAt: number | null;
   /** Redirect URI to register upstream; null when no origin is configured. */
   redirectUri: string | null;
-  /** Scopes the consent screen will ask for. Shown so the ask is not a surprise. */
-  scopes: string[];
+  /**
+   * Every scope the provider documents, each flagged `requested`. The consent
+   * screen only ever asks for the requested subset; the rest is the catalogue
+   * the Scopes tab renders.
+   */
+  scopes: ConnectorScope[];
 }
 
 export type ConnectorWithStatus = ConnectorManifest & {
@@ -43,7 +50,7 @@ export type ConnectorWithStatus = ConnectorManifest & {
   /** Granted scopes and observed usage — see lib/connectors/access.ts. */
   access: ConnectorAccess;
   /** Cached plain-English permissions from the provider's reference page. */
-  scopeDocs: ScopeDocs;
+  scopeStatus: ScopeStatusRow[];
   /** Which apps declare this connector, required vs optional. */
   dependents: ConnectorDependents;
   oauth: ConnectorOAuthStatus | null;
@@ -56,9 +63,6 @@ interface Props {
   /** Returns whether the connector now holds a usable credential set. */
   configureAction: (formData: FormData) => Promise<boolean>;
   testAction: (connectorName: string) => Promise<ConnectorTestOutcome>;
-  refreshScopeDocsAction: (
-    connectorName: string,
-  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 type StatusFilter = "all" | "configured" | "unconfigured";
@@ -74,7 +78,6 @@ export default function ConnectorRegistryList({
   initialOpen = null,
   configureAction,
   testAction,
-  refreshScopeDocsAction,
 }: Props) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -186,7 +189,9 @@ export default function ConnectorRegistryList({
                 <span>{opt.label}</span>
                 <span
                   className={`rounded px-1.5 py-px text-xs tabular-nums ${
-                    active ? "bg-white/20 text-brand-foreground" : "bg-muted text-foreground"
+                    active
+                      ? "bg-white/20 text-brand-foreground"
+                      : "bg-muted text-foreground"
                   }`}
                 >
                   {count}
@@ -208,7 +213,9 @@ export default function ConnectorRegistryList({
           ))}
         </div>
       ) : (
-        <div className="rounded-xl border border-border bg-card px-6 py-8 text-center text-muted-foreground shadow-sm">
+        <div
+          className={cn(CARD_SHELL, "p-5 text-center text-muted-foreground")}
+        >
           {query || status !== "all"
             ? "No connectors match your filters."
             : "No connectors registered. Add a connector to the /connectors directory."}
@@ -230,7 +237,6 @@ export default function ConnectorRegistryList({
           onClose={() => setOpenName(null)}
           configureAction={configureAction}
           testAction={testAction}
-          refreshScopeDocsAction={refreshScopeDocsAction}
         />
       )}
     </>

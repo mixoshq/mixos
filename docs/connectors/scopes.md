@@ -1,8 +1,8 @@
 # Scopes: reading permissions from the provider
 
-`https://www.googleapis.com/auth/gmail.readonly` tells a non-technical admin
-nothing. *"View your email messages and settings"* tells them everything — and
-the provider already wrote that sentence, because it is what their own consent
+`https://api.example.com/auth/records.readonly` tells a non-technical admin
+nothing. *"View your records and settings"* tells them everything — and the
+provider already wrote that sentence, because it is what their own consent
 screen shows. This is how the registry gets it.
 
 ---
@@ -33,21 +33,22 @@ Point it at the page that **tabulates scopes against descriptions** — not an A
 overview, not a quickstart. The parser looks for table rows containing something
 shaped like a scope, and takes the longest other cell as the description.
 
-Verify it while you are still holding the manifest:
+Read it, and write the result into the manifest:
 
 ```
-npx tsx scripts/check-scopes.ts gmail
+npx tsx scripts/check-scopes.ts <connector>            # report only
+npx tsx scripts/check-scopes.ts <connector> --write    # rewrite auth.scopes
 ```
 
 It prints every parsed scope with its read/write classification, marks the ones
 this connector requests, and warns about a requested scope the page never
-documents — which is almost always a typo in `auth.scopes`.
+documents — which is almost always a typo.
 
-This is an **authoring** step, deliberately not a build step. The registry reads
-that page at an admin's request and caches the result, so a wrong URL is not a
-broken build; it is an empty list nobody notices for a week. Putting the fetch in
-the build would make `npm run build` fail whenever a third party has a bad
-afternoon.
+This is an **authoring** step, deliberately not a build step, and it is the only
+way `auth.scopes` changes. Putting the fetch in the build would make
+`npm run build` fail whenever a third party has a bad afternoon; leaving it to
+the running product would make a permissions screen depend on someone else's
+uptime.
 
 ---
 
@@ -63,47 +64,74 @@ verbs and write verbs **independently** and combining them:
 
 Both present → **Read+Write**. Only write → **Write**. Otherwise → **Read**.
 
-Two bugs found doing this to Gmail's real page, both worth knowing because both
-were silent:
+Two bugs found running this against a real provider's page, both worth knowing
+because both were silent:
 
-- Matching whole phrases instead of independent verbs classified
-  `mail.google.com` ("Read, compose, send, and permanently delete all your
-  email") and `gmail.modify` as **Write**, when both are plainly Read+Write.
-- `\badd\b` matched inside **"add-on"**, so three read-only add-on scopes were
+- Matching whole phrases instead of independent verbs classified a scope
+  described as *"Read, compose, send, and permanently delete all your …"* as
+  **Write**, when it is plainly Read+Write. Detect each verb independently and
+  combine, rather than matching the sentence.
+- `\badd\b` matched inside **"add-on"**, so several read-only add-on scopes were
   reported as writes. The pattern is `add(?!-)`.
 
 Both were over-reports. On a permissions screen that is a false alarm nobody can
 dismiss — and the opposite error is worse.
 
-**Send `Accept-Language`.** Without it, providers localise: Google served this
-exact page in Hindi to a request that expressed no preference, and the
-descriptions were classified correctly and cached unreadable. Nothing errored.
+**Send `Accept-Language`.** Without it, providers localise: one served its scope
+page in Hindi to a request that expressed no preference, and the descriptions
+were classified correctly and cached unreadable. Nothing errored.
 
 ---
 
-## Cache, not source of truth
+## The catalogue is committed, not cached
 
-A third party's HTML is not a contract. This will break, quietly, the day the
-provider reshapes the page. So:
+A third party's HTML is not a contract. It will break, quietly, the day the
+provider reshapes the page. That is an argument for reading it **rarely, on
+purpose, and under review** — not for reading it in production.
 
-- The parse is **cached** in `connector_scope_docs` and re-read only when an
-  admin presses Refresh. No page load depends on a third party being up.
-- A failed refresh records **why** and **when it was attempted**, and leaves the
-  previous `scopes` and `fetched_at` untouched. Stale-but-accurate beats blank:
-  a permissions list that empties itself because a docs page moved is a worse
-  outcome than one showing last month's read with a note saying so.
+So the parse lands in `connector.json` as `auth.scopes`:
 
-Store the parsed array with `sql.json(...)`. `${JSON.stringify(x)}::jsonb` looks
-right and is not — postgres.js infers the parameter type from the target column,
-sees `jsonb`, and JSON-encodes the string you already stringified, so the column
-holds a JSON *string* rather than an array. It reads back as "no scopes found":
-a refresh that reports success and displays nothing.
+```jsonc
+"scopes": [
+  { "scope": "…/records.readonly", "description": "View your records and settings",
+    "access": "read",  "requested": true },
+  { "scope": "…/records.modify",   "description": "Create, edit and delete your records",
+    "access": "write", "requested": false }
+]
+```
+
+One array, not two. The catalogue and the request are the same list seen from
+two angles, and keeping them in separate places is how they drift apart.
+
+**`requested` is required and never inferred.** The refresh writes far more
+entries than a connector asks for, so a flag defaulting to true would silently
+request the provider's entire catalogue. `--write` also *preserves* the existing
+flags: refreshing the catalogue must never change what a connector asks for.
+Adding a scope to the request is a hand edit, because it is a security decision
+(minimum scopes only).
+
+What this buys: the list is identical on every install, it shows up in a diff
+where someone can object to a new write scope, and no page load depends on a
+third party being up. What it costs: a provider adding a scope needs a developer
+to run the refresh and ship the result. That is the trade, taken deliberately.
+
+There is no Refresh button in the registry, because there is nothing an admin
+could refresh.
 
 ---
 
 ## The per-scope verdict
 
-Each documented scope is marked against what this connector actually holds:
+Each documented scope is marked against what this connector actually holds. The
+verdict is **recorded in `connector_scope_status` at the OAuth callback**, which
+is the only moment it can change — not recomputed on every render, where three
+lists arriving from three places is exactly how a permissions screen starts
+disagreeing with itself.
+
+The row is keyed by connector, scope, **and grant-holder**: null for the
+tenant-wide grant an admin connected, and the user's id for a `userScoped`
+connector, where each person holds their own grant and a single per-connector
+answer would report one user's refusal as everybody's.
 
 | | Meaning |
 | --- | --- |
@@ -118,7 +146,7 @@ every already-authorized install keeps running on the older, narrower grant
 until somebody reconnects. Nothing else in the product surfaces that; the calls
 simply start failing.
 
-**Unknown carries most of the rows, and that is correct.** A scope Gmail offers
+**Unknown carries most of the rows, and that is correct.** A scope the provider offers
 but this connector never requests is not broken. Rendering those as ✗ would
 report a dozen failures on a perfectly healthy connector.
 

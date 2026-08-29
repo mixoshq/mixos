@@ -1,7 +1,7 @@
 {
   "name": "_template",
   "displayName": "Template Connector",
-  "icon": "icon.svg",
+  "icon": "assets/icon.svg",
   "description": "Starter template for a service authenticated with a simple API key.",
   "setup": {
     "title": "Create an API key",

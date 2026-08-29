@@ -14,7 +14,8 @@
 --   · Any table without RLS. `connector_webhook_events` previously shipped
 --     without it — the one table that missed the rule in the header below —
 --     which left it readable through PostgREST by anyone holding the anon key.
---     The do-block at the bottom now covers every table in this file.
+--     The do-block at the bottom covers every table in `public` by sweeping the
+--     catalog, so a new table cannot miss the rule by not being listed.
 --
 -- Applied with the Supabase CLI:  npm run db:push
 --
@@ -31,8 +32,11 @@
 -- Enabled + no policies = deny-all for those roles. The service role bypasses
 -- RLS entirely, so the application is unaffected.
 --
--- The practical rule: any table added here MUST also get
--- `enable row level security`. Adding a policy is what would open it up.
+-- The practical rule: any table added here gets RLS automatically — the sweep at
+-- the bottom of this file enables it on every table in `public` that lacks it.
+-- Adding a policy is what would open it up. A table created OUTSIDE this file
+-- is not covered by that sweep: app tables come from `scripts/migrate.ts`, which
+-- runs the same sweep itself after applying `apps/<slug>/migrations/*.sql`.
 -- ============================================================================
 
 -- ── Identity ────────────────────────────────────────────────────────────────
@@ -534,20 +538,38 @@ create index if not exists idx_app_api_keys_app on public.app_api_keys (app_slug
 -- Enable on every table, define no policies. See the header: this is what keeps
 -- PostgREST's anon/authenticated surface closed. The service role, which is how
 -- the application connects, bypasses RLS and is unaffected.
+--
+-- This sweeps the catalog rather than naming tables. It used to be a hand-kept
+-- `foreach t in array array[...]` list, and the list is precisely what failed:
+-- `connector_webhook_events` shipped without RLS once (see the file header), and
+-- after that fix three more tables were added without being transcribed into it
+-- — `user_connector_oauth`, which holds per-user OAuth grants, along with
+-- `connector_scope_docs` and `connector_scope_status`. A rule that says "every
+-- table in public" should be enforced by asking for every table in public. Add a
+-- table and it is covered; there is nothing to remember.
+--
+-- `relkind = 'r'` is ordinary tables only. The `pg_depend` clause skips tables
+-- owned by an extension, which are not ours to alter. `not c.relrowsecurity`
+-- makes the sweep idempotent and keeps re-runs quiet.
 do $$
-declare t text;
+declare t record;
 begin
-  foreach t in array array[
-    'users', 'apps', 'user_app_grants', 'user_apps',
-    'app_passwords', 'dashboard_layouts', 'dashboard_widgets',
-    'connector_configs', 'push_subscriptions', 'app_scheduled_jobs',
-    'app_job_runs', 'platform_settings', 'app_open_events',
-    'telemetry_events', 'oauth_clients', 'oauth_authorization_codes',
-    'oauth_tokens', '_migrations', 'rate_buckets',
-    'connector_webhook_events', 'app_settings', 'app_api_keys'
-  ]
+  for t in
+    select c.relname
+    from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relkind = 'r'
+      and not c.relrowsecurity
+      and not exists (
+        select 1
+        from pg_depend d
+        where d.objid = c.oid
+          and d.deptype = 'e'
+      )
   loop
-    execute format('alter table public.%I enable row level security', t);
+    execute format('alter table public.%I enable row level security', t.relname);
+    raise notice 'RLS enabled on public.%', t.relname;
   end loop;
 end
 $$;

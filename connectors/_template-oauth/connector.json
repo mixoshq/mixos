@@ -1,7 +1,7 @@
 {
   "name": "_template-oauth",
   "displayName": "Template Connector (OAuth)",
-  "icon": "icon.svg",
+  "icon": "assets/icon.svg",
   "description": "Starter template for a service using three-legged OAuth, where an admin approves access once.",
   "setup": {
     "title": "Create an OAuth app",
@@ -62,7 +62,18 @@
       "clientSecret"
     ],
     "scopes": [
-      "things:read"
+      {
+        "scope": "things:read",
+        "description": "View your things",
+        "access": "read",
+        "requested": true
+      },
+      {
+        "scope": "things:write",
+        "description": "Create, edit and delete your things",
+        "access": "write",
+        "requested": false
+      }
     ],
     "scopesUrl": "https://docs.provider.example.com/oauth/scopes"
   },

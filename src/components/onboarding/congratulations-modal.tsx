@@ -7,6 +7,8 @@
 import { useMemo, useSyncExternalStore, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { usePreferences } from "@/components/preferences-context";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 const subscribeNoop = () => () => {};
 const getTrue = () => true;
@@ -40,7 +42,11 @@ interface PopperPiece {
   height: number;
 }
 
-function buildPieces(count: number, originX: number, seed: number): PopperPiece[] {
+function buildPieces(
+  count: number,
+  originX: number,
+  seed: number,
+): PopperPiece[] {
   // Deterministic pseudo-random so SSR and the client agree.
   let s = seed;
   const rand = () => {
@@ -106,10 +112,7 @@ export default function CongratulationsModal() {
   const mounted = useSyncExternalStore(subscribeNoop, getTrue, getFalse);
 
   const pieces = useMemo(() => {
-    return [
-      ...buildPieces(26, 0.08, 17),
-      ...buildPieces(26, 0.92, 91),
-    ];
+    return [...buildPieces(26, 0.08, 17), ...buildPieces(26, 0.92, 91)];
   }, []);
 
   const fallingPieces = useMemo(() => buildFallingPieces(120, 53), []);
@@ -136,7 +139,13 @@ export default function CongratulationsModal() {
           return <span key={i} className="confetti-piece" style={style} />;
         })}
       </div>
-      <div className="relative mx-4 w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
+      <div
+        className={cn(
+          "mix-modal",
+          CARD_SURFACE,
+          "relative mx-4 w-full max-w-lg overflow-hidden shadow-xl",
+        )}
+      >
         <div className="pointer-events-none absolute inset-0 overflow-hidden">
           {pieces.map((p, i) => {
             const rad = (p.angleDeg * Math.PI) / 180;

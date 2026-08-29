@@ -9,6 +9,52 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-08-29
+
+- **Six independent platform keys.** Five of them used to be
+  `CONNECTOR_ENCRYPTION_KEY` itself or derived from it, which made the base key
+  impossible to rotate: changing it broke every stored connector credential,
+  every MCP token, every app API key and every unlock cookie at once. Each
+  purpose now has its own environment variable with a bounded blast radius.
+  Generate them with **`npm run keys:generate`** (or `--missing` to fill gaps),
+  and check a deployment with **`npm run keys:check`**. Local Docker already has
+  them in `.env.docker` — nothing to do there.
+
+- **Lint gates PRs again, and CI audits dependencies.** The `continue-on-error`
+  on CI's lint step is gone now that the 10 pre-existing react-hooks errors are
+  fixed. This matters more than style: `eslint.config.mjs` is where the
+  client/server boundary is enforced — no raw `fetch` in app code, no
+  `process.env`, no connector or DB client outside the server tier — and all of
+  it was advisory while the step could not fail a build. A new
+  `npm audit --audit-level=high` step runs beside it.
+
+- **Connector scopes live in `connector.json`.** `auth.scopes` is now the
+  provider's whole documented catalogue, each entry flagged with whether this
+  connector asks for it, and only
+  `npx tsx scripts/check-scopes.ts <name> --write` writes it — so a provider
+  quietly adding a write scope shows up in a diff rather than in a database row
+  an admin populated by pressing a button. What the provider *actually granted*
+  is recorded per-scope at the OAuth callback, which is the only moment it can
+  change. `icon` is now a full path (`"assets/icon.svg"`, not `"icon.svg"`).
+
+- **Admin actions are recorded.** Who configured a connector, who granted a
+  person access to an app, who set the password on a public page — none of it
+  was written down before, on a platform whose admins hold every third-party
+  credential in the deployment. Values are never logged, only which keys were set.
+
+- **Sessions can be revoked one user at a time.** A `session_version` counter
+  carried in the JWT and compared on every session resolution, so "this person
+  left" no longer means rotating `AUTH_SECRET` and signing out everybody.
+
+- **RLS is enforced by a backstop, not a hand-kept list.** `npm run migrate:apps`
+  now enables row-level security on every uncovered table in `public`, app
+  tables included — they were never covered, because an app's own `create table`
+  lands in `public` exactly as written.
+
+- **`-q` on any `/mix-*` command** makes it ask you 3–5 clarifying questions
+  before it plans or writes anything.
+
+
 ## 2026-08-28
 
 - **Themes are a first-class abstraction.** `themes/<slug>/` sits beside `apps/`

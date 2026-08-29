@@ -6,9 +6,15 @@ import { redirect } from "next/navigation";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import LucideIcon from "@/components/lucide-icon";
 import { consentableApps } from "@/lib/mcp/tools";
-import { MCP_SCOPE, isRegisteredRedirectUri, isValidResource } from "@/lib/mcp/oauth";
+import {
+  MCP_SCOPE,
+  isRegisteredRedirectUri,
+  isValidResource,
+} from "@/lib/mcp/oauth";
 import { getClient } from "@/lib/mcp/store";
 import { approveAuthorization, denyAuthorization } from "./authorize-action";
+import { CARD_SHELL } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /**
  * OAuth 2.1 authorization endpoint — the consent screen.
@@ -50,9 +56,12 @@ function one(v: string | string[] | undefined): string {
 function ErrorScreen({ code }: { code: string }) {
   return (
     <div className="mx-auto max-w-lg py-16">
-      <h1 className="text-xl font-semibold">Can&apos;t complete that request</h1>
+      <h1 className="text-xl font-semibold">
+        Can&apos;t complete that request
+      </h1>
       <p className="mt-3 text-sm text-muted-foreground">
-        {ERROR_COPY[code] ?? "Something about that authorization request wasn't valid."}
+        {ERROR_COPY[code] ??
+          "Something about that authorization request wasn't valid."}
       </p>
       <p className="mt-6 text-sm">
         <a className="underline" href="/account/mcp">
@@ -78,7 +87,9 @@ export default async function AuthorizePage({ searchParams }: PageProps) {
     for (const [k, v] of Object.entries(params)) {
       if (typeof v === "string") qs.set(k, v);
     }
-    redirect(`/login?callbackUrl=${encodeURIComponent(`/oauth/authorize?${qs}`)}`);
+    redirect(
+      `/login?callbackUrl=${encodeURIComponent(`/oauth/authorize?${qs}`)}`,
+    );
   }
 
   const clientId = one(params.client_id);
@@ -111,13 +122,13 @@ export default async function AuthorizePage({ searchParams }: PageProps) {
   return (
     <div className="mx-auto max-w-2xl py-12">
       <h1 className="text-xl font-semibold">
-        Allow <span className="text-primary">{client.clientName}</span>{" "}
-        to read MixOS data?
+        Allow <span className="text-primary">{client.clientName}</span> to read
+        MixOS data?
       </h1>
       <p className="mt-2 text-sm text-muted-foreground">
         Signed in as {session.user.email}. Choose which apps this connection may
-        read. It can <strong>only read</strong> — nothing it does can change data
-        in MixOS. You can revoke this at any time from{" "}
+        read. It can <strong>only read</strong> — nothing it does can change
+        data in MixOS. You can revoke this at any time from{" "}
         <a className="underline" href="/account/mcp">
           My MCP Connections
         </a>
@@ -131,18 +142,15 @@ export default async function AuthorizePage({ searchParams }: PageProps) {
         <input type="hidden" name="state" value={state} />
 
         {apps.length === 0 ? (
-          <div className="rounded-lg border border-border bg-card px-4 py-6 text-sm text-muted-foreground">
-            None of the apps you have access to expose data over MCP yet. You can
-            still approve this connection — it just won&apos;t see anything until
-            an app does.
+          <div className={cn(CARD_SHELL, "p-5 text-sm text-muted-foreground")}>
+            None of the apps you have access to expose data over MCP yet. You
+            can still approve this connection — it just won&apos;t see anything
+            until an app does.
           </div>
         ) : (
           <ul className="space-y-3">
             {apps.map((app) => (
-              <li
-                key={app.slug}
-                className="rounded-lg border border-border bg-card px-4 py-3"
-              >
+              <li key={app.slug} className={cn(CARD_SHELL, "p-5")}>
                 <label className="flex cursor-pointer items-start gap-3">
                   <input
                     type="checkbox"
@@ -153,7 +161,10 @@ export default async function AuthorizePage({ searchParams }: PageProps) {
                   />
                   <span className="min-w-0">
                     <span className="flex items-center gap-2 font-medium">
-                      <LucideIcon name={app.icon} className="h-4 w-4 shrink-0" />
+                      <LucideIcon
+                        name={app.icon}
+                        className="h-4 w-4 shrink-0"
+                      />
                       {app.name}
                     </span>
                     <span className="mt-1 block text-sm text-muted-foreground">
@@ -161,8 +172,13 @@ export default async function AuthorizePage({ searchParams }: PageProps) {
                     </span>
                     <ul className="mt-2 space-y-0.5">
                       {app.mcp.map((t) => (
-                        <li key={t.name} className="text-xs text-muted-foreground">
-                          <code className="rounded bg-muted px-1 py-0.5">{t.name}</code>{" "}
+                        <li
+                          key={t.name}
+                          className="text-xs text-muted-foreground"
+                        >
+                          <code className="rounded bg-muted px-1 py-0.5">
+                            {t.name}
+                          </code>{" "}
                           — {t.description}
                         </li>
                       ))}
@@ -175,7 +191,8 @@ export default async function AuthorizePage({ searchParams }: PageProps) {
         )}
 
         <p className="mt-6 text-xs text-muted-foreground">
-          Scope: <code className="rounded bg-muted px-1 py-0.5">{MCP_SCOPE}</code>.
+          Scope:{" "}
+          <code className="rounded bg-muted px-1 py-0.5">{MCP_SCOPE}</code>.
           Access follows your permissions — this connection can never see an app
           you don&apos;t have, even if it&apos;s ticked here.
         </p>

@@ -25,6 +25,7 @@ import OpenTrendChart from "@/components/analytics/open-trend-chart";
 import SourceSelector, {
   type SourceOption,
 } from "@/components/analytics/source-selector";
+import { Card, CardHeader, CardBody } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
@@ -158,13 +159,10 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-border bg-card p-5">
-      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-      {description && (
-        <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
-      )}
-      <div className="mt-4">{children}</div>
-    </section>
+    <Card as="section">
+      <CardHeader title={title} description={description} />
+      <CardBody>{children}</CardBody>
+    </Card>
   );
 }
 

@@ -15,12 +15,13 @@ import {
 } from "@/lib/connectors/config";
 import { connectorConfigState } from "@/lib/connectors/status";
 import { getConnectorLog, grantedScopes } from "@/lib/connectors/access";
-import { getScopeDocs, refreshScopeDocs } from "@/lib/connectors/scope-docs";
+import { getScopeStatus } from "@/lib/connectors/scope-status";
 import { getConnectorDependents } from "@/lib/connectors/dependents";
 import { TOKEN_KEYS, redirectUriFor } from "@/lib/connectors/oauth";
 import { runConnectorTest } from "@/lib/connectors/test-connection";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import ConnectorRegistryList from "@/components/admin/connector-registry-list";
+import { recordAdminAction, redactedKeys } from "@/lib/apps/admin-audit";
 
 /**
  * Outcome of an OAuth round trip, reported as a coarse status by the callback
@@ -89,7 +90,7 @@ export default async function ConnectorsAdminPage({
       };
       // Cached, never fetched during render: a page load must not depend on a
       // third party's docs site being up. The admin refreshes it explicitly.
-      const scopeDocs = await getScopeDocs(c.name);
+      const scopeStatus = await getScopeStatus(c.name);
       // Static, from the manifests — no query, and it counts apps that are
       // shipped rather than only those an admin has switched on.
       const dependents = getConnectorDependents(c.name);
@@ -100,7 +101,7 @@ export default async function ConnectorsAdminPage({
           state,
           verification,
           access,
-          scopeDocs,
+          scopeStatus,
           dependents,
           oauth: null,
         };
@@ -123,7 +124,7 @@ export default async function ConnectorsAdminPage({
         state,
         verification,
         access,
-        scopeDocs,
+        scopeStatus,
         dependents,
         oauth: {
           connected: Boolean(
@@ -163,6 +164,16 @@ export default async function ConnectorsAdminPage({
     const session = await requireReadOnlySession();
     await requireAdmin(session);
     await saveConnectorConfig(connectorName, credentials, adminUser.id);
+    // Which credential KEYS were supplied, never their values.
+    await recordAdminAction(
+      { id: adminUser.id, email: adminUser.email },
+      {
+        action: "connector.configure",
+        targetType: "connector",
+        targetId: connectorName,
+        details: { fields: redactedKeys(credentials) },
+      },
+    );
     revalidatePath("/admin/connectors");
 
     // Read back what is actually stored rather than trusting the submission:
@@ -172,29 +183,6 @@ export default async function ConnectorsAdminPage({
     return connectorConfigState(connector.auth, stored) !== "unconfigured";
   }
 
-  /**
-   * Re-read a provider's scope reference page. Admin-gated like every other
-   * action here, and the URL comes from the manifest — never from the client,
-   * which would make this a server-side request forgery primitive.
-   */
-  async function refreshScopeDocsAction(
-    connectorName: string,
-  ): Promise<{ ok: boolean; error?: string }> {
-    "use server";
-    const session = await requireReadOnlySession();
-    await requireAdmin(session);
-
-    const connector = connectorRegistry.find((c) => c.name === connectorName);
-    const url = connector?.auth?.scopesUrl;
-    if (!url) {
-      return { ok: false, error: "This connector declares no auth.scopesUrl." };
-    }
-
-    const result = await refreshScopeDocs(connectorName, url);
-    revalidatePath("/admin/connectors");
-    return result;
-  }
-
   async function testConnector(
     connectorName: string,
   ): Promise<ConnectorTestOutcome> {
@@ -202,8 +190,17 @@ export default async function ConnectorsAdminPage({
     // Re-checked inside the action: a server action is a public endpoint, and
     // the page-level check above does not protect it.
     const session = await requireReadOnlySession();
-    await requireAdmin(session);
+    const tester = await requireAdmin(session);
     const outcome = await runConnectorTest(connectorName);
+    await recordAdminAction(
+      { id: tester.id, email: tester.email },
+      {
+        action: "connector.test",
+        targetType: "connector",
+        targetId: connectorName,
+        details: { ok: outcome.ok },
+      },
+    );
     // Only a success is recorded. A failure leaves the previous timestamp
     // alone: "it worked on Tuesday" stays true and stays useful, and the
     // failure itself is on screen right now.
@@ -219,6 +216,11 @@ export default async function ConnectorsAdminPage({
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Connectors</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Configure the shared credentials apps use to reach outside services
+            — each connector is set up once here and used by every app that
+            declares it.
+          </p>
         </div>
         <Link
           href="/connectors/guide"
@@ -243,7 +245,6 @@ export default async function ConnectorsAdminPage({
         initialOpen={openConnector}
         configureAction={configureConnector}
         testAction={testConnector}
-        refreshScopeDocsAction={refreshScopeDocsAction}
       />
     </div>
   );

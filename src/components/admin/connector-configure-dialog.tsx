@@ -4,11 +4,10 @@
 
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode, useMemo } from "react";
 import Image from "next/image";
 import {
   Check,
-  RefreshCw,
   X,
   Copy,
   ExternalLink,
@@ -34,7 +33,7 @@ import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import { describeDependents } from "@/lib/connectors/dependents";
 import type { ConnectorWithStatus } from "./connector-registry-list";
 
-type DialogTab = "details" | "configure" | "logs";
+type DialogTab = "details" | "configure" | "scopes" | "logs";
 
 interface Props {
   connector: ConnectorWithStatus;
@@ -50,9 +49,6 @@ interface Props {
   /** Returns whether the connector now holds a usable credential set. */
   configureAction: (formData: FormData) => Promise<boolean>;
   testAction: (connectorName: string) => Promise<ConnectorTestOutcome>;
-  refreshScopeDocsAction: (
-    connectorName: string,
-  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 /** "in 52 minutes" / "3 days ago" — enough for an admin to judge freshness. */
@@ -252,25 +248,21 @@ type ScopeVerdict = "held" | "refused" | "unused";
 /**
  * Whether one documented scope actually works for this connector.
  *
- * Answered from the grant, which is the only thing that can answer it. The
- * provider's docs list every scope the API offers; what this deployment can
- * actually do is the intersection of that list with what was granted at the
- * consent screen.
+ * Read from `connector_scope_status`, which is written at the OAuth callback —
+ * the only moment the answer can change. It is not re-derived here: the grant
+ * lives server-side, and a screen that recomputed it from whatever lists it
+ * happened to be handed is exactly how a permissions view starts disagreeing
+ * with itself.
  *
- * "unused" is the third state and carries most of the rows: a scope this
- * connector never asks for is not broken, it is simply not part of what this
- * connector does. Rendering that as a cross would report a dozen failures on a
- * perfectly healthy connector.
+ * "unused" carries most of the rows: a scope this connector never asks for is
+ * not broken, it is simply not part of what this connector does. Rendering that
+ * as a cross would report a dozen failures on a perfectly healthy connector.
  */
-function scopeVerdict(
-  scope: string,
-  opts: { granted: string[]; grantedKnown: boolean; requested: string[] },
-): ScopeVerdict {
-  const requested = opts.requested.includes(scope);
-  if (!requested) return "unused";
-  if (!opts.grantedKnown) return "unused";
-  return opts.granted.includes(scope) ? "held" : "refused";
-}
+const STATUS_TO_VERDICT: Record<string, ScopeVerdict> = {
+  granted: "held",
+  refused: "refused",
+  unknown: "unused",
+};
 
 function ScopeStatusIcon({ verdict }: { verdict: ScopeVerdict }) {
   if (verdict === "held") {
@@ -432,15 +424,12 @@ export default function ConnectorConfigureDialog({
   initialTab = "details",
   configureAction,
   testAction,
-  refreshScopeDocsAction,
 }: Props) {
   const [tab, setTab] = useState<DialogTab>(initialTab);
   const [saving, startSave] = useTransition();
   const [testing, startTest] = useTransition();
   const [outcome, setOutcome] = useState<ConnectorTestOutcome | null>(null);
   const [copied, setCopied] = useState(false);
-  const [refreshing, startRefresh] = useTransition();
-  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [showDependents, setShowDependents] = useState(false);
   /**
    * Which step the admin has navigated to, or `undefined` to follow the
@@ -456,6 +445,25 @@ export default function ConnectorConfigureDialog({
 
   const { oauth, setup, state, verification } = connector;
   const isOAuth = oauth !== null;
+  /**
+   * Every scope the provider documents, straight from the manifest. This is the
+   * committed catalogue, so it is the same on every install and cannot be empty
+   * because a third party's docs page moved.
+   */
+  const catalogue = useMemo(
+    () => connector.auth?.scopes ?? [],
+    [connector.auth],
+  );
+  /** Only what this connector actually asks for, for the consent step. */
+  const requestedScopes = useMemo(
+    () => catalogue.filter((s) => s.requested),
+    [catalogue],
+  );
+  /** The grant snapshot, keyed for lookup while rendering rows. */
+  const statusByScope = useMemo(
+    () => new Map(connector.scopeStatus.map((r) => [r.scope, r.status])),
+    [connector.scopeStatus],
+  );
 
   const credentialsSaved = state !== "unconfigured";
   const authorized = isOAuth ? oauth.connected : true;
@@ -700,16 +708,19 @@ export default function ConnectorConfigureDialog({
             <StepNote>{setup.notes.authorize}</StepNote>
           )}
 
-          {oauth.scopes.length > 0 && (
+          {/* Only the requested subset. `oauth.scopes` is the provider's whole
+              catalogue, and listing all of it here would misrepresent what this
+              consent screen is about to ask for. */}
+          {requestedScopes.length > 0 && (
             <div>
               <p className="text-xs text-muted-foreground">Access requested:</p>
               <ul className="mt-1 space-y-0.5">
-                {oauth.scopes.map((scope) => (
+                {requestedScopes.map((s) => (
                   <li
-                    key={scope}
+                    key={s.scope}
                     className="break-all font-mono text-[11px] text-muted-foreground"
                   >
-                    {scope}
+                    {s.scope}
                   </li>
                 ))}
               </ul>
@@ -845,17 +856,11 @@ export default function ConnectorConfigureDialog({
   const hasDependents =
     connector.dependents.required.length > 0 ||
     connector.dependents.optional.length > 0;
-  const docsFetchedText = useClientValue(
-    () =>
-      connector.scopeDocs.fetchedAt
-        ? formatRelative(connector.scopeDocs.fetchedAt)
-        : null,
-    null,
-  );
 
   const tabs: Array<{ key: DialogTab; label: string }> = [
     { key: "details", label: "Details" },
     { key: "configure", label: "Configure" },
+    { key: "scopes", label: "Scopes" },
     { key: "logs", label: "Usage Logs" },
   ];
 
@@ -918,7 +923,7 @@ export default function ConnectorConfigureDialog({
       subtitle={connector.description}
       fixedHeight
       footer={
-        <span className="flex flex-wrap justify-center gap-x-10 gap-y-1.5 text-center">
+        <span className="flex flex-wrap justify-start gap-x-10 gap-y-1.5 text-left">
           <span>
             <strong className="font-semibold">Updated</strong>{" "}
             {formatLastUpdated(connector.lastUpdated, "Not yet committed")}
@@ -930,6 +935,17 @@ export default function ConnectorConfigureDialog({
             </span>
           )}
         </span>
+      }
+      /*
+        Where this connector's source lives, alongside the provenance the footer
+        already carries. Same slot, same wording as the app registry's dialog —
+        an admin moving between the two registries should not have to learn two
+        places to find an item's path.
+      */
+      footerAside={
+        <code className="font-mono text-xs text-muted-foreground">
+          /connectors/{connector.name}/
+        </code>
       }
       tabs={
         // The band, not a panel: status belongs to the connection rather than to
@@ -1066,19 +1082,32 @@ export default function ConnectorConfigureDialog({
                 )}
               </section>
             )}
+          </div>
+        )}
 
-            {/* ── What this connector's own code offers ───────────────────── */}
+        {tab === "scopes" && (
+          <div className="space-y-4 px-5 py-4">
             <section>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  What this connector offers
-                </h3>
-                {/*
-                  Inline with the heading: the icons mean nothing on first read,
-                  and a key you meet after scanning fourteen rows is a key you
-                  needed fourteen rows ago.
-                */}
-                {connector.scopeDocs.scopes.length > 0 && (
+              {/*
+                First thing on the tab, because it explains why every row below
+                resolves to the same value. Read after the key, it arrives once
+                the reader has already tried to make sense of fourteen unknowns.
+              */}
+              {catalogue.length > 0 && !connector.access.grantedKnown && (
+                <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground">
+                  Nobody has connected this yet, so there is no grant to check
+                  against. Every scope reads as unknown until someone does —
+                  which is not the same as having been refused.
+                </p>
+              )}
+
+              {/*
+                The key sits above the table, not below it: the icons mean
+                nothing on first read, and a key you meet after scanning
+                fourteen rows is a key you needed fourteen rows ago.
+              */}
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                {catalogue.length > 0 && (
                   <span className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     {[
                       {
@@ -1089,7 +1118,7 @@ export default function ConnectorConfigureDialog({
                       {
                         verdict: "refused" as const,
                         label: "Refused",
-                        tip: "This connector asks for it and the provider did not grant it — most often because it was unticked on the consent screen. Anything relying on it will be refused. Reconnect and approve every permission.",
+                        tip: "This connector asks for it and the provider did not grant it — most often because it was unticked on the consent screen, or because the connector was updated to ask for more than the existing grant covers. Reconnect and approve every permission.",
                       },
                       {
                         verdict: "unused" as const,
@@ -1108,24 +1137,22 @@ export default function ConnectorConfigureDialog({
                 )}
               </div>
 
-              {connector.scopeDocs.scopes.length === 0 ? (
+              {catalogue.length === 0 ? (
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Not read yet. Press Refresh to read the permissions this API
-                  documents.
+                  This connector declares no scopes. A developer adds them by
+                  running the scopes refresh against the provider&apos;s own
+                  documentation.
                 </p>
               ) : (
-                /* Striped rather than spaced: fourteen two-line rows read as
-                   one wall of text, and a band per row is what lets the eye
-                   carry a scope across to its verdict on the right. Dividers as
-                   well as tint, because the tint alone cannot go any darker —
-                   see the row class below. */
+                /* Striped rather than spaced: fourteen two-line rows read as one
+                   wall of text, and a band per row is what lets the eye carry a
+                   scope across to its verdict on the right. */
                 <ul className="mt-2 divide-y divide-border overflow-hidden rounded-md border border-border">
-                  {connector.scopeDocs.scopes.map((sc, i) => {
-                    const verdict = scopeVerdict(sc.scope, {
-                      granted: connector.access.granted,
-                      grantedKnown: connector.access.grantedKnown,
-                      requested: oauth?.scopes ?? [],
-                    });
+                  {catalogue.map((sc, i) => {
+                    const verdict: ScopeVerdict = sc.requested
+                      ? (STATUS_TO_VERDICT[statusByScope.get(sc.scope) ?? ""] ??
+                        "unused")
+                      : "unused";
                     return (
                       <li
                         key={sc.scope}
@@ -1133,15 +1160,10 @@ export default function ConnectorConfigureDialog({
                           60% is the ceiling, not a taste call. Measured against
                           this theme's tokens, `text-muted-foreground` — which
                           both the description and an unused row's id use — sits
-                          on the stripe at 4.51:1 here, 4.46:1 at 75%, and
-                          4.34:1 on solid `bg-muted`. The floor is 4.5:1, so a
-                          darker band would push the very text it is meant to
-                          make readable under it. Dark themes have far more
-                          headroom; the light one is what binds.
-
-                          Alpha over a known ground is what the colour rule
-                          permits — it bans opaque fills posing as theme
-                          surfaces.
+                          on the stripe at 4.51:1 here, 4.46:1 at 75%, and 4.34:1
+                          on solid `bg-muted`. The floor is 4.5:1, so a darker
+                          band would push the very text it is meant to make
+                          readable under it.
                         */
                         className={`flex items-start gap-2 px-3 py-2 ${
                           i % 2 === 1 ? "bg-muted/60" : ""
@@ -1151,9 +1173,7 @@ export default function ConnectorConfigureDialog({
                           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                             {/* The id leads: it is what the provider's console
                                 and its docs both call this scope, so it is what
-                                someone scanning for a particular one is looking
-                                for. `title` carries the full string, since this
-                                is a cut of it. */}
+                                someone scanning for one is looking for. */}
                             <span
                               title={sc.scope}
                               className={`break-all font-mono text-sm ${
@@ -1164,13 +1184,17 @@ export default function ConnectorConfigureDialog({
                             >
                               {shortScopeId(sc.scope)}
                             </span>
-                            <StatusPill tone={SCOPE_TONE[sc.access]}>
-                              {SCOPE_LABEL[sc.access]}
-                            </StatusPill>
+                            {sc.access && (
+                              <StatusPill tone={SCOPE_TONE[sc.access]}>
+                                {SCOPE_LABEL[sc.access]}
+                              </StatusPill>
+                            )}
                           </span>
-                          <span className="mt-0.5 block text-xs text-muted-foreground">
-                            {sc.description}
-                          </span>
+                          {sc.description && (
+                            <span className="mt-0.5 block text-xs text-muted-foreground">
+                              {sc.description}
+                            </span>
+                          )}
                         </span>
                         <span className="mt-0.5">
                           <ScopeStatusIcon verdict={verdict} />
@@ -1181,56 +1205,25 @@ export default function ConnectorConfigureDialog({
                 </ul>
               )}
 
-              {(refreshError ?? connector.scopeDocs.lastError) && (
-                <p className="mt-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground">
-                  Couldn&apos;t re-read the documentation page:{" "}
-                  {refreshError ?? connector.scopeDocs.lastError}
+              {/*
+                No Refresh button, deliberately. The catalogue is committed to
+                connector.json and changes only when a developer runs the scopes
+                refresh and ships the diff — so there is nothing here for an
+                admin to re-read, and a button implying otherwise would be a
+                control that cannot affect what is on screen.
+              */}
+              {scopesUrl && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Source:{" "}
+                  <DocLink
+                    link={{
+                      label: `${connector.displayName} API scopes documentation`,
+                      url: scopesUrl,
+                    }}
+                  />
                 </p>
               )}
 
-              {/*
-                The control sits with the line it acts on: "read 2 min ago" is
-                what Refresh changes, and in the heading it was the length of
-                the list away from any evidence it had done something.
-              */}
-              {scopesUrl && (
-                <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs text-muted-foreground">
-                    Source:{" "}
-                    <DocLink
-                      link={{
-                        label: `${connector.displayName} API scopes documentation`,
-                        url: scopesUrl,
-                      }}
-                    />
-                    {docsFetchedText && !connector.scopeDocs.lastError
-                      ? ` · read ${docsFetchedText}`
-                      : ""}
-                  </p>
-                  {/*
-                    `size="sm"` is the smallest the design system offers, and
-                    deliberately so — both sizes clear the touch-target floor
-                    ux.md sets, so this goes quieter rather than shorter.
-                  */}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    busy={refreshing}
-                    busyLabel="Refreshing…"
-                    icon={<RefreshCw className="h-4 w-4" aria-hidden />}
-                    onClick={() =>
-                      startRefresh(async () => {
-                        const r = await refreshScopeDocsAction(connector.name);
-                        setRefreshError(
-                          r.ok ? null : (r.error ?? "The refresh failed."),
-                        );
-                      })
-                    }
-                  >
-                    Refresh
-                  </Button>
-                </div>
-              )}
               {!isOAuth && (
                 <p className="mt-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">
                   This connector authenticates with an API key. What that key is
