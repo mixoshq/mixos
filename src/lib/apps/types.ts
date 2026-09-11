@@ -81,6 +81,15 @@ export interface AppManifest {
   slug: string;
   name: string;
   description: string;
+  /**
+   * One line that says what the app is for, for a listing that has room for a
+   * sentence and not a paragraph — the catalogue grid, a tile subtitle.
+   *
+   * Distinct from `description`, which is the full explanation. An app that
+   * sets only one of the two is the normal case; the UI falls back to
+   * `description` when this is null. Maps to a catalogue listing's `tagline`.
+   */
+  tagline: string | null;
   icon: string;
   /**
    * Names of connectors this app uses. Every connector is tenant-scoped: one
@@ -134,6 +143,31 @@ export interface AppManifest {
     listens: { actions: string[]; filters: string[] };
   };
   authors: AppAuthor[];
+  /**
+   * Search and browse terms for the catalogue. Lowercase, because a facet list
+   * dedupes on the exact string and `Gmail` next to `gmail` is two facets for
+   * one idea. Defaults to `[]`.
+   */
+  keywords: string[];
+  /**
+   * SPDX identifier or expression for the app's licence (e.g. `MPL-2.0`), or
+   * `UNLICENSED` for one that is not redistributable. `null` when undeclared —
+   * which a catalogue must read as "unknown", never as "permissive".
+   */
+  license: string | null;
+  /**
+   * Where the app lives for someone who wants to read about it — a homepage,
+   * a docs site, a repository directory. Maps to a catalogue listing's
+   * `homepageUrl`. `null` when the app declares none.
+   */
+  appUrl: string | null;
+  /**
+   * Where a user takes a problem with this app — an issue tracker, a support
+   * page. Maps to a catalogue listing's `issuesUrl`. Kept separate from
+   * `appUrl` because "read about it" and "something is broken" are different
+   * destinations, and collapsing them sends bug reports to a marketing page.
+   */
+  appSupportUrl: string | null;
   /**
    * Epoch millis of the last commit that touched this item, stamped into the
    * manifest by scripts/stamp-updated.ts. Null when nothing has been committed
