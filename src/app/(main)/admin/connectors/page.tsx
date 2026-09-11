@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import Link from "next/link";
+import { Store } from "lucide-react";
 import { revalidatePath } from "next/cache";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
@@ -222,12 +223,28 @@ export default async function ConnectorsAdminPage({
             declares it.
           </p>
         </div>
-        <Link
-          href="/connectors/guide"
-          className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground shadow-sm hover:bg-brand/90"
-        >
-          How to create a connector
-        </Link>
+        {/*
+          Two actions, and the order is the point: Browse reaches the mixos.org
+          repository, which is where an admin who wants a connector they do not
+          have goes first. The guide is for the case where nobody has built it
+          yet, so it keeps the brand fill and the second position rather than
+          competing with the action most visits to this page want.
+        */}
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/admin/connectors/browse"
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted"
+          >
+            <Store className="h-4 w-4" aria-hidden />
+            Browse Connectors
+          </Link>
+          <Link
+            href="/connectors/guide"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground shadow-sm hover:bg-brand/90"
+          >
+            How to create a connector
+          </Link>
+        </div>
       </div>
       {notice && (
         <div

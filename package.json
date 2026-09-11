@@ -19,6 +19,7 @@
     "keys:generate": "tsx scripts/generate-keys.ts",
     "keys:check": "tsx scripts/generate-keys.ts --check",
     "verify:connectors": "tsx scripts/verify-connectors.ts",
+    "verify:repository-url": "tsx scripts/check-repository-url.ts",
     "registry": "tsx scripts/generate-project-registry.ts",
     "db:push": "supabase db push",
     "db:reset": "supabase db reset",
