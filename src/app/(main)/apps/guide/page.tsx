@@ -16,7 +16,7 @@ export default async function AppGuidePage() {
   return (
     <GuidePage
       title="How to Create an App"
-      back={{ href: "/admin/apps", label: "App Registry" }}
+      back={{ href: "/admin/apps", label: "Apps" }}
       intro={
         <>
           Apps are self-contained plugins that live in the{" "}
