@@ -286,6 +286,22 @@ a tag build checks out the tagged commit, so it is **immune to the stale-head bu
 4. **Pre-flight the tag.** Refuse if it already exists locally (`git tag -l <v>`) or
    on the remote (`git ls-remote --tags origin <v>`). The target is on `origin/main`
    by construction, so ancestry is guaranteed.
+
+   Then run **`npm run verify:repository-url`** and refuse to tag if it fails.
+   `MIXOS_REPOSITORY_URL` decides which catalogue an install gets its checksums
+   from, so a local value that reached a committed file would make someone's
+   laptop authoritative for every install of this release. CI runs the same
+   check on every push, so this should never fire — which is exactly why it is
+   cheap to run here, at the last moment it can still be fixed with an edit
+   rather than a recut tag.
+
+   Also confirm the tag build passes **`--build-arg MIXOS_RELEASE=<v>`** through
+   to the image (`Dockerfile` declares the `ARG`; the workflow supplies it). That
+   variable is what makes the running instance treat itself as a release and
+   ignore any repository override. **If the workflow does not set it, the runtime
+   lock is inert** — the other three layers still hold, but the deployed instance
+   would honour an override applied to its own environment. See
+   docs/security-architecture.md §31.
 5. **Cut an annotated tag** on the target commit:
    `git tag -a <v> <target-sha> -m "<message>"`. Build the message from the commits
    since the last tag, grouped by `type`/`scope` (a mini changelog); if step 2 walked

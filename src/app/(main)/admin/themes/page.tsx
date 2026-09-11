@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import Link from "next/link";
+import { Store } from "lucide-react";
 import { revalidatePath } from "next/cache";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
@@ -42,12 +43,28 @@ export default async function ThemesAdminPage() {
             rendered with.
           </p>
         </div>
-        <Link
-          href="/themes/guide"
-          className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground shadow-sm hover:bg-brand/90"
-        >
-          How to create a theme
-        </Link>
+        {/*
+          Two actions, and the order is the point: Browse reaches the mixos.org
+          repository, which is where an admin who wants a theme they do not
+          have goes first. The guide is for the case where nobody has built it
+          yet, so it keeps the brand fill and the second position rather than
+          competing with the action most visits to this page want.
+        */}
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/admin/themes/browse"
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted"
+          >
+            <Store className="h-4 w-4" aria-hidden />
+            Browse Themes
+          </Link>
+          <Link
+            href="/themes/guide"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground shadow-sm hover:bg-brand/90"
+          >
+            How to create a theme
+          </Link>
+        </div>
       </div>
 
       <ThemeRegistryList

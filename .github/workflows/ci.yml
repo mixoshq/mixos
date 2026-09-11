@@ -62,6 +62,19 @@ jobs:
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
+      # BLOCKING, and cheap. MIXOS_REPOSITORY_URL decides which catalogue's
+      # checksums an install verifies downloads against, so a value that reaches
+      # a release decides what "verified" means on every deployment of it. The
+      # variable legitimately points at localhost while the platform and the
+      # catalogue are developed against each other — this is what stops that
+      # convenience from travelling in a committed file.
+      #
+      # Runs on every push and PR rather than only on the tag: catching it here
+      # means the fix is an edit, where catching it at the tag means recutting a
+      # release. See docs/security-architecture.md §31.
+      - name: Repository URL is not pinned away from mixos.org
+        run: npm run verify:repository-url
+
       - name: Typecheck
         run: npm run typecheck
 

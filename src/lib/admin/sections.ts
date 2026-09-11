@@ -39,11 +39,11 @@ export interface NavSection {
   /**
    * Extra paths that belong to this section but do not nest under its href.
    *
-   * The authoring guides are the case: `/apps/guide` sits beside the App
-   * Registry in a user's head, but the registry lives at `/admin/apps` and the
-   * guide could not be routed under it — `/apps/guide` has to stay where the
-   * registry page already links to it. Without an alias the guide lights up
-   * "App Manager" instead, because `/apps` is a genuine prefix of it.
+   * The authoring guides are the case: `/apps/guide` sits beside the Apps page
+   * in a user's head, but that page lives at `/admin/apps` and the guide could
+   * not be routed under it — `/apps/guide` has to stay where the Apps page
+   * already links to it. Without an alias the guide lights up "App Manager"
+   * instead, because `/apps` is a genuine prefix of it.
    */
   aliases?: string[];
 }
@@ -51,7 +51,7 @@ export interface NavSection {
 export const ADMIN_SECTIONS: NavSection[] = [
   { label: "Users", href: "/admin/users", icon: Users },
   {
-    label: "App Registry",
+    label: "Apps",
     href: "/admin/apps",
     icon: AppWindow,
     aliases: ["/apps/guide"],
@@ -74,8 +74,8 @@ export const ADMIN_SECTIONS: NavSection[] = [
 
 /**
  * The signed-in user's own settings. App Manager belongs here rather than with
- * Administration: installing an app is a personal choice, where the App
- * Registry decides what exists to install at all.
+ * Administration: installing an app is a personal choice, where the admin Apps
+ * page decides what exists to install at all.
  */
 export const ACCOUNT_SECTIONS: NavSection[] = [
   { label: "Account", href: "/account", icon: UserCog },
