@@ -179,6 +179,84 @@ const appEnvFieldSchema = z.strictObject({
 });
 
 /**
+ * A one-line summary for a listing that has room for a sentence, not a
+ * paragraph. Capped rather than merely encouraged: an over-long tagline is not
+ * a style problem but a layout one — the catalogue grid truncates it, so the
+ * half the author cared about is the half that disappears.
+ */
+const taglineSchema = z
+  .string()
+  .min(1)
+  .max(
+    100,
+    "tagline is a single line for a listing card — keep it under 100 characters and put the full explanation in `description`",
+  )
+  .regex(/^[^\n\r]+$/, "tagline is a single line — no line breaks");
+
+/**
+ * One search/browse term. Lowercase and space- or hyphen-separated.
+ *
+ * The case rule is the load-bearing one: a facet list dedupes on the exact
+ * string, so `Gmail` next to `gmail` renders as two filters for one idea and
+ * splits the results between them.
+ */
+const keywordSchema = z
+  .string()
+  .min(2)
+  .max(32)
+  .regex(
+    /^[a-z0-9]+(?:[ -][a-z0-9]+)*$/,
+    "keywords are lowercase words separated by single spaces or hyphens (e.g. \"email\", \"time tracking\", \"crm\")",
+  );
+
+/** SPDX identifier characters — no spaces; operators are matched separately. */
+const SPDX_ID = /^[A-Za-z0-9][A-Za-z0-9.+-]*$/;
+
+/**
+ * An SPDX licence identifier or expression, or `UNLICENSED`.
+ *
+ * Validated as a shape rather than against the full SPDX list, which is ~600
+ * entries and grows. That still rejects the mistake worth rejecting: prose.
+ * `"MIT License"` and `"Apache 2.0"` are what an author reaches for by default,
+ * and a catalogue that has to parse those cannot answer "is this
+ * redistributable" for anyone.
+ */
+const licenseSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine(
+    (v) =>
+      v === "UNLICENSED" ||
+      v
+        .replace(/[()]/g, "")
+        .split(/ (?:AND|OR|WITH) /)
+        .every((part) => SPDX_ID.test(part)),
+    'license must be an SPDX identifier or expression — e.g. "MPL-2.0", "Apache-2.0 WITH LLVM-exception", or "UNLICENSED" for something not redistributable. Prose like "MIT License" is not one.',
+  );
+
+/**
+ * A link the platform renders for a user. `https` only.
+ *
+ * Both listing URLs are shown on pages served over https, so an `http` link is
+ * a downgrade the browser will warn about or block outright — and the author
+ * would never see it, because their own dev server is http.
+ */
+const listingUrlSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (v) => {
+      try {
+        return new URL(v).protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    "must be an absolute https:// URL",
+  );
+
+/**
  * A host `context.http` may reach.
  *
  * Bare hostname only — no scheme, port, path or credentials — because the
@@ -430,6 +508,14 @@ const mcpToolDefinitionSchema = z.strictObject({
 const MAX_MCP_TOOLS_PER_APP = 5;
 
 /**
+ * Cap on catalogue keywords per app. Facets are only useful while they
+ * discriminate; an app that tags itself with everything is indistinguishable
+ * from an app that tags itself with nothing, and it dilutes every facet it
+ * joins for the apps that belong there.
+ */
+const MAX_APP_KEYWORDS = 10;
+
+/**
  * The auths a page or route may accept.
  *
  * The gateway resolves the *strongest* one the caller actually presents and
@@ -464,8 +550,34 @@ export const RawAppManifestSchema = z
     lastUpdated: z.iso.datetime().optional(),
 
     description: z.string().optional(),
+    /**
+     * One line for a listing card. `description` is the full explanation; this
+     * is the version that fits next to the icon in a grid.
+     */
+    tagline: taglineSchema.optional(),
     icon: z.string().optional(),
     authors: z.array(authorSchema).optional(),
+    /**
+     * Catalogue search and browse terms. Lowercase, deduplicated, and capped —
+     * a manifest listing twenty keywords is claiming every facet rather than
+     * describing itself, which makes the facets useless for everyone.
+     */
+    keywords: z
+      .array(keywordSchema)
+      .max(
+        MAX_APP_KEYWORDS,
+        `at most ${MAX_APP_KEYWORDS} keywords — a list that claims every facet describes nothing`,
+      )
+      .refine((k) => new Set(k).size === k.length, {
+        message: "duplicate keyword",
+      })
+      .optional(),
+    /** SPDX identifier or expression, or `UNLICENSED`. */
+    license: licenseSchema.optional(),
+    /** Homepage, docs, or repository directory for the app. */
+    appUrl: listingUrlSchema.optional(),
+    /** Where a user reports a problem with the app. */
+    appSupportUrl: listingUrlSchema.optional(),
     connectors: z.array(z.string().min(1)).optional(),
     /**
      * Connectors a PART of this app uses, which the app works without.
