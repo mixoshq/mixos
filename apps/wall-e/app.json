@@ -1,6 +1,7 @@
 {
   "name": "Wall·E",
   "description": "A dashboard widget with a different inspirational line from WALL·E every day.",
+  "tagline": "A different line from WALL·E every day",
   "icon": "bot",
   "authors": [
     {
@@ -8,6 +9,13 @@
       "email": "amontalbano@gmail.com"
     }
   ],
+  "keywords": [
+    "quotes",
+    "fun",
+    "dashboard",
+    "daily"
+  ],
+  "license": "MPL-2.0",
   "connectors": [],
   "database": false,
   "notifications": false,
@@ -27,5 +35,5 @@
       "component": "widgets/quote-of-the-day.tsx"
     }
   ],
-  "lastUpdated": "2026-08-28T05:32:01.230Z"
+  "lastUpdated": "2026-09-11T03:28:22.270Z"
 }
