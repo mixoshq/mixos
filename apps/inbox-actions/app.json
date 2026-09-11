@@ -1,0 +1,68 @@
+{
+  "name": "Inbox Actions",
+  "description": "The latest messages in the shared mailbox, each flagged with the action items detected in it",
+  "tagline": "See what your inbox is actually asking you to do",
+  "icon": "mail-check",
+  "authors": [
+    {
+      "name": "Anthony Montalbano",
+      "email": "amontalbano@gmail.com"
+    }
+  ],
+  "keywords": [
+    "email",
+    "gmail",
+    "inbox",
+    "tasks",
+    "productivity"
+  ],
+  "license": "MPL-2.0",
+  "connectors": [
+    "gmail"
+  ],
+  "database": true,
+  "sync": [
+    {
+      "name": "messages",
+      "schedule": {
+        "everyMinutes": 15
+      },
+      "source": "gmail",
+      "window": {
+        "coldStartDays": 7,
+        "defaultDays": 2,
+        "minDays": 1
+      },
+      "budgetMs": 200000
+    }
+  ],
+  "widgets": [
+    {
+      "name": "Action Inbox",
+      "description": "Recent messages that appear to be asking for something, with the line that asked",
+      "defaultSize": {
+        "w": 4,
+        "h": 4
+      },
+      "minSize": {
+        "w": 3,
+        "h": 3
+      },
+      "component": "widgets/action-inbox.tsx"
+    },
+    {
+      "name": "Action Summary",
+      "description": "How many of the latest messages carry action items, and how many name a deadline",
+      "defaultSize": {
+        "w": 3,
+        "h": 2
+      },
+      "minSize": {
+        "w": 2,
+        "h": 2
+      },
+      "component": "widgets/action-summary.tsx"
+    }
+  ],
+  "lastUpdated": "2026-09-11T03:28:08.121Z"
+}
