@@ -35,7 +35,7 @@ export function NavGroup({
    * The one href highlighted across the whole sidebar, resolved by the parent.
    *
    * Resolved once for both groups rather than per group: `/apps/guide` matches
-   * App Registry by alias and App Manager by prefix, and two groups each
+   * Apps by alias and App Manager by prefix, and two groups each
    * picking their own best would light up both at once.
    */
   active: string | null;

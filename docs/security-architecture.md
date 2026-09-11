@@ -1008,10 +1008,15 @@ instead.
 manifest `escapes` array with a written reason. That disclaims everything above,
 and is a blocking review item.
 
-**Platform code** still fetches user-influenced URLs in exactly one place worth
-noting: the connector OAuth token exchange (§18), where the token endpoint comes
-from the connector manifest — code, not user input — and the admin-supplied half
-is only the authorization code.
+**Platform code** fetches URLs it did not author in two places, and neither goes
+through `context.http`:
+
+- **The connector OAuth token exchange** (§18). The token endpoint comes from the
+  connector manifest — code, not user input — and the admin-supplied half is only
+  the authorization code.
+- **The repository install path** (§31). The tarball URL is chosen by
+  mixos.org, which makes it the sharper of the two. It is confined by a fixed
+  host allowlist rather than by resolve-and-recheck, for the reason given there.
 
 ## 14. Security Response Headers
 
@@ -1628,3 +1633,237 @@ not that a particular version was vulnerable but that nobody was looking. `npm
 audit` belongs in CI beside the blocking lint and typecheck steps, with a
 severity threshold rather than a clean-slate requirement so a low advisory in a
 dev dependency cannot block a release.
+
+---
+
+## 31. Installing From the Repository
+
+`/admin/{apps,connectors,themes}/browse` lets an admin search mixos.org and copy
+an extension into this instance's own source tree. It is the only path by which
+code an admin did not write reaches `apps/`, `connectors/` or `themes/`, so the
+whole of it is worth stating in one place.
+
+**The trust model is that mixos.org is an index, not a package host.** It stores
+metadata and identity; GitHub stores code. This instance asks mixos.org *what* to
+fetch and *how to verify it*, then fetches from GitHub itself. Two consequences
+follow, and the second is the one that matters: mixos.org never handles the
+bytes, and mixos.org is therefore not a party this pipeline has to trust with
+them.
+
+### The order of operations is the control
+
+```
+1. GET /api/v1/<kind>/<slug>/install     the commit, the URL, the hash
+2. Refuse a yanked release unless the admin was shown why and insisted
+3. Download from GitHub, PINNED TO THE COMMIT, through the host allowlist
+4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
+5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
+6. Pre-flight the manifest: it exists, it parses, it is for this slug
+7. Write to `.installing-<slug>` beside the target, never to the target
+8. Rename into place — the first moment the tree is live
+9. Run scripts/generate-project-registry.ts — the authoritative validation
+10. If it was rejected, remove the directory and regenerate, so a failed
+    registration leaves the instance exactly as it was
+```
+
+**Nothing untrusted touches the filesystem before step 5.** That is why the tar
+reader (`src/lib/repository/tar.ts`) exists instead of shelling out to `tar`: an
+extract-then-verify pipeline has a window where a tampered tree is on disk, and
+then depends on its cleanup being correct for that not to matter. It also means
+the path rules are ours rather than differing between GNU tar and bsdtar, which
+is what this project runs on in Docker and in development respectively.
+
+### Why a host allowlist and not resolve-and-recheck
+
+`tarballUrl` is a URL chosen by a remote service that this server then requests —
+the SSRF shape of §13, and "it came from mixos.org" is not a control, since
+mixos.org is exactly the party the content hash exists because we do not fully
+trust. It is confined by three checks rather than by §13's resolver:
+
+1. **Host allowlist** — `codeload.github.com`, `api.github.com`, `github.com`,
+   exact matches, no suffix rule (a suffix match on `github.com` admits
+   `github.com.attacker.net`). https only, no embedded credentials.
+2. **Pinned to the commit** — the path must contain the full 40-character SHA
+   from the manifest. A URL naming a branch or a tag resolves to whatever that
+   pointer says *today*, which is the mutability the release model exists to
+   remove.
+3. **Every redirect hop re-checked** — `api.github.com` legitimately redirects to
+   `codeload.github.com`, so redirects cannot simply be refused. They are
+   followed manually, max 3 hops, re-running check 1 and 2 on each.
+
+An allowlist is the stronger control here precisely because the set of legitimate
+destinations is three names that will not change. §13's resolver exists for app
+`egress`, where the destination is whatever the app author declared.
+
+### What the content hash actually covers
+
+`sha256-<base64>` over a canonical serialisation defined in
+`src/lib/repository/content-hash.ts`: a domain prefix, then each regular file in
+byte-sorted path order as `<mode> <path>\0<length>\0<bytes>`. Paths and lengths
+are both in the hash — without paths, a tree with two files renamed past each
+other hashes the same; without lengths, the boundary between one file's bytes and
+the next path is ambiguous and two different trees can be made to collide.
+
+**mixos.org's spec names the format but not the serialisation.** Two ends that
+agree on `sha256-<base64>` and disagree on how a tree becomes bytes produce a
+mismatch on every honest package, which is indistinguishable from an attack and
+is how a check gets disabled. So the serialisation is written down, versioned by
+its domain prefix (`mixos-tree-v1`), and mixos.org's publish path must implement
+the same one. **Until it does, the check has nothing real to compare against —
+see the note on the upstream below.**
+
+The algorithm is pinned to sha256 by the schema's regex rather than parsed out of
+an `<alg>-<digest>` field. A server that can name the algorithm can name a weak
+one; adding a second should be a deliberate code change with a floor.
+
+### Authorization and audit
+
+Every entry point is a server action that calls `requireAdmin()` itself (§9) —
+the browse page's own gate guards the render only, and the actions are reachable
+without ever loading it. Both outcomes are audited (§28): `app.register` records
+the version, commit, verified hash and file count; `app.register.rejected`
+records the reason. A rejection is the more interesting row —
+`reason: "checksum"` says someone was served bytes that did not match what the
+catalogue published.
+
+### What it deliberately will not do
+
+- **Overwrite.** An existing directory is refused rather than replaced. Upgrading
+  in place is a different operation with a different question attached — what
+  happens to the data and grants the installed one already has.
+- **Run from a built artifact.** `checkInstallable()` refuses up front when
+  `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
+  `output: "standalone"` tree, which its server `chdir`s to before listening.
+
+  This check has to be a marker rather than a capability probe, because the
+  capability probe passes and the capability is absent.
+  `outputFileTracingIncludes` copies `apps/` into the standalone build, and the
+  tracer follows the literal paths in `install.ts` and pulls `scripts/` and
+  `node_modules/tsx` in with them — so "the directory is writable" and "the
+  generator file exists" are both **true** in a shipped image. What is missing is
+  `esbuild`, `typescript` and `zod`, so the generator is present and cannot run.
+
+  The failure that produced was `rejected-by-registry`: verified, written,
+  spawned, died, rolled back, and the admin told the extension "did not pass this
+  instance's registry checks" — an accusation against a publisher for a property
+  of the deployment. And a deployment that *could* run the generator would gain
+  nothing: the registries are compiled into `.next` at build time, so rewriting
+  `src/generated/*.ts` under a running server changes nothing until the next
+  build. Registering is an operation on a source checkout; no arrangement of a
+  shipped artifact makes it work.
+
+  Relatedly, `RegistryOutcome.brokenToolchain` now separates the two failures
+  everywhere. A non-zero exit from the generator is never its verdict on one
+  extension — per-item problems are `Skipping <dir>/ — ...` warnings and the run
+  still exits 0, because one bad app must not break everyone else's build.
+- **Carry the archive's file modes.** Everything is written `0644`. Nothing here
+  execs a source file, and an archive that can set the mode of a file it places
+  in the checkout can set the setuid bit.
+
+### A released build always searches mixos.org
+
+`MIXOS_REPOSITORY_URL` decides where an instance gets the checksums it verifies
+every download against. **Whoever chooses the catalogue chooses what "verified"
+means on that deployment** — which makes it the highest-leverage variable in the
+project, and the one most likely to be set to something local and left there.
+
+It legitimately points at a laptop: `http://localhost:4321` for a host checkout
+of the mixos.org site, `http://host.docker.internal:4321` from inside the Docker
+stack. Both are right there and catastrophic in a release, so the value is
+gated on the way out by four layers:
+
+| Layer | Where | Catches |
+| --- | --- | --- |
+| Pre-commit review | `dangerfile.ts` (`fail`) | A PR that pins it in a committed file |
+| CI | `npm run verify:repository-url`, blocking in `ci.yml` | The same, on every push — before a tag exists |
+| Runtime lock | `repositoryBaseUrl()` | A release built or deployed with it set anyway |
+| Default | `DEFAULT_REPOSITORY_URL` | Everything else |
+
+**The runtime lock is inert until the tag build sets `MIXOS_RELEASE`.** The
+`Dockerfile` declares the `ARG` and the release phase of `/mix-deploy` says to
+pass it, but `build-and-push.yml` is not in this repository yet — so today the
+first three layers are what actually hold, and a deployed instance would still
+honour an override applied to its own environment. Wiring
+`--build-arg MIXOS_RELEASE=${{ github.ref_name }}` into that workflow is the
+step that closes it.
+
+Only the scanned files matter, and the list is explicit rather than a glob:
+`.env.docker`, `docker-compose.yml` and the two Dockerfiles. `.env.local` is
+git-ignored and `.env.docker.local` is regenerated on every boot, so neither can
+travel. A **commented** example is not flagged — both env files carry one showing
+the localhost form on purpose, and a check whose fix is "delete the
+documentation" is a check people learn to bypass.
+
+**The runtime lock keys on `MIXOS_RELEASE`, not `NODE_ENV`.** That variable
+carries the tag (`v1.2.0`) and is stamped by the tag-triggered build, nothing
+else. `npm run docker:prod` runs the production-parity profile with
+`NODE_ENV=production`, and that profile exists precisely so a developer can
+exercise a production shape locally — including against a local catalogue.
+Keying on `NODE_ENV` would take that away to catch a case it does not actually
+identify.
+
+When a release does carry an override, it is **ignored and logged, not
+refused**. A release that fails to boot over a stray environment variable is a
+worse outcome than one that quietly uses the right catalogue, and there is no
+branch here where refusing to start is safer: the correct value is known.
+
+The one thing none of this constrains is a deployment's own environment after
+the fact — an operator who sets the variable on a released instance gets the
+warning and mixos.org. That is the intended end state: **all installs search
+mixos.org, and the override is a development affordance.**
+
+### The transport carrying the checksum
+
+`MIXOS_REPOSITORY_URL` must be https, with one exception: plaintext is accepted
+on `localhost`, `127.0.0.1`, `[::1]` and `host.docker.internal`. The same shape
+RFC 8252 gives OAuth redirect URIs (§17) — https everywhere, http where the
+traffic cannot leave the machine.
+
+The rule matters more than it looks. This URL is where the `contentHash` comes
+from, so plaintext on a real network lets anyone on the path choose which hash
+this instance verifies against — and a hash the attacker picked verifies
+whatever the attacker sent. The transport carrying the checksum has to be
+authenticated even though the download it describes does not.
+
+`host.docker.internal` is on the list because the Docker stack is this project's
+default local path and, inside a container, `localhost` is the container — so
+without it the documented way to exercise this feature does not work under the
+documented way to run the project. It is safe for a reason specific to it rather
+than by analogy with loopback: Docker writes the name into the container's hosts
+file from the `extra_hosts: ["host.docker.internal:host-gateway"]` that every
+service in docker-compose.yml declares. It is never resolved over DNS, so there
+is no resolver for an attacker to answer, and Docker Desktop proxies it to host
+loopback. It is deliberately **not** gated on `NODE_ENV`: `npm run docker:prod`
+runs with `NODE_ENV=production` and is one of the profiles the entry exists to
+serve. In a real deployment the name does not resolve and the request simply
+fails to connect.
+
+### State of the upstream
+
+The endpoints are live: `/api/v1/search`, `/api/v1/<kind>/<slug>` and
+`/api/v1/<kind>/<slug>/install`. Two things about them shape the client.
+
+**Search returns summaries, not listings.** `/search` answers with
+`ExtensionSummary` — no `sourceRepo`, no `releases`, no `description` — which is
+what keeps a page of 24 small. The browse grid is built entirely from that, and
+`RegisterDialog` makes a second call to the detail endpoint for the facts an
+admin is actually being asked to weigh. Building the client against the spec's
+full `Extension` instead is a mistake that fails as "every search response is
+malformed", which reads like the repository being broken.
+
+**Nothing on it is installable yet.** Every release in the seeded catalogue
+publishes `sha256-PLACEHOLDER-<slug>` where the checksum goes, so
+`isVerifiableHash` refuses all of them with `unverifiable-checksum`. That is the
+pipeline working, not failing — and it is why the hash format is a *semantic*
+check rather than a parse rule: a placeholder is a well-formed answer whose
+content is "this cannot be verified", and rejecting the whole payload as
+malformed would take browsing down over a fact that only matters at the moment
+of installing.
+
+There is deliberately **no override** for it. `yanked` has one, because a
+withdrawn release is a risk an admin can read a reason for and knowingly accept;
+an unverifiable download is not something anyone is in a position to weigh.
+
+**What has to land on the mixos.org side** before this is a real control: a
+publish path that computes `contentHash` with the serialisation above and stores
+it in place of the placeholder.

@@ -35,6 +35,21 @@ services:
     env_file:
       - .env.docker
       - .env.docker.local
+    environment:
+      # Pass one shell variable through, so pointing this instance at a local
+      # catalogue does not mean editing a COMMITTED file. `.env.docker` is
+      # shared, and a value there naming a server only one developer runs would
+      # break browse for everyone else:
+      #
+      #   MIXOS_REPOSITORY_URL=http://host.docker.internal:4321 npm run dev:docker
+      #
+      # The `:-` default substitutes an empty string when the shell has nothing,
+      # and repositoryBaseUrl() reads empty as unset — so the normal case still
+      # gets https://mixos.org. Note the host: inside a container `localhost` is
+      # the container, so a catalogue on the macOS host is host.docker.internal,
+      # and it has to be bound beyond loopback to be reachable at all
+      # (`astro dev --host`).
+      - MIXOS_REPOSITORY_URL=${MIXOS_REPOSITORY_URL:-}
     ports:
       # The `127.0.0.1:` prefix is load-bearing, not tidiness. Compose's short
       # syntax with no host IP publishes on 0.0.0.0 — every interface, Wi-Fi
@@ -119,6 +134,21 @@ services:
     env_file:
       - .env.docker
       - .env.docker.local
+    environment:
+      # Pass one shell variable through, so pointing this instance at a local
+      # catalogue does not mean editing a COMMITTED file. `.env.docker` is
+      # shared, and a value there naming a server only one developer runs would
+      # break browse for everyone else:
+      #
+      #   MIXOS_REPOSITORY_URL=http://host.docker.internal:4321 npm run dev:docker
+      #
+      # The `:-` default substitutes an empty string when the shell has nothing,
+      # and repositoryBaseUrl() reads empty as unset — so the normal case still
+      # gets https://mixos.org. Note the host: inside a container `localhost` is
+      # the container, so a catalogue on the macOS host is host.docker.internal,
+      # and it has to be bound beyond loopback to be reachable at all
+      # (`astro dev --host`).
+      - MIXOS_REPOSITORY_URL=${MIXOS_REPOSITORY_URL:-}
     ports:
       # Loopback for the reasons spelled out on app-dev above, and if anything
       # the case is stronger here: this profile serves the production build, so
