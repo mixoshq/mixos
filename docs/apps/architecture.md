@@ -7,6 +7,7 @@ Create a new directory under `/apps` with the following structure:
 ```
 apps/my-app/
   app.json          # App manifest — or use app.ts (see below)
+  README.md         # Long-form description, published on the public listing (optional)
   pages/
     Main.tsx        # Root page at /apps/my-app
     settings/
@@ -22,6 +23,27 @@ apps/my-app/
 
 **Templates:** any app directory whose name starts with an underscore (e.g. `apps/_template/`) is treated as a template and skipped by the registry. Use this for starter scaffolds you want to keep in the repo without exposing to users.
 
+### Long-Form Description (README.md)
+
+A `README.md` beside `app.json` is the app's long-form description: what it does, who it is for, what it needs to work. It is **optional**, no manifest field points at it — the path is the convention — and nothing fails a build over its absence.
+
+The manifest's `description` is specified as a brief one-liner, which is the right length for a tile and too short for a page. So [mixos.org](https://mixos.org) reads this file when it publishes the app and renders it as the prose section of the public listing at `mixos.org/extend/apps/<slug>`. Where the file is absent, the listing falls back to `description`.
+
+Write it for a stranger deciding whether to install: what the app does, what it needs (connectors, `env` settings an admin fills in, a database), and anything surprising about how it behaves — scheduled jobs, `egress` destinations, declared `escapes`. Leave out install instructions; the catalogue owns those.
+
+#### What the renderer does to it
+
+The listing renders GitHub-Flavoured Markdown and then sanitizes the result. These are limits of that renderer, not style advice — a README that ignores them publishes a listing with dead links and missing images, and the author never sees it, because the same file renders fine on GitHub.
+
+| Rule | Why |
+| --- | --- |
+| **Raw HTML is stripped entirely.** No `<br>`, `<img>`, `<details>` — no inline HTML of any kind. | It is dropped before it ever becomes an element, so the content inside it disappears too, not just the tag. |
+| **Links must be absolute `https://`** (or `mailto:`). | Relative links resolve against mixos.org, not against your GitHub repo, so `./setup.md` is a broken link on the listing. |
+| **Images must be absolute `https://` URLs.** | Same resolution rule: a relative `./screenshot.png` 404s on the listing page. |
+| Headings are re-levelled automatically. | Whatever the shallowest heading in the file is becomes `<h2>`, with relative depth preserved — so a README that opens with `#` and one that opens with `##` both render correctly. Nothing to plan around. |
+
+One thing to leave out: the listing page already displays the app's name, `tagline`, `license`, `authors`, `keywords`, and its `appUrl` / `appSupportUrl` links. A README that repeats them renders as duplication.
+
 ## App Manifest (app.json)
 
 The manifest declares your app's metadata, widgets, and dependencies. Every app needs one.
@@ -30,10 +52,15 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
 {
   "name": "My App",
   "description": "A brief description of what this app does",
+  "tagline": "The one-line version, for a listing card",
   "icon": "box",
   "authors": [
     { "name": "Jane Doe", "email": "jane@example.com" }
   ],
+  "keywords": ["reporting", "sales"],
+  "license": "MPL-2.0",
+  "appUrl": "https://example.com/my-app",
+  "appSupportUrl": "https://example.com/my-app/issues",
   "connectors": [],
   "database": false,
   "roles": [
@@ -59,10 +86,15 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
 
 | Field | Required | Description | Example |
 | --- | --- | --- | --- |
-| `name` | ✅ | Display name shown in the App Manager, App Registry, and header dropdown. | `"name": "Sales Dashboard"` |
-| `description` |  | Brief summary of what the app does. Shown in the App Manager and App Registry. | `"description": "Real-time sales metrics and pipeline overview"` |
+| `name` | ✅ | Display name shown in the App Manager, the Apps admin page, and the header dropdown. | `"name": "Sales Dashboard"` |
+| `description` |  | Brief summary of what the app does. Shown in the App Manager and the Apps admin page. | `"description": "Real-time sales metrics and pipeline overview"` |
+| `tagline` |  | The one-line version of `description`, for surfaces with room for a sentence and not a paragraph — a listing card, a tile subtitle. Max 100 characters, single line. Where it is absent, `description` is used instead; setting only one of the two is the normal case. | `"tagline": "Sales metrics, live"` |
 | `icon` |  | A [Lucide icon](https://lucide.dev/icons/) name. Use the lowercase hyphenated name (e.g. `bar-chart`, `users`, `settings`). Defaults to `box`. | `"icon": "bar-chart"` |
-| `authors` |  | Array of `{ name, email }` objects identifying the app's authors. Shown in the App Registry admin page. Optional but recommended so others know who to contact. | `"authors": [{ "name": "Jane Doe", "email": "jane@example.com" }]` |
+| `authors` |  | Array of `{ name, email }` objects identifying the app's authors. Shown in the Apps admin page. Optional but recommended so others know who to contact. | `"authors": [{ "name": "Jane Doe", "email": "jane@example.com" }]` |
+| `keywords` |  | Search and browse terms for the catalogue. Lowercase words, separated by single spaces or hyphens; max 10, no duplicates. Lowercase is enforced because a facet list dedupes on the exact string — `Gmail` next to `gmail` renders as two filters for one idea and splits the results between them. | `"keywords": ["email", "time tracking"]` |
+| `license` |  | SPDX identifier or expression for the app's licence, or `UNLICENSED` for something not redistributable. Validated as a shape, not against the full SPDX list — which still rejects the mistake worth rejecting: prose. `"MIT License"` fails the build; `"MIT"` passes. | `"license": "MPL-2.0"` |
+| `appUrl` |  | Where the app lives for someone who wants to read about it — a homepage, a docs site, a repository directory. Absolute `https://` only: these render as links on pages served over https, and an author never sees the downgrade because their own dev server is http. | `"appUrl": "https://example.com/my-app"` |
+| `appSupportUrl` |  | Where a user takes a problem with this app — an issue tracker, a support page. Same `https://` rule. Kept separate from `appUrl` because "read about it" and "something is broken" are different destinations, and collapsing them sends bug reports to a marketing page. | `"appSupportUrl": "https://example.com/my-app/issues"` |
 | `connectors` |  | Array of connector names this app requires. These must match registered connectors in the Connector Registry. The platform will initialize and inject them into the app context. | `"connectors": ["hubspot", "notion"]` |
 | `database` |  | Set to `true` to enable a scoped database for this app. The app gets its own isolated tables prefixed with the app slug. Migrations go in the `migrations/` directory. | `"database": true` |
 | `notifications` |  | Set to `true` to enable Web Push. The app gets `context.notifications.send(...)` in its API routes and can opt users in with the SDK helper. See [Notifications](./notifications.md). | `"notifications": true` |
