@@ -16,9 +16,17 @@ Push is **platform-native infrastructure**: subscriptions are stored once per us
 
 ## How it works
 
-```
-user opts in (SDK helper) ──> browser subscribes ──> platform stores subscription
-app API route ──> context.notifications.send({ userIds, ... }) ──> web-push ──> service worker ──> OS notification
+```mermaid
+flowchart TD
+    OPTIN["user opts in<br/>(SDK helper)"] --> SUB["browser subscribes"]
+    SUB --> STORE["platform stores<br/>the subscription"]
+
+    ROUTE["app API route"] --> SEND["context.notifications.send({ userIds, … })"]
+    SEND --> PUSH["web-push"]
+    PUSH --> SW["service worker"]
+    SW --> OSN["OS notification"]
+
+    STORE -.-> SEND
 ```
 
 1. A user opts in once (per browser) via the SDK helper — this grants permission and registers a subscription.

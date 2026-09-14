@@ -44,77 +44,40 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 Every request from client code to an app's API traverses the same secured path.
 No alternative entry points exist for app logic.
 
+```mermaid
+flowchart TD
+    BROWSER["Browser — widget or page<br/>createAppClient(slug)<br/>fetch('/api/apps/{slug}/{path}')<br/>Cookie: session token"]
+
+    BROWSER --> PROXY
+
+    PROXY["PROXY — src/proxy.ts<br/>OPTIMISTIC ONLY — NOT AUTHORIZATION<br/>runs on all routes except a small public allowlist<br/>checks only that a session COOKIE IS PRESENT<br/>it does not decode, verify or validate the JWT<br/>redirects to /login when the cookie is absent<br/>does NOT check admin, app access, or CSRF"]
+
+    PROXY -- "session valid" --> DISPATCH
+
+    DISPATCH["DISPATCHER — src/lib/apps/dispatch.ts<br/>bound at BOTH mounts, which are 40-line files that do<br/>nothing but call dispatchAppRoute()<br/>/api/apps — mount: authenticated<br/>/api/p — mount: public<br/><br/>eleven checks, in order — enumerated below"]
+
+    DISPATCH -- "AppContext injected" --> HANDLER
+
+    HANDLER["APP HANDLER — apps/{slug}/api/{path}/route.ts<br/>a DECLARATION, not a bare function<br/>export const GET = defineRoute({ auth, input, output, handler })"]
+
+    HANDLER -- "context.db.table(…)" --> PG["POSTGRES<br/>prefixed tables · Supabase + pool"]
+    HANDLER -- "context.connectors<br/>.name.search(…)" --> EXT["EXTERNAL API<br/>whatever the connector wraps"]
 ```
-  Browser (Widget / Page)
-  ========================
-  | createAppClient(slug)
-  | fetch("/api/apps/<slug>/<path>")
-  | Cookie: session token
-  |
-  v
-+---------------------------------------------------------------+
-| PROXY  (src/proxy.ts)  -- OPTIMISTIC ONLY, NOT AUTHORIZATION  |
-|                                                               |
-|  - Runs on all routes except a small public allowlist         |
-|  - Checks only that a session COOKIE IS PRESENT               |
-|    (it does not decode, verify, or validate the JWT)          |
-|  - Redirects to /login when the cookie is absent              |
-|  - Does NOT check admin, app access, or CSRF                  |
-+---------------------------------------------------------------+
-  |
-  | Session valid
-  v
-+---------------------------------------------------------------+
-| DISPATCHER  (src/lib/apps/dispatch.ts)                        |
-|                                                               |
-|  Bound at BOTH mounts, which are 40-line files that do        |
-|  nothing but call dispatchAppRoute({ ..., mount }):           |
-|    /api/apps/[...slug]/route.ts       mount: "authenticated"  |
-|    /api/p/[appSlug]/[[...slug]]/route.ts     mount: "public"  |
-|                                                               |
-|  1. Body cap from content-length, before any read  --> 413    |
-|  2. App exists in registry                         --> 404    |
-|  3. Rate limit by IP (token bucket, 60 burst/10s)  --> 429    |
-|  4. Resolve URL to an on-disk route pattern        --> 404    |
-|  5. Mount serves this route (hoisted contract)     --> 404    |
-|  6. Import module; method exported     --> 404 / 405 / 500    |
-|  7. Live declaration matches the registry          --> 404    |
-|  8. resolveAuthTier()                  --> 401 / 403 / 404    |
-|  9. Rate limit by user+app and by route            --> 429    |
-| 10. buildAppContext / buildPublicAppContext        --> 500    |
-| 11. runRoute(): roles, input, budget, output                  |
-+---------------------------------------------------------------+
-  |
-  | AppContext injected
-  v
-+---------------------------------------------------------------+
-| APP HANDLER  (apps/<slug>/api/<path>/route.ts)                |
-|                                                               |
-|  A DECLARATION, not a bare function:                          |
-|    export const GET = defineRoute({ auth, input,              |
-|                                     output, handler })        |
-|  handler: (context, input) => data                            |
-|                                                               |
-|  context.user          - Caller (null on non-identity tiers)  |
-|  context.connectors    - Initialized connector instances      |
-|  context.db            - Scoped DB client (or null)           |
-|  context.notifications - Web Push sender (or null)            |
-|  context.telemetry     - Usage tracking (or null)             |
-|  context.services      - Cross-app broker (or null)           |
-|  context.env           - Declared app settings                |
-|  context.http          - Egress-bounded fetch (or null)       |
-|  context.manifest      - App metadata                         |
-|  context.hooks         - App-scoped hook registrar            |
-+---------------------------------------------------------------+
-  |                           |
-  | context.db.table(...)     | context.connectors.<name>.search(...)
-  v                           v
-+-----------------------+   +---------------------------+
-| POSTGRES              |   | EXTERNAL API              |
-| (prefixed tables,     |   | (whatever the connector   |
-|  Supabase + pool)     |   |  wraps)                   |
-+-----------------------+   +---------------------------+
-```
+
+The context that handler is called with:
+
+| Field | Is |
+|---|---|
+| `context.user` | The caller. `null` on non-identity tiers |
+| `context.connectors` | Initialized connector instances |
+| `context.db` | Scoped DB client, or `null` |
+| `context.notifications` | Web Push sender, or `null` |
+| `context.telemetry` | Usage tracking, or `null` |
+| `context.services` | Cross-app broker, or `null` |
+| `context.env` | Declared app settings |
+| `context.http` | Egress-bounded fetch, or `null` |
+| `context.manifest` | App metadata |
+| `context.hooks` | App-scoped hook registrar |
 
 ### Security checkpoints in order
 
@@ -275,32 +238,37 @@ Output:     base64(IV) : base64(AuthTag) : base64(Ciphertext)
 
 ### 3.1 User-to-app access control
 
+```mermaid
+erDiagram
+    users ||--o{ user_app_grants : holds
+    apps  ||--o{ user_app_grants : "granted via"
+
+    users {
+        uuid id PK
+        text email UK
+        text display_name
+        bool is_admin
+    }
+    apps {
+        text slug PK
+        text name
+    }
+    user_app_grants {
+        uuid user_id PK "FK -> users.id"
+        text app_slug PK "FK -> apps.slug"
+        text role "nullable"
+    }
 ```
-+------------------+         +------------------+
-|     users        |         |      apps        |
-|------------------|         |------------------|
-| id (uuid, PK)   |         | slug (PK)        |
-| email (unique)   |         | name             |
-| display_name     |         | ...              |
-| is_admin         |         |                  |
-+------------------+         +------------------+
-        |                            |
-        |     +--------------------+ |
-        +---->| user_app_grants    |<+
-              |--------------------|
-              | user_id (FK)       |
-              | app_slug (FK)      |
-              | role (nullable)    |
-              | PK: (user_id,      |
-              |      app_slug)     |
-              +--------------------+
 
-  hasAppGrant(userId, appSlug):
-    if the app's manifest says `global`      --> true
-    SELECT app_slug FROM user_app_grants
-    WHERE user_id = $1 AND app_slug = $2
+The check itself, run on every request:
 
-  Result: boolean --> 403 if false
+```text
+hasAppGrant(userId, appSlug):
+  if the app's manifest says `global`      --> true
+  SELECT app_slug FROM user_app_grants
+  WHERE user_id = $1 AND app_slug = $2
+
+Result: boolean --> 403 if false
 ```
 
 Users can only reach app API routes for apps they hold a grant for. This is
@@ -317,18 +285,19 @@ app.
 Apps that declare `"database": true` in their manifest receive a scoped
 database client. All table names are automatically prefixed.
 
+```mermaid
+flowchart LR
+    APP["app code<br/>context.db.table('goals')"] --> SCOPED["createScopedClient('my-app')<br/>prefixes every name"]
+    SCOPED --> REAL["db.from('_app_my_app_goals')"]
 ```
-  App code:                    Actual table in Postgres:
-  ========================     ===========================
 
-  context.db                   createScopedClient("my-app")
-    .table("goals")     -->    db.from("_app_my_app_goals")
-    .select("*")
+The prefix is derived from the app slug, so two apps asking for the same table
+name never reach the same rows:
 
-  context.db                   createScopedClient("reports")
-    .table("renewals")  -->    db.from("_app_reports_renewals")
-    .select("*")
-```
+| App | Writes | Actually reads |
+|---|---|---|
+| `my-app` | `context.db.table("goals")` | `_app_my_app_goals` |
+| `reports` | `context.db.table("renewals")` | `_app_reports_renewals` |
 
 **Isolation guarantees:**
 
@@ -425,25 +394,21 @@ There are **two** credential models. Which one applies is declared per connector
 **Tenant-scoped (the default).** One credential set in `connector_configs`,
 configured once by an admin, shared by every app and every user:
 
-```
-  +-------------------+
-  | connector_configs |
-  |                   |
-  | "crm"      ---->  | One set of CRM credentials
-  | "billing"  ---->  | One set of billing credentials
-  +-------------------+
-         |
-         | Shared by ALL apps declaring the connector
-         v
-  +------------------+     +------------------+
-  | sales app        |     | account-mgmt app |
-  |   ["crm"]        |     |   ["crm",        |
-  |                  |     |    "billing"]    |
-  +------------------+     +------------------+
+```mermaid
+flowchart TD
+    subgraph CFG["connector_configs — one row per connector"]
+        CRM["'crm'<br/>one set of CRM credentials"]
+        BILL["'billing'<br/>one set of billing credentials"]
+    end
 
-  Access control is at the EXTERNAL SERVICE level:
-  the CRM's token scopes, the billing key's permissions, etc.
+    CRM -- "shared by ALL<br/>apps declaring it" --> SALES["sales app<br/>connectors: ['crm']"]
+    CRM --> AM["account-mgmt app<br/>connectors: ['crm', 'billing']"]
+    BILL --> AM
 ```
+
+Access control is therefore at the **external service** level: the CRM's token
+scopes, the billing key's permissions, and so on. MixOS decides *which apps may
+use a connector*, never what that connector's credentials are allowed to do.
 
 The property this buys is worth naming: because there is exactly one credential
 set, **any response the connector returns is the same response any user would
@@ -495,19 +460,22 @@ client (gated exactly like `context.db`; `null` otherwise). It exposes a single
 method — `send({ userIds, title, body, url, tag, icon })` — and is the only way
 app code can dispatch a push.
 
+```mermaid
+flowchart LR
+    APP["app handler<br/>context.notifications.send({<br/>userIds, title, body, url })"] --> PLAT
+    PLAT["platform<br/>createNotificationsClient(slug)<br/>five steps, below"]
+    PLAT --> OUT["web push, to the<br/>recipients who survive"]
 ```
-  App handler                         Platform
-  ===========                         ========
-  context.notifications.send({        createNotificationsClient("<slug>")
-    userIds: [...],          -->        1. dedupe userIds
-    title, body, url         -->        2. filter to recipients who actually
-  })                                       have THIS app (hasAppGrant: global
-                                           apps -> everyone; else an explicit
-                                           user_app_grants row)
-                                        3. load each recipient's subscriptions
-                                        4. web-push.sendNotification (VAPID-signed)
-                                        5. prune dead endpoints (404/410)
-```
+
+What the platform does between those two boxes, in order:
+
+1. **Dedupe** `userIds`.
+2. **Filter to recipients who actually have THIS app** — `hasAppGrant`: a
+   `global` app resolves to everyone, otherwise an explicit `user_app_grants`
+   row is required. **This step is the security boundary.**
+3. **Load** each surviving recipient's subscriptions.
+4. **Send** via `web-push.sendNotification`, VAPID-signed.
+5. **Prune** dead endpoints (404/410).
 
 **Isolation guarantees:**
 
