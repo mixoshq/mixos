@@ -1,6 +1,15 @@
 {
   "name": "MixOS",
   "description": "The default MixOS theme. Slate and cyan on a light ground, drawn from the MixOS brand guidelines v1.0.",
+  "tagline": "The default MixOS light theme",
+  "keywords": [
+    "light",
+    "default",
+    "brand"
+  ],
+  "license": "MPL-2.0",
+  "themeUrl": "https://github.com/italianst4/mixos/tree/main/themes/mixos",
+  "themeSupportUrl": "https://github.com/italianst4/mixos/issues",
   "authors": [
     {
       "name": "MixOS Core Team",
@@ -38,5 +47,5 @@
   },
   "surfaces": [],
   "escapes": [],
-  "lastUpdated": "2026-08-29T15:30:02.322Z"
+  "lastUpdated": "2026-09-14T03:55:51.997Z"
 }
