@@ -7,6 +7,7 @@ Each connector lives in its own directory under `/connectors` with two files: a 
 ```
 connectors/my-service/
   connector.json    # Metadata, credential fields, setup guide
+  README.md         # Optional — long-form description for the catalogue listing
   index.ts          # Implementation class
   assets/           # Optional. icon.png and anything else the manifest names.
     icon.png        # Square, >= 512x512. Copied to public/connector-assets/my-service/
@@ -39,8 +40,13 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 | --- | --- | --- | --- |
 | `name` | ✅ | Unique identifier for the connector. Used in app.json and internally. Should be lowercase with hyphens. | `"name": "my-service"` |
 | `displayName` | ✅ | Human-readable name shown in the Connector Registry admin page. | `"displayName": "My Service"` |
-| `icon` |  | Filename inside the connector's `assets/` directory, shown on its Connector Registry tile. **Square, at least 512x512**, `.png` / `.webp` / `.svg`; the generator measures it and aborts the build otherwise. Omit it and the tile renders a generic plug glyph. | `"icon": "icon.png"` |
+| `icon` |  | Path inside the connector's own `assets/` directory, **written out in full including the `assets/` prefix**, shown on its Connector Registry tile. **Square, at least 512x512**, `.png` / `.webp` / `.svg`; the generator measures it and aborts the build otherwise. Omit it and the tile renders a generic plug glyph. | `"icon": "assets/icon.png"` |
 | `description` |  | What the **service** is, in a sentence or two. Not what the connector does with it, and not how to set it up. **Capped at 140 characters.** The tile shows its first 15 words; the configure dialog shows all of it. | `"description": "Highly popular email service by Google. Gmail tracks all of your email conversations."` |
+| `tagline` |  | One line for a listing card on mixos.org — the version that fits beside the icon in a grid. Max 100 characters, single line. Where it is absent, `description` is used instead; setting only one of the two is the normal case. | `"tagline": "Read Gmail messages, threads and labels"` |
+| `keywords` |  | Search and browse terms for the catalogue. Lowercase words, separated by single spaces or hyphens; max 10, no duplicates. Lowercase is enforced because a facet list dedupes on the exact string — `Gmail` next to `gmail` renders as two filters for one idea and splits the results between them. | `"keywords": ["email", "crm"]` |
+| `license` |  | SPDX identifier or expression for the connector's own licence, or `UNLICENSED` for something not redistributable. Validated as a shape, not against the full SPDX list — which still rejects the mistake worth rejecting: prose. `"MIT License"` fails the build; `"MIT"` passes. | `"license": "MPL-2.0"` |
+| `connectorUrl` |  | Where the connector lives for someone who wants to read about it — a homepage, a docs site, a repository directory. Absolute `https://` only: these render as links on pages served over https, and an author never sees the downgrade because their own dev server is http. | `"connectorUrl": "https://example.com/x"` |
+| `connectorSupportUrl` |  | Where a user takes a problem with the connector — an issue tracker, a support page. Same `https://` rule. Kept separate from `connectorUrl` because "read about it" and "something is broken" are different destinations, and collapsing them sends bug reports to a marketing page. | `"connectorSupportUrl": "https://example.com/x/issues"` |
 | `setup` |  | Provisioning instructions, structured so the registry renders them as a numbered list with working links. See below. | |
 | `setup.steps` | ✅ (if `setup`) | Array of `{ text, why?, link? }`. The provider-side work only — the registry renders saving, authorizing and verifying as its own steps. One imperative sentence each; the UI numbers them, so don't number them yourself. | `{ "text": "Create an API key.", "link": { "label": "API keys", "url": "https://example.com/keys" } }` |
 | `setup.steps[].why` |  | Rationale, shown behind a **"?"** the reader opens on hover or focus. Max 300 chars. Rationale *only* — a tooltip is not somewhere an instruction can live. | `"why": "Internal avoids Google's annual CASA assessment."` |

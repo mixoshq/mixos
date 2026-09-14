@@ -3,6 +3,14 @@
   "displayName": "Template Connector",
   "icon": "assets/icon.svg",
   "description": "Starter template for a service authenticated with a simple API key.",
+  "tagline": "One line about the service, for a listing card",
+  "keywords": [
+    "example",
+    "starter"
+  ],
+  "license": "UNLICENSED",
+  "connectorUrl": "https://provider.example.com/",
+  "connectorSupportUrl": "https://provider.example.com/support",
   "setup": {
     "title": "Create an API key",
     "steps": [

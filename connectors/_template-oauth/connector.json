@@ -3,6 +3,15 @@
   "displayName": "Template Connector (OAuth)",
   "icon": "assets/icon.svg",
   "description": "Starter template for a service using three-legged OAuth, where an admin approves access once.",
+  "tagline": "One line about the service, for a listing card",
+  "keywords": [
+    "example",
+    "oauth",
+    "starter"
+  ],
+  "license": "UNLICENSED",
+  "connectorUrl": "https://provider.example.com/",
+  "connectorSupportUrl": "https://provider.example.com/support",
   "setup": {
     "title": "Create an OAuth app",
     "steps": [
