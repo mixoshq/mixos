@@ -7,7 +7,7 @@ import { assertValidCron } from "../src/lib/apps/cron";
 
 /**
  * Zod schemas for the *on-disk* manifest shapes — `apps/<slug>/app.json`
- * (or the default export of `app.ts`) and `connectors/<name>/connector.json`.
+ * and `connectors/<name>/connector.json`.
  *
  * These validate what a developer writes, NOT the fully-derived registry
  * entry: fields the generator fills in from the filesystem (`slug`,
@@ -508,12 +508,30 @@ const mcpToolDefinitionSchema = z.strictObject({
 const MAX_MCP_TOOLS_PER_APP = 5;
 
 /**
- * Cap on catalogue keywords per app. Facets are only useful while they
- * discriminate; an app that tags itself with everything is indistinguishable
- * from an app that tags itself with nothing, and it dilutes every facet it
- * joins for the apps that belong there.
+ * Cap on catalogue keywords per extension. Facets are only useful while they
+ * discriminate; an extension that tags itself with everything is
+ * indistinguishable from one that tags itself with nothing, and it dilutes
+ * every facet it joins for the extensions that belong there.
  */
 const MAX_APP_KEYWORDS = 10;
+
+/**
+ * The catalogue keyword list, shared by apps, connectors and themes.
+ *
+ * Defined once because all three feed the same browse and search surfaces on
+ * mixos.org. Three separate copies of this would drift, and the first symptom
+ * would be a connector allowed twelve keywords while an app is allowed ten —
+ * which nobody would notice until the facet list was already skewed.
+ */
+const catalogueKeywordsSchema = z
+  .array(keywordSchema)
+  .max(
+    MAX_APP_KEYWORDS,
+    `at most ${MAX_APP_KEYWORDS} keywords — a list that claims every facet describes nothing`,
+  )
+  .refine((k) => new Set(k).size === k.length, {
+    message: "duplicate keyword",
+  });
 
 /**
  * The auths a page or route may accept.
@@ -562,16 +580,7 @@ export const RawAppManifestSchema = z
      * a manifest listing twenty keywords is claiming every facet rather than
      * describing itself, which makes the facets useless for everyone.
      */
-    keywords: z
-      .array(keywordSchema)
-      .max(
-        MAX_APP_KEYWORDS,
-        `at most ${MAX_APP_KEYWORDS} keywords — a list that claims every facet describes nothing`,
-      )
-      .refine((k) => new Set(k).size === k.length, {
-        message: "duplicate keyword",
-      })
-      .optional(),
+    keywords: catalogueKeywordsSchema.optional(),
     /** SPDX identifier or expression, or `UNLICENSED`. */
     license: licenseSchema.optional(),
     /** Homepage, docs, or repository directory for the app. */
@@ -1045,6 +1054,29 @@ export const RawConnectorManifestSchema = z
         'keep it to ~2 sentences about the service itself. Provisioning steps go in "setup"',
       )
       .optional(),
+    /**
+     * One line for a listing card.
+     *
+     * Distinct from `description`, which answers "what is this service?" in up
+     * to 140 characters. This is the version that fits beside the icon in a
+     * catalogue grid, and for most connectors only one of the two is worth
+     * writing — `description` stands in where this is absent.
+     */
+    tagline: taglineSchema.optional(),
+    /** Catalogue search and browse terms. */
+    keywords: catalogueKeywordsSchema.optional(),
+    /**
+     * SPDX identifier or expression, or `UNLICENSED`.
+     *
+     * The connector's own licence, not the upstream service's terms. A
+     * connector is code someone redistributes; whether the API it talks to is
+     * free to use is a different question and not one a manifest can answer.
+     */
+    license: licenseSchema.optional(),
+    /** Homepage, docs, or repository directory for the connector. */
+    connectorUrl: listingUrlSchema.optional(),
+    /** Where a user reports a problem with the connector. */
+    connectorSupportUrl: listingUrlSchema.optional(),
     setup: connectorSetupSchema.optional(),
     credentialFields: z.array(credentialFieldSchema).optional(),
     authors: z.array(authorSchema).optional(),
@@ -1154,6 +1186,25 @@ const themeEscapeSchema = z.strictObject({
 export const RawThemeManifestSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().min(1),
+  /**
+   * One line for a listing card. `description` is the full explanation; this is
+   * the version that fits under the theme's name in a catalogue grid.
+   */
+  tagline: taglineSchema.optional(),
+  /** Catalogue search and browse terms. */
+  keywords: catalogueKeywordsSchema.optional(),
+  /**
+   * SPDX identifier or expression, or `UNLICENSED`.
+   *
+   * Worth stating explicitly for a theme even though it is "only" CSS: a theme
+   * carries fonts and brand assets, and whether those may be redistributed is
+   * exactly the question a licence answers.
+   */
+  license: licenseSchema.optional(),
+  /** Homepage, docs, or repository directory for the theme. */
+  themeUrl: listingUrlSchema.optional(),
+  /** Where a user reports a problem with the theme. */
+  themeSupportUrl: listingUrlSchema.optional(),
   authors: z.array(authorSchema).optional(),
   /** ISO 8601 date-time, stamped by scripts/stamp-updated.ts. Never hand-edited. */
   lastUpdated: z.iso.datetime().optional(),
