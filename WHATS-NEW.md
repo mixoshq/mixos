@@ -9,6 +9,34 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-09-13
+
+- **`app.json` is the only app manifest form.** An app whose whole manifest was
+  the default export of `app.ts` no longer loads. The reason is the install
+  path: a manifest that is static text can be schema-checked *before* any of the
+  package executes, and a manifest that is a module has to be imported before
+  there is anything to validate — the wrong order for a package that just
+  arrived from the Registry. **Migrating:** move every field to `app.json`, and
+  move widget `config` arrays built from preset helpers into an optional
+  `widgets.ts` beside it, default-exporting an object keyed by each widget's
+  `component` path. The generator refuses to guess when the two disagree: a key
+  matching no widget is an error, and so is a widget declaring `config` in both
+  files. Plain config needs no `widgets.ts` at all — leave it inline in the JSON.
+
+- **Connectors and themes get listing metadata and a `README.md`.** Both
+  manifests now take the same optional catalogue fields apps already had —
+  `tagline`, `keywords` (max 10, lowercase, no duplicates), `license`, and a
+  pair of URLs (`connectorUrl` / `connectorSupportUrl`, `themeUrl` /
+  `themeSupportUrl`). Alongside them, an optional `README.md` at the extension's
+  root is its long-form description on the public listing, the same convention
+  apps adopted. Templates ship both, filled in as placeholders.
+
+- **Guide diagrams render as diagrams.** A ```` ```mermaid ```` fence in
+  `docs/` now draws in the in-app guides instead of showing an admin the raw
+  source, matching how mixos.org renders the same files. The ASCII diagrams in
+  the apps, connectors, theme and security docs are converted. Mermaid is a
+  dynamic import, so only an opened guide tab pays for it.
+
 ## 2026-08-29
 
 - **Six independent platform keys.** Five of them used to be
