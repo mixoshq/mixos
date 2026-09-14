@@ -106,7 +106,7 @@ Triage by outcome class, then act. Re-run the smoke test after every fix or user
 
 - **`GUARD_MISMATCH`** — code bug. Add the missing `if (!connector?.configured)` early-return in the route per [`apps/AGENTS.md` invariant 12](apps/AGENTS.md). Fix and re-run.
 - **`OK_EMPTY`** — route returned `{}`, `[]`, or `null`. May be valid (no rows yet) or a shape bug. Read the widget file: if the widget expects `{ deals: [...], totalArr: number }` and the route returns `{}`, you have a shape mismatch — fix in code. If the upstream really has no data, ask the user whether that's expected.
-- **Code-side errors** (wrong property name, wrong status code, missing `safeErrorMessage`, typo in SQL or HubSpot property): fix in the route and re-run.
+- **Code-side errors** (wrong property name, wrong status code, missing `safeErrorMessage`, typo in SQL or a monday.com column name): fix in the route and re-run.
 - **`AUTH_ERROR`** (401/403, or 5xx with auth-y error text) — do **not** edit code. Ask the user, e.g. *"The `<connector>` route is returning 401/403. Can you confirm the credentials in `/admin/connectors` are valid and include the scope(s) `<...>`? The error body was: `<excerpt>`."*
 - **`UNAUTHENTICATED`** — your `SMOKE_COOKIE` is missing/expired, or the gateway redirected to `/login`. Re-grab the cookie from DevTools per the script's setup instructions and re-run.
 - **`RATE_LIMITED`** — wait, then re-run once. If it persists, ask the user whether to lower the request budget or back off the polling interval before re-running.

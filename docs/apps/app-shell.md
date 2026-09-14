@@ -268,7 +268,7 @@ Two different things get conflated, and they need different mechanisms:
 | Editing | **Still on** — the user is working | Off |
 | What's hidden | Internal-only content: ARR, CRM links, internal owner names | Everything not explicitly published |
 
-Screen-share mode is a client-side filter over the *same* page (`{!customerMode && <HubSpotLink />}`), persisted per user. A public page is a genuinely separate surface with its own route, its own auth, and `context.user === null`. Don't try to make one do the other's job: a client-side flag is not a security boundary, and a public page can't be edited.
+Screen-share mode is a client-side filter over the *same* page (`{!customerMode && <MondayLink />}`), persisted per user. A public page is a genuinely separate surface with its own route, its own auth, and `context.user === null`. Don't try to make one do the other's job: a client-side flag is not a security boundary, and a public page can't be edited.
 
 ## Designed states, by cause
 
@@ -279,7 +279,7 @@ One addition at this layer: **degrade, don't fail.** When an app pulls from seve
 ```tsx
 {data?.gongDegraded && (
   <div className="mb-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
-    Gong call data is temporarily unavailable — last-activity timing is using HubSpot activity only.
+    Gong call data is temporarily unavailable — last-activity timing is using monday.com activity only.
   </div>
 )}
 ```

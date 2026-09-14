@@ -73,8 +73,8 @@ import { AppError } from "@/lib/apps/route";
 
 if (!row) throw AppError.notFound("No such item.");
 if (!context.user.hasRole(["editor"])) throw AppError.forbidden();
-if (!hubspot?.configured) {
-  throw AppError.unavailable("HubSpot is not configured. Ask an admin to set it up.");
+if (!monday?.configured) {
+  throw AppError.unavailable("monday.com is not configured. Ask an admin to set it up.");
 }
 ```
 
@@ -255,11 +255,11 @@ reading it would drain the stream and hand your handler an already-consumed
 
 ```ts
 handler: async (context) => {
-  const hubspot = context.connectors.hubspot;
-  if (!hubspot?.configured) {
-    throw AppError.unavailable("HubSpot is not configured. Ask an admin to set it up.");
+  const monday = context.connectors.monday;
+  if (!monday?.configured) {
+    throw AppError.unavailable("monday.com is not configured. Ask an admin to set it up.");
   }
-  return { contacts: await hubspot.getContacts({ limit: 20 }) };
+  return { contacts: await monday.getContacts({ limit: 20 }) };
 },
 ```
 
