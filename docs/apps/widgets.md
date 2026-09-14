@@ -150,12 +150,15 @@ export default function MyWidget({ appSlug }: WidgetProps) {
 - For circular elements (avatars, status dots), add `rounded-full` to the Skeleton
 - Never show a bare spinner or "Loading..." text as the only loading indicator
 
-### Declaring the config (app.ts)
+### Declaring the config (widgets.ts)
 
-Collect the fields in a `const` array with `as const`, then derive the widget's config type from it:
+Config fields built from presets live in `widgets.ts`, beside the manifest —
+`app.json` is the only manifest form and cannot call a helper. Collect the
+fields in a `const` array with `as const`, then derive the widget's config type
+from it:
 
 ```ts
-// apps/my-app/app.ts
+// apps/my-app/widgets.ts
 import {
   titleField,
   selectionField,
@@ -181,21 +184,29 @@ export type FavoriteLinksWidgetConfig = InferConfig<
 //   groupByCategory: boolean;
 // }
 
-const manifest = {
-  name: "Favorites",
-  widgets: [
-    {
-      name: "Favorite Links",
-      component: "widgets/favorite-links.tsx",
-      config: favoriteLinksConfigFields,
-    },
-  ],
+// Keyed by the widget's `component` path, exactly as app.json spells it.
+export default {
+  "widgets/favorite-links.tsx": favoriteLinksConfigFields,
 };
+```
 
-export default manifest;
+The manifest itself stays plain JSON and says nothing about this widget's config:
+
+```json
+{
+  "widgets": [
+    {
+      "name": "Favorite Links",
+      "description": "Links you keep coming back to",
+      "component": "widgets/favorite-links.tsx"
+    }
+  ]
+}
 ```
 
 The `as const` is load-bearing: without it, TypeScript widens the array to a plain `WidgetConfigField[]` and `InferConfig` can't see the per-field literal types.
+
+The generator refuses to guess when the two files disagree: a key in `widgets.ts` that matches no widget in `app.json` is an error, and so is a widget that declares `config` in both. Plain, one-off config needs no `widgets.ts` — put it inline in `app.json`.
 
 ### Consuming the type in the widget
 

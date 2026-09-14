@@ -49,7 +49,14 @@ interface Target {
   slug: string;
   /** Repo-relative path to the manifest. */
   manifestRel: string;
-  /** True for an `app.ts` module manifest, which is never rewritten. */
+  /**
+   * True for a manifest this script must not rewrite.
+   *
+   * Nothing sets it today: every manifest is JSON and every one is stampable.
+   * It stays because the caller still branches on it, and because the reason it
+   * existed — a manifest that was code — is exactly the shape that could come
+   * back.
+   */
   isModule: boolean;
   /** Repo-relative paths of the changed files under this directory. */
   changed: string[];
@@ -102,25 +109,26 @@ function stagedFiles(): string[] {
 }
 
 /**
- * Resolve which manifest a directory owns. Mirrors `loadAppManifest()` in
- * scripts/generate-project-registry.ts: `app.ts` wins over `app.json` when both
- * exist, because that is the one the generator reads — stamping the other would
- * write a value nothing consumes.
+ * Resolve which manifest a directory owns.
+ *
+ * One candidate per kind now. This used to mirror a precedence rule in
+ * `loadAppManifest()` — `app.ts` over `app.json` — which existed so that
+ * stamping did not write a value nothing consumes. With `app.json` the sole
+ * manifest there is nothing to prefer.
+ *
+ * `widgets.ts` is deliberately not considered: it carries config fields, not
+ * the `lastUpdated` this script stamps.
  */
 function resolveManifest(
   root: string,
   slug: string,
 ): { rel: string; isModule: boolean } | null {
-  const dir = path.join(ROOT, root, slug);
   if (root === "connectors" || root === "themes") {
     const rel =
       root === "connectors"
         ? `connectors/${slug}/connector.json`
         : `themes/${slug}/theme.json`;
     return fs.existsSync(path.join(ROOT, rel)) ? { rel, isModule: false } : null;
-  }
-  if (fs.existsSync(path.join(dir, "app.ts"))) {
-    return { rel: `apps/${slug}/app.ts`, isModule: true };
   }
   const jsonRel = `apps/${slug}/app.json`;
   return fs.existsSync(path.join(ROOT, jsonRel))

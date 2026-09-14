@@ -5,9 +5,13 @@
 import type { WidgetConfigField } from "./types";
 
 /**
- * Reusable widget-config field builders. Use these in app manifests
- * (`app.ts`) to keep common patterns consistent across widgets and — more
- * importantly — to get a fully-typed `config` object in the widget.
+ * Reusable widget-config field builders. Use these in an app's `widgets.ts`
+ * to keep common patterns consistent across widgets and — more importantly —
+ * to get a fully-typed `config` object in the widget.
+ *
+ * They live in a `widgets.ts` rather than the manifest because `app.json` is
+ * the sole manifest form and cannot call a function. That file supplies config
+ * arrays and nothing else; everything a reviewer reads stays in the JSON.
  *
  * Each builder is generic over its key (so `titleField({ key: "header" })`
  * gives you `config.header`) and returns a narrow return type that
