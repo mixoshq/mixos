@@ -47,8 +47,8 @@ one-off scripts, they become simple apps anyone can open in mos.
   detail, or a step-by-step workflow). Apps can also work quietly in the background —
   for example, checking something every night and sending a notification. If you can
   picture the screen you want, that's your app.
-- **Connectors** — secure bridges MixOS uses to reach outside tools like HubSpot,
-  Outlook/Microsoft, or Gong. Someone sets a connector up once with the login; apps
+- **Connectors** — secure bridges MixOS uses to reach outside tools like Gmail,
+  Slack, or monday.com. Someone sets a connector up once with the login; apps
   just reuse it. You usually won't build one — you'll use a bridge that already exists.
 
 **How building actually happens.** You don't have to write code. You describe what
@@ -71,7 +71,7 @@ Ask a few simple questions (use the question tool; one or two at a time, and ada
 to their answers):
 
 1. **What do you wish you could see or do?** What's the goal, and who would use it?
-2. **Where does that information live today?** (a tool like HubSpot / Outlook / Gong,
+2. **Where does that information live today?** (a tool like monday.com / Gmail / Slack,
    a spreadsheet, somewhere else) — this tells you whether an existing bridge can
    supply it.
 3. **How do you picture it?** A small card on a dashboard, or a full page?
@@ -88,7 +88,7 @@ to their answers):
 Work out the shape, in plain terms:
 
 - **Almost always: build an app** that uses a bridge that already exists. Check
-  what's already available by listing `connectors/` (e.g. HubSpot, Microsoft/Outlook,
+  what's already available by listing `connectors/` (e.g. Gmail, Slack, monday.com,
   a CRM, a data warehouse, a docs tool). If the tool they named is there, they're all set.
 - **If the tool they need isn't connected yet**, adding that bridge (a new
   **connector**) is a more technical job — flag it kindly and say a developer can add
@@ -114,7 +114,7 @@ it themselves):
 - **Runs on a schedule** (e.g. nightly) → `docs/apps/scheduled-jobs.md`
 - **Sends notifications** → `docs/apps/notifications.md`
 - **Remembers its own data** (saves things between visits) → `docs/apps/database.md`
-- **Uses an existing connection** (HubSpot, Outlook, …) → `docs/apps/connectors.md`
+- **Uses an existing connection** (Gmail, Slack, …) → `docs/apps/connectors.md`
 - The overall picture — how an app fits together → `docs/apps/architecture.md`
 - Making it look and feel polished → `docs/apps/ux.md`
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Connectors are reusable integrations with external services like HubSpot, Notion, or any third-party API. They live in the `/connectors` directory and are shared across apps. An admin configures connector credentials in the Connector Registry, and apps declare which connectors they need in their `app.json`.
+Connectors are reusable integrations with external services like monday.com, Slack, or any third-party API. They live in the `/connectors` directory and are shared across apps. An admin configures connector credentials in the Connector Registry, and apps declare which connectors they need in their `app.json`.
 
 For the authoring side (how to build a connector), see [the connectors guide](../connectors/).
 
@@ -14,7 +14,7 @@ To use a connector, add its name to the `connectors` array in your `app.json`. T
 // app.json
 {
   "name": "My App",
-  "connectors": ["hubspot", "notion"]
+  "connectors": ["monday", "slack"]
 }
 ```
 
@@ -22,11 +22,11 @@ Access initialized connectors via `context.connectors` in your pages, widgets, o
 
 ```ts
 // In a page or server-side code
-const hubspot = context.connectors.hubspot;
-const contacts = await hubspot.getContacts({ limit: 10 });
+const monday = context.connectors.monday;
+const contacts = await monday.getContacts({ limit: 10 });
 
-const notion = context.connectors.notion;
-const page = await notion.getPage("page-id");
+const slack = context.connectors.slack;
+const messages = await slack.getMessages({ channel: "C0123456789" });
 ```
 
 ## Creating a Connector
@@ -134,7 +134,7 @@ if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES) {
 }
 ```
 
-Retry and throttling belong **here**, in the connector, not repeated in every app that calls it. See [`connectors/microsoft/index.ts`](../../connectors/microsoft/index.ts) for a worked example, and [Data Freshness](data-freshness.md) for how the calling job budgets around it.
+Retry and throttling belong **here**, in the connector, not repeated in every app that calls it. See [`connectors/gmail/index.ts`](../../connectors/gmail/index.ts) for a worked example, and [Data Freshness](data-freshness.md) for how the calling job budgets around it.
 
 ## Credential Lifecycle
 
@@ -147,11 +147,11 @@ Connector credentials are managed entirely through the admin UI:
 
 ## User-Scoped (Per-User) Connectors
 
-Some connectors authenticate each logged-in user against an external IdP (e.g. Microsoft Graph, Google Calendar) instead of using a single admin-configured credential set. **Apps don't declare scope — the connector itself does**, by virtue of implementing `OAuthCapableConnector` in its `index.ts`. Apps just list connector names:
+Some connectors authenticate each logged-in user against an external IdP (e.g. Slack, Google Calendar) instead of using a single admin-configured credential set. **Apps don't declare scope — the connector itself does**, by virtue of implementing `OAuthCapableConnector` in its `index.ts`. Apps just list connector names:
 
 ```json
 {
-  "connectors": ["hubspot", "dock", "microsoft"]
+  "connectors": ["monday", "dock", "slack"]
 }
 ```
 
@@ -166,17 +166,17 @@ When a user-scoped connector reports `configured: false`, the user has not conne
 ```ts
 // apps/<slug>/api/<thing>/route.ts
 import type { AppContext } from "@/lib/hooks/types";
-import type MicrosoftConnector from "@/../connectors/microsoft";
+import type SlackConnector from "@/../connectors/slack";
 
 export async function GET(_req: Request, { context }: { context: AppContext }) {
-  const microsoft = context.connectors.microsoft as unknown as
-    | MicrosoftConnector
+  const slack = context.connectors.slack as unknown as
+    | SlackConnector
     | undefined;
-  if (!microsoft?.configured) {
+  if (!slack?.configured) {
     return NextResponse.json({ connected: false });
   }
-  const events = await microsoft.getCalendarEvents({ /* ... */ });
-  return NextResponse.json({ connected: true, events });
+  const messages = await slack.getMessages({ /* ... */ });
+  return NextResponse.json({ connected: true, messages });
 }
 ```
 
@@ -185,7 +185,7 @@ export async function GET(_req: Request, { context }: { context: AppContext }) {
 if (data.connected === false) {
   return (
     <div className="flex h-full flex-col items-center justify-center p-4 text-center">
-      <p className="text-sm font-medium">Connect your Microsoft account</p>
+      <p className="text-sm font-medium">Connect your Slack account</p>
       <Link
         href="/account/connections"
         className="mt-3 rounded-md bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground"
@@ -206,4 +206,4 @@ if (data.connected === false) {
 
 ### How to make a connector user-scopable
 
-It's a connector-side change, not an app-side one. The connector's `index.ts` implements `OAuthCapableConnector` (exports an `oauth` object); the platform picks that up at registry-generation time and exposes the connector as user-scoped to every app that lists it. See [connectors/implementation.md](../connectors/implementation.md#oauth-capable-connectors-user-scoped) and the real example at [connectors/microsoft/](../../connectors/microsoft/).
+It's a connector-side change, not an app-side one. The connector's `index.ts` implements `OAuthCapableConnector` (exports an `oauth` object); the platform picks that up at registry-generation time and exposes the connector as user-scoped to every app that lists it. See [connectors/implementation.md](../connectors/implementation.md#oauth-capable-connectors-user-scoped) and the OAuth connector template at [connectors/_template-oauth/](../../connectors/_template-oauth/).
