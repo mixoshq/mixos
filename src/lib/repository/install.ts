@@ -122,9 +122,15 @@ function installDir(kind: ExtensionKind): string {
 /**
  * The manifest file the generator looks for, per kind.
  *
- * Apps are the exception: the generator accepts `app.ts` as well, and prefers
- * it. Pre-flight can only schema-check the JSON form, so a TS manifest defers
- * entirely to step 9 — which is the authoritative check anyway.
+ * One form per kind, all of them JSON, and that is the point: pre-flight can
+ * schema-check the bytes before a single line of the package executes. Apps
+ * briefly also accepted an `app.ts` carrying the whole manifest, which had to
+ * be imported before there was anything to validate — the wrong order for a
+ * package that just arrived from the Registry.
+ *
+ * An app may still ship `widgets.ts` for config fields built from presets, but
+ * it is additive: `app.json` is required either way, so there is always
+ * something to check first.
  */
 const MANIFEST_FILE: Record<ExtensionKind, string> = {
   app: "app.json",
@@ -376,19 +382,16 @@ function resolveInstallDir(kind: ExtensionKind, slug: string): { dir: string; re
 function preflight(kind: ExtensionKind, slug: string, entries: TarEntry[]): void {
   const byPath = new Map(entries.map((e) => [e.path, e]));
 
-  // An app may carry `app.ts` instead, which only the generator can evaluate.
   const manifestName = MANIFEST_FILE[kind];
   const manifest = byPath.get(manifestName);
-  const appTs = kind === "app" ? byPath.get("app.ts") : undefined;
 
-  if (!manifest && !appTs) {
+  if (!manifest) {
     throw new InstallError(
       `The package has no ${manifestName} at its root, so it is not a MixOS ${kind}. ` +
-        `The repository listing may point at the wrong directory in its source repo.`,
+        `The Registry listing may point at the wrong directory in its source repo.`,
       "invalid-package",
     );
   }
-  if (!manifest) return; // app.ts — deferred to the generator
 
   let parsed: unknown;
   try {
