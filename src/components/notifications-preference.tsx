@@ -4,6 +4,7 @@
 
 "use client";
 
+import { Bell } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useClientValue } from "@/lib/use-client-value";
 import {
@@ -124,7 +125,8 @@ export default function NotificationsPreference() {
             disabled={busy}
             className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand/90 disabled:opacity-50"
           >
-            🔔 {busy ? "Enabling…" : "Enable notifications"}
+            <Bell className="h-4 w-4" aria-hidden="true" />
+            {busy ? "Enabling…" : "Enable notifications"}
           </button>
           {lastResult === "not-configured" && (
             <Note tone="warning">
