@@ -318,7 +318,7 @@ Deep dives live in [`docs/apps/`](docs/apps/): [architecture](docs/apps/architec
 ### Connectors → [`connectors/AGENTS.md`](connectors/AGENTS.md)
 
 A connector is a folder under `connectors/<name>/` with a `connector.json`
-manifest, wrapping one external service (Gmail, Notion, GitHub, …). It owns the
+manifest, wrapping one external service (Gmail, Slack, GitHub, …). It owns the
 credential handling, the scopes it may request, retry and failure semantics, and
 the typed client apps call — so several apps can share one authenticated link
 instead of each rolling its own. Credentials are entered in the admin UI and
@@ -379,7 +379,7 @@ they require, enforced per request; see [docs/apps/roles.md](docs/apps/roles.md)
 
 ## Connectors
 
-Connectors integrate MixOS with external services (HubSpot, Notion, GitHub, etc.).
+Connectors integrate MixOS with external services (monday.com, Slack, GitHub, etc.).
 Their API keys are **not** environment variables — an admin enters them in the UI
 at [/admin/connectors](http://localhost:3000/admin/connectors), and MixOS encrypts
 them in the database with `CONNECTOR_ENCRYPTION_KEY`.

@@ -35,7 +35,7 @@ It can never see something that user couldn't already see in your app.
     "name": "quarter-summary",          // → handler at mcp/quarter-summary.ts
     "description": "Closed-won ARR and deal count for the current quarter, with year-to-date team totals.",
     "hint": "Use for quarterly attainment, new ARR booked, or one rep's closed business.",
-    "sources": ["hubspot"],
+    "sources": ["monday"],
     "notCovered": "Open deals and forecast — see my-app__pipeline. Renewals, which live in another app's renewal tool."
   }
 ]
@@ -56,7 +56,7 @@ Those four strings are assembled into the one description a client sees:
 
 Use for quarterly attainment, new ARR booked, or one rep's closed business.
 
-Built from: HubSpot — joined and cached in MixOS, scoped to what you can already
+Built from: monday.com — joined and cached in MixOS, scoped to what you can already
 see there; that system's own connector holds the raw records.
 Not covered: Open deals and forecast — see my-app__pipeline. Renewals, which live
 in another app's renewal tool.
@@ -74,7 +74,7 @@ sees when deciding whether to call you. A vague description means your tool neve
 gets called, or gets called for the wrong question. Say what it returns and when
 to use it, in plain language:
 
-- ✅ "Open deals in the HubSpot Sales pipeline — total open ARR, deal count, and
+- ✅ "Open deals in the monday.com Sales pipeline — total open ARR, deal count, and
   the largest deals with company, stage, close date, and next steps."
 - ❌ "Returns pipeline data."
 
@@ -83,13 +83,13 @@ Review these as carefully as the code.
 ### Describe your data, don't claim a topic
 
 Your tool does not appear alone. A client pools it into one flat list beside every
-other server the user has connected — their HubSpot, their Notion, their Drive —
+other server the user has connected — their monday.com, their Slack, their Drive —
 and picks from that list. Most of those tools describe mechanics and stop:
 *"searches CRM records with filters."* No claim on when to use it.
 
 So when one tool in the list says **"Start here for any question about onboarding
 status"**, it doesn't read as a capability, it reads as an instruction — and it
-wins, including on the questions where the user's own HubSpot connector held the
+wins, including on the questions where the user's own monday.com connector held the
 better answer. One sentence in one `app.json` quietly degrades every other
 connector that user owns. That is why these are build failures, not review notes:
 
@@ -109,7 +109,7 @@ The rewrite is almost always the same move: **swap the subject area for the data
 
 | Instead of | Write |
 |---|---|
-| "Start here for any Voice-of-Customer question." | "Use to resolve a customer name to the hubspotId and domain that the account-brief tool needs." |
+| "Start here for any Voice-of-Customer question." | "Use to resolve a customer name to the mondayItemId and domain that the account-brief tool needs." |
 | "Use for anything about bugs customers have reported." | "Use for the triage view of a customer-reported bug — priority, age, status, whether a fix has shipped." |
 | "Use for questions about retention, GRR, NRR, churn, or expansion." | "Use when the answer is a headline number for a period rather than a per-account breakdown." |
 
@@ -120,7 +120,7 @@ better-suited tool beats it, which is the property we want.
 
 Dropping the topic claims is only half of it. Strip a description back to bare
 mechanics and a model can no longer tell your joined, cached view apart from the
-source system's own connector — so it reaches for raw HubSpot search and gets a
+source system's own connector — so it reaches for raw monday.com search and gets a
 worse answer than your app would have given. The two structured fields let you
 keep the useful signal without asserting jurisdiction:
 
@@ -227,7 +227,7 @@ builders:
 
 ```ts
 // apps/my-app/mcp/quarter-summary.ts
-import { currentQuarterRange, fetchClosedWonDeals } from "../api/_hubspot-deals";
+import { currentQuarterRange, fetchClosedWonDeals } from "../api/_monday-deals";
 ```
 
 If the logic lives inline in a route, lift it to `lib/server/` and have both call

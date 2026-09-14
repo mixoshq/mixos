@@ -484,7 +484,7 @@ export const MIXOS_SOURCE = "mixos";
  *
  * Everything here is written for a model, and a model reads it pooled into one
  * flat list beside tools from every other server the user has connected —
- * HubSpot's, Notion's, whatever else. That shared list is the reason the
+ * monday.com's, Slack's, whatever else. That shared list is the reason the
  * `sources` / `notCovered` fields exist and the reason the build rejects
  * jurisdiction language: a tool that claims a whole subject area ("start here
  * for any question about X") outranks a neighbouring tool that only described
@@ -522,7 +522,7 @@ export interface McpToolDefinition {
    * declared, so a tool cannot claim provenance it doesn't have.
    *
    * Rendered into the description as a `Built from:` line. It is what lets a
-   * model tell "the joined, cached view of HubSpot" apart from "HubSpot", and
+   * model tell "the joined, cached view of monday.com" apart from "monday.com", and
    * so hand a raw-record question to the source system's own connector.
    */
   sources: string[];
