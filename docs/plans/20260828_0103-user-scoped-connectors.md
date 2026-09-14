@@ -9,8 +9,8 @@ that — it says the user-scoped model "is gone and stays gone, along with the
 `/account/connections` page, and the `user_connector_oauth` table."
 
 This plan brings it back, deliberately, for connectors where one shared account
-is the wrong answer: a person's own Microsoft 365 mail and calendar cannot be a
-single mailbox the whole deployment reads.
+is the wrong answer: a person's own Slack messages and DMs cannot be a
+single account the whole deployment reads.
 
 **What that removal bought, and what we now owe.** The doc names the property:
 *because there is exactly one credential set, any response a connector returns
@@ -27,7 +27,7 @@ back, not about OAuth.
 | Scope of this change | the full model, end to end |
 | Per-user credentials | new `user_connector_oauth` table, encrypted, keyed `(user_id, connector_name)` |
 | Caching | cache keys must include the user; enforced where the platform owns the key, documented where an app does |
-| Microsoft 365 | not built here — the concept only |
+| Slack | not built here — the concept only |
 | Declaring it | `userScoped: true` in `connector.json` |
 
 **Only three-legged OAuth may be user-scoped.** An API-key connector has one key

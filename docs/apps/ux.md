@@ -279,7 +279,7 @@ Each of these is a real screen a user will hit. All four live in [`@/components/
 ```
 
 - **Error:** a calm, human message. Never dump a raw error string (also a security rule — see invariant #9 and `safeErrorMessage`). Offer a retry where it makes sense.
-- **Degraded, not broken:** if one of several sources is down but the page can still render, say so inline and keep going. A banner explaining that last-activity timing is HubSpot-only right now beats failing the whole page over a partial outage.
+- **Degraded, not broken:** if one of several sources is down but the page can still render, say so inline and keep going. A banner explaining that last-activity timing is monday.com-only right now beats failing the whole page over a partial outage.
 
 ## Spacing, type & motion
 

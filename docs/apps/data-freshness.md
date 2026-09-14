@@ -358,7 +358,7 @@ rebuild reuses a lookup captured before the sync that prompted it:
 // Resolved inside the closure, so a background revalidation picks up a snapshot
 // written since the cached payload was built.
 getCached(db, BOOK_CACHE_KEY, async () =>
-  buildAccountBook(hubspot, db, directory, await loadHealthLookup(db, databricks)),
+  buildAccountBook(monday, db, directory, await loadHealthLookup(db, databricks)),
 );
 ```
 
