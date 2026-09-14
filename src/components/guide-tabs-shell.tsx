@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { GuideMermaid } from "@/components/guide-mermaid";
 import {
   GuideRailHorizontal,
   GuideRailVertical,
@@ -28,6 +29,21 @@ export interface GuideTabDef extends GuideDocument {
  * that is those forms narrowing a column of short inputs, not part of the card.
  */
 const SECTION_CARD = "p-4 shadow-sm";
+
+/**
+ * The source text of a ```mermaid fence, or null for any other code block.
+ *
+ * react-markdown hands `pre` a single `code` child carrying a `language-*`
+ * class, so this reads that child rather than the raw markdown. It stays
+ * defensive about the shape because a remark plugin added later could change
+ * it, and the wrong answer here should be "render it as code", not a crash.
+ */
+function extractMermaid(children: React.ReactNode): string | null {
+  if (!children || typeof children !== "object" || !("props" in children)) return null;
+  const props = (children as { props?: { className?: string; children?: unknown } }).props;
+  if (!props?.className?.includes("language-mermaid")) return null;
+  return typeof props.children === "string" ? props.children.trimEnd() : null;
+}
 
 const MARKDOWN_COMPONENTS: Components = {
   // A tier above the `##` card headings below it, and a tier below the page
@@ -69,12 +85,20 @@ const MARKDOWN_COMPONENTS: Components = {
       {...props}
     />
   ),
-  pre: (props) => (
-    <pre
-      className="mt-3 overflow-x-auto rounded-lg border border-border bg-muted p-4 text-sm"
-      {...props}
-    />
-  ),
+  // Intercepted at `pre`, not at `code`, because a diagram has to replace the
+  // whole block: styling it as a code block first and swapping the contents
+  // afterwards leaves the diagram sitting inside a <pre> with code padding and
+  // a monospace inherit.
+  pre: (props) => {
+    const mermaid = extractMermaid(props.children);
+    if (mermaid !== null) return <GuideMermaid code={mermaid} />;
+    return (
+      <pre
+        className="mt-3 overflow-x-auto rounded-lg border border-border bg-muted p-4 text-sm"
+        {...props}
+      />
+    );
+  },
   code: ({ className, children, ...rest }) => {
     const isBlock = /language-/.test(className ?? "");
     if (isBlock) {
