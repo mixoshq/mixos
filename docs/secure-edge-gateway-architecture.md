@@ -37,46 +37,32 @@ They were parallel implementations once. That is how the public mount acquired a
 gate the authenticated one never had, and the authenticated one ended up checking
 the wrong table. Keeping them as bindings is what stops them drifting again.
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  Client (Browser)                                        │
-│  ┌────────────┐  ┌────────────┐                          │
-│  │  Full Page │  │   Widget   │                          │
-│  └──────┬─────┘  └──────┬─────┘                          │
-│         │  createAppClient(slug).get("/path")            │
-│         └───────────┬─────────┘                          │
-└─────────────────────┼────────────────────────────────────┘
-                      │  fetch("/api/apps/<slug>/<path>")
-                      ▼
-┌──────────────────────────────────────────────────────────┐
-│  PROXY (src/proxy.ts) — OPTIMISTIC ONLY                  │
-│  Cookie PRESENCE check → 307 /login. No decode, no       │
-│  validation, no admin check, no CSRF. Public prefixes    │
-│  (incl. /api/p) skip it entirely.                        │
-└───────────────────────────┬──────────────────────────────┘
-                            ▼
-┌──────────────────────────────────────────────────────────┐
-│  dispatchAppRoute()  —  src/lib/apps/dispatch.ts         │
-│  1  body cap from content-length          → 413          │
-│  2  app exists in registry                → 404          │
-│  3  rate limit, per IP, pre-auth          → 429          │
-│  4  URL → on-disk route pattern           → 404          │
-│  5  mount serves this route (hoisted)     → 404          │
-│  6  import module; method exported   → 404 / 405 / 500   │
-│  7  live declaration matches registry     → 404          │
-│  8  resolveAuthTier()               → 401 / 403 / 404    │
-│  9  CSRF, cookie-authed mutations only    → 403          │
-│ 10  rate limit, per user+app and route    → 429          │
-│ 11  build context                         → 500          │
-│ 12  runRoute() — roles, input, budget, output            │
-└───────────────────────────┬──────────────────────────────┘
-                            ▼
-           ┌────────────────┼────────────────┐
-           ▼                ▼                ▼
-     ┌──────────┐   ┌──────────────┐   ┌────────────┐
-     │ Scoped DB│   │  Connector   │   │ context.http│
-     │ (_app_*) │   │  (Gmail, …)  │   │ (egress)    │
-     └──────────┘   └──────────────┘   └────────────┘
+```mermaid
+flowchart TD
+    subgraph CLIENT["Client (browser)"]
+        PAGE["Full page"]
+        WIDGET["Widget"]
+    end
+
+    PAGE --> SDK
+    WIDGET --> SDK
+    SDK["createAppClient(slug).get('/path')"]
+
+    SDK --> FETCH
+
+    FETCH["fetch('/api/apps/{slug}/{path}')<br/>Cookie: session token"]
+
+    FETCH --> PROXY
+
+    PROXY["PROXY — src/proxy.ts<br/>optimistic only<br/>cookie PRESENCE check, else 307 /login<br/>no decode, no validation, no admin check, no CSRF<br/>public prefixes (incl. /api/p) skip it entirely"]
+
+    PROXY --> DISPATCH
+
+    DISPATCH["dispatchAppRoute() — src/lib/apps/dispatch.ts<br/>twelve checks, in order — enumerated below<br/>413 · 404 · 429 · 405 · 401 · 403 · 500"]
+
+    DISPATCH --> DB["Scoped DB<br/>_app_*"]
+    DISPATCH --> CONN["Connector<br/>(Gmail, …)"]
+    DISPATCH --> HTTP["context.http<br/>(egress)"]
 ```
 
 ---
