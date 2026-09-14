@@ -6,7 +6,8 @@ Create a new directory under `/apps` with the following structure:
 
 ```
 apps/my-app/
-  app.json          # App manifest — or use app.ts (see below)
+  app.json          # App manifest — the only manifest form
+  widgets.ts        # Widget config built from presets (optional, see below)
   README.md         # Long-form description, published on the public listing (optional)
   pages/
     Main.tsx        # Root page at /apps/my-app
@@ -95,7 +96,7 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
 | `license` |  | SPDX identifier or expression for the app's licence, or `UNLICENSED` for something not redistributable. Validated as a shape, not against the full SPDX list — which still rejects the mistake worth rejecting: prose. `"MIT License"` fails the build; `"MIT"` passes. | `"license": "MPL-2.0"` |
 | `appUrl` |  | Where the app lives for someone who wants to read about it — a homepage, a docs site, a repository directory. Absolute `https://` only: these render as links on pages served over https, and an author never sees the downgrade because their own dev server is http. | `"appUrl": "https://example.com/my-app"` |
 | `appSupportUrl` |  | Where a user takes a problem with this app — an issue tracker, a support page. Same `https://` rule. Kept separate from `appUrl` because "read about it" and "something is broken" are different destinations, and collapsing them sends bug reports to a marketing page. | `"appSupportUrl": "https://example.com/my-app/issues"` |
-| `connectors` |  | Array of connector names this app requires. These must match registered connectors in the Connector Registry. The platform will initialize and inject them into the app context. | `"connectors": ["hubspot", "notion"]` |
+| `connectors` |  | Array of connector names this app requires. These must match registered connectors in the Connector Registry. The platform will initialize and inject them into the app context. | `"connectors": ["monday", "slack"]` |
 | `database` |  | Set to `true` to enable a scoped database for this app. The app gets its own isolated tables prefixed with the app slug. Migrations go in the `migrations/` directory. | `"database": true` |
 | `notifications` |  | Set to `true` to enable Web Push. The app gets `context.notifications.send(...)` in its API routes and can opt users in with the SDK helper. See [Notifications](./notifications.md). | `"notifications": true` |
 | `schedules` |  | Array of scheduled jobs. Each `name` maps to a handler at `jobs/<name>.ts` and sets **exactly one** cadence: `everyMinutes` (interval, min 5, multiple of 5) **or** a 5-field `cron` expression with an optional IANA `timezone` (default UTC). The platform runs them on a 5-minute scheduler. See [Scheduled Jobs](./scheduled-jobs.md). | `"schedules": [{ "name": "refresh-cache", "everyMinutes": 60 }, { "name": "digest", "cron": "0 8 * * 1" }]` |
@@ -113,46 +114,67 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
 | `listensTo` |  | Hooks from other apps this app listens for: `[{ app, hook }]`. The emitter must allow you, or the build fails. | `"listensTo": [{ "app": "sales", "hook": "deal-won" }]` |
 | `mcp` |  | Array of read-only tools this app exposes to the MixOS MCP server, so Claude can answer questions using its data. Each `name` maps to a handler at `mcp/<name>.ts` exporting `inputSchema` (Zod) and a default handler; `description` is written for a model and is the only thing it sees when deciding to call the tool. Max 5 per app. Reachable only when the connecting user consented to this app *and* holds a grant for it. See [MCP Tools](./mcp.md). | `"mcp": [{ "name": "quarter-summary", "description": "Closed-won ARR for the current quarter." }]` |
 
-> **Tool-written:** `lastUpdated` lives in `app.json` as an ISO 8601 date-time (e.g. `"2026-08-24T03:21:40.694Z"`) and is stamped automatically: `.githooks/pre-commit` runs [`scripts/stamp-updated.ts`](../../scripts/stamp-updated.ts), which rewrites the date on every app with a file in the commit and re-stages the manifest. It records when the app last changed, so a dependency bump or a formatting pass inside the app moves it too. A commit that touches only `lastUpdated` never re-stamps. Don't edit it by hand; an invalid value fails the build. An `app.ts` manifest is warned about, never rewritten — the script won't edit arbitrary TypeScript, so add the line to the default export yourself.
+> **Tool-written:** `lastUpdated` lives in `app.json` as an ISO 8601 date-time (e.g. `"2026-08-24T03:21:40.694Z"`) and is stamped automatically: `.githooks/pre-commit` runs [`scripts/stamp-updated.ts`](../../scripts/stamp-updated.ts), which rewrites the date on every app with a file in the commit and re-stages the manifest. It records when the app last changed, so a dependency bump or a formatting pass inside the app moves it too. A commit that touches only `lastUpdated` never re-stamps. Don't edit it by hand; an invalid value fails the build.
 
 > **Per-app roles:** the `roles` / `defaultRole` fields let an app define its own access tiers and gate features with `context.user.hasRole([...])`. See the dedicated [Roles & Permissions](./roles.md) guide.
 
-### TS Manifests (app.ts)
+### Widget config from presets (widgets.ts)
 
-For manifests that benefit from shared helpers — most commonly, widget config fields that follow a common pattern (title / selection / display mode / group-by) — you can use `app.ts` instead of `app.json`. The default export has the same shape as the JSON manifest; the only difference is that you can `import` helpers from across the codebase.
+`app.json` is the only manifest form. It is static text, which is what lets the
+installer schema-check a package **before** any of it executes — see the
+pre-flight step in [`src/lib/repository/install.ts`](../../src/lib/repository/install.ts).
+
+The one thing JSON cannot express is a config field built from a helper. A
+widget wanting a title, a selection and a display mode is three field objects,
+written out again for every widget that wants the same three. So that — and
+only that — can live in an optional `widgets.ts` beside the manifest:
 
 ```ts
-// apps/my-app/app.ts
+// apps/my-app/widgets.ts
 import {
   titleField,
   selectionField,
   displayModeField,
   groupByField,
+  type InferConfig,
 } from "@/lib/apps/widget-config-presets";
 
+export const favoritesConfigFields = [
+  titleField({ default: "Favorites" }),
+  selectionField({ key: "itemIds", label: "Items to show" }),
+  displayModeField({ modes: ["list", "grid"] }),
+  groupByField({ label: "Group by team" }),
+] as const;
+
+// The widget imports this to type its own props.
+export type FavoritesWidgetConfig = InferConfig<typeof favoritesConfigFields>;
+
+// Keyed by the widget's `component` path, exactly as app.json spells it.
 export default {
-  name: "My App",
-  description: "…",
-  icon: "star",
-  widgets: [
-    {
-      name: "My Widget",
-      description: "…",
-      component: "widgets/my-widget.tsx",
-      config: [
-        titleField({ default: "My Widget" }),
-        selectionField({ key: "itemIds", label: "Items to show" }),
-        displayModeField({ modes: ["list", "grid"] }),
-        groupByField({ label: "Group by team" }),
-      ],
-    },
-  ],
+  "widgets/favorites.tsx": favoritesConfigFields,
 };
 ```
 
+The manifest stays plain, and says nothing about config for that widget:
+
+```json
+{
+  "widgets": [
+    {
+      "name": "Favorites",
+      "description": "Links you keep coming back to",
+      "component": "widgets/favorites.tsx"
+    }
+  ]
+}
+```
+
 **Rules:**
-- When both `app.ts` and `app.json` exist, `app.ts` wins. Delete the JSON after migrating.
-- The default export must be plain data — the generator serializes it into the registry with `JSON.stringify`. Functions, class instances, and React nodes won't survive. Preset helpers return plain data, so they're safe.
+- `app.json` is always required. `widgets.ts` is additive and supplies config arrays only — every other field stays in the JSON.
+- Keys are `component` paths, not widget names. A path is already unique within an app; a name is prose and free to collide.
+- A key that matches no widget in `app.json` is an error, and so is a widget declaring `config` in both files. Two files describing one widget can drift, so neither direction is reconciled silently.
+- Field arrays must be plain data — the generator serializes them into the registry with `JSON.stringify`. Functions, class instances and React nodes won't survive. Preset helpers return plain data, so they're safe.
 - Imports resolve through the project's tsconfig paths (`@/*`, `@apps/*`, `@connectors/*`). Any import that works in runtime TS works here.
+- Plain config needs no `widgets.ts` at all — declare `config` inline in `app.json` and skip the file.
 
 See [`src/lib/apps/widget-config-presets.ts`](../../src/lib/apps/widget-config-presets.ts) for the list of built-in presets and [Widgets → Config Presets](./widgets.md#config-presets) for when to use which.

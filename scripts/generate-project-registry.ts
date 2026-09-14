@@ -219,29 +219,129 @@ function scanHooks(appDir: string, slug: string): HookScan {
 }
 
 /**
- * Load an app manifest from either `app.ts` (for manifests that use preset
- * helpers or other TS composition) or `app.json` (the original static form).
- * `app.ts` takes precedence when both exist.
+ * Load an app manifest.
+ *
+ * `app.json` is the only manifest form. It is static text, which means the
+ * install path can schema-check the bytes BEFORE anything executes — see
+ * preflight() in src/lib/repository/install.ts. An earlier design also accepted
+ * an `app.ts` whose default export was the whole manifest; that inverted the
+ * order, because the module had to be imported before there was anything to
+ * validate. For apps arriving from the Registry that is the wrong way round.
+ *
+ * The one thing JSON cannot express is a config field built from a helper, so
+ * that — and only that — moved to an optional `widgets.ts`. See
+ * loadWidgetConfigs() below.
  */
 async function loadAppManifest(
   appDir: string,
 ): Promise<Record<string, unknown> | null> {
-  const tsPath = path.join(appDir, "app.ts");
-  if (fs.existsSync(tsPath)) {
-    // tsx's ESM loader handles transpilation. Append a cache-busting query so
-    // repeated generator runs during `next dev` pick up manifest edits.
-    const href = `${pathToFileURL(tsPath).href}?t=${Date.now()}`;
-    const mod = (await import(href)) as { default?: unknown };
-    if (!mod.default || typeof mod.default !== "object") return null;
-    return mod.default as Record<string, unknown>;
-  }
-
   const jsonPath = path.join(appDir, "app.json");
-  if (fs.existsSync(jsonPath)) {
-    return JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
+  if (!fs.existsSync(jsonPath)) return null;
+
+  const manifest = JSON.parse(
+    fs.readFileSync(jsonPath, "utf-8"),
+  ) as Record<string, unknown>;
+
+  await applyWidgetConfigs(appDir, manifest);
+  return manifest;
+}
+
+/**
+ * Merge `widgets.ts` config fields into the manifest's widget entries.
+ *
+ * A widget's `config` is the one part of a manifest that repeats: four widgets
+ * wanting a title, a selection and a display mode is the same four field
+ * objects written out four times. Helpers in @/lib/apps/widget-config-presets
+ * collapse that, and they also derive the widget's config TYPE — neither of
+ * which JSON can do.
+ *
+ * So `widgets.ts` is optional, and narrow: it supplies config arrays and
+ * nothing else. Identity, permissions, egress, roles and every other field a
+ * reviewer cares about stay in `app.json`, as text.
+ *
+ *     // apps/my-app/widgets.ts
+ *     export default {
+ *       "widgets/favorites.tsx": favoritesConfigFields,
+ *     };
+ *
+ * Keyed by `component`, which is a path and therefore already unique within an
+ * app — `name` is prose and free to collide.
+ *
+ * ## Drift is refused, not reconciled
+ *
+ * Splitting one manifest across two files invents a way for them to disagree.
+ * Both directions throw rather than shrug: a key naming no widget is a typo or
+ * a rename that missed a file, and a widget declaring `config` in BOTH places
+ * has two sources of truth and no rule for picking one. Neither is a state
+ * anyone means to be in, and a generator that quietly picks a winner is how
+ * someone edits the file that is being ignored.
+ *
+ * Worth knowing where that throw lands: the caller catches it, warns, and skips
+ * the app — the same handling a malformed `app.json` gets. So the build still
+ * succeeds and the app is absent from the registry rather than wrong in it.
+ * That is this generator's existing severity for a broken manifest, not a
+ * judgement about drift specifically.
+ */
+async function applyWidgetConfigs(
+  appDir: string,
+  manifest: Record<string, unknown>,
+): Promise<void> {
+  const tsPath = path.join(appDir, "widgets.ts");
+  if (!fs.existsSync(tsPath)) return;
+
+  const slug = path.basename(appDir);
+
+  // tsx's ESM loader handles transpilation. Append a cache-busting query so
+  // repeated generator runs during `next dev` pick up edits.
+  const href = `${pathToFileURL(tsPath).href}?t=${Date.now()}`;
+  const mod = (await import(href)) as { default?: unknown };
+  const byComponent = mod.default;
+
+  if (!byComponent || typeof byComponent !== "object" || Array.isArray(byComponent)) {
+    throw new Error(
+      `apps/${slug}/widgets.ts must default-export an object keyed by each ` +
+        `widget's "component" path, e.g. { "widgets/foo.tsx": fooConfigFields }.`,
+    );
   }
 
-  return null;
+  const widgets = Array.isArray(manifest.widgets)
+    ? (manifest.widgets as Record<string, unknown>[])
+    : [];
+  const declared = new Set(
+    widgets.map((w) => String(w.component ?? "")).filter(Boolean),
+  );
+
+  for (const [component, fields] of Object.entries(
+    byComponent as Record<string, unknown>,
+  )) {
+    if (!declared.has(component)) {
+      throw new Error(
+        `apps/${slug}/widgets.ts has config for "${component}", which no widget ` +
+          `in app.json declares. Known components: ${[...declared].join(", ") || "(none)"}.`,
+      );
+    }
+    if (!Array.isArray(fields)) {
+      throw new Error(
+        `apps/${slug}/widgets.ts: "${component}" must map to an array of config fields.`,
+      );
+    }
+  }
+
+  for (const widget of widgets) {
+    const component = String(widget.component ?? "");
+    const fields = (byComponent as Record<string, unknown>)[component];
+    if (fields === undefined) continue;
+    if (widget.config !== undefined) {
+      throw new Error(
+        `apps/${slug}: widget "${component}" declares config in BOTH app.json and ` +
+          `widgets.ts. Keep it in one — app.json for plain fields, widgets.ts for ` +
+          `fields built from presets.`,
+      );
+    }
+    // Plain data by the time it lands here; the registry is serialised with
+    // JSON.stringify, so anything else would not survive the write.
+    widget.config = fields;
+  }
 }
 
 /**
@@ -397,8 +497,8 @@ function paramsForPath(routePath: string): string[] {
  * radius of executing app code at build time". A route contract cannot be read
  * that way: `auth`, `roles` and `budget` could be recovered from an AST, but
  * the Zod schemas cannot, and a contract the build can only half-read is one
- * the build can only half-enforce. So this follows the `app.ts` precedent
- * instead, which has imported app code since the manifest gained a TS form.
+ * the build can only half-enforce. So it imports, as `widgets.ts` does for
+ * config fields a manifest cannot express in JSON.
  *
  * The blast radius is real and worth naming: a module-level side effect in a
  * route or anything it imports will run during `npm run build`. That is an
@@ -1183,7 +1283,7 @@ async function scanApps(): Promise<AppManifest[]> {
           `  apps/${entry.name}/ — planned, not yet built (plans/ only)`,
         );
       } else {
-        console.warn(`  Skipping ${entry.name}/ — no app.ts or app.json found`);
+        console.warn(`  Skipping ${entry.name}/ — no app.json found`);
       }
       continue;
     }
@@ -1907,12 +2007,7 @@ ${pageImports.join("\n")}
   for (const entry of fs.readdirSync(APPS_DIR, { withFileTypes: true })) {
     if (!entry.isDirectory() || !entry.name.startsWith("_")) continue;
     const dir = path.join(APPS_DIR, entry.name);
-    if (
-      !fs.existsSync(path.join(dir, "app.json")) &&
-      !fs.existsSync(path.join(dir, "app.ts"))
-    ) {
-      continue;
-    }
+    if (!fs.existsSync(path.join(dir, "app.json"))) continue;
     try {
       templateRoutes.push({
         slug: entry.name,
