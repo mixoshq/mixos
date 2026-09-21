@@ -85,7 +85,7 @@ function supabaseBin(): string | null {
  * Ask before destroying data.
  *
  * Refuses rather than assuming "yes" when stdin is not a terminal: this script
- * is reachable from `/mix-init` and from CI-ish contexts, and a silently
+ * is reachable from `/mixos init` and from CI-ish contexts, and a silently
  * auto-confirmed database wipe is exactly the surprise worth engineering
  * against. `--yes` is the explicit opt-in.
  */

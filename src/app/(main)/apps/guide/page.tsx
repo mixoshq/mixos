@@ -25,8 +25,8 @@ export default async function AppGuidePage() {
           widgets, and optional hooks.
         </>
       }
-      command="/mix-app"
-      usage="/mix-app create my-app-slug optional notes about the app"
+      command="/mixos app"
+      usage="/mixos app create my-app-slug optional notes about the app"
       tabs={await loadAppGuideTabs()}
     />
   );

@@ -27,7 +27,7 @@ keeps running, so the next boot skips the slow part. `npm run docker:down`
 stops both.
 
 That blocking behaviour is wrong for anything that has to run a command and
-then do something else — a setup script, CI, or Claude running `/mix-init` for
+then do something else — a setup script, CI, or Claude running `/mixos init` for
 you. For those, `--detach`:
 
 ```bash

@@ -145,11 +145,11 @@ thing that matters and it is already stored; the snapshot is reporting.
 - `src/app/(main)/admin/connectors/page.tsx` drops `refreshScopeDocsAction` and
   the `getScopeDocs` import; `connector-registry-list.tsx` drops the prop.
 
-### Dev-time refresh — `scripts/check-scopes.ts` + `/mix-connector`
+### Dev-time refresh — `scripts/check-scopes.ts` + `/mixos connector`
 
 `check-scopes.ts` keeps its read-only report and gains `--write`, which fetches
 `auth.scopesUrl`, parses, preserves the `requested` flags already in the
-manifest, and rewrites `auth.scopes` in place. `.claude/commands/mix-connector.md`
+manifest, and rewrites `auth.scopes` in place. `.claude/skills/mixos/actions/connector.md`
 gains a **Scopes refresh** section documenting `npx tsx scripts/check-scopes.ts
 <connector> --write`, that it is the only way the catalog changes, and that the
 diff is the review.

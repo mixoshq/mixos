@@ -17,4 +17,4 @@ theme — a clone, a conversion, or a handoff carries both.
 A change that touches the platform itself (`src/`, `scripts/`, the build) is a
 **platform plan** and belongs in [`docs/plans/`](../../../docs/plans) instead.
 
-Full convention: [`docs/plans/README.md`](../../../docs/plans/README.md). Command: [`/mix-theme`](../../../.claude/commands/mix-theme.md).
+Full convention: [`docs/plans/README.md`](../../../docs/plans/README.md). Command: [`/mixos theme`](../../../.claude/skills/mixos/actions/theme.md).

@@ -1,15 +1,4 @@
----
-description: Create or update a connector under connectors/
-argument-hint: <create|update> <connector-name> [notes] [-q]
----
-
-## Clarify gate
-
-If $ARGUMENTS contains `-q` (anywhere), then before doing anything else:
-ask me 3-5 clarifying questions and stop. Do not read ahead, plan, or write
-code until I answer. Ignore the rest of this skill until then.
-
-Strip `-q` from the task description before acting on it.
+# /mixos connector
 
 You are creating or modifying a connector under `connectors/`.
 
@@ -163,4 +152,4 @@ Read [registry-ux.md](docs/connectors/registry-ux.md) first. In short:
 
 ## User request
 
-$ARGUMENTS
+The arguments the dispatcher passed — everything after `connector` in the invocation.
