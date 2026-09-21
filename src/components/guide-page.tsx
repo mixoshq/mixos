@@ -39,7 +39,7 @@ export default function GuidePage({
    */
   back: { href: string; label: string };
   intro: React.ReactNode;
-  /** The slash command that scaffolds this kind of thing, e.g. `/mix-app`. */
+  /** The slash command that scaffolds this kind of thing, e.g. `/mixos app`. */
   command: string;
   /** A full example invocation, shown under the command. */
   usage: string;

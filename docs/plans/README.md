@@ -55,7 +55,7 @@ YYYYMMDD_HHMM-<plan-name>.md
 - `YYYYMMDD_HHMM` — the local timestamp when the plan was started (e.g.
   `20260630_0834`). This keeps plans sorted chronologically within their folder.
 - `<plan-name>` — a short kebab-case slug for the work (e.g. `roadshows-app`).
-  [`/mix-deploy`](../../.claude/commands/mix-deploy.md) derives the branch name
+  [`/mixos deploy`](../../.claude/skills/mixos/actions/deploy.md) derives the branch name
   from this slug.
 
 ## What a plan contains
@@ -80,16 +80,16 @@ and where it belongs. Plan files are committed.
 A `plans/` directory may precede its subject — write the plan where the thing will
 live, then build it there. A folder holding only `plans/` and no manifest is a
 legitimate state: the registry reports it as *planned, not yet built* and skips it
-rather than warning. `/mix-convert` relies on this, creating `apps/<slug>/plans/`
+rather than warning. `/mixos convert` relies on this, creating `apps/<slug>/plans/`
 in Phase 1 and nothing else until the plan is approved.
 
 ## Referenced by
 
-[`/mix-app`](../../.claude/commands/mix-app.md),
-[`/mix-connector`](../../.claude/commands/mix-connector.md),
-[`/mix-theme`](../../.claude/commands/mix-theme.md),
-[`/mix-convert`](../../.claude/commands/mix-convert.md),
-[`/mix-deploy`](../../.claude/commands/mix-deploy.md),
+[`/mixos app`](../../.claude/skills/mixos/actions/app.md),
+[`/mixos connector`](../../.claude/skills/mixos/actions/connector.md),
+[`/mixos theme`](../../.claude/skills/mixos/actions/theme.md),
+[`/mixos convert`](../../.claude/skills/mixos/actions/convert.md),
+[`/mixos deploy`](../../.claude/skills/mixos/actions/deploy.md),
 [`apps/AGENTS.md`](../../apps/AGENTS.md),
 [`connectors/AGENTS.md`](../../connectors/AGENTS.md),
 [`themes/AGENTS.md`](../../themes/AGENTS.md).

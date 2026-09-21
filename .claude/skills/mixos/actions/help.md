@@ -1,13 +1,10 @@
----
-description: Guided help for non-technical builders — understand what a MixOS app is, and get a plain-language recommendation for what to build
-argument-hint: [what you want to build]
----
+# /mixos help
 
 You are helping someone figure out what to build on **MixOS**. Assume they
 are **not a developer** and may have **never used MixOS before**. Explain things in
 plain language, understand what they want, and recommend what to build and what
 happens next. **You don't build anything here** — Claude does the actual building in
-`/mix-app`; this command just helps them decide what to ask for.
+`/mixos app`; this command just helps them decide what to ask for.
 
 Tone: warm, encouraging, jargon-free. Reassure them they don't need to know how to code.
 
@@ -53,13 +50,13 @@ one-off scripts, they become simple apps anyone can open in MixOS.
 
 **How building actually happens.** You don't have to write code. You describe what
 you want, and Claude builds it through a few guided commands:
-- **`/mix-init`** — one-time setup of MixOS on your computer.
-- **`/mix-help`** (this one) — figure out what to build.
-- **`/mix-app`** — Claude builds your app. (A brand-new bridge, if one's needed, is
-  a developer's job via **`/mix-connector`**.)
-- **`/mix-convert`** — already have a tool that works? Claude can bring it over
+- **`/mixos init`** — one-time setup of MixOS on your computer.
+- **`/mixos help`** (this one) — figure out what to build.
+- **`/mixos app`** — Claude builds your app. (A brand-new bridge, if one's needed, is
+  a developer's job via **`/mixos connector`**.)
+- **`/mixos convert`** — already have a tool that works? Claude can bring it over
   instead of starting from scratch.
-- **`/mix-deploy`** — publish it so the rest of the team can use it.
+- **`/mixos deploy`** — publish it so the rest of the team can use it.
 
 You can reassure them: they only decide what the app should show and do — the code,
 and keeping data safe, is handled for them. Then say something like *"Now let's
@@ -92,10 +89,10 @@ Work out the shape, in plain terms:
   a CRM, a data warehouse, a docs tool). If the tool they named is there, they're all set.
 - **If the tool they need isn't connected yet**, adding that bridge (a new
   **connector**) is a more technical job — flag it kindly and say a developer can add
-  it with `/mix-connector`, and then their app can use it. Don't send a non-technical
+  it with `/mixos connector`, and then their app can use it. Don't send a non-technical
   person off to build a connector.
 
-**If they already have something that works**, recommend **`/mix-convert`** instead
+**If they already have something that works**, recommend **`/mixos convert`** instead
 of starting from scratch. Say it plainly: Claude reads the existing tool, works out
 everything it does, writes up a plan of how it'll come across, and **shows them that
 plan before building anything** — so nothing gets quietly lost or changed. Two honest
@@ -138,17 +135,17 @@ Write a short, plain-language summary (in chat — don't save a file):
    uses a connection that already exists.
 2. **What it'll do:** the capabilities from Step 3, in plain words.
 3. **What happens next:**
-   - Not set up on their computer yet? → run **`/mix-init`** first.
-   - To build it → run **`/mix-app`**, and Claude will build the app for them.
-   - Bringing over a tool that already exists → run **`/mix-convert`**, pointing it
+   - Not set up on their computer yet? → run **`/mixos init`** first.
+   - To build it → run **`/mixos app`**, and Claude will build the app for them.
+   - Bringing over a tool that already exists → run **`/mixos convert`**, pointing it
      at where that tool lives.
-   - Need a brand-new connection first? → a developer runs **`/mix-connector`**.
-   - When it's ready for everyone → **`/mix-deploy`** creates the branch and opens
+   - Need a brand-new connection first? → a developer runs **`/mixos connector`**.
+   - When it's ready for everyone → **`/mixos deploy`** creates the branch and opens
      the request to publish it.
 
-End warmly, and invite them back to `/mix-help` any time they're unsure what to build
+End warmly, and invite them back to `/mixos help` any time they're unsure what to build
 next.
 
 ## What the user is trying to build
 
-$ARGUMENTS
+The arguments the dispatcher passed — everything after `help` in the invocation. May be empty.

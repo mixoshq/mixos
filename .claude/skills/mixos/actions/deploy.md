@@ -1,15 +1,4 @@
----
-description: Start a feature branch, open a deploy PR, or cut a production release tag
-argument-hint: [deploy|release] [notes] [-q]
----
-
-## Clarify gate
-
-If $ARGUMENTS contains `-q` (anywhere), then before doing anything else:
-ask me 3-5 clarifying questions and stop. Do not read ahead, plan, or write
-code until I answer. Ignore the rest of this skill until then.
-
-Strip `-q` from the task description before acting on it.
+# /mixos deploy
 
 You are managing git branches, pull requests, and production releases for a
 developer building on **MixOS**, so they don't have to do it by hand. One
@@ -98,11 +87,11 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 Read git state and pick a phase:
 
 - `git branch --show-current` and `git status --porcelain`.
-- If `$ARGUMENTS` contains **`release`** → **Release phase** (must run from an
+- If the arguments contain **`release`** → **Release phase** (must run from an
   up-to-date `main`; the phase enforces that itself).
-- If the current branch is **`main`** (and `$ARGUMENTS` says neither `deploy` nor
+- If the current branch is **`main`** (and the arguments say neither `deploy` nor
   `release`) → **Branch phase**.
-- If on a **feature branch** (anything but `main`), or `$ARGUMENTS` contains
+- If on a **feature branch** (anything but `main`), or the arguments contain
   **`deploy`** → **Deploy phase**.
 - Detached HEAD or an unexpected state → stop and explain; don't guess.
 
@@ -127,8 +116,8 @@ Read git state and pick a phase:
 3. **Confirm before creating.** Show the proposed name and let the user accept or
    edit it. Then create it: `git switch -c <name>` (this keeps any uncommitted
    changes).
-4. Tell them the branch is ready — keep developing, and run **`/mix-deploy`** again
-   (or `/mix-deploy deploy`) when they're ready to open the PR.
+4. Tell them the branch is ready — keep developing, and run **`/mixos deploy`** again
+   (or `/mixos deploy deploy`) when they're ready to open the PR.
 
 ---
 
@@ -159,7 +148,7 @@ Read git state and pick a phase:
    If anything fails, summarize it clearly and **ask whether to open the PR anyway**
    (warn, don't block).
 3. **Update the "what's new" notes.** If this branch adds or changes a
-   developer-facing behavior — a new `/mix-*` command, a workflow change, or a
+   developer-facing behavior — a new `/mixos` action, a workflow change, or a
    breaking change — add a short `## <today's date>` entry at the top of
    `WHATS-NEW.md` (newest-first) so it surfaces after other developers pull. Skip
    for internal-only changes (refactors, an app/connector build with no
@@ -217,7 +206,7 @@ Read git state and pick a phase:
      fail: print the compare URL
      `https://github.com/MixOSWork/mixos/compare/main...<branch>?expand=1`
      together with the full markdown body (ready to paste), and tell them to run
-     **`/mix-init`** to install/authenticate `gh`.
+     **`/mixos init`** to install/authenticate `gh`.
 8. **Stop.** Print the PR URL and say: *"Review and merge when you're ready —
    merging into `main` triggers the production build-and-deploy. I won't merge for
    you."*
@@ -258,7 +247,7 @@ Promotes what's on `main` to prod through the **gated** tag path
 (`build-and-push.yml` → `deploy.yml`, `production` environment). Unlike merge-CD,
 a tag build checks out the tagged commit, so it is **immune to the stale-head bug**
 (issue #85) and leaves an **immutable `vX.Y.Z`** to roll back to. Trigger:
-`$ARGUMENTS` contains **`release`**.
+the arguments contain **`release`**.
 
 1. **Be on an up-to-date `main`.** `git fetch origin main --tags`. Refuse unless the
    checkout is `main` *and* level with `origin/main` (offer `git switch main` +
@@ -323,9 +312,9 @@ a tag build checks out the tagged commit, so it is **immune to the stale-head bu
      the feature works, so remind the user to smoke-test.
 8. **Stop.** Report the tag, the target commit + version reasoning, the run URL, the
    live digest, and the gate outcome (auto-rolled vs awaiting approval). If this
-   release changed a `/mix-*` command or other developer-facing behavior, offer to
+   release changed a `/mixos` action or other developer-facing behavior, offer to
    add a `WHATS-NEW.md` entry (as in the Deploy phase).
 
 ## Notes
 
-$ARGUMENTS
+The arguments the dispatcher passed — everything after `deploy` in the invocation (`deploy`, `release`, and any notes).

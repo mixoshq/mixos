@@ -120,7 +120,7 @@ separation was sound; the un-rotatability was not. Split into six env vars
 inventoried in `src/lib/env/keys.ts`, each with its blast radius written next to
 it, no derivation fallback. `scripts/generate-keys.ts` enumerates the inventory
 so it cannot drift. `npm run keys:generate` / `keys:check`, wired into
-`/mix-init`.
+`/mixos init`.
 
 **A sixth consumer turned up mid-change** — `src/lib/apps/env.ts` encrypts
 `password`-typed app settings under the same key — so the split is six, not five.
