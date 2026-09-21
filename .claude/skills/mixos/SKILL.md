@@ -71,7 +71,7 @@ Call one of these actions:
 | **`convert`** | You already have an application and want it as a MixOS app. | Inventories the source, writes a conversion plan, and stops for approval; then builds the first slice. Pass a plan path to resume at the build. | `/mixos convert <source-path\|git-url\|plan-path>` `[app-slug] [notes]` |
 | **`connector`** | An app needs an outside service no connector covers yet. | Creates or updates a connector under `connectors/`: client, credentials and OAuth, scopes, admin setup wizard. A developer's job. | `/mixos connector <create\|update> <connector-name>` `[notes]` |
 | **`theme`** | You want to change how the whole install looks. | Creates, updates, or reviews a theme under `themes/`, optionally from a brand book. Checks contrast and verifies light, dark and signed-out. | `/mixos theme <create\|update\|review> <theme-name>` `[brand book path or notes]` |
-| **`deploy`** | You're starting work, or ready to ship it. | On `main`, starts a feature branch. On a branch, commits, pushes, opens a PR — never merges. `release` cuts a production tag from `main`; `deploy` forces the PR phase. | `/mixos deploy` `[deploy\|release] [notes]` |
+| **`deploy`** | You're ready to ship, or a PR has merged. | Commits the working tree in logical commits, pushes, and opens a PR against `main` (branching first if you are on `main`; updating the PR if one is open). Never merges. With `--reset`, instead returns to `main`, pulls, and deletes local branches whose PR has merged. | `/mixos deploy` `[--reset]` |
 
 Add `-q` to any action to have Claude ask 3–5 clarifying questions first and wait for your answers.
 

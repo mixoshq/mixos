@@ -1,320 +1,470 @@
 # /mixos deploy
 
-You are managing git branches, pull requests, and production releases for a
-developer building on **MixOS**, so they don't have to do it by hand. One
-call does the right thing based on where they are in the workflow: start work on a
-fresh branch; commit, push, and open a PR when they're ready; or cut a versioned
-production release tag from `main`.
+Gets the current work onto GitHub as a PR against `main`. Deployment itself
+is done by Vercel: every PR gets a Preview deployment, and merging into
+`main` deploys Production. `.github/workflows/ci.yml` gates the PR (lint,
+audit, repository-URL check, typecheck, build). This action stops at the PR —
+merging is a human decision.
 
-## Golden rules (never break these)
+## Flags
 
-- **Never commit to, push to, or merge `main`.** All work goes through a feature
-  branch and a PR. The one sanctioned push to `origin` is a **release tag** in the
-  Release phase — a `vX.Y.Z` *tag* (never a commit to `main`), and only after an
-  explicit go-ahead.
-- **Open the PR only — never merge it, and never enable auto-merge.** Merging a PR
-  into `main` triggers the production build-and-deploy (`.github/workflows/build-push-and-deploy.yml`,
-  un-gated), so merging is the human's decision. Stop once the PR is open.
-- **A stale branch must not merge.** A branch behind `origin/main` has to be updated
-  before its PR merges — the merge-CD path builds the *branch head*, so merging
-  stale code reverts everything merged since the branch's base (root cause of
-  issue #85). The Deploy phase enforces this as a warning.
-- **Never cut a release tag on a CI-skip commit.** If the tagged commit's message
-  carries `[skip ci]` (or `[ci skip]` / `[no ci]` / `[skip actions]` /
-  `[actions skip]`), the tag-triggered build never fires and the release is a silent
-  no-op. The Release phase walks back to the newest non-skip commit.
-- **Confirm the branch name** with the user before creating it, and **confirm the
-  version number** before cutting a release tag.
-- Checks **warn, they don't block** — surface failures and let the user decide.
-- **Review the manifest before you commit an app, connector, or theme.** `lastUpdated`
-  stamps itself in the pre-commit hook, so the date is never the thing you forget
-  — but the date is a claim that the manifest is current, and only you can check
-  that it is. See the manifest review in the Deploy phase.
+- `--reset` — do none of the above. Instead, return to `main`, bring it up
+  to date, and clean out branches that are finished. See **Reset** at the
+  end of this file. Anything else after `deploy` is ignored.
 
-## How code reaches prod (two paths)
+## 0. Ground rules
 
-1. **Merge to `main` → `build-push-and-deploy.yml` (un-gated CD).** Fires on every
-   merged PR and rolls out immediately with no approval. ⚠️ It builds the **PR
-   branch head**, so merging a branch that is behind `main` reverts everything
-   merged in the interim (issue #85). The Deploy phase's stale-base guard is the
-   command-level defense until "require branches up to date" branch protection and
-   the upstream `mixactions` checkout fix land.
-2. **`vX.Y.Z` tag → `build-and-push.yml` → `deploy.yml` (gated `production`).** What
-   the Release phase uses. A tag build checks out the tagged commit (`github.sha`),
-   so it is **immune to the stale-head bug**, it pauses for a reviewer if the
-   `production` environment has one, and it leaves an **immutable version to roll
-   back to**. This is the safe promotion path.
+- Never commit or push to `main` directly. Every path below ends on a branch.
+- Never merge the PR, and never enable auto-merge. Merging into `main` is the
+  production deploy; that is the human's call.
+- Never use `--force`, `--no-verify`, `git add -A` of files you have not
+  looked at, or `git stash`. If you would need any of those, stop and say why.
+- Do not modify, format, or "tidy" the changes you are committing. This
+  action ships what is there. The two exceptions are the manifest review and
+  the `WHATS-NEW.md` entry in step 3, and both are confirmed with the user
+  before they are written.
+- Never run `npm run db:push` here. It targets the *linked hosted* project,
+  so on a feature branch it would push unreviewed schema straight at
+  production. Applying schema to production is a deploy step a human does
+  (README, "Deploying").
+- Every commit message ends with the attribution trailer this session was
+  given (the `Co-Authored-By: Claude …` line). If the session has none, omit it
+  rather than invent one.
 
-## Commit message discipline (drives versioning)
+## 1. Read the situation
 
-Every commit this command writes — and every one it asks the developer to write —
-follows Conventional Commits, so the Release phase can infer the version bump and
-assemble the changelog from history instead of guessing.
+Run, together:
 
-**Format:** `<type>(<scope>): <summary>`
+```bash
+git status --porcelain
+git branch --show-current
+git fetch origin main --quiet && git log --oneline origin/main..HEAD
+git rev-list --count HEAD..origin/main
+git diff --stat && git diff --cached --stat
+```
 
-- **type** — `feat` (new user-facing behavior), `fix` (bug fix), `ops` (infra /
-  deploy plumbing), or `refactor` / `perf` / `test` / `docs` / `chore` (no behavior
-  change / housekeeping). These mirror the branch-name prefixes.
-- **scope** — the app, connector, or theme slug the change lives in, or **`os`**
-  for anything platform-wide (outside `apps/`, `connectors/` and `themes/`: `src/`, `scripts/`,
-  `.github/`, `supabase/migrations/`, root config). Use `deps` for dependency
+If not on `main`, also find out whether the branch already has a PR:
+
+```bash
+gh pr list --head "$(git branch --show-current)" --state all --json number,state --jq '.[] | "#\(.number) \(.state)"'
+```
+
+(Skip if `gh` is not authenticated — treat the branch as having no PR.)
+
+Decide which case you are in:
+
+| Working tree | Branch | Case |
+| --- | --- | --- |
+| dirty | `main` | **A** — branch, commit, push, PR |
+| dirty | not `main`, no PR or a closed one | **B** — commit, push, PR |
+| dirty | not `main`, PR **open** | **B-open** — commit, push, update that PR |
+| dirty | not `main`, PR **merged** | **B-merged** — the branch is finished; see below |
+| clean, and `origin/main..HEAD` is non-empty | not `main`, no open PR | **C** — push, PR |
+| clean, and `origin/main..HEAD` is non-empty | not `main`, PR open | **Nothing to deploy** unless there are unpushed commits — then push and stop. |
+| clean, and `origin/main..HEAD` is empty | any | **Nothing to deploy.** Say so and stop. |
+| clean | `main` | **Nothing to deploy.** Say so and stop. |
+
+**B-merged** — the branch's PR has merged, so `origin/main` already contains
+its commits and the branch is dead. Do not commit onto it: the new PR would
+come from a branch that should be deleted. Instead carry the uncommitted
+work onto a fresh branch from `origin/main`. This is safe when every dirty
+file is identical on `HEAD` and `origin/main`; check with
+
+```bash
+git diff --quiet HEAD origin/main -- <each dirty path> && echo identical
+```
+
+If identical, the branch to create in step 5 is made with
+`git switch -c <name> origin/main` — git carries the working-tree changes
+across untouched — and the rest of the run is case A. If NOT identical
+(someone changed one of those files on `main` after the merge), stop and
+show the difference; merging that by hand is not this action's job.
+
+"Dirty" means `git status --porcelain` printed anything — untracked files
+count. Look at every untracked file before including it; if one is clearly
+not meant for the repo (a scratch file, a log, a local dump), leave it out and
+say so in the plan.
+
+If the branch is not `main` and the `rev-list --count` above is non-zero,
+`main` has moved on since the branch was cut. **Warn, don't block:** the
+Preview will not show what `main` looks like after the merge, and conflicts
+are cheaper to find here than in the PR. Offer `git merge origin/main`
+(never rebase a pushed branch) and continue once the user decides.
+
+If `git merge-base HEAD origin/main` fails — no common ancestor — stop and
+explain: the PR would carry unrelated history.
+
+## 2. Pre-flight
+
+Whenever there is uncommitted work (cases A, B, B-open, B-merged). These are
+the checks `ci.yml` will run on the PR, so failing them here is cheaper than
+failing them there. Run in this order and read each result:
+
+```bash
+npx tsx scripts/generate-project-registry.ts   # registry + theme contrast
+npm run typecheck
+npm run lint
+npm run verify:repository-url
+npm run build
+```
+
+Then, only when the relevant files changed:
+
+- `supabase/migrations/*.sql` changed → `npm run db:local` (applies to the
+  local Docker stack, which is what a pre-PR check should prove).
+- any `apps/*/migrations/*.sql` changed → `npm run migrate:apps`.
+
+If any of these reports **errors**, print them and stop. Nothing is
+committed. Warnings do not block; mention them in the plan.
+
+## 3. Plan the commits
+
+Whenever there is uncommitted work. Read the full diff — `git diff` plus the
+content of each untracked file — and group the hunks into logical changes. A
+logical change is something that would make sense as its own line in a
+changelog: "gate sign-in to superadmins", "add the Gmail connector", "rename
+the header link". It is NOT a file or a directory: one file can hold two
+changes, and one change usually spans several files. Prefer one commit per
+scope when the work spans unrelated areas, so the changelog stays legible.
+
+Write a commit message for each group in **Conventional Commits** form —
+look at `git log --format=%s -15` for the register:
+
+```
+<type>(<scope>): <summary>
+```
+
+- **type** — `feat` (new user-facing behavior), `fix`, `ops` (infra / deploy
+  plumbing), or `refactor` / `perf` / `test` / `docs` / `chore`. These mirror
+  the branch-name prefixes.
+- **scope** — the app, connector, or theme slug the change lives in, or
+  **`os`** for anything platform-wide (`src/`, `scripts/`, `.github/`,
+  `supabase/migrations/`, root config, `.claude/`). `deps` for dependency
   bumps.
-- **breaking change** — append `!` before the colon (`feat(<slug>)!:`) **and** add a
+- **breaking change** — `!` before the colon (`feat(os)!:`) **and** a
   `BREAKING CHANGE: <what breaks + how to migrate>` footer.
-- **summary** — imperative mood, ≤ ~70 chars, no trailing period.
+- **summary** — imperative mood, ≤ ~70 chars, no trailing period, specific
+  about the *what*. If a change needs explaining, a short body saying **why**,
+  wrapped at 72 columns.
 
-**How the type/scope maps to a version bump (0.x scheme):**
+The type and scope are what a future release derives its version bump and
+changelog from (see `docs/plans/20260921_0842-release-versioning.md`), so a
+mislabeled commit costs more later than it saves now.
 
-| Highest-ranking change since the last tag | Bump | Example |
-|---|---|---|
-| any breaking (`!` / `BREAKING CHANGE`), **or** any `os`-scoped / OS-path change | **minor** | `v0.1.3 → v0.2.0` |
-| everything else (`feat`/`fix`/… inside an app, connector, or theme, `docs`) | **patch** | `v0.1.3 → v0.1.4` |
+If everything belongs to one logical change, one commit is correct. Do not
+split for the sake of splitting.
 
-Major stays `0` while the platform is pre-1.0, so a breaking change bumps the minor.
+**Manifest review.** If a group touches files under an app, connector, or
+theme, the pre-commit hook will stamp that manifest's `lastUpdated`
+(preview with `npx tsx scripts/stamp-updated.ts --dry-run`). The date claims
+the manifest describes what exists today, and only you can check that.
+Read the code and compare:
 
-When the command commits, it writes the message in this form — inferring
-`type`/`scope` from the changed paths — and confirms the wording. Prefer **one commit
-per scope** when a branch spans unrelated areas, so the changelog stays legible.
-Always end with the required trailer on its own line:
+- `description` — does it describe what the thing does *now*? This is the
+  field most likely to have drifted, and the one users read.
+- `name` / `displayName` — still what people call it?
+- `icon` — a [Lucide](https://lucide.dev/icons/) name, lowercase and
+  hyphenated (`bar-chart`, not `BarChart`).
+- `authors` — the template ships `Your Name` / `you@example.com`; if you see
+  those, they were never filled in.
+- `connectors` — every connector the app actually calls, and nothing it
+  doesn't. A stale entry blocks registration until an admin configures a
+  connector the app never uses.
+- `widgets[].description` — shown in the widget catalog.
+
+Any correction goes in the plan as its own line, and is written only after
+the user confirms.
+
+**What's new.** If the work adds or changes developer-facing behavior — a
+`/mixos` action, a workflow change, a breaking change — draft a short
+`## <today's date>` entry for the top of `WHATS-NEW.md` (newest first) and
+put it in the plan; it joins the commit it describes. Skip for internal-only
+changes (refactors, an app or connector build with no platform-facing
+impact).
+
+If a branch is to be created (cases A and B-merged), also choose its name:
+`<type>/<slug>` where the type is `feat`, `fix`, or `ops` by the nature of
+the change, and the slug is short kebab-case derived from the changes —
+prefer the slug of a matching plan file (`docs/plans/*.md` or
+`{apps,connectors,themes}/*/plans/*.md`) when one exists. Example:
+`feat/deal-radar`. Check `git branch -a --list '*<slug>*'` and add a `-2`
+suffix if it exists.
+
+## 4. Show the plan and wait
+
+Print, then **stop and wait for a yes**:
 
 ```
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Branch: <name>  (new, from main)
+   — or —   Branch: <name>  (current)
+   — or —   Branch: <name>  (new, from origin/main — PR #<n> has merged)
+
+Behind origin/main by <n> commits — merging origin/main first.   (omit if 0, or if the user declined)
+
+Commits:
+  1. <type>(<scope>): <summary>
+       <file>, <file>, <file>
+  2. <type>(<scope>): <summary>
+       <file>
+
+Manifest: <path> — <field>: "<old>" → "<new>"     (omit if none)
+What's new: <one-line summary of the entry>        (omit if none)
+Left out: <untracked file> — <one-line reason>     (omit if none)
+
+Then: push to origin and open a PR against main.
+   — or, B-open —   Then: push to origin; PR #<n> is open, so its title and body get rewritten to cover every commit.
 ```
 
-## Phase detection
+Do not proceed on silence, on a question, or on a partial answer. If the
+user edits the plan (renames the branch, regroups, drops a file), apply the
+edit and show the plan again.
 
-Read git state and pick a phase:
+## 5. Execute
 
-- `git branch --show-current` and `git status --porcelain`.
-- If the arguments contain **`release`** → **Release phase** (must run from an
-  up-to-date `main`; the phase enforces that itself).
-- If the current branch is **`main`** (and the arguments say neither `deploy` nor
-  `release`) → **Branch phase**.
-- If on a **feature branch** (anything but `main`), or the arguments contain
-  **`deploy`** → **Deploy phase**.
-- Detached HEAD or an unexpected state → stop and explain; don't guess.
+Once confirmed, run through without further prompts.
 
----
+**Case A** — create the branch:
 
-## Branch phase — start work on a new branch
+```bash
+git switch -c <name>
+```
 
-1. **Base off the freshest `main`.** Run `git fetch origin main`. If local `main`
-   is behind `origin/main`, say so and offer to fast-forward it first
-   (`git merge --ff-only origin/main`) so the branch isn't based on stale code.
-   Any uncommitted changes in the working tree carry over to the new branch, so
-   they're safe.
-2. **Infer a branch name.** Prefer the slug of a matching plan file if one exists
-   for this work. Plans live in two places: **beside their subject**
-   (`apps/<slug>/plans/`, `connectors/<slug>/plans/`, `themes/<slug>/plans/`) for
-   work scoped to one app, connector, or theme, and in `docs/plans/` for platform
-   work. Search both — `ls docs/plans/*.md {apps,connectors,themes}/*/plans/*.md`
-   — and match against the changed paths. Choose the type prefix by the nature of
-   the change: `fix/` for a bug fix, `ops/` for infra (`.github/`, `vercel.json`,
-   `scripts/`), otherwise `feat/`. Kebab-case the rest (mirrors the
-   `docs/plans/README.md` slug convention). Example: `feat/deal-radar`.
-3. **Confirm before creating.** Show the proposed name and let the user accept or
-   edit it. Then create it: `git switch -c <name>` (this keeps any uncommitted
-   changes).
-4. Tell them the branch is ready — keep developing, and run **`/mixos deploy`** again
-   (or `/mixos deploy deploy`) when they're ready to open the PR.
+**Case B-merged** — create it from `origin/main` instead, which carries the
+uncommitted changes across:
 
----
+```bash
+git switch -c <name> origin/main
+```
 
-## Deploy phase — commit, push, open the PR
+**Whenever there is uncommitted work** — first write any manifest correction
+and the `WHATS-NEW.md` entry from the plan. Then make each commit in plan
+order. Stage precisely what the commit covers:
 
-1. **Guards.**
-   - Refuse if the current branch is `main`.
-   - **Stale-base guard (issue #85):** `git fetch origin main`, then
-     `git rev-list --count HEAD..origin/main`. If the branch is behind `origin/main`,
-     **warn prominently** — the merge-CD path builds this branch's *head*, so merging
-     it as-is reverts the commits added to `main` since your base. Offer to update
-     the branch (`git merge origin/main`, or rebase) and continue only once the user
-     decides. This is the command-level stand-in for "require branches up to date"
-     until that branch protection is enabled.
-2. **Run the MixOS verification suite** and capture pass/fail for each:
-   - `npx tsx scripts/generate-project-registry.ts` (registry)
-   - `npm run typecheck`
-   - `npx eslint <changed dirs>` (scope to the directories that changed)
-   - `npm run build` (also regenerates the registry)
-   - `npm run db:local` **only if** `supabase/migrations/*.sql` changed, and
-     `npm run migrate:apps` **only if** any `apps/*/migrations/*.sql` changed.
-     Both run against the local Docker stack, which is what a pre-PR check
-     should prove. Do **not** run `npm run db:push` here — it targets the
-     *linked hosted* project, so on a feature branch it would push unreviewed
-     schema straight at production. Pushing to a hosted database is a deploy
-     step, not a verification step (see the README's Deploying section).
+- Whole files: `git add <paths>`.
+- A file split across commits: `git add -p <path>` is interactive and will
+  not work here. Instead stage the file's hunks by writing a patch:
+  `git diff <path> > <tempdir>/<n>.patch` (use the session's scratch
+  directory), edit it down to the hunks for this commit, then
+  `git apply --cached <tempdir>/<n>.patch`. Verify with
+  `git diff --cached --stat` before committing.
 
-   If anything fails, summarize it clearly and **ask whether to open the PR anyway**
-   (warn, don't block).
-3. **Update the "what's new" notes.** If this branch adds or changes a
-   developer-facing behavior — a new `/mixos` action, a workflow change, or a
-   breaking change — add a short `## <today's date>` entry at the top of
-   `WHATS-NEW.md` (newest-first) so it surfaces after other developers pull. Skip
-   for internal-only changes (refactors, an app/connector build with no
-   platform-facing impact). Confirm the wording with the user.
-4. **Review the manifest, then commit.**
+Commit with a heredoc so the body, footer and trailer survive intact:
 
-   **First, if this branch touched an app, connector, or theme, check its manifest
-   is still true.** The commit is about to stamp `lastUpdated`, and that date claims
-   the manifest describes what exists today. Read the actual code and compare:
+```bash
+git commit -m "$(cat <<'MSG'
+<type>(<scope>): <summary>
 
-   - **`description`** — does it describe what the app does *now*? An app that
-     grew a forecasting widget but still says "tracks sales" is the common case.
-     This is the field most likely to have drifted, and the one users read.
-   - **`name`** / **`displayName`** — still what people call it?
-   - **`icon`** — a [Lucide](https://lucide.dev/icons/) name, lowercase and
-     hyphenated (`bar-chart`, not `BarChart`).
-   - **`authors`** — still accurate? The template ships `Your Name` /
-     `you@example.com`; if you see those, they were never filled in.
-   - **`connectors`** — every connector the app actually calls, and nothing it
-     doesn't. A stale entry blocks registration until an admin configures a
-     connector the app never uses.
-   - **`widgets[].description`** — shown in the widget catalog when someone is
-     deciding whether to add it.
+<body, if any>
 
-   Propose any changes and **confirm them with the user before writing**.
+BREAKING CHANGE: <if any>
 
-   **Then commit** any uncommitted changes (skip if the tree is already clean and
-   the branch has commits ahead of `origin/main`). Stage the work. Run
-   `npx tsx scripts/stamp-updated.ts --dry-run` first if you want to see which
-   manifests the commit will stamp; the pre-commit hook does the real stamping
-   and re-stages the manifests itself, so there is no separate publish step and
-   nothing extra to add. It stamps the *staged* manifest, so if you are holding
-   unstaged edits in an `app.json` the commit takes only the date and your edits
-   stay in the working tree — the manifest reading as modified afterwards is
-   expected, not a misfire. An `app.ts` manifest is warned about rather than
-   stamped — the script won't rewrite arbitrary TypeScript, so paste the line it
-   prints into the default export yourself and re-stage. Write the
-   message per **Commit message discipline** above (`<type>(<scope>): …`, plus a
-   `BREAKING CHANGE:` footer when applicable) so the eventual release can version
-   itself from history. If the branch already carries ad-hoc commits that don't
-   follow the convention, note it — the Release phase falls back to change-scope, but
-   a clean history makes the bump and changelog trustworthy. End the message with the
-   required trailer on its own line:
+Co-Authored-By: …
+MSG
+)"
+```
 
-   ```
-   Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
-   ```
-5. **Push:** `git push -u origin <branch>`.
-6. **Compose the PR body** (see template) from `git diff origin/main...HEAD` and the
-   branch's commit messages.
-7. **Open the PR:** `gh pr create --base main --head <branch> --title "<inferred title>" --body "<body>"`.
-   - If a PR for this branch **already exists**, the push above updated it — offer
-     to refresh its body with `gh pr edit <n> --body ...`.
-   - If **`gh` is missing or not authenticated** (`gh auth status` fails), don't
-     fail: print the compare URL
-     `https://github.com/MixOSWork/mixos/compare/main...<branch>?expand=1`
-     together with the full markdown body (ready to paste), and tell them to run
-     **`/mixos init`** to install/authenticate `gh`.
-8. **Stop.** Print the PR URL and say: *"Review and merge when you're ready —
-   merging into `main` triggers the production build-and-deploy. I won't merge for
-   you."*
+The pre-commit hook stamps `lastUpdated` on every manifest whose app,
+connector, or theme has a file in the commit, re-stages the manifest, and
+validates it. That is expected output, not a failure. It stamps the *staged*
+manifest, so if you are holding unstaged edits in a manifest the commit takes
+only the date and your edits stay in the working tree.
 
-### PR body template
+After the last commit, `git status --porcelain` must be empty apart from
+anything you deliberately left out. If it is not, stop and show what remains.
 
-Generate GitHub-flavored markdown with these sections:
+**All cases** — push:
 
-- **Summary** — what this change does and why (1–3 sentences).
-- **What changed** — grouped by scope, derived from the changed paths:
-  `app:<slug>` (files under `apps/<slug>/`), `connector:<slug>`
-  (`connectors/<slug>/`), `theme:<slug>` (`themes/<slug>/`), **OS** (anything under
-  `src/`, `scripts/`, `.github/`, `vercel.json`, root config, etc.), `migrations`,
-  `docs`.
-- **⚠️ OS change** — include this heads-up **only if** any changed file is outside
-  `apps/`, `connectors/` and `themes/`, excluding every build plan (`docs/plans/*.md` and any
-  `*/plans/*.md` co-located in an app, connector, or theme — a plan describes work,
-  it does not perform it):
-  note that Danger will label the PR `os-change` and it needs admin review before
-  merge (per `OS-UPDATES.md`).
-- **Migrations** — list any new `**/migrations/*.sql`; note they apply automatically
-  on deploy. Omit the section if there are none.
-- **Verification** — the pre-PR check results (✓/⚠ per check) plus any manual
-  testing that was done this session.
-- **Deploy note** — "Merging into `main` triggers `build-push-and-deploy` → prod
-  (un-gated). Don't merge until reviewed."
-- Footer (verbatim):
+```bash
+git push -u origin HEAD
+```
 
-  ```
-  🤖 Generated with [Claude Code](https://claude.com/claude-code)
-  ```
+## 6. Open the PR — or update the open one
 
----
+**Case B-open:** do not open a second PR. Rewrite the existing one so its
+title and body describe every commit on the branch, not just the new one —
+the reviewer reads the PR, not the commit list:
 
-## Release phase — cut a production version tag
+```bash
+gh pr edit <n> --title "<title>" --body "$(cat <<'BODY'
+<body>
+BODY
+)"
+```
 
-Promotes what's on `main` to prod through the **gated** tag path
-(`build-and-push.yml` → `deploy.yml`, `production` environment). Unlike merge-CD,
-a tag build checks out the tagged commit, so it is **immune to the stale-head bug**
-(issue #85) and leaves an **immutable `vX.Y.Z`** to roll back to. Trigger:
-the arguments contain **`release`**.
+Draft the body exactly as below, then print the PR URL and skip the rest
+of this step.
 
-1. **Be on an up-to-date `main`.** `git fetch origin main --tags`. Refuse unless the
-   checkout is `main` *and* level with `origin/main` (offer `git switch main` +
-   `git merge --ff-only origin/main`). The tag must capture exactly what integrated
-   on `main` — nothing local, nothing stale.
-2. **Pick the tag target — skip a CI-skip tip.** Start at `origin/main`'s tip. If its
-   message carries a CI-skip directive (`[skip ci]` / `[ci skip]` / `[no ci]` /
-   `[skip actions]` / `[actions skip]`), the tag-triggered build **won't fire** — a
-   silent no-op release. Walk back to the newest ancestor without such a directive
-   and tag that commit. Show the user the chosen commit and
-   `git diff --stat <target>..origin/main` so they see exactly what (if anything) is
-   left off.
-3. **Compute the next version from history.** Last tag:
-   `git describe --tags --abbrev=0` (parse `vMAJOR.MINOR.PATCH`). Classify the
-   commits since it — `git log <lasttag>..<target> --format='%s%n%b'` — by the
-   **Commit message discipline** rules: **minor** if any commit is breaking
-   (`!` / `BREAKING CHANGE`) or `os`-scoped, else **patch**. Cross-check against
-   `git diff --name-only <lasttag>..<target>`: if a path outside
-   `apps/`/`connectors/`/`themes/` changed (excluding build plans — `docs/plans/*.md`
-   and any `*/plans/*.md`) but no commit
-   was `os`-scoped, treat it as **minor** and flag the mislabeled commit. Show the
-   computed version, the commits that drove it, and **confirm before tagging** — a
-   hotfix or recovery may deliberately override to a patch, so let the user set the
-   final number.
-4. **Pre-flight the tag.** Refuse if it already exists locally (`git tag -l <v>`) or
-   on the remote (`git ls-remote --tags origin <v>`). The target is on `origin/main`
-   by construction, so ancestry is guaranteed.
+**Every other case:** draft the PR body first, from
+`git diff origin/main...HEAD` and the branch's commit messages. Audience:
+whoever reviews and merges — assume they have not been in this session.
 
-   Then run **`npm run verify:repository-url`** and refuse to tag if it fails.
-   `MIXOS_REPOSITORY_URL` decides which catalogue an install gets its checksums
-   from, so a local value that reached a committed file would make someone's
-   laptop authoritative for every install of this release. CI runs the same
-   check on every push, so this should never fire — which is exactly why it is
-   cheap to run here, at the last moment it can still be fixed with an edit
-   rather than a recut tag.
+```
+## Summary
 
-   Also confirm the tag build passes **`--build-arg MIXOS_RELEASE=<v>`** through
-   to the image (`Dockerfile` declares the `ARG`; the workflow supplies it). That
-   variable is what makes the running instance treat itself as a release and
-   ignore any repository override. **If the workflow does not set it, the runtime
-   lock is inert** — the other three layers still hold, but the deployed instance
-   would honour an override applied to its own environment. See
-   docs/security-architecture.md §31.
-5. **Cut an annotated tag** on the target commit:
-   `git tag -a <v> <target-sha> -m "<message>"`. Build the message from the commits
-   since the last tag, grouped by `type`/`scope` (a mini changelog); if step 2 walked
-   back off the tip, note which commit was tagged and why.
-6. **Confirm, then push — this is the deploy.** Pushing the tag fires the gated prod
-   rollout, so treat it like a merge: state plainly that `git push origin <v>` builds
-   the image and (once any `production`-env reviewer approves) rolls it out to prod,
-   and get an explicit go-ahead. Then `git push origin <v>`.
-7. **Watch the run and verify the rollout took the new image.**
-   - Find it: `gh run list --workflow=build-and-push.yml --limit 5` → the row for
-     `<v>`. If it never appears, the build was skipped — recheck step 2.
-   - If the `deploy` job pauses, tell the user to approve the `production`
-     environment in the GitHub UI (the tag path is gated by design).
-   - Watch to completion: `gh run watch <id> --exit-status`.
-   - From the `Verify rollout` step, read and report the live pod **image digest**.
-     If you recorded the pre-release digest (from the previous deploy run's
-     `Verify rollout` log), assert it **changed** — an unchanged digest means the
-     rollout didn't pick up the new image. A digest proves the image rolled, not that
-     the feature works, so remind the user to smoke-test.
-8. **Stop.** Report the tag, the target commit + version reasoning, the run URL, the
-   live digest, and the gate outcome (auto-rolled vs awaiting approval). If this
-   release changed a `/mixos` action or other developer-facing behavior, offer to
-   add a `WHATS-NEW.md` entry (as in the Deploy phase).
+<what this change does and why — 1–3 sentences, then one bullet per commit in plain language>
+
+## What changed
+
+<grouped by scope, derived from the changed paths: `app:<slug>`, `connector:<slug>`,
+`theme:<slug>`, **OS** (anything under src/, scripts/, .github/, .claude/, root config),
+`migrations`, `docs`>
+
+## ⚠️ OS change
+
+<only if any changed file is outside apps/, connectors/ and themes/, excluding build
+plans (docs/plans/*.md and any */plans/*.md — a plan describes work, it does not
+perform it): "Danger will label this PR `os-change`; it needs admin review before
+merge (OS-UPDATES.md)." Omit the section otherwise.>
+
+## Migrations
+
+<list any new **/migrations/*.sql. Note that they do NOT apply on deploy: after
+merging, a human runs `npm run db:push` (platform) and/or `npm run migrate:apps`
+(per-app) against production, per the README's "Deploying" section. Omit the
+section if there are none.>
+
+## Verify on the preview
+
+<2–4 concrete things to click or curl on the Vercel Preview URL, specific to these
+changes. Skip if there is nothing user-visible.>
+
+## Verification
+
+<the pre-flight results, ✓/⚠ per check, plus any manual testing done this session>
 
 ## Notes
 
-The arguments the dispatcher passed — everything after `deploy` in the invocation (`deploy`, `release`, and any notes).
+<anything the merger must know: a Vercel env var to set, a secret to add, a
+Supabase setting to flip. Omit the section if none.>
+
+Merging into `main` deploys Production on Vercel. Don't merge until reviewed.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+```
+
+Title: if one commit, its subject; otherwise a short line covering the set.
+
+Then check for the GitHub CLI:
+
+```bash
+gh auth status >/dev/null 2>&1 && echo ok
+```
+
+**If `ok`:**
+
+```bash
+gh pr create --base main --title "<title>" --body "$(cat <<'BODY'
+<body>
+BODY
+)"
+```
+
+Print the PR URL. Then say that Vercel will post a Preview URL on the PR
+within a few minutes, that `ci.yml` and Danger run against it, and that
+merging deploys Production.
+
+**If not `ok`** — the push already happened, so do not undo anything. Print:
+
+1. The compare link: `https://github.com/<owner>/<repo>/compare/main...<branch>?expand=1`
+   (read owner/repo from `git remote get-url origin`).
+2. The title and body you drafted, in a fenced block, ready to paste.
+3. One line: `gh auth login` makes this automatic next time (`/mixos init`
+   installs and authenticates it).
+
+## 7. Final message
+
+End with a short summary: branch, the commits (subjects only), the PR or
+compare URL, and anything that still needs a human (migrations to apply,
+secrets, Vercel settings). Nothing else.
+
+## When something fails midway
+
+- Pre-flight fails → nothing was touched; print the errors.
+- A commit fails (hook, empty stage, manifest validation) → show the error
+  and the current `git status`; do not retry blindly and do not skip to the
+  next commit.
+- Push is rejected → do not force. Show the error. The likely cause is the
+  branch already exists on origin with different history; suggest a new
+  branch name.
+- `gh pr create` fails after the push → fall through to the "not ok" path
+  above; the work is safe on origin.
+
+## Reset: `/mixos deploy --reset`
+
+For after a PR has merged. Gets the checkout back to a fresh `main` and
+removes the branches that are done. Nothing here touches `main`'s history
+or any branch with work that has not been merged.
+
+### R1. Refuse to run on a dirty tree
+
+```bash
+git status --porcelain
+```
+
+If it prints anything, stop and show it. Switching branches with
+uncommitted changes either fails or silently carries the changes to `main`;
+neither is what "reset" means. Suggest `/mixos deploy` (to ship them) or
+tell the user to stash or discard them by hand — this action never does
+either.
+
+### R2. Back to main, up to date
+
+```bash
+git switch main
+git pull --ff-only origin main
+git fetch --prune origin
+```
+
+`--ff-only` is deliberate: if `main` has diverged locally, stop and show
+`git log --oneline origin/main..main`. Local commits on `main` are a
+mistake this action must not paper over with a merge.
+
+`--prune` drops the remote-tracking refs for branches deleted on GitHub;
+that is what makes step R3 able to see them.
+
+### R3. Find the dead branches
+
+A local branch is dead when either:
+
+- its upstream is **gone** — deleted on GitHub:
+  `git branch -vv | grep ': gone]'`
+- or its PR has been **merged** but the remote branch was not deleted. This
+  is the common case here: the repository does not delete branches on merge.
+  For every other local branch except `main`, ask
+  `gh pr list --head <branch> --state merged --json number --jq length`; a
+  non-zero answer means merged. Skip this check if `gh auth status` fails,
+  and say so.
+
+Never include `main`.
+
+### R4. Show, then delete
+
+Print the list and what will happen to each:
+
+```
+Deleting:
+  <branch>   — PR #<n> merged, remote branch gone
+  <branch>   — PR #<n> merged; will also delete origin/<branch>
+
+Keeping:
+  <branch>   — no merged PR found                (omit if none)
+```
+
+If every branch to delete has a merged PR or a gone upstream, go ahead
+without waiting. If any branch is dead only because its upstream is gone
+and `gh` could not confirm a merged PR, **stop and wait for a yes** — that
+is the one case where the branch might hold unmerged work.
+
+Then:
+
+```bash
+git branch -D <branch>                      # -D, not -d: squash-merged branches look unmerged to git
+git push origin --delete <branch>           # only for the "merged but remote still there" case
+```
+
+If nothing is dead, say "Nothing to clean up" and stop.
+
+### R5. Final message
+
+Three lines: `main` is at `<short sha>` (`<subject>`), which branches were
+deleted, which were kept and why. Nothing else.

@@ -45,6 +45,7 @@ Current platform plans:
 | [`20260825_2153-theme-abstraction.md`](20260825_2153-theme-abstraction.md) | `themes/` as a first-class abstraction; ships `themes/mixos` as theme one |
 | [`20260826_1959-dark-mode-legibility.md`](20260826_1959-dark-mode-legibility.md) | Dark-mode legibility once `data-mode="dark"` became reachable: body ground/ink from tokens, the surface ladder, the palette fence extended to `src/` |
 | [`20260826_2041-single-palette-themes.md`](20260826_2041-single-palette-themes.md) | Collapses the theme/mode axes: one palette per theme, `mixos` light by default, `mixos-dark` as a sibling theme |
+| [`20260921_0842-release-versioning.md`](20260921_0842-release-versioning.md) | Version tags and `MIXOS_RELEASE` on Vercel via a release-PR flow; restores `/mixos deploy release` |
 
 ## File naming
 
