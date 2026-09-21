@@ -381,7 +381,7 @@ function main(): void {
 
   // A TS manifest is never rewritten: a bad edit to arbitrary TypeScript breaks
   // the build for everyone. Warn loudly and let the commit through — the same
-  // "checks warn, they don't block" stance /mixos deploy takes everywhere else.
+  // stance /mixos deploy takes toward a manifest it cannot safely edit.
   for (const target of manual) {
     console.warn(
       `\n${prefix} ${target.manifestRel} is a TypeScript manifest — not stamped.\n` +
