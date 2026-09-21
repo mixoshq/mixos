@@ -202,5 +202,5 @@ useful than a blank.
 ## Referenced by
 
 [`connectors/AGENTS.md`](../../connectors/AGENTS.md) ·
-[`/mix-connector`](../../.claude/commands/mix-connector.md) ·
+[`/mixos connector`](../../.claude/skills/mixos/actions/connector.md) ·
 [Architecture](architecture.md) · [Scopes](scopes.md)

@@ -1748,7 +1748,7 @@ gated on the way out by four layers:
 | Default | `DEFAULT_REPOSITORY_URL` | Everything else |
 
 **The runtime lock is inert until the tag build sets `MIXOS_RELEASE`.** The
-`Dockerfile` declares the `ARG` and the release phase of `/mix-deploy` says to
+`Dockerfile` declares the `ARG` and the release phase of `/mixos deploy` says to
 pass it, but `build-and-push.yml` is not in this repository yet — so today the
 first three layers are what actually hold, and a deployed instance would still
 honour an override applied to its own environment. Wiring

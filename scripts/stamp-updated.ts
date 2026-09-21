@@ -10,7 +10,7 @@
  *   npx tsx scripts/stamp-updated.ts --files a b  # stamp as if these paths changed
  *
  * `lastUpdated` means "this app/connector changed in this commit". It is written
- * by `.githooks/pre-commit` (and by `/mix-deploy`, which calls the same script so
+ * by `.githooks/pre-commit` (and by `/mixos deploy`, which calls the same script so
  * the stamp lands in the diff you review). It replaced `/mos-publish`, which made
  * the date mean "the author ran a command" — accurate, but only when someone
  * remembered to run it, which is the failure mode this removes.
@@ -381,7 +381,7 @@ function main(): void {
 
   // A TS manifest is never rewritten: a bad edit to arbitrary TypeScript breaks
   // the build for everyone. Warn loudly and let the commit through — the same
-  // "checks warn, they don't block" stance /mix-deploy takes everywhere else.
+  // "checks warn, they don't block" stance /mixos deploy takes everywhere else.
   for (const target of manual) {
     console.warn(
       `\n${prefix} ${target.manifestRel} is a TypeScript manifest — not stamped.\n` +

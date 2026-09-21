@@ -7,7 +7,7 @@
  * allowed to style.
  *
  * This file is the single source of truth read by the build-time validator
- * (scripts/theme-css.ts), the docs generator, and `/mix-theme`. Keeping one
+ * (scripts/theme-css.ts), the docs generator, and `/mixos theme`. Keeping one
  * list means the token set can never drift between what a theme is told to
  * declare, what the generator enforces, and what the UI actually consumes.
  *

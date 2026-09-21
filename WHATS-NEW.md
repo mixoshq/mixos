@@ -86,12 +86,12 @@ just pulled.
 ## 2026-08-28
 
 - **Themes are a first-class abstraction.** `themes/<slug>/` sits beside `apps/`
-  and `connectors/`, with its own manifest, guide and **`/mix-theme`** command.
+  and `connectors/`, with its own manifest, guide and **`/mixos theme`** command.
   A theme declares **exactly one palette**: light is what an install gets by
   default, and a dark look ships as a *separate installable theme*
   (`mixos-dark`) rather than a mode you switch inside the current one.
 
-- **`/mix-convert`** turns an existing application into a MixOS app under
+- **`/mixos convert`** turns an existing application into a MixOS app under
   `apps/`.
 
 - **Connectors carry their own setup guide.** `connector.json` gained a
@@ -208,7 +208,7 @@ just pulled.
   npm run migrate:apps  # per-app tables   → apps/*/migrations/
   ```
 
-  Full walkthrough in [README.md](README.md), or run `/mix-init` for a guided
+  Full walkthrough in [README.md](README.md), or run `/mixos init` for a guided
   setup.
 
 - **Publishing an app or connector.** *(Superseded 2026-08-24 — `/mos-publish`
