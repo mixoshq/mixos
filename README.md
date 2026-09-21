@@ -361,8 +361,9 @@ questions before it starts.
   builds the first slice.
 - **`/mixos connector`** — create or update a connector under `connectors/`.
 - **`/mixos theme`** — create or update a theme under `themes/`.
-- **`/mixos deploy`** — start a feature branch and, when you're ready, open the
-  pull request.
+- **`/mixos deploy`** — commit what you have in sensible commits, push, and
+  open the pull request (branching first if you are on `main`). `--reset`
+  brings you back to a fresh `main` after the PR merges.
 
 ## Authentication
 
@@ -416,8 +417,9 @@ them to yours.
 
 ## Developing
 
-Work from a feature branch; `/mixos deploy` creates it and opens the pull request
-(with a detailed description) when you're ready. It stops at opening the PR,
+Work from a feature branch; `/mixos deploy` creates one if you are still on
+`main`, commits your work, and opens the pull request (with a detailed
+description). It stops at opening the PR,
 since merging is what deploys to production. Without GitHub / `gh` access it
 hands you a ready-to-open PR link and body to paste.
 

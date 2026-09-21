@@ -1747,13 +1747,14 @@ gated on the way out by four layers:
 | Runtime lock | `repositoryBaseUrl()` | A release built or deployed with it set anyway |
 | Default | `DEFAULT_REPOSITORY_URL` | Everything else |
 
-**The runtime lock is inert until the tag build sets `MIXOS_RELEASE`.** The
-`Dockerfile` declares the `ARG` and the release phase of `/mixos deploy` says to
-pass it, but `build-and-push.yml` is not in this repository yet — so today the
-first three layers are what actually hold, and a deployed instance would still
-honour an override applied to its own environment. Wiring
-`--build-arg MIXOS_RELEASE=${{ github.ref_name }}` into that workflow is the
-step that closes it.
+**The runtime lock is inert until a production build sets `MIXOS_RELEASE`.**
+The `Dockerfile` declares the `ARG` for the image path, but this repository
+deploys on Vercel, where nothing sets the variable today — so the first three
+layers are what actually hold, and a deployed instance would still honour an
+override applied to its own environment. The step that closes it is
+[`docs/plans/20260921_0842-release-versioning.md`](plans/20260921_0842-release-versioning.md):
+`next.config.ts` derives `MIXOS_RELEASE` from `package.json` when
+`VERCEL_ENV` is `production`.
 
 Only the scanned files matter, and the list is explicit rather than a glob:
 `.env.docker`, `docker-compose.yml` and the two Dockerfiles. `.env.local` is
