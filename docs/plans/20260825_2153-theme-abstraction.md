@@ -30,7 +30,7 @@ This adds `themes/` as a third first-class abstraction alongside `apps/` and
 | Assets | Self-hosted fonts, logo/wordmark, favicon + PWA icons, preview thumbnail |
 | Contrast | Generator computes WCAG ratios for every declared pair; AA failure aborts the build |
 | Default | The brand-guidelines theme **replaces** today's navy/coral entirely |
-| Tooling | `/mix-theme` command + `themes/AGENTS.md` + `docs/themes/*` |
+| Tooling | `/mixos theme` command + `themes/AGENTS.md` + `docs/themes/*` |
 
 The one active theme means no cookie, no per-user preference table, and no
 favicon ambiguity — the favicon is simply the active theme's.
@@ -94,7 +94,7 @@ Single source of truth: the required token list, each token's role, and the
 contrast pairs to verify. The pairs are the ones already annotated by hand in
 `globals.css` (foreground-on-background, `*-foreground`-on-`*`, each `cat-n`
 as text on background). This file is what the generator, the docs page, and the
-`/mix-theme` command all read, so the token list can never drift between them.
+`/mixos theme` command all read, so the token list can never drift between them.
 
 ### 4. Surface classes (`.mix-*`)
 
@@ -171,7 +171,7 @@ not themeable.
 - `themes/AGENTS.md` — hard invariants, mirroring the other two guides.
 - `docs/themes/architecture.md`, `authoring.md`, `tokens.md` (generated token
   reference), `assets.md`, `contrast.md`.
-- `.claude/commands/mix-theme.md` — create / modify / review a theme.
+- `.claude/skills/mixos/actions/theme.md` — create / modify / review a theme.
 - Pointers added to root [`AGENTS.md`](../../AGENTS.md) and the two sibling guides.
 
 ## The MixOS theme (from the brand guidelines)

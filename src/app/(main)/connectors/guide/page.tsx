@@ -25,8 +25,8 @@ export default async function ConnectorGuidePage() {
           directory and can be shared across any app in the platform.
         </>
       }
-      command="/mix-connector"
-      usage="/mix-connector create my-connector optional notes"
+      command="/mixos connector"
+      usage="/mixos connector create my-connector optional notes"
       tabs={await loadConnectorGuideTabs()}
     />
   );

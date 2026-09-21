@@ -45,10 +45,10 @@ git clone <repo-url>
 cd mixos
 ```
 
-Then open it in VSCode and run **`/mix-init`** in Claude Code:
+Then open it in VSCode and run **`/mixos init`** in Claude Code:
 
 ```
-/mix-init
+/mixos init
 ```
 
 That skill is the setup. It surveys what your machine is missing, asks once
@@ -58,7 +58,7 @@ admin, and hands you a login for
 [http://localhost:3000](http://localhost:3000). Budget 5–15 minutes on a first
 run — most of it is Docker pulling images.
 
-From there, `/mix-help` explains how apps, connectors, and themes relate and
+From there, `/mixos help` explains how apps, connectors, and themes relate and
 recommends what to build first.
 
 The guided installer covers **macOS**. MixOS itself runs fine on Linux and on
@@ -90,8 +90,8 @@ hand are under [Prerequisites](#prerequisites) and
   to be worked on in. After installing, add these two extensions (Extensions
   view → search by ID, or run the `code` commands below):
   - **Anthropic.claude-code** — Claude Code, the assistant that drives the
-    guided skills (`/mix-init`, `/mix-help`, `/mix-app`, `/mix-connector`,
-    `/mix-theme`, `/mix-deploy`).
+    guided `/mixos` command (`/mixos init`, `/mixos help`, `/mixos app`,
+    `/mixos connector`, `/mixos theme`, `/mixos deploy`).
   - **esbenp.prettier-vscode** — Prettier, for consistent formatting.
 
   ```bash
@@ -102,7 +102,7 @@ hand are under [Prerequisites](#prerequisites) and
   (`code` on the command line requires the
   [VSCode shell command](https://code.visualstudio.com/docs/setup/mac#_launching-from-the-command-line);
   open VSCode and run **Shell Command: Install 'code' command in PATH** from the
-  Command Palette if it isn't available. `/mix-init` installs both extensions for
+  Command Palette if it isn't available. `/mixos init` installs both extensions for
   you automatically.)
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) — runs the
@@ -127,7 +127,7 @@ hand are under [Prerequisites](#prerequisites) and
 
 ## Manual setup
 
-This is what [`/mix-init`](#quick-start) does on your behalf. Follow it if you
+This is what [`/mixos init`](#quick-start) does on your behalf. Follow it if you
 aren't using Claude Code, or if you'd rather drive the steps yourself.
 
 1. Install Docker Desktop and start it once. The first launch shows a license
@@ -346,20 +346,22 @@ Deep dives live in [`docs/themes/`](docs/themes/): [architecture](docs/themes/ar
 
 ### The guided path
 
-If you're working with Claude Code in VSCode, the skills scaffold any of the
-three for you and read the right guide first:
+If you're working with Claude Code in VSCode, the `/mixos` command scaffolds any
+of the three for you and reads the right guide first. Run `/mixos` on its own for
+the list of actions; add `-q` to any action to have Claude ask clarifying
+questions before it starts.
 
-- **`/mix-help`** — new here or unsure what to build? It explains how apps,
+- **`/mixos help`** — new here or unsure what to build? It explains how apps,
   connectors, and themes relate, asks what you're trying to do, and recommends
   what to build and which docs to read.
-- **`/mix-app`** — create, update, or design-review an app under `apps/`.
-- **`/mix-convert`** — turn an existing application (a local folder, a git URL,
+- **`/mixos app`** — create, update, or design-review an app under `apps/`.
+- **`/mixos convert`** — turn an existing application (a local folder, a git URL,
   or code you've staged here) into a MixOS app. It inventories the original,
   writes a conversion plan to `apps/<slug>/plans/`, stops for your approval, then
   builds the first slice.
-- **`/mix-connector`** — create or update a connector under `connectors/`.
-- **`/mix-theme`** — create or update a theme under `themes/`.
-- **`/mix-deploy`** — start a feature branch and, when you're ready, open the
+- **`/mixos connector`** — create or update a connector under `connectors/`.
+- **`/mixos theme`** — create or update a theme under `themes/`.
+- **`/mixos deploy`** — start a feature branch and, when you're ready, open the
   pull request.
 
 ## Authentication
@@ -414,7 +416,7 @@ them to yours.
 
 ## Developing
 
-Work from a feature branch; `/mix-deploy` creates it and opens the pull request
+Work from a feature branch; `/mixos deploy` creates it and opens the pull request
 (with a detailed description) when you're ready. It stops at opening the PR,
 since merging is what deploys to production. Without GitHub / `gh` access it
 hands you a ready-to-open PR link and body to paste.

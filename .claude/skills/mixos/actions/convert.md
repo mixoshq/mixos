@@ -1,22 +1,11 @@
----
-description: Convert an existing application into a MixOS app under apps/
-argument-hint: <source-path|git-url|plan-path> [app-slug] [notes] [-q]
----
-
-## Clarify gate
-
-If $ARGUMENTS contains `-q` (anywhere), then before doing anything else:
-ask me 3-5 clarifying questions and stop. Do not read ahead, plan, or write
-code until I answer. Ignore the rest of this skill until then.
-
-Strip `-q` from the task description before acting on it.
+# /mixos convert
 
 You are converting an **existing, non-MixOS application** into a MixOS app under `apps/`.
 
 This is a two-phase command with a **hard stop between them**:
 
 - **Phase 1 — Analyze.** Inventory the source, map every piece onto a MixOS primitive, decide the app boundary, slice the work into phases, and write a build plan. **Then stop and wait for approval.** Write no app code in Phase 1.
-- **Phase 2 — Build.** Build **phase 1 of the slice only**, following [`/mix-app`](.claude/commands/mix-app.md) end to end, and close out the parity checklist.
+- **Phase 2 — Build.** Build **phase 1 of the slice only**, following [`/mixos app`](.claude/skills/mixos/actions/app.md) end to end, and close out the parity checklist.
 
 **If the first argument is a path to an existing conversion plan — `apps/<slug>/plans/*.md`, or a legacy `docs/plans/*.md` — skip Phase 1 and resume at [Phase 2](#phase-2--build-the-first-slice).** Re-read the plan in full first; it is the contract you agreed to. If the plan is still at the legacy `docs/plans/` path, move it to `apps/<slug>/plans/` as your first action so it sits beside the app you are about to build.
 
@@ -111,7 +100,7 @@ Universal translation table. Apply it row by row against the inventory:
 For each outbound integration in the inventory:
 
 1. **Look for an existing connector first.** `ls connectors/` and read the manifest of anything close. Reuse beats building.
-2. **If none exists**, record it in the plan as a **blocking dependency**, naming the service, the operations the app needs, and the credentials involved. **Do not build the connector inside `/mix-convert`** — tell the user to run `/mix-connector create <name>`. A connector is a shared, tenant-scoped, security-sensitive artifact; it deserves its own plan and its own review, not a side effect of an app conversion.
+2. **If none exists**, record it in the plan as a **blocking dependency**, naming the service, the operations the app needs, and the credentials involved. **Do not build the connector inside `/mixos convert`** — tell the user to run `/mixos connector create <name>`. A connector is a shared, tenant-scoped, security-sensitive artifact; it deserves its own plan and its own review, not a side effect of an app conversion.
 3. **If there is no credential involved**, it is not a connector — it is `context.http` plus an `egress` entry. Say which you chose and why.
 
 An integration in the "no connector yet" list means the conversion phase that depends on it **cannot be built**. Sequence the slice so phase 1 does not depend on a connector that does not exist.
@@ -170,7 +159,7 @@ Use alongside the universal table. These are the mappings that differ by source 
 
 **React / Next / Vue SPA + API.** The cleanest case, and the one where the temptation to paste is strongest — resist it: components come over as *layouts*, rewritten against the design system's primitives. Client routes → `pages/`; the API layer → `defineRoute` handlers; the fetch/axios wrapper → `createAppClient`; react-query/SWR/Redux → `useAppQuery` + `AsyncView`. A component that fetches its own data and could stand alone on a dashboard is a **widget**, not a page. Watch for auth logic embedded in components (`{user.isAdmin && ...}`) — that becomes a fail-closed capability context, and the *route* enforces the role independently.
 
-**Server-rendered monolith (Rails / Django / Laravel / Express+templates).** Controllers → routes; models → migrations + `context.db` queries; views → `pages/` (server pages calling `callAppRoute`); helpers/services → `lib/server/`; workers (Sidekiq/Celery/Resque) → `jobs/` or `sync/`; `before_action`/middleware → the route's declared `auth` and `roles`. Two traps: an ORM with lazy loading hides N+1s that were tolerable in-process and are not tolerable through a connector — see [connector-call discipline](.claude/commands/mix-app.md#connector-call-discipline-widgets--routes); and fat models often hide business rules that no controller mentions — read the model callbacks, not just the actions.
+**Server-rendered monolith (Rails / Django / Laravel / Express+templates).** Controllers → routes; models → migrations + `context.db` queries; views → `pages/` (server pages calling `callAppRoute`); helpers/services → `lib/server/`; workers (Sidekiq/Celery/Resque) → `jobs/` or `sync/`; `before_action`/middleware → the route's declared `auth` and `roles`. Two traps: an ORM with lazy loading hides N+1s that were tolerable in-process and are not tolerable through a connector — see [connector-call discipline](.claude/skills/mixos/actions/app.md#connector-call-discipline-widgets--routes); and fat models often hide business rules that no controller mentions — read the model callbacks, not just the actions.
 
 **Low-code / internal tools (Retool, Airtable, Streamlit, Apps Script, Zapier).** Usually a data model + a few screens + a sync, wearing a lot of vendor scaffolding. The vendor's data store → scoped tables; its scheduled refresh → `sync[]`; its connections → connectors; its query/transform blocks → route handlers. Expect **undocumented business logic in formulas and filters** — read every one, since it is often the only place a rule is written down. Expect no real role model: derive roles from who the user says uses it, and ask.
 
@@ -180,7 +169,7 @@ Use alongside the universal table. These are the mappings that differ by source 
 
 ## Phase 2 — Build the first slice
 
-Approved. Now follow [`/mix-app`](.claude/commands/mix-app.md) — every rule in it applies, including all of [apps/AGENTS.md](apps/AGENTS.md). Conversion-specific order of operations:
+Approved. Now follow [`/mixos app`](.claude/skills/mixos/actions/app.md) — every rule in it applies, including all of [apps/AGENTS.md](apps/AGENTS.md). Conversion-specific order of operations:
 
 1. **`app.json` first.** Copy [`apps/_template/`](apps/_template/) as the starting shape. Folder name is the slug — no `slug` field, no `hasPages`, no `hookCounts`, no hand-written `lastUpdated`. `icon` is a lowercase-hyphenated Lucide name.
 2. **Migrations next**, then `npm run migrate:apps`. Get the schema right before anything reads from it.
@@ -195,7 +184,7 @@ Delete any legacy source you staged inside the repo before reporting done.
 
 ## Verify
 
-Everything in [`/mix-app`'s verification](.claude/commands/mix-app.md#verify-before-reporting-done) — registry generation, `npm run typecheck`, migrations, the smoke test for connector-backed routes, a real browser pass on every surface you built, a double tick for any schedule or sync — **plus the parity audit**:
+Everything in [`/mixos app`'s verification](.claude/skills/mixos/actions/app.md#verify-before-reporting-done) — registry generation, `npm run typecheck`, migrations, the smoke test for connector-backed routes, a real browser pass on every surface you built, a double tick for any schedule or sync — **plus the parity audit**:
 
 1. **Every inventory row has a terminal status.** `done`, `deferred: <reason>`, or `dropped: <reason>`. No blanks, no `todo` left in a shipped phase. A row you cannot account for means the inventory was wrong, which means go back and fix the inventory.
 2. **Walk the phase-1 rows against the running app.** For each `done` row, exercise that behaviour in the browser and confirm it matches what the source did. Reading the code you just wrote is not verification.
@@ -212,4 +201,4 @@ Close with: the app slug and where it lives · phase-1 rows done / deferred / dr
 
 ## User request
 
-$ARGUMENTS
+The arguments the dispatcher passed — everything after `convert` in the invocation.

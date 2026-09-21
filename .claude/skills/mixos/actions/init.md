@@ -1,7 +1,4 @@
----
-description: Guided first-time local setup of MixOS on your machine
-argument-hint: [notes]
----
+# /mixos init
 
 You are installing MixOS on someone's machine and booting it for the first
 time. Assume **macOS**, **Claude running in VSCode**, and that the person may not
@@ -23,8 +20,8 @@ Run `uname -s`. If it is not `Darwin`, stop and say so plainly:
 
 > This guided installer only covers macOS. MixOS runs fine on Linux and on Windows
 > via WSL2, but the install steps differ enough that guessing them would waste
-> your time. The manual path is in [README.md](../../README.md) and
-> [docs/local-docker.md](../../docs/local-docker.md) — everything after
+> your time. The manual path is in [README.md](../../../../README.md) and
+> [docs/local-docker.md](../../../../docs/local-docker.md) — everything after
 > "install Docker Desktop and Node 22" is identical on every platform.
 
 Then stop. Do not attempt a Linux or Windows install.
@@ -53,7 +50,7 @@ If all three are true, don't re-run setup. Tell them:
 
 > MixOS is already set up. Run `npm run dev:docker` and open
 > http://localhost:3000. If you'd rather figure out what to build, run
-> `/mix-help`.
+> `/mixos help`.
 
 Then stop. If only some are true, continue — the steps below are all safe to
 re-run.
@@ -73,7 +70,7 @@ complete list in Step 2 instead of six separate prompts.
 | Docker daemon | `docker info` | Bare, and read the **exit code**. `docker info --format '{{.ServerVersion}}'` exits 0 with empty output when the daemon is down, so it reports dead as healthy. |
 | VSCode CLI | `code --version` | If missing: VSCode → Command Palette (`Cmd+Shift+P`) → **Shell Command: Install 'code' command in PATH**, then retry. |
 | Extensions | `code --list-extensions` | Looking for `Anthropic.claude-code` and `esbenp.prettier-vscode`. |
-| GitHub CLI (optional) | `gh --version` | Not needed to boot MixOS. `/mix-deploy` uses it to open pull requests, and falls back to a paste-ready link without it. |
+| GitHub CLI (optional) | `gh --version` | Not needed to boot MixOS. `/mixos deploy` uses it to open pull requests, and falls back to a paste-ready link without it. |
 
 Also check that ports **3000, 54321, 54322, and 54323** are free:
 
@@ -344,7 +341,7 @@ curl -s -o /dev/null -w '%{http_code}\n' http://localhost:3000/api/health/ready 
 
 A **200** means the app reached Postgres. A **503** means it started but can't
 query — point at
-[docs/local-docker.md](../../docs/local-docker.md#troubleshooting) rather than
+[docs/local-docker.md](../../../../docs/local-docker.md#troubleshooting) rather than
 guessing. **000** means nothing is listening on 3000 at all: curl also exits 7
 there, which is what the `|| true` absorbs so the case reports itself as a
 number instead of looking like a broken command — check
@@ -359,7 +356,7 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
 ## Step 6 — Hand off
 
 1. Read `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` out of
-   [`.env.docker`](../../.env.docker) and print them. Those are the credentials
+   [`.env.docker`](../../../../.env.docker) and print them. Those are the credentials
    the seeded admin was created with — do not invent values, and do not ask the
    person to choose any.
 2. Tell them to open **http://localhost:3000** and log in.
@@ -373,11 +370,11 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
    > "Welcome to the real world. It sucks! You're gonna love it!"
 
 4. Then orient them, briefly:
-   - **Not sure what to build?** Run **`/mix-help`** — it explains how apps and
+   - **Not sure what to build?** Run **`/mixos help`** — it explains how apps and
      connectors relate and recommends what to build.
-   - **`/mix-app`** builds something under `apps/`; **`/mix-connector`** builds
-     an integration under `connectors/`; **`/mix-theme`** changes how the whole
-     install looks, under `themes/`; **`/mix-deploy`** makes the branch and
+   - **`/mixos app`** builds something under `apps/`; **`/mixos connector`** builds
+     an integration under `connectors/`; **`/mixos theme`** changes how the whole
+     install looks, under `themes/`; **`/mixos deploy`** makes the branch and
      opens the pull request when you're ready. Never commit straight to `main`.
    - **Your edits appear on save; brand-new apps, connectors and themes do not.** The
      container runs `next dev` over your working tree, so editing a page, a
@@ -386,8 +383,8 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
      `connectors/` and `themes/` are scanned once at container start by the
      `predev` hook, so a **newly created** app, connector, or theme stays
      invisible until you run `npm run registry`. That writes `src/generated/`,
-     which then hot-reloads like any other file. `/mix-app`, `/mix-connector`
-     and `/mix-theme` already run the generator as their first verification
+     which then hot-reloads like any other file. `/mixos app`, `/mixos connector`
+     and `/mixos theme` already run the generator as their first verification
      step, so this mostly bites when you add a directory by hand.
    - **Everyday commands:** `npm run dev:docker` to start — it stays in the
      foreground streaming logs, and Ctrl-C ends the session by stopping the app
@@ -432,7 +429,7 @@ npm run keys:check
 ```
 
 The generator enumerates the inventory in
-[`src/lib/env/keys.ts`](../../src/lib/env/keys.ts), so it cannot fall behind when
+[`src/lib/env/keys.ts`](../../../../src/lib/env/keys.ts), so it cannot fall behind when
 a key is added. Each printed key carries a comment saying what rotating it costs.
 
 **Do not point two of them at the same value**, and do not derive one from
@@ -455,7 +452,9 @@ token, every app API key and every unlock cookie simultaneously.
   override; needing it should feel like a decision.
 - **If they ask about running without Docker:** MixOS also runs with Node on the
   host against a hosted Supabase project — see the "Alternative: hosted
-  Supabase" section of [README.md](../../README.md). Don't offer this
+  Supabase" section of [README.md](../../../../README.md). Don't offer this
   unprompted; it is more setup, not less.
 
-$ARGUMENTS
+## Notes
+
+The arguments the dispatcher passed — everything after `init` in the invocation. Usually empty.

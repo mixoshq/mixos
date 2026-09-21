@@ -24,8 +24,8 @@ export default async function ThemeGuidePage() {
           against WCAG AA before one can be installed.
         </>
       }
-      command="/mix-theme"
-      usage="/mix-theme create my-theme optional brand book path or notes"
+      command="/mixos theme"
+      usage="/mixos theme create my-theme optional brand book path or notes"
       tabs={await loadThemeGuideTabs()}
     />
   );

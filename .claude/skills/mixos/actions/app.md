@@ -1,15 +1,4 @@
----
-description: Create, update, or design-review an app under apps/
-argument-hint: <create|update|review> <app-slug> [notes] [-q]
----
-
-## Clarify gate
-
-If $ARGUMENTS contains `-q` (anywhere), then before doing anything else:
-ask me 3-5 clarifying questions and stop. Do not read ahead, plan, or write
-code until I answer. Ignore the rest of this skill until then.
-
-Strip `-q` from the task description before acting on it.
+# /mixos app
 
 You are creating or modifying an app under `apps/`.
 
@@ -117,7 +106,7 @@ If the static-analysis warning section flags a route as using a connector "witho
 
 ## Review mode (design & UX audit)
 
-Triggered by `/mix-app review <app-slug> [notes]`. The goal is to find where an existing app
+Triggered by `/mixos app review <app-slug> [notes]`. The goal is to find where an existing app
 falls short of the design system and say so precisely — **not** to redesign it. Report first,
 fix second, and only fix what the user picks.
 
@@ -196,4 +185,4 @@ isn't done until you've seen it.
 
 ## User request
 
-$ARGUMENTS
+The arguments the dispatcher passed — everything after `app` in the invocation.

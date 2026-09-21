@@ -227,7 +227,7 @@ const eslintConfig = defineConfig([
   //
   // KNOWN LIMITATION: this reads string literals and template chunks, so it
   // cannot see a class assembled at runtime (`` `text-${tone}-600` ``). It
-  // catches the common case; `/mix-app review <slug>` covers the rest by
+  // catches the common case; `/mixos app review <slug>` covers the rest by
   // reading the code.
   //
   // See docs/apps/ux.md and apps/AGENTS.md invariant 22.

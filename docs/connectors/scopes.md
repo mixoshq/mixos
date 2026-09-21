@@ -155,5 +155,5 @@ report a dozen failures on a perfectly healthy connector.
 ## Referenced by
 
 [`connectors/AGENTS.md`](../../connectors/AGENTS.md) ·
-[`/mix-connector`](../../.claude/commands/mix-connector.md) ·
+[`/mixos connector`](../../.claude/skills/mixos/actions/connector.md) ·
 [Registry UX](registry-ux.md) · [Credentials](credentials.md)
