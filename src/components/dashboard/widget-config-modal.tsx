@@ -201,7 +201,6 @@ export default function WidgetConfigModal({
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div
-        data-tour="widget-config-modal"
         className={cn(
           "mix-modal",
           CARD_SURFACE,
@@ -256,7 +255,6 @@ export default function WidgetConfigModal({
               </button>
               <button
                 type="submit"
-                data-tour="widget-config-submit"
                 className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
               >
                 {submitLabel}
@@ -321,7 +319,6 @@ function OrderedMultiselect({
             {selected.map((value, i) => (
               <li
                 key={`${fieldKey}-${value}`}
-                data-tour="widget-config-selected-item"
                 {...getItemProps(i)}
                 className={`flex items-center gap-2 rounded px-1.5 py-1 text-sm ${
                   dragOverIndex === i && dragIndex !== null && dragIndex !== i

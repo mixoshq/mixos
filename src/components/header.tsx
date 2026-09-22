@@ -91,11 +91,14 @@ export default function Header({ logo }: { logo?: string | null }) {
   }, [dashMenu]);
 
   return (
-    <header className="mix-menubar flex h-10 shrink-0 items-center justify-between border-b border-border bg-brand px-4">
+    <header
+      data-tour="menu-bar"
+      className="mix-menubar flex h-10 shrink-0 items-center justify-between border-b border-border bg-brand px-4">
       <div className="flex min-w-0 flex-1 items-center gap-4">
         {/* The bar is only h-10, so the mark and wordmark run leading-none to fit. */}
         <Link
           href="/"
+          data-tour="menu-bar-logo"
           className="flex shrink-0 items-center gap-2 leading-none"
         >
           {logo && (
@@ -116,7 +119,6 @@ export default function Header({ logo }: { logo?: string | null }) {
         <Link
           href="/"
           title="Dashboard"
-          data-tour="dashboard-link"
           onContextMenu={(e) => {
             e.preventDefault();
             setDashMenu({ x: e.clientX, y: e.clientY });
@@ -134,7 +136,6 @@ export default function Header({ logo }: { logo?: string | null }) {
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setMenuOpen(!menuOpen)}
-            data-tour="settings-menu"
             className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-foreground/10"
           >
             {status === "authenticated" && user && (

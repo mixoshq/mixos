@@ -11,6 +11,10 @@ import {
 } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
 
+/**
+ * When this user finished (or skipped) the welcome tour, or null if they have
+ * not. Null is what makes the tour play; see `docs/plans/*-welcome-tour.md`.
+ */
 export async function getOnboardingCompletedAt(): Promise<string | null> {
   const session = await requireReadOnlySession();
   const supabase = createServiceClient();
@@ -29,7 +33,7 @@ export async function markOnboardingComplete(): Promise<void> {
     .from("users")
     .update({ onboarding_completed_at: new Date().toISOString() })
     .eq("id", session.user.id);
-  revalidatePath("/");
+  revalidatePath("/", "layout");
 }
 
 export async function resetOnboarding(): Promise<void> {
@@ -39,5 +43,5 @@ export async function resetOnboarding(): Promise<void> {
     .from("users")
     .update({ onboarding_completed_at: null })
     .eq("id", session.user.id);
-  revalidatePath("/");
+  revalidatePath("/", "layout");
 }

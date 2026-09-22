@@ -8,6 +8,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
+import { docsUrl } from "@/lib/docs";
 import { getAppOrigin } from "@/lib/env/origin";
 import { platformKey } from "@/lib/env/keys";
 
@@ -114,7 +115,7 @@ export function protectedResourceMetadata() {
     scopes_supported: [MCP_SCOPE],
     bearer_methods_supported: ["header"],
     resource_name: "MixOS",
-    resource_documentation: `${origin}/apps/guide`,
+    resource_documentation: docsUrl("reference/apps/mcp"),
   };
 }
 
@@ -134,7 +135,7 @@ export function authorizationServerMetadata() {
     token_endpoint_auth_methods_supported: ["none"],
     code_challenge_methods_supported: ["S256"],
     revocation_endpoint_auth_methods_supported: ["none"],
-    service_documentation: `${origin}/apps/guide`,
+    service_documentation: docsUrl("reference/apps/mcp"),
   };
 }
 

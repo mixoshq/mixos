@@ -64,7 +64,6 @@ const AppsMoreMenu = forwardRef<HTMLDivElement, Props>(function AppsMoreMenu(
             key={app.slug}
             href={`/apps/${app.slug}`}
             onClick={onItemClick}
-            data-tour-app-nav={app.slug}
             {...getItemProps(globalIndex)}
             className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent ${
               isActive
