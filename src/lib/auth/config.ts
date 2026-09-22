@@ -59,11 +59,9 @@ const credentialsProvider = Credentials({
  */
 export async function buildAuthOptions(): Promise<NextAuthConfig> {
   // Cookies are left at Auth.js defaults: SameSite=Lax, Secure on HTTPS, and
-  // the `__Secure-` name prefix applied automatically there. They used to be
-  // forced to SameSite=None + Partitioned (CHIPS) so the app could be iframed
-  // by a Chrome new-tab extension; that extension is gone, and Lax is the
-  // stricter, correct default with no third-party embedder. src/proxy.ts
-  // already recognises both the plain and `__Secure-` cookie names.
+  // the `__Secure-` name prefix applied automatically there. Nothing embeds
+  // MixOS from another origin, so Lax is the stricter, correct default.
+  // src/proxy.ts already recognises both the plain and `__Secure-` cookie names.
   return {
     session: { strategy: "jwt" },
     trustHost: true,

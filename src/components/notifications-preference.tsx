@@ -84,8 +84,8 @@ export default function NotificationsPreference() {
         Notifications
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        Get browser notifications from MixOS apps (e.g. deal wins, lunch
-        arrivals) even when no MixOS tab is focused. This applies to this
+        Get browser notifications from MixOS apps (e.g. new messages, warnings, 
+        or new content) even when no MixOS tab is focused. This applies to this
         browser on this device.
       </p>
 

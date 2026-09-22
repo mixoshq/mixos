@@ -270,6 +270,7 @@ export default function AppsDropdown() {
         <button
           ref={appsBtnRef}
           onClick={() => setDropdownOpen(!dropdownOpen)}
+          data-tour="apps-menu"
           className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-foreground/10"
         >
           <LayoutGrid className="h-4 w-4" />
@@ -293,7 +294,6 @@ export default function AppsDropdown() {
                     <Link
                       href={`/apps/${app.slug}`}
                       onClick={() => setDropdownOpen(false)}
-                      data-tour-app-nav={app.slug}
                       className={`flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-sm hover:bg-accent ${
                         isActive
                           ? "bg-accent font-medium text-foreground"
@@ -399,7 +399,6 @@ export default function AppsDropdown() {
               key={app.slug}
               href={`/apps/${app.slug}`}
               title={iconOnly ? undefined : app.name}
-              data-tour-app-nav={app.slug}
               {...getItemProps(i)}
               className={`${itemClass} ${itemColors(isActive)} ${
                 isDropTarget ? "ring-1 ring-brand-foreground/40" : ""

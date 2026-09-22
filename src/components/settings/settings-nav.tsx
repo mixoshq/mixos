@@ -62,7 +62,6 @@ export function NavGroup({
               // `aria-current` is what tells a screen reader which page this is;
               // the fill only tells someone who can see it.
               aria-current={isActive ? "page" : undefined}
-              data-tour={section.dataTour}
               className={`flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
                 isActive
                   ? "bg-brand font-medium text-brand-foreground"

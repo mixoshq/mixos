@@ -5,11 +5,9 @@
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { ensureUser, getUserApps } from "@/lib/apps/access";
 import { getDashboard } from "@/lib/dashboard/actions";
-import { getOnboardingCompletedAt } from "@/lib/onboarding/actions";
 import { appRegistry } from "@/generated/app-registry";
 import { hooks } from "@/lib/hooks";
 import DashboardGrid from "@/components/dashboard/grid";
-import WelcomeModal from "@/components/onboarding/welcome-modal";
 
 export default async function DashboardPage() {
   const session = await requireReadOnlySession();
@@ -20,15 +18,7 @@ export default async function DashboardPage() {
   // Only active apps' hooks will fire
   hooks.setActiveApps(enabledSlugs);
 
-  const [{ layout, widgets }, onboardingCompletedAt] = await Promise.all([
-    getDashboard(),
-    getOnboardingCompletedAt(),
-  ]);
-
-  const showWelcome =
-    onboardingCompletedAt === null &&
-    enabledSlugs.length === 0 &&
-    widgets.length === 0;
+  const { layout, widgets } = await getDashboard();
 
   return (
     <div className="h-full p-4">
@@ -37,7 +27,6 @@ export default async function DashboardPage() {
         widgets={widgets}
         availableApps={enabledApps}
       />
-      {showWelcome && <WelcomeModal />}
     </div>
   );
 }

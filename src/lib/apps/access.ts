@@ -64,7 +64,9 @@ export async function setUserAppRole(
  * Comma-separated, e.g. "mysite.com,example.com".
  */
 const ALLOWED_DOMAINS = process.env.ALLOWED_EMAIL_DOMAINS
-  ? process.env.ALLOWED_EMAIL_DOMAINS.split(",").map((d) => d.trim().toLowerCase())
+  ? process.env.ALLOWED_EMAIL_DOMAINS.split(",").map((d) =>
+      d.trim().toLowerCase(),
+    )
   : null;
 
 /**
@@ -103,13 +105,41 @@ export async function ensureUser(args: {
         display_name: args.name,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "email" }
+      { onConflict: "email" },
     )
-    .select("id")
+    .select("id, onboarding_completed_at")
     .single();
 
   if (error) throw new Error(`Failed to ensure user: ${error.message}`);
+
+  // A first sign-in starts with every `global` app installed, so the welcome
+  // tour has a widget to add and a new dashboard is not a blank page. "First
+  // sign-in" is read off the tour: until it is finished or skipped, the
+  // install is re-asserted on each visit (idempotent, one upsert), which is
+  // what makes it hold for users seeded outside this function — the first
+  // admin — and for a session that races itself. Afterwards it is theirs to
+  // uninstall like any other app.
+  if (data.onboarding_completed_at === null) {
+    await installGlobalApps(supabase, data.id);
+  }
   return data.id;
+}
+
+async function installGlobalApps(
+  supabase: ReturnType<typeof createServiceClient>,
+  userId: string,
+): Promise<void> {
+  const slugs = getGlobalAppSlugs();
+  if (slugs.length === 0) return;
+  const { error } = await supabase.from("user_apps").upsert(
+    slugs.map((app_slug, position) => ({
+      user_id: userId,
+      app_slug,
+      position,
+    })),
+    { onConflict: "user_id,app_slug", ignoreDuplicates: true },
+  );
+  if (error) throw new Error(`Failed to install global apps: ${error.message}`);
 }
 
 export async function getUserApps(userId: string): Promise<string[]> {
@@ -157,7 +187,7 @@ export async function hasAppGrant(
 
 export async function hasAppAccess(
   userId: string,
-  appSlug: string
+  appSlug: string,
 ): Promise<boolean> {
   const supabase = createServiceClient();
   const { data } = await supabase

@@ -16,6 +16,12 @@ import { cn } from "@/lib/utils";
 
 interface WidgetCatalogProps {
   apps: AppManifest[];
+  /**
+   * Dim the page behind the dialog. Default true. The welcome tour turns it
+   * off: it is already spotlighting one card in here, and a second fade
+   * underneath it reads as the page being broken rather than focused.
+   */
+  backdrop?: boolean;
   onClose: () => void;
   onWidgetAdded: (widget: DashboardWidget, layoutItem: LayoutItem) => void;
 }
@@ -27,6 +33,7 @@ type FlatWidget = {
 
 export default function WidgetCatalog({
   apps,
+  backdrop = true,
   onClose,
   onWidgetAdded,
 }: WidgetCatalogProps) {
@@ -110,7 +117,12 @@ export default function WidgetCatalog({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div
+        className={cn(
+          "fixed inset-0 z-50 flex items-center justify-center",
+          backdrop && "bg-black/50",
+        )}
+      >
         <div
           className={cn(
             "mix-modal",
@@ -242,7 +254,7 @@ function WidgetCard({
 }) {
   return (
     <div
-      data-tour-widget={app.slug}
+      data-tour={`widget-${app.slug}`}
       className="flex flex-col gap-3 rounded-lg border border-border p-4"
     >
       <div className="flex items-start gap-3">
