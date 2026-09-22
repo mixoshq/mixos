@@ -7,8 +7,11 @@ import { DashboardEditProvider } from "@/components/dashboard/edit-mode-context"
 import { PreferencesProvider } from "@/components/preferences-context";
 import HeaderShell from "@/components/header-shell";
 import { getActiveTheme } from "@/lib/themes/active";
-import OnboardingTour from "@/components/onboarding/onboarding-tour";
-import CongratulationsModal from "@/components/onboarding/congratulations-modal";
+import { getOnboardingCompletedAt } from "@/lib/onboarding/actions";
+import { TourProvider } from "@/components/onboarding/tour-context";
+import WelcomeTour from "@/components/onboarding/welcome-tour";
+import Guide from "@/components/onboarding/guide";
+import Confetti from "@/components/onboarding/confetti";
 import RegisterServiceWorker from "@/components/push/register-sw";
 import OfflineOverlay from "@/components/offline-overlay";
 
@@ -31,24 +34,30 @@ export default async function MainLayout({
 }) {
   // Resolved on the server: the menu bar is a client component, and sniffing
   // the theme there would either flash the wrong mark or mismatch on hydration.
-  const { theme } = await getActiveTheme();
-  const logo = theme.assets.logo ? `${theme.assetBase}/${theme.assets.logo}` : null;
+  const [{ theme }, onboardingCompletedAt] = await Promise.all([
+    getActiveTheme(),
+    getOnboardingCompletedAt(),
+  ]);
+  const logo = theme.assets.logo
+    ? `${theme.assetBase}/${theme.assets.logo}`
+    : null;
 
   return (
     <AuthProvider>
       <PreferencesProvider>
-        <DashboardEditProvider>
-          <div className="flex h-screen flex-col">
-            <HeaderShell logo={logo} />
-            <main className="flex-1 overflow-auto bg-muted">
-              {children}
-            </main>
-          </div>
-          <OnboardingTour />
-          <CongratulationsModal />
-          <RegisterServiceWorker />
-          <OfflineOverlay />
-        </DashboardEditProvider>
+        <TourProvider active={onboardingCompletedAt === null}>
+          <DashboardEditProvider>
+            <div className="flex h-screen flex-col">
+              <HeaderShell logo={logo} />
+              <main className="flex-1 overflow-auto bg-muted">{children}</main>
+            </div>
+            <WelcomeTour logo={logo} />
+            <Guide />
+            <Confetti />
+            <RegisterServiceWorker />
+            <OfflineOverlay />
+          </DashboardEditProvider>
+        </TourProvider>
       </PreferencesProvider>
     </AuthProvider>
   );
