@@ -62,7 +62,7 @@ export default function AppToggleList({
   }
 
   return (
-    <div data-tour-app={app.slug}>
+    <div>
       <div className="flex items-start justify-between px-6 py-4">
         <div className="flex items-start gap-3">
           <LucideIcon name={app.icon} className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />

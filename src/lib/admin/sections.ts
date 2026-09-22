@@ -32,11 +32,6 @@ export interface NavSection {
   href: string;
   icon: LucideIcon;
   /**
-   * Hook for the onboarding tour to point at this entry. Only App Manager needs
-   * one: the tour used to target it in the header menu, and it moved here.
-   */
-  dataTour?: string;
-  /**
    * Extra paths that belong to this section but do not nest under its href.
    *
    * The authoring guides are the case: `/apps/guide` sits beside the Apps page
@@ -84,7 +79,6 @@ export const ACCOUNT_SECTIONS: NavSection[] = [
     label: "App Manager",
     href: "/apps",
     icon: LayoutGrid,
-    dataTour: "app-manager-link",
   },
   { label: "My Connections", href: "/account/connections", icon: Plug },
   { label: "MCP Connections", href: "/account/mcp", icon: Bot },

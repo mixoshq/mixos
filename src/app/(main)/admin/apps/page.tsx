@@ -3,9 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import Link from "next/link";
-import { Store } from "lucide-react";
+import { ExternalLink, Store } from "lucide-react";
 import { appRegistry } from "@/generated/app-registry";
 import { requireReadOnlySession } from "@/lib/auth/session";
+import { docsUrl } from "@/lib/docs";
 import { requireAdmin } from "@/lib/apps/access";
 import { getAppGrantCounts, getAppTableCounts } from "@/lib/apps/admin-actions";
 import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
@@ -51,9 +52,11 @@ export default async function AppsAdminPage() {
         {/*
           Two actions, and the order is the point: Browse reaches the mixos.org
           repository, which is where an admin who wants a app they do not
-          have goes first. The guide is for the case where nobody has built it
-          yet, so it keeps the brand fill and the second position rather than
-          competing with the action most visits to this page want.
+          have goes first. The docs are for the case where nobody has built it
+          yet, so they keep the brand fill and the second position rather than
+          competing with the action most visits to this page want. They open on
+          mixos.org in a new tab: the in-app copy at /apps/guide still exists but
+          is no longer linked, so the site is the one place the guide is current.
         */}
         <div className="flex shrink-0 items-center gap-2">
           <Link
@@ -63,12 +66,16 @@ export default async function AppsAdminPage() {
             <Store className="h-4 w-4" aria-hidden />
             Browse Apps
           </Link>
-          <Link
-            href="/apps/guide"
+          <a
+            href={docsUrl("extending/apps")}
+            target="_blank"
+            rel="noreferrer noopener"
             className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground shadow-sm hover:bg-brand/90"
           >
             How to create an app
-          </Link>
+            <ExternalLink className="h-4 w-4" aria-hidden />
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
         </div>
       </div>
       <AppRegistryList

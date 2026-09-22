@@ -888,10 +888,8 @@ URLs or credential hints) from reaching the browser.
 
 ## 12. Session Cookie Security
 
-Session cookies are left at Auth.js v5 defaults. The platform previously
-overrode them to `SameSite=None` + `Partitioned` (CHIPS) so the app could be
-iframed by a browser-extension new-tab page; that extension is gone and the
-override was removed, restoring the stricter defaults below.
+Session cookies are left at Auth.js v5 defaults. Nothing embeds MixOS from
+another origin, so there is no reason to loosen them below `SameSite=Lax`.
 
 | Flag          | Value                       | Purpose                            |
 |---------------|-----------------------------|------------------------------------|

@@ -24,6 +24,7 @@ import type { AppManifest, WidgetDefinition } from "@/lib/apps/types";
 import WidgetWrapper from "./widget-wrapper";
 import WidgetCatalog from "./widget-catalog";
 import { useDashboardEdit } from "./edit-mode-context";
+import { useTour } from "@/components/onboarding/tour-context";
 
 import "react-grid-layout/css/styles.css";
 import { CARD_SURFACE } from "@/components/ui/card";
@@ -47,6 +48,17 @@ export default function DashboardGrid({
   const [widgetList, setWidgetList] = useState<DashboardWidget[]>(widgets);
   const { width, containerRef } = useContainerWidth();
   const { isEditing, setIsEditing } = useDashboardEdit();
+  // The welcome tour asks for "Edit Dashboard" and then points at a widget
+  // card, so during the tour entering edit mode opens the catalog straight
+  // away — as it does for an empty dashboard anyway, where the only thing to
+  // do in edit mode is add something.
+  const { phase: tourPhase, guideStep } = useTour();
+  const tourActive = tourPhase === "guide";
+  // The tour talks about the menu bar first and the dashboard third. Until it
+  // gets there, an empty dashboard shows nothing at all — "Your dashboard is
+  // empty" and its button would be competing with the bubble for the eye,
+  // and the button is the very thing step three asks for.
+  const emptyStateHidden = tourPhase !== "done" && guideStep < 2;
   const currentBreakpointRef = useRef<Breakpoint>("lg");
   const [isDraggingWidget, setIsDraggingWidget] = useState(false);
   const [isCollapsing, setIsCollapsing] = useState(false);
@@ -167,14 +179,18 @@ export default function DashboardGrid({
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+    const openCatalog = widgetList.length === 0 || tourActive;
+
     if (reduced) {
       setIsEditing(true);
+      if (openCatalog) setCatalogOpen(true);
       return;
     }
 
     setIsExpanding(true);
     setIsEditing(true);
-  }, [isExpanding, isCollapsing, setIsEditing]);
+    if (openCatalog) setCatalogOpen(true);
+  }, [isExpanding, isCollapsing, setIsEditing, widgetList.length, tourActive]);
 
   // Once the pill mounts in expand mode, measure its natural rect, then run
   // the reverse WAAPI keyframes. useLayoutEffect runs synchronously after
@@ -333,14 +349,23 @@ export default function DashboardGrid({
       onContextMenu={handleContextMenu}
     >
       {widgetList.length === 0 ? (
-        <div className="flex h-full flex-col items-center justify-center gap-4">
+        <div
+          className={cn(
+            "flex h-full flex-col items-center justify-center gap-4",
+            emptyStateHidden && "invisible",
+            tourActive && !emptyStateHidden && "tour-screen-in",
+          )}
+        >
           <p className="text-lg text-muted-foreground">
             Your dashboard is empty
           </p>
           {!isEditing && (
             <button
-              onClick={() => setIsEditing(true)}
-              data-tour="edit-dashboard-btn"
+              onClick={() => {
+                setIsEditing(true);
+                setCatalogOpen(true);
+              }}
+              data-tour="edit-dashboard"
               className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
             >
               Edit Dashboard
@@ -375,6 +400,7 @@ export default function DashboardGrid({
               return (
                 <div
                   key={widget.id}
+                  data-tour-widget-instance={widget.app_slug}
                   onDoubleClick={() => {
                     if (!isEditing) handleEnterEdit();
                   }}
@@ -397,6 +423,7 @@ export default function DashboardGrid({
           onClick={handleEnterEdit}
           aria-label="Edit dashboard"
           title="Edit dashboard"
+          data-tour="dashboard-pencil"
           className={`group fixed bottom-6 right-6 z-40 flex h-9 items-center overflow-hidden rounded-full bg-primary px-2.5 text-white shadow-sm backdrop-blur transition-opacity duration-500 hover:bg-primary/90 ${
             pencilVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
@@ -417,8 +444,8 @@ export default function DashboardGrid({
         >
           <button
             onClick={() => setCatalogOpen(true)}
-            data-tour="add-widget-btn"
             disabled={isCollapsing || isExpanding}
+            data-tour="add-widget"
             className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium hover:bg-accent ${
               isCollapsing || isExpanding
                 ? "pointer-events-none opacity-0"
@@ -430,8 +457,8 @@ export default function DashboardGrid({
           </button>
           <button
             onClick={handleDoneEditing}
-            data-tour="done-editing-btn"
             disabled={isCollapsing || isExpanding}
+            data-tour="done-editing"
             className={`flex items-center gap-1.5 whitespace-nowrap rounded-full bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary/90 ${
               isCollapsing || isExpanding
                 ? "pointer-events-none opacity-0"
@@ -471,6 +498,7 @@ export default function DashboardGrid({
       {catalogOpen && (
         <WidgetCatalog
           apps={availableApps}
+          backdrop={!tourActive}
           onClose={() => setCatalogOpen(false)}
           onWidgetAdded={handleWidgetAdded}
         />

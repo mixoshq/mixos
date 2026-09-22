@@ -7,17 +7,19 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { resetOnboarding } from "@/lib/onboarding/actions";
-import { usePreferences } from "@/components/preferences-context";
 import { Card } from "@/components/ui/card";
 
+/**
+ * Clears the completion stamp and returns to the dashboard. The layout reads
+ * the stamp on every request, so the refresh is what restarts the tour —
+ * TourProvider sees `active` turn true and goes back to the first screen.
+ */
 export default function ReplayTourButton() {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
-  const { stopOnboarding } = usePreferences();
 
   function handleReplay() {
     startTransition(async () => {
-      stopOnboarding();
       await resetOnboarding();
       router.push("/");
       router.refresh();
@@ -33,8 +35,7 @@ export default function ReplayTourButton() {
         Welcome tour
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        Replay the first-run introduction that walks you through installing an
-        app and adding your first dashboard widget.
+        Replay the introduction you saw the first time you signed in.
       </p>
       <button
         type="button"

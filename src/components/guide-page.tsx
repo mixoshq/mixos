@@ -19,6 +19,11 @@ import GuideTabsShell, { type GuideTabDef } from "@/components/guide-tabs-shell"
  * `/apps/guide`, `/connectors/guide` and `/themes/guide` — three unrelated
  * route segments, and `/apps` cannot take a layout at all because
  * `/apps/[appSlug]` renders installed apps beneath it. See SettingsShell.
+ *
+ * NOT LINKED FROM ANYWHERE. The "How to create …" buttons on the admin pages
+ * open the same material on mixos.org (`@/lib/docs`), which is the copy that
+ * gets maintained. These routes stay reachable by URL and are kept for now;
+ * they are not deleted, just unreferenced.
  */
 export default function GuidePage({
   title,
