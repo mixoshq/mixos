@@ -53,7 +53,7 @@ export default function LoginCard({ logo }: { logo: string | null }) {
         <div
           aria-hidden
           className={cn(
-            "absolute inset-0 rounded-xl border border-white/10 bg-white/5 shadow-lg backdrop-blur transition-opacity duration-300",
+            "absolute inset-0 rounded-lg border border-white/10 bg-white/5 shadow-lg backdrop-blur transition-opacity duration-300",
             faded,
           )}
         />
