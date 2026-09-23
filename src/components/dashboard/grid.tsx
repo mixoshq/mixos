@@ -346,6 +346,11 @@ export default function DashboardGrid({
   return (
     <div
       className="relative h-full"
+      // The resize handles are rendered by react-grid-layout whether or not
+      // resizing is on, so the stylesheet needs to know when the dashboard is
+      // being edited to show them. One attribute here beats a class on every
+      // grid item.
+      data-dashboard-editing={isEditing || undefined}
       ref={containerRef}
       onContextMenu={handleContextMenu}
     >

@@ -102,6 +102,66 @@ h6 {
   border-radius: 0.75rem;
 }
 
+/* The widget resize handle.
+   react-grid-layout ships one drawn with `rgba(0, 0, 0, 0.4)` borders, which
+   is invisible on any dark theme — the mark was there the whole time, on a
+   near-black card. This replaces it with three diagonal strokes in
+   `--muted-foreground`, the grab-here convention, and drops the library's
+   hover gate: the handles only matter while the dashboard is being edited,
+   and during editing an affordance that appears only under the pointer is an
+   affordance nobody finds. `[data-dashboard-editing]` (set by DashboardGrid)
+   is what "while editing" means here, because the library renders the
+   handles either way. */
+.react-grid-item > .react-resizable-handle {
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+[data-dashboard-editing] .react-grid-item > .react-resizable-handle {
+  opacity: 0.55;
+}
+
+[data-dashboard-editing] .react-grid-item:hover > .react-resizable-handle {
+  opacity: 1;
+}
+
+/* The library's corner bracket, replaced rather than overridden: `::after`
+   is its own, and leaving it would draw both marks on top of each other. */
+.react-grid-item > .react-resizable-handle.react-resizable-handle-se::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 12px;
+  height: 12px;
+  border: 0;
+  /* Three 45° strokes, longest at the corner. A repeating-linear-gradient
+     would tie stroke width to the element's diagonal; three explicit
+     gradients keep each stroke 1.5px whatever the handle's size. */
+  background:
+    linear-gradient(
+        315deg,
+        transparent 0 2px,
+        var(--muted-foreground) 2px 3.5px,
+        transparent 3.5px
+      )
+      no-repeat,
+    linear-gradient(
+        315deg,
+        transparent 0 5px,
+        var(--muted-foreground) 5px 6.5px,
+        transparent 6.5px
+      )
+      no-repeat,
+    linear-gradient(
+        315deg,
+        transparent 0 8px,
+        var(--muted-foreground) 8px 9.5px,
+        transparent 9.5px
+      )
+      no-repeat;
+}
+
 /* Stepped "wiggle" for each PIVOT! word. Rotation pivots on the word center
    (default transform-origin), so the ends seesaw up/down. The `step-end`
    timing function makes each keyframe transition INSTANT — no interpolation
