@@ -47,6 +47,7 @@ Current platform plans:
 | [`20260826_2041-single-palette-themes.md`](20260826_2041-single-palette-themes.md) | Collapses the theme/mode axes: one palette per theme, `mixos` light by default, `mixos-dark` as a sibling theme |
 | [`20260921_0842-release-versioning.md`](20260921_0842-release-versioning.md) | Version tags and `MIXOS_RELEASE` on Vercel via a release-PR flow; restores `/mixos deploy release` |
 | [`20260921_2323-welcome-tour.md`](20260921_2323-welcome-tour.md) | First-run welcome tour: brand takeover, three screens, the lockup-to-menu-bar reveal, and a guide-step framework |
+| [`20260922_2234-extension-screenshots.md`](20260922_2234-extension-screenshots.md) | `screenshots/` and a manifest `screenshots` array for apps and themes: build-time verification and measurement, resolved public URLs in the registries |
 
 ## File naming
 

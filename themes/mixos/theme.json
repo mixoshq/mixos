@@ -7,6 +7,13 @@
     "default",
     "brand"
   ],
+  "screenshots": [
+    {
+      "file": "screenshots/menu-bar-and-widget.png",
+      "alt": "The MixOS menu bar over a dashboard widget in the light palette.",
+      "caption": "Menu bar and a dashboard widget"
+    }
+  ],
   "license": "MPL-2.0",
   "themeUrl": "https://github.com/italianst4/mixos/tree/main/themes/mixos",
   "themeSupportUrl": "https://github.com/italianst4/mixos/issues",
@@ -47,5 +54,5 @@
   },
   "surfaces": [],
   "escapes": [],
-  "lastUpdated": "2026-09-21T02:55:21.121Z"
+  "lastUpdated": "2026-09-23T04:10:34.453Z"
 }

@@ -40,7 +40,7 @@ The listing renders GitHub-Flavoured Markdown and then sanitizes the result. The
 | --- | --- |
 | **Raw HTML is stripped entirely.** No `<br>`, `<img>`, `<details>` — no inline HTML of any kind. | It is dropped before it ever becomes an element, so the content inside it disappears too, not just the tag. |
 | **Links must be absolute `https://`** (or `mailto:`). | Relative links resolve against mixos.org, not against your GitHub repo, so `./setup.md` is a broken link on the listing. |
-| **Images must be absolute `https://` URLs.** | Same resolution rule: a relative `./screenshot.png` 404s on the listing page. |
+| **Images must be absolute `https://` URLs.** | Same resolution rule: a relative `./screenshot.png` 404s on the listing page. **This is what the `screenshots` manifest field is for** — put the image in `screenshots/`, declare it, and the build publishes it to a URL that resolves. |
 | Headings are re-levelled automatically. | Whatever the shallowest heading in the file is becomes `<h2>`, with relative depth preserved — so a README that opens with `#` and one that opens with `##` both render correctly. Nothing to plan around. |
 
 One thing to leave out: the listing page already displays the app's name, `tagline`, `license`, `authors`, `keywords`, and its `appUrl` / `appSupportUrl` links. A README that repeats them renders as duplication.
@@ -59,6 +59,9 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
     { "name": "Jane Doe", "email": "jane@example.com" }
   ],
   "keywords": ["reporting", "sales"],
+  "screenshots": [
+    { "file": "screenshots/dashboard.png", "alt": "The main dashboard with this quarter's pipeline" }
+  ],
   "license": "MPL-2.0",
   "appUrl": "https://example.com/my-app",
   "appSupportUrl": "https://example.com/my-app/issues",
@@ -93,6 +96,7 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
 | `icon` |  | A [Lucide icon](https://lucide.dev/icons/) name. Use the lowercase hyphenated name (e.g. `bar-chart`, `users`, `settings`). Defaults to `box`. | `"icon": "bar-chart"` |
 | `authors` |  | Array of `{ name, email }` objects identifying the app's authors. Shown in the Apps admin page. Optional but recommended so others know who to contact. | `"authors": [{ "name": "Jane Doe", "email": "jane@example.com" }]` |
 | `keywords` |  | Search and browse terms for the catalogue. Lowercase words, separated by single spaces or hyphens; max 10, no duplicates. Lowercase is enforced because a facet list dedupes on the exact string — `Gmail` next to `gmail` renders as two filters for one idea and splits the results between them. | `"keywords": ["email", "time tracking"]` |
+| `screenshots` |  | Images for the app's catalogue listing, `[{ file, alt?, caption? }]`. Files live under `apps/<slug>/screenshots/` and `file` carries that prefix. The build verifies each one and fills in the URL and measured dimensions; the limits are `.png`/`.jpg`/`.webp` only (no SVG), max 8, max 2 MB each, min 640px wide. See [Assets](./assets.md#screenshots). | `"screenshots": [{ "file": "screenshots/dashboard.png", "alt": "The main dashboard" }]` |
 | `license` |  | SPDX identifier or expression for the app's licence, or `UNLICENSED` for something not redistributable. Validated as a shape, not against the full SPDX list — which still rejects the mistake worth rejecting: prose. `"MIT License"` fails the build; `"MIT"` passes. | `"license": "MPL-2.0"` |
 | `appUrl` |  | Where the app lives for someone who wants to read about it — a homepage, a docs site, a repository directory. Absolute `https://` only: these render as links on pages served over https, and an author never sees the downgrade because their own dev server is http. | `"appUrl": "https://example.com/my-app"` |
 | `appSupportUrl` |  | Where a user takes a problem with this app — an issue tracker, a support page. Same `https://` rule. Kept separate from `appUrl` because "read about it" and "something is broken" are different destinations, and collapsing them sends bug reports to a marketing page. | `"appSupportUrl": "https://example.com/my-app/issues"` |

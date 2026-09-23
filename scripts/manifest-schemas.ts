@@ -4,6 +4,10 @@
 
 import { z } from "zod";
 import { assertValidCron } from "../src/lib/apps/cron";
+import {
+  SCREENSHOT_DIR,
+  SCREENSHOT_MAX_COUNT,
+} from "../src/lib/screenshots";
 
 /**
  * Zod schemas for the *on-disk* manifest shapes — `apps/<slug>/app.json`
@@ -192,6 +196,45 @@ const taglineSchema = z
     "tagline is a single line for a listing card — keep it under 100 characters and put the full explanation in `description`",
   )
   .regex(/^[^\n\r]+$/, "tagline is a single line — no line breaks");
+
+/**
+ * One screenshot for the extension's listing gallery.
+ *
+ * Shape only. Whether the file exists, whether it is an image at all, and how
+ * wide it is are the generator's business — this schema cannot open a file, and
+ * a path that merely *looks* right is worth nothing.
+ *
+ * `file` carries its `screenshots/` prefix rather than leaving the directory
+ * implied, the same way a connector's `icon` is written `assets/icon.svg`: the
+ * manifest should say where the file actually is, so a reader can find it
+ * without knowing a convention.
+ *
+ * `alt` is optional, but a renderer is told to treat its absence as "none
+ * supplied" rather than "decorative" — see `src/lib/screenshots.ts`.
+ */
+const screenshotSchema = z.strictObject({
+  file: z
+    .string()
+    .min(SCREENSHOT_DIR.length + 2)
+    .refine(
+      (v) => v.startsWith(`${SCREENSHOT_DIR}/`) && !v.includes(".."),
+      `must be a path inside the extension's own ${SCREENSHOT_DIR}/ directory, written out in full — e.g. "${SCREENSHOT_DIR}/dashboard.png"`,
+    ),
+  alt: z.string().min(1).optional(),
+  caption: z.string().min(1).optional(),
+});
+
+/**
+ * The gallery, newest-idea-first: whatever order the author lists is the order
+ * it renders. Capped here as well as in the generator so an over-long array
+ * fails with a schema message pointing at the field.
+ */
+const screenshotsSchema = z
+  .array(screenshotSchema)
+  .max(
+    SCREENSHOT_MAX_COUNT,
+    `at most ${SCREENSHOT_MAX_COUNT} screenshots — a gallery longer than that is not read`,
+  );
 
 /**
  * One search/browse term. Lowercase and space- or hyphen-separated.
@@ -581,6 +624,11 @@ export const RawAppManifestSchema = z
      * describing itself, which makes the facets useless for everyone.
      */
     keywords: catalogueKeywordsSchema.optional(),
+    /**
+     * Listing gallery. Files live under `apps/<slug>/screenshots/`; the
+     * generator verifies, measures and publishes each one.
+     */
+    screenshots: screenshotsSchema.optional(),
     /** SPDX identifier or expression, or `UNLICENSED`. */
     license: licenseSchema.optional(),
     /** Homepage, docs, or repository directory for the app. */
@@ -1210,6 +1258,15 @@ export const RawThemeManifestSchema = z.strictObject({
   lastUpdated: z.iso.datetime().optional(),
   fonts: z.array(themeFontFaceSchema).optional(),
   assets: themeAssetsSchema.optional(),
+  /**
+   * Listing gallery, under `themes/<slug>/screenshots/`.
+   *
+   * Distinct from `assets.preview`, which is the admin picker's thumbnail and
+   * stays where it is. The picker shows one image beside a live swatch row;
+   * a listing shows a gallery to someone who has not installed the theme and
+   * cannot see those swatches at all.
+   */
+  screenshots: screenshotsSchema.optional(),
   /**
    * Allowlisted .mix-* surfaces this theme styles. Cross-checked against
    * theme.css by the generator in both directions, so it can neither
