@@ -1,19 +1,29 @@
 "use client";
 
-import { Quote as QuoteMark } from "lucide-react";
+import { useEffect } from "react";
 import type { WidgetProps } from "@/lib/hooks/types";
 import { useAppQuery } from "@/lib/apps/use-app-query";
 import { AsyncView } from "@/components/ui/async-view";
 import { Skeleton } from "@/components/ui/skeleton";
 
-interface DailyQuote {
+interface HourlyQuote {
   text: string;
   character: string;
-  date: string;
+  /** When this line is replaced, ISO-8601, decided by the server. */
+  nextChangeAt: string;
 }
 
 /**
- * One line from WALL·E, chosen by the date.
+ * One line from WALL·E, chosen at random, changing on the hour.
+ *
+ * IT REFETCHES ON THE BOUNDARY, NOT ON AN INTERVAL. The server says when the
+ * line changes (`nextChangeAt`); the widget sleeps until then and asks again.
+ * A `setInterval(…, 3600_000)` would drift off the hour by however long the
+ * tab took to load, and a tab left open overnight would change the line at
+ * 9:43 rather than at 10:00. It also re-checks when the tab becomes visible:
+ * background timers are throttled to minutes in every browser, so the one
+ * moment the widget must be right — someone looking at it again — is the one
+ * a timer alone cannot be trusted for.
  *
  * Zero config by design: there is no title field, no character filter, no
  * rotation setting. You add it and it works.
@@ -30,7 +40,30 @@ interface DailyQuote {
  * cramped card scrolls instead of bleeding past the card edge.
  */
 export default function QuoteOfTheDayWidget({ appSlug }: WidgetProps) {
-  const query = useAppQuery<DailyQuote>(appSlug, "GET /quote");
+  const query = useAppQuery<HourlyQuote>(appSlug, "GET /quote");
+  const { refetch } = query;
+  const nextChangeAt = query.state.data?.nextChangeAt ?? null;
+
+  useEffect(() => {
+    if (!nextChangeAt) return;
+    const due = new Date(nextChangeAt).getTime();
+    if (Number.isNaN(due)) return;
+
+    // At least a second, so a clock a little behind the server cannot spin
+    // this into a refetch loop.
+    const timer = window.setTimeout(refetch, Math.max(1000, due - Date.now()));
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() >= due) {
+        refetch();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [nextChangeAt, refetch]);
 
   return (
     <div className="h-full overflow-y-auto p-4">
