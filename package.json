@@ -12,6 +12,7 @@
     "docker:down": "tsx scripts/docker-down.ts",
     "docker:reset": "tsx scripts/docker-down.ts --reset",
     "prebuild": "tsx scripts/generate-project-registry.ts",
+    "pretypecheck": "tsx scripts/generate-project-registry.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
