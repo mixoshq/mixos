@@ -19,6 +19,10 @@
 // So the row is no longer something a person creates. It is derived state, and
 // this is what derives it:
 //
+//   - a NEWLY seen app arrives INACTIVE: its code is present but it serves
+//     nothing until an admin activates it on the Apps page. `is_active` is
+//     absent from the conflict clause on purpose — a redeploy must never
+//     re-decide a switch an admin has already thrown, in either direction.
 //   - every app in the registry is upserted, so its name and description in the
 //     database track the manifest rather than whatever they were on the day
 //     someone first registered it;
@@ -43,8 +47,8 @@ export async function syncAppRegistry(sql: Sql): Promise<AppRegistrySyncResult> 
 
   for (const app of appRegistry) {
     await sql`
-      insert into public.apps (slug, name, description, icon)
-      values (${app.slug}, ${app.name}, ${app.description}, ${app.icon})
+      insert into public.apps (slug, name, description, icon, is_active)
+      values (${app.slug}, ${app.name}, ${app.description}, ${app.icon}, false)
       on conflict (slug) do update set
         name        = excluded.name,
         description = excluded.description,

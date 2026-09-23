@@ -9,6 +9,7 @@ import { requireReadOnlySession } from "@/lib/auth/session";
 import { docsUrl } from "@/lib/docs";
 import { requireAdmin } from "@/lib/apps/access";
 import { getAppGrantCounts, getAppTableCounts } from "@/lib/apps/admin-actions";
+import { getAppActiveMap } from "@/lib/apps/access";
 import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
 import AppRegistryList from "@/components/admin/app-registry-list";
 
@@ -22,6 +23,7 @@ export default async function AppsAdminPage() {
   // Live table counts for the tile pills. One RPC for the registry — see
   // getAppTableCounts.
   const tableCountsBySlug = await getAppTableCounts();
+  const activeBySlug = await getAppActiveMap();
 
   // Precompute the missing-connector map once per page load. Shown here as a
   // warning only — it is not a gate on this page any more. An app that needs an
@@ -83,6 +85,7 @@ export default async function AppsAdminPage() {
         missingConnectorsBySlug={missingConnectorsBySlug}
         grantCountsBySlug={grantCountsBySlug}
         tableCountsBySlug={tableCountsBySlug}
+        activeBySlug={activeBySlug}
       />
     </div>
   );

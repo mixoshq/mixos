@@ -4,12 +4,17 @@
 
 "use client";
 
-import { ExternalLink, ShieldCheck } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ExternalLink, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { formatCount, truncateWords, TILE_DESCRIPTION_WORDS } from "@/lib/apps/display";
+import {
+  formatCount,
+  truncateWords,
+  TILE_DESCRIPTION_WORDS,
+} from "@/lib/apps/display";
 import { KIND_SEGMENT, type ExtensionSummary } from "@/lib/repository/types";
 
 /**
@@ -48,12 +53,15 @@ export default function ExtensionCard({
   repositoryOrigin: string;
   /** Identifiers already present on this instance, for the "Installed" state. */
   installedSlugs: ReadonlySet<string>;
-  onInstall: (extension: ExtensionSummary) => void;
+  /** `activate` is only ever true for apps; see the action bar below. */
+  onInstall: (extension: ExtensionSummary, activate: boolean) => void;
 }) {
   const installed = installedSlugs.has(extension.slug);
   // No version means no published release: nothing to fetch and no hash to
   // verify against. Browsable, not installable, and the button says which.
   const installable = Boolean(extension.latestVersion);
+  const canActivate = extension.kind === "app" && !installed && installable;
+  const [menuOpen, setMenuOpen] = useState(false);
   const listingUrl = `${repositoryOrigin}/extend/${KIND_SEGMENT[extension.kind]}/${extension.slug}`;
 
   return (
@@ -90,21 +98,82 @@ export default function ExtensionCard({
         )}
         {extension.license && <Badge tone="neutral">{extension.license}</Badge>}
         {extension.installCount > 0 && (
-          <Badge tone="neutral">{formatCount(extension.installCount, "install")}</Badge>
+          <Badge tone="neutral">
+            {formatCount(extension.installCount, "install")}
+          </Badge>
         )}
       </div>
 
       {/* Pushed to the floor so tiles in a row align on their action bar even
           when their taglines run to different lengths. */}
       <div className="mt-auto flex items-center gap-2 pt-4">
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={installed || !installable}
-          onClick={() => onInstall(extension)}
-        >
-          {installed ? "Installed" : installable ? "Register" : "No release"}
-        </Button>
+        {/*
+          A split button, and only for apps. Installing copies the code in;
+          activating is what makes it serve anything, and the two are separate
+          decisions on purpose — an admin reviewing third-party code wants the
+          files before the routes. The common case is still one click, so the
+          fast path keeps the fill and the second step lives under the chevron.
+
+          Connectors and themes have no such switch: a connector does nothing
+          until an admin configures it, and a theme does nothing until someone
+          applies it, so both already have the gate this would duplicate.
+        */}
+        <div className="flex items-center">
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={installed || !installable}
+            className={canActivate ? "rounded-r-none" : undefined}
+            onClick={() => onInstall(extension, false)}
+          >
+            {installed ? "Installed" : installable ? "Install" : "No release"}
+          </Button>
+          {canActivate && (
+            <div className="relative">
+              <Button
+                variant="primary"
+                size="sm"
+                aria-label={`More install options for ${extension.name}`}
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+                className="rounded-l-none border-l border-brand-foreground/25 px-2"
+                onClick={() => setMenuOpen((v) => !v)}
+              >
+                <ChevronDown className="h-4 w-4" aria-hidden />
+              </Button>
+              {menuOpen && (
+                <>
+                  {/* Click-away as a sibling rather than a document listener:
+                      it cannot leak past unmount, and it swallows the click
+                      that dismisses it. */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setMenuOpen(false)}
+                  />
+                  <div
+                    role="menu"
+                    className={cn(
+                      "mix-popover",
+                      CARD_SHELL,
+                      "absolute right-0 top-full z-50 mt-1 w-56 py-1 shadow-lg",
+                    )}
+                  >
+                    <button
+                      role="menuitem"
+                      className="w-full px-3 py-2 text-left text-sm hover:bg-accent"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onInstall(extension, true);
+                      }}
+                    >
+                      Install &amp; Activate
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
         <a
           href={listingUrl}
           target="_blank"
