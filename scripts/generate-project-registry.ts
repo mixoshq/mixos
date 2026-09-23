@@ -40,6 +40,14 @@ import type {
   ThemeManifest,
 } from "../src/lib/themes/types";
 import { compileTheme, ThemeError } from "./theme-css";
+import type { Screenshot, ScreenshotKind } from "../src/lib/screenshots";
+import {
+  SCREENSHOT_EXTENSIONS,
+  SCREENSHOT_MAX_BYTES,
+  SCREENSHOT_MAX_COUNT,
+  SCREENSHOT_MIN_WIDTH,
+  screenshotUrl,
+} from "../src/lib/screenshots";
 import * as ts from "typescript";
 
 /**
@@ -108,6 +116,13 @@ const PUBLIC_CONNECTORS_DIR = path.resolve(
   __dirname,
   "../public/connector-assets",
 );
+// Listing galleries for apps and themes, copied out of <ext>/screenshots/.
+// One prefix for both kinds, segmented by kind underneath, because the rules
+// are identical and a second prefix would be a second proxy exemption to keep
+// in step. Exempted from the auth matcher in src/proxy.ts for the same reason
+// theme assets and connector icons are: a listing is read by someone deciding
+// whether to install, which is necessarily before they have a session.
+const PUBLIC_SCREENSHOTS_DIR = path.resolve(__dirname, "../public/screenshots");
 
 function scanPages(dir: string, slug: string, prefix: string, out: string[]) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -1094,6 +1109,140 @@ function validateConnectorTelemetry(
   }));
 }
 
+// ── screenshots ──────────────────────────────────────────────────────────────
+
+/**
+ * Verify, measure and resolve an extension's declared screenshots.
+ *
+ * Shared verbatim between apps and themes. The rules have to be identical
+ * across the two or an author learns the convention twice and gets it wrong
+ * once; the limits themselves live in `src/lib/screenshots.ts` so the docs and
+ * the schema quote the same numbers this function enforces.
+ *
+ * Every failure aborts the build. A screenshot is listing imagery, so the
+ * failure mode of letting a bad one through is not a crash but a published
+ * listing with a hole in it — which the author never sees, because they are
+ * looking at their local copy where the file is right there.
+ *
+ * Errors name the file and the measured value rather than restating the rule,
+ * for the same reason `validateConnectorIcon` does: "is 412x260, below the
+ * 640px minimum" is actionable, "invalid screenshot" is not.
+ */
+function validateScreenshots(
+  declared: { file: string; alt?: string; caption?: string }[] | undefined,
+  kind: ScreenshotKind,
+  slug: string,
+  dir: string,
+): Screenshot[] {
+  const entries = declared ?? [];
+  if (entries.length === 0) return [];
+
+  const manifest = kind === "apps" ? "app.json" : "theme.json";
+  const where = `${kind}/${slug}`;
+
+  // The schema caps this too; re-checked here because the generator is what
+  // actually copies the files, and a limit enforced in only one of two places
+  // is a limit that moves when someone edits the other.
+  if (entries.length > SCREENSHOT_MAX_COUNT) {
+    throw new FatalManifestError(
+      `${where}/${manifest}: declares ${entries.length} screenshots, above the ` +
+        `maximum of ${SCREENSHOT_MAX_COUNT}.`,
+    );
+  }
+
+  const seen = new Set<string>();
+  const out: Screenshot[] = [];
+
+  for (const entry of entries) {
+    // A duplicate is always a copy-paste slip: the same image twice in a
+    // gallery reads as a rendering bug to whoever is looking at the listing.
+    if (seen.has(entry.file)) {
+      throw new FatalManifestError(
+        `${where}/${manifest}: screenshots lists "${entry.file}" twice.`,
+      );
+    }
+    seen.add(entry.file);
+
+    const file = path.join(dir, entry.file);
+    if (!fs.existsSync(file)) {
+      throw new FatalManifestError(
+        `${where}/${manifest}: screenshots names "${entry.file}", which does not ` +
+          `exist. Expected it at ${where}/${entry.file}.`,
+      );
+    }
+
+    const ext = path.extname(entry.file).toLowerCase();
+    if (!(SCREENSHOT_EXTENSIONS as readonly string[]).includes(ext)) {
+      throw new FatalManifestError(
+        `${where}/${entry.file} is a ${ext || "extensionless"} file. ` +
+          `Screenshots must be ${SCREENSHOT_EXTENSIONS.join(", ")} — notably not ` +
+          `.svg, which is a script-bearing document rather than an image, and ` +
+          `these are served from an unauthenticated path.`,
+      );
+    }
+
+    const buf = fs.readFileSync(file);
+    if (buf.byteLength > SCREENSHOT_MAX_BYTES) {
+      const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+      throw new FatalManifestError(
+        `${where}/${entry.file} is ${mb(buf.byteLength)}, above the ` +
+          `${mb(SCREENSHOT_MAX_BYTES)} limit. Re-export it, or ship it as .webp.`,
+      );
+    }
+
+    const size = readImageSize(buf);
+    if (!size) {
+      throw new FatalManifestError(
+        `${where}/${entry.file} could not be read as a ${ext.slice(1)} image. ` +
+          `Either it is not one, or it is truncated — re-export it.`,
+      );
+    }
+    if (size.width < SCREENSHOT_MIN_WIDTH) {
+      throw new FatalManifestError(
+        `${where}/${entry.file} is ${size.width}x${size.height}, below the ` +
+          `${SCREENSHOT_MIN_WIDTH}px minimum width. Below that it is a ` +
+          `thumbnail, and it ships visibly soft on a high-DPI display.`,
+      );
+    }
+
+    out.push({
+      file: entry.file,
+      url: screenshotUrl(kind, slug, entry.file),
+      alt: entry.alt ?? null,
+      caption: entry.caption ?? null,
+      width: size.width,
+      height: size.height,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Copy an extension's screenshots to public/screenshots/<kind>/<slug>/.
+ *
+ * Only the declared files, unlike a theme's `assets/` which is copied
+ * wholesale: an undeclared image in the directory is a draft or a reject, and
+ * publishing it to an unauthenticated URL because it happened to be sitting
+ * beside the real ones is not a behaviour anyone would ask for.
+ */
+function copyScreenshots(
+  screenshots: Screenshot[],
+  kind: ScreenshotKind,
+  slug: string,
+  dir: string,
+): void {
+  if (screenshots.length === 0) return;
+  const dest = path.join(PUBLIC_SCREENSHOTS_DIR, kind, slug);
+  fs.mkdirSync(dest, { recursive: true });
+  for (const shot of screenshots) {
+    fs.copyFileSync(
+      path.join(dir, shot.file),
+      path.join(dest, path.basename(shot.file)),
+    );
+  }
+}
+
 // ── themes ───────────────────────────────────────────────────────────────────
 
 /** Recursively copy a theme's assets into public/themes/<slug>/. */
@@ -1218,8 +1367,10 @@ async function scanThemes(): Promise<{
     const rawCss = fs.readFileSync(path.join(dir, "theme.css"), "utf-8");
     const fonts = validateThemeFonts(r.fonts ?? [], slug, dir, rawCss);
     const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
+    const screenshots = validateScreenshots(r.screenshots, "themes", slug, dir);
 
     copyDir(path.join(dir, "assets"), path.join(PUBLIC_THEMES_DIR, slug));
+    copyScreenshots(screenshots, "themes", slug, dir);
 
     cssParts.push(
       `/* ── ${slug} ─────────────────────────────── */\n${compiled.css}`,
@@ -1233,6 +1384,7 @@ async function scanThemes(): Promise<{
       authors: normalizeAuthors(r.authors),
       fonts,
       assets,
+      screenshots,
       surfaces: compiled.surfaces,
       escapes: r.escapes ?? [],
       assetBase: `/themes/${slug}`,
@@ -1357,6 +1509,12 @@ async function scanApps(): Promise<AppManifest[]> {
         hooks: { emits: hookScan.emits, listens: hookScan.listens },
         authors: normalizeAuthors(r.authors),
         keywords: r.keywords ?? [],
+        screenshots: validateScreenshots(
+          r.screenshots,
+          "apps",
+          entry.name,
+          appDir,
+        ),
         license: r.license ?? null,
         appUrl: r.appUrl ?? null,
         appSupportUrl: r.appSupportUrl ?? null,
@@ -1392,6 +1550,8 @@ async function scanApps(): Promise<AppManifest[]> {
         ...(pageVisibility ? { pageVisibility } : {}),
         ...(apiVisibility ? { apiVisibility } : {}),
       };
+
+      copyScreenshots(manifest.screenshots, "apps", entry.name, appDir);
 
       manifests.push(manifest);
       console.log(`  App: ${manifest.name} (/${manifest.slug})`);
@@ -1638,6 +1798,59 @@ function readImageSize(buf: Buffer): { width: number; height: number } | null {
       const u24 = (o: number) =>
         buf[o] | (buf[o + 1] << 8) | (buf[o + 2] << 16);
       return { width: u24(24) + 1, height: u24(27) + 1 };
+    }
+  }
+
+  // JPEG: unlike PNG and WebP there is no fixed offset. Dimensions live in a
+  // Start-Of-Frame marker, which sits after a variable run of other segments
+  // (JFIF/Exif headers, quantisation tables, comments), so the only way to
+  // find it is to walk the segment chain.
+  //
+  // Worth the extra code rather than letting `.jpg` return null: a caller
+  // reads null as "cannot measure", so a screenshot format the build cannot
+  // measure is one the minimum-width rule silently stops covering — and JPEG
+  // is the format a screenshot is most likely to arrive in.
+  if (buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+    let o = 2;
+    while (o + 9 < buf.length) {
+      // Segments are 0xFF followed by a marker; 0xFF is also the padding byte,
+      // so skip any run of them before reading the marker itself.
+      if (buf[o] !== 0xff) {
+        o++;
+        continue;
+      }
+      let marker = buf[o + 1];
+      while (marker === 0xff && o + 2 < buf.length) {
+        o++;
+        marker = buf[o + 1];
+      }
+
+      // Standalone markers carrying no payload: RSTn, SOI, TEM. Nothing to skip.
+      if ((marker >= 0xd0 && marker <= 0xd9) || marker === 0x01) {
+        o += 2;
+        continue;
+      }
+
+      const len = buf.readUInt16BE(o + 2);
+      // SOF0–SOF15, excluding DHT (0xC4), JPG (0xC8) and DAC (0xCC), which
+      // share the 0xCn range but are not frame headers.
+      if (
+        marker >= 0xc0 &&
+        marker <= 0xcf &&
+        marker !== 0xc4 &&
+        marker !== 0xc8 &&
+        marker !== 0xcc
+      ) {
+        // Payload: 1 byte precision, then height and width as big-endian uint16.
+        return {
+          height: buf.readUInt16BE(o + 5),
+          width: buf.readUInt16BE(o + 7),
+        };
+      }
+
+      // A malformed length would otherwise spin here forever.
+      if (len < 2) return null;
+      o += 2 + len;
     }
   }
 
