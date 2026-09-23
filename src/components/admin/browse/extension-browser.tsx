@@ -10,7 +10,10 @@ import { Button } from "@/components/ui/button";
 import { CARD_SHELL } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { searchRepositoryAction, type SearchOutcome } from "@/lib/repository/actions";
+import {
+  searchRepositoryAction,
+  type SearchOutcome,
+} from "@/lib/repository/actions";
 import {
   KIND_LABEL,
   SORT_KEYS,
@@ -62,7 +65,12 @@ export default function ExtensionBrowser({
   const [page, setPage] = useState(1);
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
   const [pending, startTransition] = useTransition();
-  const [chosen, setChosen] = useState<ExtensionSummary | null>(null);
+  // The extension to install, and whether the admin asked for it to be
+  // activated in the same step (apps only — see ExtensionCard).
+  const [chosen, setChosen] = useState<{
+    extension: ExtensionSummary;
+    activate: boolean;
+  } | null>(null);
   const [installed, setInstalled] = useState(() => new Set(installedSlugs));
 
   // Guards against an earlier, slower search overwriting a later one — the
@@ -131,22 +139,32 @@ export default function ExtensionBrowser({
       </div>
 
       {outcome === null || (pending && outcome === null) ? (
-        <Panel>Searching {label.many.toLowerCase()} on {host}…</Panel>
+        <Panel>
+          Searching {label.many.toLowerCase()} on {host}…
+        </Panel>
       ) : !outcome.ok ? (
         <div className={cn(CARD_SHELL, "p-6")}>
           <div className="flex gap-3">
-            <ServerCrash className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+            <ServerCrash
+              className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground"
+              aria-hidden
+            />
             <div>
               <p className="font-medium text-foreground">
                 {outcome.unreachable
                   ? `Could not reach ${outcome.origin}.`
                   : `${outcome.origin} could not answer that search.`}
               </p>
-              <p className="mt-1 text-sm text-muted-foreground">{outcome.message}</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {outcome.message}
+              </p>
               {outcome.unreachable && (
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Set <code className="font-mono text-xs">MIXOS_REPOSITORY_URL</code> to
-                  point this instance at a different repository.
+                  Set{" "}
+                  <code className="font-mono text-xs">
+                    MIXOS_REPOSITORY_URL
+                  </code>{" "}
+                  to point this instance at a different repository.
                 </p>
               )}
               <Button
@@ -182,7 +200,9 @@ export default function ExtensionBrowser({
                 extension={e}
                 repositoryOrigin={repositoryOrigin}
                 installedSlugs={installed}
-                onInstall={setChosen}
+                onInstall={(extension, activate) =>
+                  setChosen({ extension, activate })
+                }
               />
             ))}
           </div>
@@ -197,7 +217,8 @@ export default function ExtensionBrowser({
                 Previous
               </Button>
               <span className="text-muted-foreground">
-                Page {outcome.page} of {outcome.totalPages} · {outcome.total} results
+                Page {outcome.page} of {outcome.totalPages} · {outcome.total}{" "}
+                results
               </span>
               <Button
                 size="sm"
@@ -213,8 +234,11 @@ export default function ExtensionBrowser({
 
       {/* Keyed so each choice gets a fresh dialog — see the effect inside it. */}
       <RegisterDialog
-        key={chosen ? `${chosen.kind}/${chosen.slug}` : "none"}
-        extension={chosen}
+        key={
+          chosen ? `${chosen.extension.kind}/${chosen.extension.slug}` : "none"
+        }
+        extension={chosen?.extension ?? null}
+        activateAfterInstall={chosen?.activate ?? false}
         onClose={() => setChosen(null)}
         onRegistered={(slug) => setInstalled((s) => new Set(s).add(slug))}
       />
@@ -224,6 +248,8 @@ export default function ExtensionBrowser({
 
 function Panel({ children }: { children: React.ReactNode }) {
   return (
-    <div className={cn(CARD_SHELL, "p-5 text-center text-muted-foreground")}>{children}</div>
+    <div className={cn(CARD_SHELL, "p-5 text-center text-muted-foreground")}>
+      {children}
+    </div>
   );
 }
