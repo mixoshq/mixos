@@ -8,7 +8,11 @@ import { createServiceClient } from "@/lib/db/server";
 import { appRegistry } from "@/generated/app-registry";
 import { revalidatePath } from "next/cache";
 import { requireReadOnlySession } from "@/lib/auth/session";
-import { requireAdmin } from "@/lib/apps/access";
+import { requireAdmin, setAppActive } from "@/lib/apps/access";
+import {
+  formatMissingList,
+  getMissingTenantConfigConnectors,
+} from "@/lib/apps/connector-gates";
 import {
   clearAppPassword,
   getAppPasswordMetadata,
@@ -106,6 +110,64 @@ export interface AppSchemaColumn {
 export interface AppSchemaTable {
   name: string;
   columns: AppSchemaColumn[];
+}
+
+/**
+ * Turn an app on or off for the whole instance.
+ *
+ * Deactivating is complete, not cosmetic: the app leaves every user's App
+ * Manager and menu bar, its pages and API routes stop being served at any auth
+ * tier, its widgets stop rendering and its scheduled jobs stop running. What it
+ * does NOT touch is anyone's install, grants or data — reactivating puts
+ * everyone back where they were, which is what makes this a switch rather than
+ * a deletion.
+ *
+ * Audited like the other privileged app operations: who turned an app off for
+ * everyone is exactly the question asked afterwards.
+ */
+export async function setAppActiveAction(
+  slug: string,
+  isActive: boolean,
+): Promise<void> {
+  const session = await requireReadOnlySession();
+  const admin = await requireAdmin(session);
+
+  if (!appRegistry.some((a) => a.slug === slug)) {
+    throw new Error("App not found in registry");
+  }
+
+  // Enforced here, not only on the button. The tile disables Activate when a
+  // declared connector is unconfigured, but the catalogue's "Install &
+  // Activate" never touches that tile — and an app activated without its
+  // connector is one that fails on its first request, for everyone, at once.
+  // Deactivating is never blocked: the way out of a mistake must not be gated
+  // on the thing that made it.
+  if (isActive) {
+    const missing = await getMissingTenantConfigConnectors(slug);
+    if (missing.length > 0) {
+      throw new Error(
+        `Configure ${formatMissingList(missing)} before activating this app.`,
+      );
+    }
+  }
+
+  await setAppActive(slug, isActive);
+
+  await recordAdminAction(
+    { id: admin.id, email: admin.email },
+    {
+      action: isActive ? "app.activate" : "app.deactivate",
+      targetType: "app",
+      targetId: slug,
+    },
+  );
+
+  // The app's own pages and routes read the flag per request, so only the
+  // surfaces that cache a LIST of apps need clearing: the admin registry, the
+  // App Manager, and the dashboard's menu bar.
+  revalidatePath("/admin/apps");
+  revalidatePath("/apps");
+  revalidatePath("/", "layout");
 }
 
 export async function getAppSchema(slug: string): Promise<AppSchemaTable[]> {

@@ -35,7 +35,7 @@ export default async function AppsPage() {
     <SettingsShell>
       <h1 className="text-2xl font-bold text-foreground">App Manager</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Toggle each on to install it on your dashboard.
+        Toggle each one on to use it and put its widgets on your dashboard.
       </p>
 
       <div className="mt-6">

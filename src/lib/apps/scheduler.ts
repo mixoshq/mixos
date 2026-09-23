@@ -102,7 +102,11 @@ function errMessage(err: unknown): string {
  * while the next tick starts a second copy beside it. Handlers observe the abort
  * via `ctx.signal`; one that ignores it still can't outlive its recorded run.
  */
-function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => void): Promise<T> {
+function withTimeout<T>(
+  p: Promise<T>,
+  ms: number,
+  onTimeout: () => void,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       onTimeout();
@@ -200,8 +204,10 @@ async function syncSchedules(): Promise<void> {
 }
 
 /**
- * Atomically claim a job if it's enabled, due (`next_run_at <= now()`, with NULL
- * meaning due now), and not currently held (or its hold is stale). Returns true
+ * Atomically claim a job if its app is active, the job is enabled, it is due
+ * (`next_run_at <= now()`, with NULL meaning due now), and it is not currently
+ * held (or its hold is stale). The app check is inside the claim, not before
+ * it, so "Run now" on a deactivated app cannot race past it either. Returns true
  * iff this pod won the claim. The UPDATE row-locks the matched row, so
  * concurrent claimers serialize and only the first sees the row as due+free.
  */
@@ -212,6 +218,10 @@ async function claim(slug: string, job: string): Promise<boolean> {
     where app_slug = ${slug}
       and job_name = ${job}
       and enabled
+      and exists (
+        select 1 from public.apps a
+        where a.slug = app_slug and a.is_active
+      )
       and (next_run_at is null or next_run_at <= now())
       and (running_since is null
            or running_since <= now() - make_interval(mins => ${STALE_LEASE_MINUTES}))
@@ -271,7 +281,8 @@ async function runClaimed(
       const result = await withTimeout(
         runSync(ctx, definition, mod.default),
         JOB_TIMEOUT_MS,
-        () => abort.abort(new JobTimeoutError(`sync exceeded ${JOB_TIMEOUT_MS}ms`)),
+        () =>
+          abort.abort(new JobTimeoutError(`sync exceeded ${JOB_TIMEOUT_MS}ms`)),
       );
       // The summary line is what makes a truncated tick distinguishable from a
       // complete one on the admin page.
@@ -284,7 +295,9 @@ async function runClaimed(
       const mod = await import(`@apps/${slug}/jobs/${job}`);
       const handler = mod.default;
       if (typeof handler !== "function") {
-        throw new Error(`apps/${slug}/jobs/${job}.ts must export a default function`);
+        throw new Error(
+          `apps/${slug}/jobs/${job}.ts must export a default function`,
+        );
       }
       await withTimeout(Promise.resolve(handler(ctx)), JOB_TIMEOUT_MS, () =>
         abort.abort(new JobTimeoutError(`job exceeded ${JOB_TIMEOUT_MS}ms`)),
@@ -392,24 +405,38 @@ export async function runDueJobs(): Promise<void> {
     // redeploy. Applies to every cron invocation (they all land
     // here); explicit "Run now" (runJobNow) bypasses this on purpose.
     if (!(await getSchedulerEnabled())) {
-      console.log("[scheduler] paused (scheduler_enabled=false); skipping tick");
+      console.log(
+        "[scheduler] paused (scheduler_enabled=false); skipping tick",
+      );
       return;
     }
     await syncSchedules();
+    // Joined to `apps` rather than filtered afterwards: a deactivated app runs
+    // nothing, and leaving its jobs to be claimed and then skipped would still
+    // advance `next_run_at`, so reactivating would silently lose a window.
     const jobs = (await sql`
-      select app_slug, job_name, interval_minutes, cron, timezone
-      from public.app_scheduled_jobs
-      where enabled
+      select j.app_slug, j.job_name, j.interval_minutes, j.cron, j.timezone
+      from public.app_scheduled_jobs j
+      join public.apps a on a.slug = j.app_slug
+      where j.enabled and a.is_active
     `) as unknown as JobRow[];
 
     await Promise.all(
       jobs.map(async (j) => {
         try {
           if (await claim(j.app_slug, j.job_name)) {
-            await runClaimed(j.app_slug, j.job_name, cadenceOfRow(j), "scheduled");
+            await runClaimed(
+              j.app_slug,
+              j.job_name,
+              cadenceOfRow(j),
+              "scheduled",
+            );
           }
         } catch (err) {
-          console.error(`[scheduler] claim/run failed for ${j.app_slug}/${j.job_name}:`, err);
+          console.error(
+            `[scheduler] claim/run failed for ${j.app_slug}/${j.job_name}:`,
+            err,
+          );
         }
       }),
     );
@@ -419,4 +446,3 @@ export async function runDueJobs(): Promise<void> {
     tickInFlight = false;
   }
 }
-

@@ -23,13 +23,9 @@
  */
 
 import { getReadOnlySession } from "@/lib/auth/session";
-import { getUserById, hasAppGrant } from "@/lib/apps/access";
+import { getUserById, hasAppGrant, isAppActive } from "@/lib/apps/access";
 import { isAppUnlocked } from "@/lib/apps/public-access";
-import {
-  keyAllows,
-  presentedApiKey,
-  resolveApiKey,
-} from "@/lib/apps/api-keys";
+import { keyAllows, presentedApiKey, resolveApiKey } from "@/lib/apps/api-keys";
 import type { RouteAuth } from "@/lib/apps/types";
 
 export type AppMount = "authenticated" | "public";
@@ -104,6 +100,15 @@ export async function resolveAuthTier(opts: {
 
   if (candidates.length === 0) return { kind: "not-served" };
 
+  // A deactivated app serves nothing, at any tier. This is above the tier loop
+  // deliberately: `public` and `password` routes never consult a grant, so
+  // gating `hasAppGrant` alone would leave an app's public surface answering
+  // after an admin switched it off — the one surface where that matters most.
+  // `not-served` rather than a 403, because from outside there is no such
+  // route: an app that is off should not be distinguishable from one that was
+  // never here.
+  if (!(await isAppActive(appSlug))) return { kind: "not-served" };
+
   // Track why an identity tier failed, so a signed-in user who simply lacks the
   // grant gets 403 rather than a misleading 401 — but only when no weaker tier
   // rescues them.
@@ -165,7 +170,8 @@ export async function resolveAuthTier(opts: {
     }
   }
 
-  if (sawIdentityTier && hadSession && lackedGrant) return { kind: "forbidden" };
+  if (sawIdentityTier && hadSession && lackedGrant)
+    return { kind: "forbidden" };
   // Checked before `unauthenticated`: for a route declaring both, the visitor on
   // the public surface has a password to enter, not a login to complete.
   if (lockedOut) return { kind: "password-required" };
@@ -183,7 +189,10 @@ async function safeSession() {
   try {
     return await getReadOnlySession();
   } catch (err) {
-    console.warn("[auth-tier] session probe failed, treating as anonymous:", err);
+    console.warn(
+      "[auth-tier] session probe failed, treating as anonymous:",
+      err,
+    );
     return null;
   }
 }

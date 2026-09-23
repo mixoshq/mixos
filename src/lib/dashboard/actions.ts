@@ -9,7 +9,7 @@ import {
   requireReadOnlySession,
   requireServerSession,
 } from "@/lib/auth/session";
-import { getUserById } from "@/lib/apps/access";
+import { getUserById, isAppActive } from "@/lib/apps/access";
 import { revalidatePath } from "next/cache";
 
 export interface LayoutItem {
@@ -51,9 +51,18 @@ export async function getDashboard(): Promise<{
       .eq("user_id", dbUser.id),
   ]);
 
+  // A widget whose app has been deactivated is not shown. The ROW stays —
+  // deactivating is a switch, not a deletion, and reactivating has to put
+  // everyone's dashboard back exactly as they left it — so this filters the
+  // read rather than the table. The layout is left whole for the same reason:
+  // react-grid-layout ignores entries with no matching child, and rewriting it
+  // here would quietly forget where the widget used to sit.
+  const widgets = (widgetsRes.data as DashboardWidget[]) ?? [];
+  const active = await Promise.all(widgets.map((w) => isAppActive(w.app_slug)));
+
   return {
     layout: (layoutRes.data?.layout as LayoutItem[]) ?? [],
-    widgets: (widgetsRes.data as DashboardWidget[]) ?? [],
+    widgets: widgets.filter((_, i) => active[i]),
   };
 }
 
@@ -69,7 +78,7 @@ export async function saveLayout(layout: LayoutItem[]): Promise<void> {
       layout: JSON.parse(JSON.stringify(layout)),
       updated_at: new Date().toISOString(),
     },
-    { onConflict: "user_id" }
+    { onConflict: "user_id" },
   );
 }
 
@@ -77,7 +86,7 @@ export async function addWidget(
   appSlug: string,
   widgetId: string,
   config: Record<string, unknown>,
-  layoutItem: LayoutItem
+  layoutItem: LayoutItem,
 ): Promise<string> {
   const session = await requireServerSession();
   const dbUser = await getUserById(session.user.id);
@@ -131,7 +140,7 @@ export async function removeWidget(widgetInstanceId: string): Promise<void> {
 
 export async function updateWidgetConfig(
   widgetInstanceId: string,
-  config: Record<string, unknown>
+  config: Record<string, unknown>,
 ): Promise<void> {
   const session = await requireServerSession();
   const dbUser = await getUserById(session.user.id);

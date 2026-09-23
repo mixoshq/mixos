@@ -58,25 +58,27 @@ export default async function BrowsePage({
     <div>
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Browse {label.many}</h1>
+          <h1 className="text-2xl font-bold text-foreground">
+            Browse {label.many}
+          </h1>
           {/*
-            Two sentences, because a header that promises registering while the
-            banner underneath says this instance cannot register is the page
+            Two sentences, because a header that promises installing while the
+            banner underneath says this instance cannot install is the page
             arguing with itself. Browsing is the same either way; only the
             second half of the story changes.
           */}
           <p className="mt-1 text-sm text-muted-foreground">
             {ok ? (
               <>
-                {label.many} published to {host}. Registering one downloads it from
-                GitHub, verifies it against the checksum {host} published, runs it
-                through this instance&rsquo;s registry checks, and copies it into
-                this deployment — where anyone on it can install it.
+                {label.many} published to {host}. Installing one downloads it
+                from GitHub, verifies it against the checksum {host} published,
+                runs it through this instance&rsquo;s registry checks, and
+                copies it into this deployment.
               </>
             ) : (
               <>
                 {label.many} published to {host}. This instance can browse the
-                catalogue but cannot register from it — see below.
+                catalogue but cannot install from it — see below.
               </>
             )}
           </p>
