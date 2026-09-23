@@ -36,3 +36,10 @@ create index if not exists idx_app_unlock_failures_updated
 -- 0001's catalog sweep has already run by the time this file applies, so a
 -- migration that adds a table enables it here rather than relying on that sweep.
 alter table public.app_unlock_failures enable row level security;
+
+-- The schema version this file brings the database to. See 0007 and OS-UPDATES.md.
+insert into public.platform_settings (key, value)
+values ('platform_schema_version', '3')
+on conflict (key) do update
+  set value = excluded.value,
+      updated_at = now();

@@ -48,3 +48,10 @@ create index if not exists idx_connector_scope_status_lookup
 -- The scraped-catalogue cache this replaces. The parse now happens at authoring
 -- time and lands in the manifest, so nothing reads this table any more.
 drop table if exists public.connector_scope_docs;
+
+-- The schema version this file brings the database to. See 0007 and OS-UPDATES.md.
+insert into public.platform_settings (key, value)
+values ('platform_schema_version', '2')
+on conflict (key) do update
+  set value = excluded.value,
+      updated_at = now();

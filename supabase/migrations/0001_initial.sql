@@ -609,3 +609,18 @@ $$;
 
 revoke all on function public.get_app_schema(text) from public, anon, authenticated;
 grant execute on function public.get_app_schema(text) to service_role;
+
+-- The schema version this file brings the database to.
+--
+-- 0001 is the baseline, so this is where the row starts. Every migration after
+-- it sets its own number as its last statement, and the readiness probe
+-- compares the row against the version the image was built expecting — see
+-- 0007_platform_schema_version.sql and OS-UPDATES.md.
+--
+-- `do update` rather than `do nothing`: unlike `scheduler_enabled` above, this
+-- is not a default someone may have changed, it is a fact about the schema.
+insert into public.platform_settings (key, value)
+values ('platform_schema_version', '1')
+on conflict (key) do update
+  set value = excluded.value,
+      updated_at = now();
