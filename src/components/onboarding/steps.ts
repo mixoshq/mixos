@@ -24,7 +24,8 @@ export interface GuideStep {
    */
   target: string | string[];
   title: string;
-  body: string;
+  /** Optional: a step whose title says it all needs no second sentence. */
+  body?: string;
   /** Which side of the target the bubble sits on. Default `below`. */
   placement?: "below" | "above";
   /**
@@ -47,6 +48,9 @@ export interface GuideStep {
 
 const has = (selector: string) => document.querySelector(selector) !== null;
 
+/** The `data-tour` name the dashboard step points at. */
+export const DASHBOARD_TARGET = "edit-dashboard";
+
 export const GUIDE_STEPS: GuideStep[] = [
   {
     target: "menu-bar",
@@ -55,15 +59,10 @@ export const GUIDE_STEPS: GuideStep[] = [
     along: 0.3,
   },
   {
-    target: "apps-menu",
-    title: "Your apps live here.",
-    body: "Everything you've installed is in this menu. Or install something new with App Manager.",
-  },
-  {
-    target: ["edit-dashboard", "dashboard-pencil"],
+    target: [DASHBOARD_TARGET, "dashboard-pencil"],
     title: "Everything else is your dashboard.",
-    body: "Your dashboard is a collection of widgets. A widget is a small piece of an app. Let's add one, click Edit Dashboard.",
-    placement: "above",
+    body: "Your dashboard is a collection of widgets. A widget is a small piece of an app. Let's add one.",
+    placement: "below",
     advance: "auto",
     // Entering edit mode opens the catalog by itself during the tour (see
     // DashboardGrid), so "done" is the catalog being open.
@@ -71,8 +70,7 @@ export const GUIDE_STEPS: GuideStep[] = [
   },
   {
     target: "widget-wall-e",
-    title: "Try Wall-E.",
-    body: "Wall-E is a simple app that shows a line from the film on your dashboard. Let's add it.",
+    title: "Add your first widget.",
     advance: "auto",
     done: () =>
       !has('[data-tour="widget-wall-e"]') &&
@@ -90,9 +88,19 @@ export const GUIDE_STEPS: GuideStep[] = [
   {
     target: "dashboard-pencil",
     title: "That's all for now.",
-    body: "The pencil is always here to edit your dashboard. Enjoy MixOS!",
+    body: "You can edit your dashboard any time here. Enjoy MixOS!",
     placement: "above",
     dim: false,
     along: 1,
   },
 ];
+
+/**
+ * The step that first talks about the dashboard. Everything before it is
+ * about the menu bar, so the dashboard keeps its empty state out of sight
+ * until then — derived, not a number, so reordering the steps cannot leave
+ * the empty state hidden during its own step.
+ */
+export const DASHBOARD_STEP = GUIDE_STEPS.findIndex((s) =>
+  (Array.isArray(s.target) ? s.target : [s.target]).includes(DASHBOARD_TARGET),
+);
