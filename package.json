@@ -36,7 +36,7 @@
     "croner": "^10.0.1",
     "cronstrue": "^3.24.0",
     "lucide-react": "^1.8.0",
-    "mermaid": "^12.0.0",
+    "mermaid": "^11.17.2",
     "next": "^16.3.3",
     "next-auth": "^5.0.0-beta.32",
     "postgres": "^3.4.9",
@@ -56,7 +56,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/web-push": "^3.6.4",
-    "danger": "^13.0.7",
+    "danger": "^14.0.7",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "sharp": "^0.35.4",
@@ -67,5 +67,11 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "allowScripts": {
+    "core-js@3.49.0": true,
+    "fsevents@2.3.3": true,
+    "esbuild@0.27.7": true,
+    "unrs-resolver@1.11.1": true
   }
 }
