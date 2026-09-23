@@ -24,7 +24,7 @@ See [`docs/plans/README.md`](docs/plans/README.md) for the full convention.
    - [docs/connectors/registry-ux.md](docs/connectors/registry-ux.md) — **the admin experience the manifest builds.** Read this before writing `setup`
    - [docs/connectors/scopes.md](docs/connectors/scopes.md) — reading a provider's permissions in its own words
 3. Authoritative types: [src/lib/connectors/types.ts](src/lib/connectors/types.ts).
-4. For reference shape, read [connectors/gmail/](connectors/gmail/) — the worked example for all of it: a scraped scope page, a three-step provider guide with inline links and emboldened values, and a redirect URI placed on the step that registers it.
+4. For reference shape, read the Gmail connector at [italianst4/mixos-connector-gmail](https://github.com/italianst4/mixos-connector-gmail) — the worked example for all of it: a scraped scope page, a three-step provider guide with inline links and emboldened values, and a redirect URI placed on the step that registers it.
 5. If updating an existing connector, read its current files before proposing edits.
 
 Do not infer conventions from surrounding code alone, and do not guess based on training data.
