@@ -135,10 +135,6 @@ just pulled.
   connected. The client ID and secret stay tenant-wide — the *application* is
   registered once, only the *grant* is personal.
 
-- **Gmail connector.** Read-only access to a shared mailbox: search with Gmail's
-  `q` syntax, threads, labels, attachments, and message bodies decoded out of
-  MIME.
-
 
 ## 2026-08-24
 
