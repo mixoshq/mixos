@@ -25,6 +25,7 @@ import WidgetWrapper from "./widget-wrapper";
 import WidgetCatalog from "./widget-catalog";
 import { useDashboardEdit } from "./edit-mode-context";
 import { useTour } from "@/components/onboarding/tour-context";
+import { DASHBOARD_STEP } from "@/components/onboarding/steps";
 
 import "react-grid-layout/css/styles.css";
 import { CARD_SURFACE } from "@/components/ui/card";
@@ -54,11 +55,11 @@ export default function DashboardGrid({
   // do in edit mode is add something.
   const { phase: tourPhase, guideStep } = useTour();
   const tourActive = tourPhase === "guide";
-  // The tour talks about the menu bar first and the dashboard third. Until it
-  // gets there, an empty dashboard shows nothing at all — "Your dashboard is
-  // empty" and its button would be competing with the bubble for the eye,
-  // and the button is the very thing step three asks for.
-  const emptyStateHidden = tourPhase !== "done" && guideStep < 2;
+  // The tour talks about the menu bar before it talks about the dashboard.
+  // Until it gets there, an empty dashboard shows nothing at all — "Your
+  // dashboard is empty" and its button would be competing with the bubble
+  // for the eye, and the button is the very thing that step asks for.
+  const emptyStateHidden = tourPhase !== "done" && guideStep < DASHBOARD_STEP;
   const currentBreakpointRef = useRef<Breakpoint>("lg");
   const [isDraggingWidget, setIsDraggingWidget] = useState(false);
   const [isCollapsing, setIsCollapsing] = useState(false);
