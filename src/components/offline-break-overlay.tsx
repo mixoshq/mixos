@@ -30,7 +30,11 @@ const getServerSnapshot = () => true;
  * screen or the public customer pages (/p/...).
  */
 export default function OfflineBreakOverlay() {
-  const online = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const online = useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    getServerSnapshot,
+  );
   if (online) return null;
 
   return createPortal(
@@ -55,7 +59,7 @@ export default function OfflineBreakOverlay() {
         alt="We're on a break"
         width={800}
         height={400}
-        className="max-h-[70vh] w-auto max-w-full rounded-xl shadow-2xl"
+        className="max-h-[70vh] w-auto max-w-full rounded-lg shadow-2xl"
       />
       <p className="text-sm text-white/60">
         No internet connection — we&apos;ll pick right back up as soon as
