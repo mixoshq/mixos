@@ -1,0 +1,21 @@
+{
+  "name": "Template",
+  "description": "Copy this folder to themes/<your-slug>/ and edit. The folder name becomes the slug — it appears in a CSS attribute selector, so use lowercase letters, digits and hyphens.",
+  "tagline": "One line about the theme, for a listing card",
+  "keywords": [
+    "starter"
+  ],
+  "license": "UNLICENSED",
+  "themeUrl": "https://example.com/my-theme",
+  "themeSupportUrl": "https://example.com/my-theme/issues",
+  "authors": [
+    {
+      "name": "Your Name",
+      "email": "you@example.com"
+    }
+  ],
+  "fonts": [],
+  "assets": {},
+  "surfaces": [],
+  "escapes": []
+}

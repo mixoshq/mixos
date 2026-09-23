@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { requireReadOnlySession } from "@/lib/auth/session";
 import {
   ensureUser,
@@ -5,29 +9,33 @@ import {
   getUserGrantedSlugs,
 } from "@/lib/apps/access";
 import { appRegistry } from "@/generated/app-registry";
-import { getRegisteredSlugs } from "@/lib/apps/admin-actions";
 import AppManagerList from "@/components/apps/app-manager-list";
+import SettingsShell from "@/components/settings/settings-shell";
 
 export default async function AppsPage() {
   const session = await requireReadOnlySession();
   const userId = await ensureUser(session.user);
-  const [installedSlugs, grantedSlugs, registeredSlugs] = await Promise.all([
+  const [installedSlugs, grantedSlugs] = await Promise.all([
     getUserApps(userId),
     getUserGrantedSlugs(userId),
-    getRegisteredSlugs(),
   ]);
 
-  const registered = new Set(registeredSlugs);
+  // The grant is the only gate now. Registration used to be a second one —
+  // every app had to be switched on by an admin before anyone could be given
+  // it — but an app in the registry passed build-time validation, which is what
+  // that switch was standing in for.
   const granted = new Set(grantedSlugs);
-  const availableApps = appRegistry.filter(
-    (a) => registered.has(a.slug) && granted.has(a.slug),
-  );
+  const availableApps = appRegistry.filter((a) => granted.has(a.slug));
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
-      <h1 className="text-2xl font-bold">App Manager</h1>
+    // App Manager is a settings page, so it gets the settings shell — the same
+    // sidebar as Administration and the account pages, which link to it.
+    // Applied here rather than as apps/layout.tsx, which would also wrap
+    // /apps/[appSlug] and put a settings sidebar around every installed app.
+    <SettingsShell>
+      <h1 className="text-2xl font-bold text-foreground">App Manager</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Toggle each on to install it on your dashboard.
+        Toggle each one on to use it and put its widgets on your dashboard.
       </p>
 
       <div className="mt-6">
@@ -35,11 +43,12 @@ export default async function AppsPage() {
           Always empty: user-scoped (per-user OAuth) connectors were removed
           from the platform — see docs/connectors/architecture.md, "One
           credential set per connector". Every connector is tenant-scoped now,
-          and that gate is enforced upstream: `registeredSlugs` above only
-          contains apps whose declared connectors an admin has already
-          configured (src/lib/apps/connector-gates.ts, applied in
-          src/app/(main)/admin/apps/page.tsx). So there is nothing left for this
-          prop to carry, and nothing is lost by passing {}.
+          and that gate is enforced upstream: an app whose declared connectors
+          an admin has not configured cannot be GRANTED
+          (src/lib/apps/connector-gates.ts, applied in
+          src/app/(main)/admin/users/page.tsx), so it never reaches this list.
+          There is nothing left for this prop to carry, and nothing is lost by
+          passing {}.
 
           The prop itself is dead weight that AppManagerList and AppToggleList
           still declare, along with a "Connect →" link to /account/connections —
@@ -52,10 +61,6 @@ export default async function AppsPage() {
           missingUserConnectorsBySlug={{}}
         />
       </div>
-
-      <p className="mt-12 text-center text-xs text-muted-foreground">
-        Made in Detroit with 🫶🏽
-      </p>
-    </div>
+    </SettingsShell>
   );
 }

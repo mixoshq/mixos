@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 #
-# Two jobs, whenever an app or connector is part of this commit:
+# Two jobs, whenever an app, connector, or theme is part of this commit:
 #
-#   1. Stamp `lastUpdated` on every app/connector manifest the commit touches,
-#      and re-stage it so the date ships with the change it describes.
-#   2. Validate app/connector manifests (and rebuild the gitignored
+#   1. Stamp `lastUpdated` on every app/connector/theme manifest the commit
+#      touches, and re-stage it so the date ships with the change it describes.
+#   2. Validate app/connector/theme manifests (and rebuild the gitignored
 #      src/generated/*.ts). The generator schema-validates every app.json /
-#      connector.json and aborts loudly on a bad manifest, so wiring it here
+#      connector.json / theme.json — and compiles each theme.css against the
+#      token contract — aborting loudly on a bad manifest, so wiring it here
 #      fails the commit before a broken manifest can land.
 #
 # Order matters: stamp first, then regenerate, so the registry picks up the dates
@@ -20,15 +21,15 @@
 # followed by npm run registry.
 set -euo pipefail
 
-# Only run when a manifest/structure under apps/ or connectors/ is part of this
-# commit — keeps unrelated commits fast.
+# Only run when a manifest/structure under apps/, connectors/ or themes/ is part
+# of this commit — keeps unrelated commits fast.
 #
 # core.quotePath=false matters: by default git C-quotes a non-ASCII path
 # (`"apps/a/na\303\257ve.txt"`), which starts with a double quote and so fails
 # the `^(apps/` test below — the hook would skip both the stamp and manifest
 # validation for that commit without a word.
 staged="$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMRD)"
-if ! printf '%s\n' "$staged" | grep -qE '^(apps/|connectors/)'; then
+if ! printf '%s\n' "$staged" | grep -qE '^(apps/|connectors/|themes/)'; then
   exit 0
 fi
 
@@ -36,6 +37,6 @@ fi
 # failure, by design — see the header of scripts/stamp-updated.ts.
 npx tsx scripts/stamp-updated.ts
 
-echo "[pre-commit] apps/ or connectors/ changed — validating manifests…"
+echo "[pre-commit] apps/, connectors/ or themes/ changed — validating manifests…"
 # Non-zero on a bad manifest — exactly what we want before a commit lands.
 npm run --silent registry >/dev/null

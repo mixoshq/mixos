@@ -1,6 +1,23 @@
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 @import "tailwindcss";
 
+/*
+ * Every installed theme, each scoped to [data-theme="<slug>"]. AUTO-GENERATED
+ * from themes/<slug>/theme.css by scripts/generate-project-registry.ts, which
+ * validates the token set, the selector allowlist and WCAG contrast before
+ * emitting anything. See themes/AGENTS.md.
+ */
+@import "../generated/themes.css";
+
+/*
+ * The utility → variable mapping. This is NOT themeable: a theme supplies
+ * values, it can never add or remove a utility. That asymmetry is what keeps
+ * `bg-card` meaning the same thing under every theme, and it is why an app can
+ * be written once against the token names and survive a rebrand untouched.
+ */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -31,149 +48,118 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  /* Literal brand utilities. Same value as --primary (see :root) but a
-     different intent: `bg-primary` means "the primary action", `bg-mixnavy`
-     means "the brand colour" — a navy backdrop, a branded header band. Both
-     read from --brand-* so they can never drift apart. */
-  --color-mixnavy: var(--brand-navy);
-  --color-mixcoral: var(--brand-coral);
-  /* Local-development band. Only ever reached when the request Host is
-     localhost — see src/lib/env/local-host.ts. */
-  --color-mixlocal: var(--brand-local);
-  --color-mixlocal-mark: var(--brand-local-mark);
-  --font-sans: 'Roboto', sans-serif;
+  /* Literal brand utilities. `bg-primary` means "the primary action";
+     `bg-brand` means "the brand surface" — the menu bar, the sign-in page, a
+     marketing panel. Deliberately named for the ROLE, never the hue: a utility
+     called after a colour becomes a lie the first time the brand changes, and
+     cannot survive a theme system at all. */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-accent: var(--brand-accent);
+  /* The published brand hues, for large text and non-text accents only —
+     several of them cannot carry body text at AA. See docs/themes/contrast.md. */
+  --color-brand-cyan: var(--brand-cyan);
+  --color-brand-teal: var(--brand-teal);
+  --color-brand-violet: var(--brand-violet);
+  --font-sans: var(--type-sans);
+  --font-heading: var(--type-heading);
+  --font-mono: var(--type-mono);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
 }
 
-/*
- * Colour tokens are the ONLY place a colour is allowed to fork by theme. App
- * code never writes a `dark:` variant and never names a raw palette colour —
- * it uses the semantic tokens below, so flipping the theme is a change here
- * rather than an audit of every app. Enforced for `apps/**` by the
- * no-restricted-syntax block in eslint.config.mjs. See docs/apps/ux.md.
- *
- * Every status pair below is verified to clear WCAG AA (4.5:1) in BOTH
- * directions — as text on the page background, and as a surface carrying its
- * own foreground — in both themes. Ratios are noted per line; recheck them if
- * you change a value.
- */
-:root {
-  /* Brand hexes, defined once. --primary and --color-mixnavy both read
-     from these, so `bg-primary` and `bg-mixnavy` cannot drift apart. */
-  --brand-navy: #002345;
-  --brand-coral: #F05237;
-
-  /* The menu bar swaps to these on localhost so a local tab is never mistaken
-     for the real thing. Off-brand on purpose — that IS the signal. Not themed:
-     the band is a fixed colour in both themes. Mark on band: 11.2:1. */
-  --brand-local: #3C1246;
-  --brand-local-mark: #FFD900;
-
-  --background: #ffffff;
-  --foreground: hsl(222.2 84% 4.9%);
-  --card: #ffffff;
-  --card-foreground: hsl(222.2 84% 4.9%);
-  --popover: #ffffff;
-  --popover-foreground: hsl(222.2 84% 4.9%);
-  --primary: var(--brand-navy); /* white on it: 15.84:1 */
-  --primary-foreground: hsl(210 40% 98%);
-  --secondary: hsl(210 40% 96.1%);
-  --secondary-foreground: hsl(222.2 47.4% 11.2%);
-  --muted: hsl(210 40% 96.1%);
-  --muted-foreground: hsl(215.4 16.3% 46.9%); /* on --background: 4.75:1 */
-  --accent: hsl(210 40% 96.1%);
-  --accent-foreground: hsl(222.2 47.4% 11.2%);
-  /* Was #ef4444 (3.76:1) — failed AA as `text-destructive` AND as a surface
-     under white. #dc2626 clears 4.85:1 both ways. */
-  --destructive: #dc2626;
-  --destructive-foreground: hsl(210 40% 98%);
-  --success: #047857; /* 5.49:1 both ways */
-  --success-foreground: hsl(210 40% 98%);
-  --warning: #b45309; /* 5.05:1 both ways */
-  --warning-foreground: hsl(210 40% 98%);
-
-  /* CATEGORICAL ramp — for distinguishing things, never for judging them.
-     Chart series, category chips, column accents: cases where the colour says
-     "this is a different one", not "this is bad". Assign by stable index.
-     Do NOT reach for --destructive/--warning/--success here; a category tile
-     rendered in the error colour tells the user something untrue.
-     Each clears AA as text on --background; ratios noted. */
-  --cat-1: #1d4ed8; /* 6.70:1 */
-  --cat-2: #7e22ce; /* 6.98:1 */
-  --cat-3: #0369a1; /* 5.93:1 */
-  --cat-4: #be185d; /* 6.04:1 */
-  --cat-5: #0f766e; /* 5.47:1 */
-  --cat-6: #4d7c0f; /* 4.99:1 */
-  --border: hsl(214.3 31.8% 91.4%);
-  --input: hsl(214.3 31.8% 91.4%);
-  --ring: hsl(222.2 84% 4.9%);
-  --radius: 0.5rem;
-}
-
-/*
- * NOT CURRENTLY REACHABLE. Nothing applies this class — there is no theme
- * provider and no toggle, and <html> in src/app/layout.tsx is bare. It is kept
- * complete and AA-correct on purpose: that is what keeps shipping dark mode a
- * change to this file rather than an audit of 21 apps. If you add a toggle,
- * these values are ready — verify them, don't assume.
- *
- * On a near-black page a status colour has to get LIGHTER, and its foreground
- * flips dark, exactly the way --primary already does here. The previous
- * --destructive got this backwards (hsl(0 62.8% 30.6%) = #7f1d1d, a mere
- * 2.00:1 against --background — effectively unreadable), which went unnoticed
- * precisely because the class was never applied.
- *
- * OPEN QUESTION: --primary here is the inherited near-white flip, not the
- * brand navy, because #002345 on this background is a 1.26:1 surface — an
- * invisible button. Choosing a lighter brand tint for dark mode is a brand
- * decision; until someone makes it, a dark-mode primary action is white.
- */
-.dark {
-  --background: hsl(222.2 84% 4.9%);
-  --foreground: hsl(210 40% 98%);
-  --card: hsl(222.2 84% 4.9%);
-  --card-foreground: hsl(210 40% 98%);
-  --popover: hsl(222.2 84% 4.9%);
-  --popover-foreground: hsl(210 40% 98%);
-  --primary: hsl(210 40% 98%);
-  --primary-foreground: hsl(222.2 47.4% 11.2%);
-  --secondary: hsl(217.2 32.6% 17.5%);
-  --secondary-foreground: hsl(210 40% 98%);
-  --muted: hsl(217.2 32.6% 17.5%);
-  --muted-foreground: hsl(215 20.2% 65.1%); /* on --background: 7.80:1 */
-  --accent: hsl(217.2 32.6% 17.5%);
-  --accent-foreground: hsl(210 40% 98%);
-  --destructive: #ef4444; /* text 5.31:1 · fg on it 4.74:1 */
-  --destructive-foreground: hsl(222.2 47.4% 11.2%);
-  --success: #34d399; /* text 10.4:1 · fg on it 9.28:1 */
-  --success-foreground: hsl(222.2 47.4% 11.2%);
-  --warning: #fbbf24; /* text 12.0:1 · fg on it 10.7:1 */
-  --warning-foreground: hsl(222.2 47.4% 11.2%);
-  /* Categorical ramp, lightened for a near-black ground — same hue order as
-     :root so a series keeps its identity across themes. */
-  --cat-1: #60a5fa;
-  --cat-2: #c084fc;
-  --cat-3: #38bdf8;
-  --cat-4: #f472b6;
-  --cat-5: #2dd4bf;
-  --cat-6: #a3e635;
-  --border: hsl(217.2 32.6% 17.5%);
-  --input: hsl(217.2 32.6% 17.5%);
-  --ring: hsl(212.7 26.8% 83.9%);
-}
-
+/* The page ground and the default ink, straight from the token contract.
+   These two declarations are the difference between `--background` /
+   `--foreground` being live and being inert: `<body>` carries `mix-app-shell`,
+   but that is an OPTIONAL theme surface (themes/mixos and _template both ship
+   `"surfaces": []`), so nothing else in the stack sets them. Without this,
+   every element that inherits its colour — a heading, a `<pre>`, a `<th>` —
+   falls back to the UA default black, which reads as correct on a white page
+   and as ~1.05:1 on a dark one. */
 body {
-  font-family: 'Roboto', sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--type-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Match the widget card radius (rounded-xl = 0.75rem) on the drag/resize
+/* Headings carry the brand face; body copy carries the UI face. Which faces
+   those are is the theme's call — this only says which role goes where. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--type-heading);
+}
+
+/* Match the widget card radius (rounded-lg = 0.5rem) on the drag/resize
    placeholder so the dropzone visually belongs to the same grid of cards. */
 .react-grid-item.react-grid-placeholder {
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
+}
+
+/* The widget resize handle.
+   react-grid-layout ships one drawn with `rgba(0, 0, 0, 0.4)` borders, which
+   is invisible on any dark theme — the mark was there the whole time, on a
+   near-black card. This replaces it with three diagonal strokes in
+   `--muted-foreground`, the grab-here convention, and drops the library's
+   hover gate: the handles only matter while the dashboard is being edited,
+   and during editing an affordance that appears only under the pointer is an
+   affordance nobody finds. `[data-dashboard-editing]` (set by DashboardGrid)
+   is what "while editing" means here, because the library renders the
+   handles either way. */
+.react-grid-item > .react-resizable-handle {
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+[data-dashboard-editing] .react-grid-item > .react-resizable-handle {
+  opacity: 0.55;
+}
+
+[data-dashboard-editing] .react-grid-item:hover > .react-resizable-handle {
+  opacity: 1;
+}
+
+/* The library's corner bracket, replaced rather than overridden: `::after`
+   is its own, and leaving it would draw both marks on top of each other. */
+.react-grid-item > .react-resizable-handle.react-resizable-handle-se::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 12px;
+  height: 12px;
+  border: 0;
+  /* Three 45° strokes, longest at the corner. A repeating-linear-gradient
+     would tie stroke width to the element's diagonal; three explicit
+     gradients keep each stroke 1.5px whatever the handle's size. */
+  background:
+    linear-gradient(
+        315deg,
+        transparent 0 2px,
+        var(--muted-foreground) 2px 3.5px,
+        transparent 3.5px
+      )
+      no-repeat,
+    linear-gradient(
+        315deg,
+        transparent 0 5px,
+        var(--muted-foreground) 5px 6.5px,
+        transparent 6.5px
+      )
+      no-repeat,
+    linear-gradient(
+        315deg,
+        transparent 0 8px,
+        var(--muted-foreground) 8px 9.5px,
+        transparent 9.5px
+      )
+      no-repeat;
 }
 
 /* Stepped "wiggle" for each PIVOT! word. Rotation pivots on the word center
@@ -182,22 +168,46 @@ body {
    — producing exactly 3 discrete frames per second. Each word gets its own
    angles and phase offset so the trio feels hand-animated. */
 @keyframes pivot-wiggle-1 {
-  0%   { transform: rotate(-14deg); }
-  33%  { transform: rotate(10deg); }
-  66%  { transform: rotate(-4deg); }
-  100% { transform: rotate(-14deg); }
+  0% {
+    transform: rotate(-14deg);
+  }
+  33% {
+    transform: rotate(10deg);
+  }
+  66% {
+    transform: rotate(-4deg);
+  }
+  100% {
+    transform: rotate(-14deg);
+  }
 }
 @keyframes pivot-wiggle-2 {
-  0%   { transform: rotate(12deg); }
-  33%  { transform: rotate(-11deg); }
-  66%  { transform: rotate(5deg); }
-  100% { transform: rotate(12deg); }
+  0% {
+    transform: rotate(12deg);
+  }
+  33% {
+    transform: rotate(-11deg);
+  }
+  66% {
+    transform: rotate(5deg);
+  }
+  100% {
+    transform: rotate(12deg);
+  }
 }
 @keyframes pivot-wiggle-3 {
-  0%   { transform: rotate(-9deg); }
-  33%  { transform: rotate(13deg); }
-  66%  { transform: rotate(-2deg); }
-  100% { transform: rotate(-9deg); }
+  0% {
+    transform: rotate(-9deg);
+  }
+  33% {
+    transform: rotate(13deg);
+  }
+  66% {
+    transform: rotate(-2deg);
+  }
+  100% {
+    transform: rotate(-9deg);
+  }
 }
 
 .pivot-word-1,
@@ -207,83 +217,142 @@ body {
   transform-origin: center;
 }
 
-.pivot-word-1 { animation: pivot-wiggle-1 1s step-end infinite; }
-.pivot-word-2 { animation: pivot-wiggle-2 1s step-end -0.33s infinite; }
-.pivot-word-3 { animation: pivot-wiggle-3 1s step-end -0.66s infinite; }
+.pivot-word-1 {
+  animation: pivot-wiggle-1 1s step-end infinite;
+}
+.pivot-word-2 {
+  animation: pivot-wiggle-2 1s step-end -0.33s infinite;
+}
+.pivot-word-3 {
+  animation: pivot-wiggle-3 1s step-end -0.66s infinite;
+}
 
-/* Party popper for the onboarding congratulations modal. Two "streams" of
-   confetti shoot from the bottom corners toward the top-center, then the
-   pieces tumble down while fading out. Per-piece variation (angle, distance,
-   delay, color) lives on inline custom properties set in the component. */
-@keyframes popper-burst {
-  0% {
-    transform: translate(0, 0) rotate(0deg) scale(0.4);
+/* Welcome tour: each screen, and the guide bubble, settles in rather than
+   popping. Short enough that clicking Next quickly still feels immediate. */
+@keyframes tour-screen-in {
+  from {
     opacity: 0;
+    transform: translateY(8px);
   }
-  10% {
+  to {
     opacity: 1;
-  }
-  45% {
-    transform:
-      translate(var(--popper-x, 0px), var(--popper-y, -240px))
-      rotate(var(--popper-spin, 360deg))
-      scale(1);
-    opacity: 1;
-  }
-  100% {
-    transform:
-      translate(
-        calc(var(--popper-x, 0px) * 0.6),
-        calc(var(--popper-y, -240px) + 420px)
-      )
-      rotate(calc(var(--popper-spin, 360deg) * 2.2))
-      scale(0.9);
-    opacity: 0;
+    transform: translateY(0);
   }
 }
 
-.popper-piece {
-  position: absolute;
-  width: 10px;
-  height: 14px;
-  border-radius: 2px;
-  transform-origin: center;
-  animation: popper-burst 2.4s cubic-bezier(0.15, 0.75, 0.35, 1) forwards;
-  animation-delay: var(--popper-delay, 0ms);
-  will-change: transform, opacity;
-  pointer-events: none;
+.tour-screen-in {
+  animation: tour-screen-in 400ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-/* Full-screen confetti that rains from above the viewport down past the
-   bottom, tumbling as it falls. Per-piece values (horizontal position, spin,
-   duration, delay, color) are set via inline custom properties.
-   `animation-fill-mode: backwards` forces the pre-delay state to match the
-   0% keyframe (off-screen, opacity 0) so staggered pieces don't pile up
-   visibly at the top of the container while they wait their turn. */
-@keyframes confetti-fall {
+/* Confetti for finishing the welcome tour. Every piece starts at the origin
+   (the Done button, set on the container as --origin-x/y) and runs one
+   animation in two movements: an outward burst that decelerates as it
+   reaches the screen edge (0% → 38%), then a fall under gravity that
+   accelerates off the bottom (38% → 100%). A keyframe's timing function
+   governs the interval it starts, which is what gives the two movements
+   different feels inside one animation. Per-piece vectors are inline custom
+   properties set by the component.
+
+   Fill mode `both`: `backwards` keeps delayed pieces at the origin while
+   they wait; `forwards` keeps finished pieces at the 100% state — off the
+   bottom — instead of snapping back to the origin and piling up until the
+   component unmounts. */
+@keyframes confetti-burst {
   0% {
     transform: translate3d(0, 0, 0) rotate(0deg);
-    opacity: 0;
+    animation-timing-function: cubic-bezier(0.1, 0.7, 0.3, 1);
   }
-  8% {
-    opacity: 1;
+  38% {
+    transform: translate3d(var(--burst-x), var(--burst-y), 0)
+      rotate(var(--spin-1));
+    animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.5);
   }
   100% {
-    transform:
-      translate3d(var(--confetti-drift, 0px), 200vh, 0)
-      rotate(var(--confetti-spin, 720deg));
-    opacity: 1;
+    transform: translate3d(
+        calc(var(--burst-x) + var(--drift, 0px)),
+        var(--fall-y),
+        0
+      )
+      rotate(var(--spin-2));
+  }
+}
+
+/* The straggler: same burst, then it hangs at the edge and drifts down
+   slowly, the last thing to leave the screen. */
+@keyframes confetti-straggle {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+    animation-timing-function: cubic-bezier(0.1, 0.7, 0.3, 1);
+  }
+  16% {
+    transform: translate3d(var(--burst-x), var(--burst-y), 0)
+      rotate(var(--spin-1));
+    animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+  }
+  30% {
+    transform: translate3d(
+        calc(var(--burst-x) + var(--drift, 0px) * 0.3),
+        calc(var(--burst-y) + 24px),
+        0
+      )
+      rotate(calc(var(--spin-1) + 40deg));
+    animation-timing-function: cubic-bezier(0.45, 0, 0.7, 0.6);
+  }
+  100% {
+    transform: translate3d(
+        calc(var(--burst-x) + var(--drift, 0px)),
+        var(--fall-y),
+        0
+      )
+      rotate(var(--spin-2));
   }
 }
 
 .confetti-piece {
   position: absolute;
-  top: -80vh;
-  width: 10px;
-  height: 14px;
+  top: var(--origin-y, 50%);
+  left: var(--origin-x, 50%);
   border-radius: 2px;
-  will-change: transform, opacity;
-  pointer-events: none;
-  animation: confetti-fall var(--confetti-duration, 1.8s) linear backwards;
-  animation-delay: var(--confetti-delay, 0ms);
+  background: var(--confetti-color, currentColor);
+  animation: confetti-burst var(--confetti-duration, 2.5s) linear
+    var(--confetti-delay, 0ms) both;
+  will-change: transform;
+}
+
+.confetti-straggler {
+  animation-name: confetti-straggle;
+}
+
+/* Sign-in card on a failed attempt: a short horizontal shake, the physical
+   "no" — enough to be felt, short enough not to be a punishment. */
+@keyframes login-shake {
+  10%,
+  90% {
+    transform: translateX(-2px);
+  }
+  20%,
+  80% {
+    transform: translateX(4px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-8px);
+  }
+  40%,
+  60% {
+    transform: translateX(8px);
+  }
+}
+
+.login-shake {
+  animation: login-shake 500ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-screen-in,
+  .login-shake,
+  .confetti-piece {
+    animation-duration: 1ms;
+  }
 }

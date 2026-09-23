@@ -1,224 +1,398 @@
 # Secure Edge Gateway Architecture
 
-This document describes how MixOS actually routes, authenticates, and executes requests from apps today. It is a reference of the *current* system — not a proposal.
+How MixOS routes, authenticates, and executes app requests. This is a reference
+of the *current* system — a description, not a proposal.
+
+Its companion is [`security-architecture.md`](security-architecture.md), which
+covers the same machinery from a threat and audit angle. This document is the
+one to read to understand the request path; that one is the one to read to review
+it. Where they overlap, the authority is the code.
 
 ## Goal
 
-All database and connector access from app code (pages, widgets, server handlers) goes through a single authenticated gateway. Credentials never reach the browser. Apps cannot reach across the boundary into other apps' data. Every app inherits the same security and operational posture by construction.
+All database and connector access from app code goes through one authenticated
+pipeline. Credentials never reach the browser. Apps cannot reach across the
+boundary into other apps' data. Every app inherits the same security and
+operational posture by construction.
 
 ---
 
-## Request Flow
+## Two mounts, one pipeline
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  Client (Browser)                                        │
-│  ┌────────────┐  ┌────────────┐                          │
-│  │  Full Page │  │   Widget   │                          │
-│  │  (CSR)     │  │ (Dashboard)│                          │
-│  └──────┬─────┘  └──────┬─────┘                          │
-│         │  createAppClient(slug).get("/path")            │
-│         └───────────┬─────────┘                          │
-└─────────────────────┼────────────────────────────────────┘
-                      │  fetch("/api/apps/<slug>/<path>")
-                      ▼
-┌──────────────────────────────────────────────────────────┐
-│  /api/apps/[...slug]/route.ts   —   THE GATEWAY          │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │ 1. Resolve app slug from URL                       │  │
-│  │ 2. Lookup manifest in generated appRegistry        │  │
-│  │ 3. requireServerSession()      → 401 on failure    │  │
-│  │ 4. getUserBySSO + hasAppAccess → 403 on failure    │  │
-│  │ 5. buildAppContext(slug, session, dbUser)          │  │
-│  │ 6. Dynamic import apps/<slug>/api/<path>/route.ts  │  │
-│  │ 7. Invoke GET/POST/etc. with (request, { context })│  │
-│  └────────────────────────────────────────────────────┘  │
-└───────────────────────────┬──────────────────────────────┘
-                            │
-           ┌────────────────┼────────────────┐
-           ▼                ▼                ▼
-     ┌──────────┐   ┌──────────────┐   ┌────────────┐
-     │ Scoped DB│   │  Connector   │   │  Connector │
-     │ (Postgres│   │  (HubSpot)   │   │  (Notion)  │
-     │  tables) │   └──────────────┘   └────────────┘
-     └──────────┘
-```
+There are two HTTP entry points, and they are thin bindings over the same
+function:
 
-Every request under `/api/apps/...` is handled by **one** catch-all route ([src/app/api/apps/[...slug]/route.ts](../src/app/api/apps/[...slug]/route.ts)). It exports `GET`, `POST`, `PUT`, `PATCH`, and `DELETE`, all of which delegate to a single `handleRequest` helper. The app's own `route.ts` files are never wired directly into the Next.js router; they are imported dynamically by the gateway.
+| Mount | Path | Serves tiers | Caller |
+|---|---|---|---|
+| authenticated | `/api/apps/<slug>/<path>` | `session`, `signed-in`, `public` | a signed-in browser, via `createAppClient` |
+| public | `/api/p/<slug>/<path>` | `password`, `key`, `public` | an anonymous visitor, or a machine with an API key |
+
+Both files ([`/api/apps/[...slug]/route.ts`](../src/app/api/apps/%5B...slug%5D/route.ts),
+[`/api/p/[appSlug]/[[...slug]]/route.ts`](../src/app/api/p/%5BappSlug%5D/%5B%5B...slug%5D%5D/route.ts))
+do nothing but call `dispatchAppRoute({ ..., mount })` and re-export it under the
+five HTTP methods. **All the logic lives in
+[`src/lib/apps/dispatch.ts`](../src/lib/apps/dispatch.ts).**
+
+They were parallel implementations once. That is how the public mount acquired a
+gate the authenticated one never had, and the authenticated one ended up checking
+the wrong table. Keeping them as bindings is what stops them drifting again.
+
+```mermaid
+flowchart TD
+    subgraph CLIENT["Client (browser)"]
+        PAGE["Full page"]
+        WIDGET["Widget"]
+    end
+
+    PAGE --> SDK
+    WIDGET --> SDK
+    SDK["createAppClient(slug).get('/path')"]
+
+    SDK --> FETCH
+
+    FETCH["fetch('/api/apps/{slug}/{path}')<br/>Cookie: session token"]
+
+    FETCH --> PROXY
+
+    PROXY["PROXY — src/proxy.ts<br/>optimistic only<br/>cookie PRESENCE check, else 307 /login<br/>no decode, no validation, no admin check, no CSRF<br/>public prefixes (incl. /api/p) skip it entirely"]
+
+    PROXY --> DISPATCH
+
+    DISPATCH["dispatchAppRoute() — src/lib/apps/dispatch.ts<br/>twelve checks, in order — enumerated below<br/>413 · 404 · 429 · 405 · 401 · 403 · 500"]
+
+    DISPATCH --> DB["Scoped DB<br/>_app_*"]
+    DISPATCH --> CONN["Connector<br/>(Gmail, …)"]
+    DISPATCH --> HTTP["context.http<br/>(egress)"]
+```
 
 ---
 
-## The Gateway
-
-The gateway performs seven steps, in order, on every request:
+## The dispatcher, step by step
 
 | # | Step | Fails with |
 |---|------|------------|
-| 1 | Split the slug path: `["my-app", "items", "42"]` → `appSlug="my-app"`, `apiPath=["items", "42"]` | — |
-| 2 | Look up `appSlug` in the generated `appRegistry`. | 404 if unknown |
-| 3 | **Rate limit** by client IP (token-bucket: 60 burst, 10/s refill). IP extracted from rightmost `x-forwarded-for` to resist spoofing. | 429 + Retry-After header |
-| 4 | `requireServerSession()` — asserts a valid SSO session. | 401 if missing/expired |
-| 5 | `getUserBySSO(session.user.id)` + `hasAppAccess(userId, appSlug)` — asserts the user has registered for this app. | 401 if user not found, 403 if no access |
-| 6 | `buildAppContext(appSlug, session, dbUser)` — constructs the `AppContext` passed to the handler (see below). Wrapped in try-catch; returns a generic 500 on failure (e.g. corrupted connector credentials). | 500 on internal failure |
-| 7 | `await import("@apps/<slug>/api/<path>/route")` and invoke the matching HTTP-method export. Path `[]` resolves to `api/index/route.ts`. | 404 if file missing, 405 if method not exported |
+| 1 | Body cap — `content-length` compared against `MAX_BODY_BYTES` (27 MB) **before the body is read** | 413 |
+| 2 | `appRegistry` lookup for the slug | 404 |
+| 3 | Per-IP token bucket (60 burst, 10/s). IP is the **rightmost** `x-forwarded-for` entry | 429 + `Retry-After` |
+| 4 | `resolveRoutePath()` maps URL segments to an on-disk pattern; `[]` → `api/index/route.ts` | 404 |
+| 5 | Does this mount serve any tier the route declares? Decided from the **hoisted registry contract**, so no app module is imported for a caller the route would refuse | 404 |
+| 6 | Dynamic `import()`, then method lookup. Import and dispatch are **separate**, so a module that throws at load is not reported as missing | 404 / 405 / 500 |
+| 7 | The live declaration must match what step 5 was decided on. A gate decided from one source and enforced from another is not a gate | 404 |
+| 8 | `resolveAuthTier()` — which tier has the caller earned? | 401 / 403 / 404 |
+| 9 | CSRF double-submit token — **authenticated mount, identity tiers, mutating methods only** | 403 `CSRF_FAILED` |
+| 10 | Identity-aware limits: per user+app (120 burst, 4/s) and per route (90 burst, 3/s). Subject is the user where there is one, the IP where there is not | 429 |
+| 11 | `buildAppContext(appSlug, dbUser)` or `buildPublicAppContext(appSlug)`, in a try-catch | 500, generic body |
+| 12 | `runRoute()` — role gate, input schema, connector/wall-clock budget, output schema | 403 / 400 / 429 / 504 / 500 |
 
-Because every app goes through the same gateway, cross-cutting behavior — auth, access control, context building, audit — lives in exactly one place and applies uniformly.
+Step 8 fails **closed**: an authorization decision the platform could not make is
+not a decision it skips.
+
+Step 8 also answers differently per mount. On the public mount an identity
+challenge would confirm the route exists, so an unauthenticated caller gets 404.
+On the authenticated mount the caller is already known to be a browser with a
+cookie, so 401 is the useful answer.
+
+---
+
+## Auth tiers
+
+A route declares which tiers it accepts. `resolveAuthTier`
+([`auth-tier.ts`](../src/lib/apps/auth-tier.ts)) intersects that set with what
+the mount can serve and walks it **strongest-first**, stopping at the first match:
+
+```
+session  >  signed-in  >  password  >  key  >  public
+```
+
+| Tier | Requires | `context.user` |
+|---|---|---|
+| `session` | a session **and** `hasAppGrant` for this app | populated, with app roles |
+| `signed-in` | a session only; app roles are stripped | populated, no roles |
+| `password` | the app's unlock cookie (public mount only) | `null` |
+| `key` | a scoped app API key (public mount only) | `null` |
+| `public` | nothing | `null` |
+
+A route declaring `["session", "public"]` therefore serves a granted user their
+own data and a stranger the public view, from one handler, with `context.user`
+typed nullable so the compiler forces both branches to exist.
+
+**Authorization is `hasAppGrant`, not `hasAppAccess`.** The former reads
+`user_app_grants` and short-circuits true for a `global` app. The latter reads
+`user_apps`, which records that a user *installed* the app on their dashboard — a
+layout preference, not a permission. `hasAppAccess` has no callers and should not
+acquire any.
+
+**The `key` tier is implemented** ([`api-keys.ts`](../src/lib/apps/api-keys.ts)):
+keys are `mixk_`-prefixed random strings stored as HMAC-SHA256 digests, bound to
+one app, and scope-checked per method and route pattern — a key minted for one
+endpoint does not become a key for the whole app. It is served on the public
+mount only, because `/api/apps` sits behind the proxy's cookie check and a
+machine caller has no cookie.
+
+---
+
+## The route contract: `defineRoute`
+
+A route is a **declaration, not a bare function**. This is the shape:
+
+```ts
+// apps/my-app/api/hello/route.ts
+import { z } from "zod";
+import { defineRoute } from "@/lib/apps/route";
+
+export const GET = defineRoute({
+  summary: "Greet the signed-in user.",
+  auth: ["session"],
+  input: z.object({ shout: z.boolean().default(false) }),
+  output: z.object({ message: z.string() }),
+  handler: async (context, input) => {
+    const message = `Hello, ${context.user.displayName}!`;
+    return { message: input.shout ? message.toUpperCase() : message };
+  },
+});
+```
+
+`export async function GET(request, { context })` is a **build failure** —
+[`generate-project-registry.ts`](../scripts/generate-project-registry.ts) throws
+`FatalManifestError` on a bare handler, and an unbranded export is a 500 at
+runtime. The reason is that everything above `handler` has to be readable by
+something other than the handler: the build checks roles against the manifest,
+the dispatcher enforces `auth` before any app code runs, and the generated client
+types itself from the schemas.
+
+Rules:
+
+- **Folder path = URL path.** `api/items/[id]/route.ts` → `/api/apps/<slug>/items/<id>`.
+- **One `defineRoute` per method.** Missing methods are 405.
+- **Handler signature is `(context, input)`** — and `(context, input, request)` for
+  `raw: true` routes, which own their own `Response`.
+- **`output` is required** unless `raw: true`. It is validated on the way out, so
+  a route cannot quietly return a shape its widget does not expect.
+- **Roles are default-deny and do not bow to `isAdmin`.** A platform admin without
+  the app role gets 403. Roles are only valid on `auth: ["session"]`, enforced at
+  build *and* runtime.
+- **You return plain data.** The platform serializes it, picks the status, and
+  turns a thrown `AppError` into the right code — no hand-written 404, and no
+  chance of leaking a driver message.
+- **`budget` caps connector calls and wall clock**, so a route that turns into an
+  N+1 fails loudly rather than costing thirty seconds.
 
 ---
 
 ## AppContext
 
-[src/lib/apps/context.ts](../src/lib/apps/context.ts) builds the context object fresh for each request:
+[`context.ts`](../src/lib/apps/context.ts) builds a fresh context per request.
+Three shapes exist — `AppContext` (identity tiers), `PublicAppContext`
+(`user: null`), and `SystemAppContext` (scheduled jobs, no user but a trusted
+server context):
 
 ```ts
 interface AppContext {
-  user: {
-    id: string;           // Database user ID
-    ssoId: string;        // SSO subject
-    email: string;
-    displayName: string;
-    isAdmin: boolean;
-  };
-  connectors: Record<string, BaseConnector>;   // Initialized from app.json
-  db: ScopedClient | null;                     // Present if database: true
-  manifest: AppManifest;                       // This app's manifest
-  hooks: HookRegistrar;                        // Scoped hook registrar
+  user: AppContextUser;                      // id, email, displayName, isAdmin, roles, hasRole()
+  connectors: Record<string, BaseConnector>; // from manifest.connectors
+  db: ScopedClient | null;                   // manifest.database
+  notifications: NotificationsClient | null; // manifest.notifications
+  telemetry: TelemetryClient | null;         // manifest.telemetry
+  services: ServicesClient | null;           // manifest.consumes
+  env: AppEnv;                               // manifest.env, admin-filled
+  http: AppHttpClient | null;                // manifest.egress
+  manifest: AppManifest;
+  hooks: HookRegistrar;
 }
 ```
 
-### User
-
-Pulled from the SSO session + the `users` table row.
+Each capability field is `null` unless the manifest asks for it. That is the
+grant model: an app gets what it declared and nothing else.
 
 ### Connectors
 
-For each name in `manifest.connectors` (from `app.json`), the builder:
+For each name in `manifest.connectors`, the builder imports
+`@connectors/<name>/index`, instantiates it, and calls `initialize()` with
+decrypted credentials. Credentials are decrypted **only** here, server-side, and
+never serialized into a response.
 
-1. Dynamically imports `@connectors/<name>/index` and instantiates the default export.
-2. Loads the admin-configured credentials from `connector_configs` (encrypted at rest with AES-256-GCM; decrypted with `CONNECTOR_ENCRYPTION_KEY`).
-3. Calls `instance.initialize(credentials)`.
-4. Places the instance on `context.connectors[<name>]`.
+Two credential models:
 
-If a connector fails to load (e.g., missing directory, throwing constructor) or `initialize()` throws (e.g., invalid credentials), the connector is excluded from the context entirely — it is never added in a half-initialized state. Handlers must check `context.connectors.hubspot?.configured` before making calls.
+- **Tenant-scoped** (the default) — one credential set in `connector_configs`,
+  configured once by an admin, shared by everyone. Any response the connector
+  returns is the same response any user would have received.
+- **User-scoped** (`userScoped: true`) — the client id and secret still come from
+  the tenant row, but the OAuth *grant* is the caller's own, from
+  `user_connector_oauth` keyed `(user_id, connector_name)`. Only three-legged
+  OAuth may be user-scoped, and a user-scoped connector cannot be used by a
+  scheduled job — both build-enforced.
 
-Credentials are decrypted **only** inside `buildAppContext`, server-side. They are never serialized into the response.
+Once a connector answers differently per user, **every cache key must include the
+user**. That is the cost of the model, and it is the thing to get right.
+
+If a connector is missing, its constructor throws, `initialize()` throws, or a
+user-scoped connector has no grant for this caller, it is **omitted from the
+context entirely** — never present in a half-initialized state. Handlers check
+`context.connectors.gmail?.configured` before calling.
 
 ### Scoped DB
 
-If `manifest.database === true`, `context.db` is a `ScopedClient` created by `createScopedClient(appSlug)` ([src/lib/apps/scoped-db.ts](../src/lib/apps/scoped-db.ts)). The client is pinned to the app's namespaced tables — there is no way to reach another app's tables through it.
+`context.db` is a `ScopedClient` pinned to the app's `_app_<slug>_` tables. It
+exposes only `.table(name)`, which prepends the prefix; app code never sees or
+constructs a raw table name. MCP tool handlers get a `ReadOnlyScopedClient`
+instead — a `Proxy` that throws on `insert`/`update`/`upsert`/`delete` and
+re-wraps itself across chained calls, so `as any` does not defeat it.
 
-If the app does not declare a database, `context.db` is `null`.
+### Egress (`context.http`)
 
-### Hooks
-
-A per-request `HookRegistrar` scoped to this app. `doAction` / `applyFilters` calls fan out through the platform's hook system; registered callbacks are identified with the app's slug for audit and observability.
+Outbound HTTP for app code, bounded by the manifest's `egress` hostname
+allowlist ([`http.ts`](../src/lib/apps/http.ts)). It checks the scheme and
+hostname, resolves the name, re-checks **every returned address** against
+private/loopback/link-local/CGNAT/multicast ranges, and follows redirects
+manually so each hop repeats both checks. Raw `fetch` is lint-banned in `apps/**`
+so this is the only door.
 
 ---
 
-## App API Routes
+## Calling a route from a server component
 
-App authors add handlers under `apps/<slug>/api/<path>/route.ts`:
+Pages under `apps/<slug>/pages/` do **not** build a context themselves.
+`buildAppContext()` is platform-internal — it performs no auth check of its own,
+and `@/lib/apps/context` is a restricted import for `apps/**/pages/**` and
+`apps/**/widgets/**`. Use the app's own route:
 
 ```ts
-// apps/my-app/api/hello/route.ts
-import { NextResponse } from "next/server";
-import type { AppContext } from "@/lib/hooks/types";
+import { callAppRoute } from "@/lib/apps/call";
 
-export async function GET(
-  _request: Request,
-  { context }: { context: AppContext }
-) {
-  return NextResponse.json({
-    message: `Hello, ${context.user.displayName}!`,
-  });
-}
+const { items } = await callAppRoute<Result>("my-app", "GET /items", { limit: 20 });
 ```
 
-Rules:
-
-- **Folder path = URL path.** `api/items/[id]/route.ts` is reachable at `/api/apps/<slug>/items/<id>`.
-- **One function per method.** Export `GET`, `POST`, `PUT`, `PATCH`, or `DELETE` — missing methods return 405.
-- **Signature is `(request, { context })`.** No other arguments; no other shape.
-- **Authentication is already done** when the handler runs. `context.user` is always populated.
-
-These handlers run on the server, inside the gateway process. They can reach connectors and the DB freely — that's the whole point of this boundary.
+Same pipeline as the wire: the same auth-tier resolution against the page's own
+session, the same role gate, the same input and output validation, the same
+budget, the same telemetry row. What it skips is the network, the JSON round
+trip, and **the rate limiters** — deliberately, because the page render is already
+bounded by the request that triggered it. It throws `AppError` rather than
+returning a `Response`.
 
 ---
 
-## Client Calls (SDK)
+## Client calls (SDK)
 
-Widgets and client-side pages reach their app's routes via [src/lib/apps/sdk.ts](../src/lib/apps/sdk.ts):
+Widgets and client pages reach their app through
+[`sdk.ts`](../src/lib/apps/sdk.ts):
 
 ```ts
-import { createAppClient } from "@/lib/apps/sdk";
-
 const client = createAppClient("my-app");
 const { message } = await client.get<{ message: string }>("/hello");
 await client.post("/items", { body: { name: "Widget" } });
 ```
 
-The SDK:
+The SDK prefixes every path with `/api/apps/<slug>/`, sends JSON (or passes
+`FormData` through untouched), supports `AbortSignal`, and throws
+`AppClientError` carrying the status and parsed body. On mutating methods it
+attaches an `X-CSRF-Token` header, which the dispatcher verifies at step 9; on a
+403 it clears the cached token, refetches, and retries once, which is what
+recovers a token that went stale mid-session. See
+[`security-architecture.md` §7](security-architecture.md#7-csrf-protection).
 
-- Prefixes every path with `/api/apps/<slug>/`.
-- Sends `Content-Type: application/json`.
-- Throws `AppClientError` on non-2xx responses, exposing the status and parsed body.
-- Supports `AbortSignal` for cancellation.
-
-Widgets receive `appSlug` via `WidgetProps` — they cannot reach into the platform's session, DB, or connectors any other way.
-
----
-
-## Full Pages (Server Components)
-
-Server components under `apps/<slug>/pages/` run in the same Node process as the gateway but not *through* the gateway. They may call `buildAppContext()` directly if they need the same context the API handlers get — this is safe because server components never ship to the browser.
-
-Client pages (`"use client"`) must use the SDK, exactly like widgets.
+Widgets receive only `{ appSlug, config, size }`. There is no `context` prop and
+no way to receive a connector or a DB handle in client code.
 
 ---
 
 ## Enforcement
 
-The boundary is enforced in three places:
+The boundary holds in four places, not three:
 
-1. **Runtime (the gateway itself).** Every request to `/api/apps/...` goes through auth + access checks. There is no other public entry point for app code on the server.
-2. **TypeScript structure.** Widgets get `WidgetProps` (just `appSlug` + `config` + `size`). There is no `context` prop; there is no way to receive connectors or a DB handle in client code.
-3. **ESLint rules.** [eslint.config.mjs](../eslint.config.mjs) applies `no-restricted-imports` to `apps/**/*.{ts,tsx}` (with `apps/**/api/**` excluded). App code cannot import `@/lib/db/*`, `@connectors/*`, or `@/lib/connectors/*` — violations fail the build.
+1. **Runtime.** Every HTTP request to either mount goes through the dispatcher.
+   The one other entry point into a handler, `callAppRoute`, re-runs the same
+   auth, role, and validation stages.
+2. **Types.** Widgets get `WidgetProps`. There is no shape through which client
+   code can receive a context.
+3. **ESLint** ([`eslint.config.mjs`](../eslint.config.mjs)) — restrictions are
+   **tiered**, and each tier **restates the full set** rather than inheriting it:
+   - `apps/**` as a whole: no `@connectors/*`, no `@/lib/connectors/*`, no
+     `@/lib/db*`, no raw `fetch`, no `process.env`, and no constructing a scoped
+     DB client.
+   - `apps/**/pages/**` and `apps/**/widgets/**`: the same, plus no importing
+     their own app's `lib/server/**`.
+   - The server tier — `apps/**/api/**`, `lib/server/**`, `services/**`,
+     `mcp/**`, `jobs/**` — is allowlisted for connectors but **still banned from
+     `@/lib/db*`**, the services broker, and the context builder. App API routes
+     are *not* a free pass to the raw database client.
 
-API route handlers (`apps/**/api/**`) are allowlisted for those imports because they run behind the gateway and already have a validated context.
+   **Why restated and not inherited.** ESLint flat config *replaces* a rule's
+   options when a later block names the same rule; it does not merge them.
+   Anything omitted from a later block is therefore allowed there. That is not
+   hypothetical: the pages/widgets block once omitted `@/lib/apps/context`, which
+   made the most client-facing tier the only one able to import the server
+   context builder. Adding a restriction means adding it to **every** block.
+
+   `createScopedClient` is restricted by **name**, not by module, so
+   `import type { ScopedClient }` still works — a type cannot construct a client
+   for another app's prefix, and a handler needs it to type `context.db`.
+
+   These are `error`-level, and CI runs `npm run lint` as a blocking step.
+4. **Manifest `escapes`.** `app.json` may name rules from a closed set —
+   `raw-html`, `raw-response`, `output-validate-dev-only`, `process-env`,
+   `raw-fetch` — each with a written reason of at least a sentence. Naming a rule
+   outside the set is a build failure, because a typo'd escape reads as
+   "declared" to a reviewer while enforcing nothing. Three of the five disclaim
+   controls this document describes (`raw-fetch` the egress containment,
+   `process-env` the environment boundary, `raw-html` the injection boundary), so
+   an app carrying one is a review item. The set is visible in the generated
+   registry.
 
 ---
 
-## App Visibility
+## App visibility
 
-`manifest.hasPages` is computed at registry-generation time: it's `true` when `apps/<slug>/pages/` exists and is non-empty. Apps with no `pages/` directory are still valid — their widgets appear on the dashboard — but they don't show up in the Apps dropdown because there's nowhere to navigate to.
+`manifest.hasPages` is computed at registry-generation time: true when
+`apps/<slug>/pages/` exists and is non-empty. Apps with no `pages/` are still
+valid — their widgets appear on the dashboard — but they do not show in the Apps
+dropdown, because there is nowhere to navigate to.
 
-Directories starting with `_` (e.g., `apps/_template/`) are treated as scaffolds and excluded from the registry entirely.
-
----
-
-## What This Buys You
-
-- **Credentials never hit the browser.** They're decrypted in `buildAppContext` and injected into connector instances; the response only contains whatever the handler chooses to serialize.
-- **Auth/authz is done once.** Apps cannot forget to check. The gateway gates every request before any app code runs.
-- **Connector reuse across apps.** HubSpot is configured once in the Connector Registry. Any app that declares `"connectors": ["hubspot"]` gets a ready-to-call instance.
-- **Per-app DB isolation.** `context.db` is scoped by construction; cross-app reads are impossible without going outside the platform.
-- **Self-contained apps.** Pages, widgets, API routes, migrations, and manifest all live in one folder. Adding/removing an app is a folder move.
-- **Platform features are free.** Because every handler speaks the same `(request, { context })` shape, platform-level concerns (hooks, logging, audit, rate limiting) apply to every app at once. Rate limiting is already active — a per-IP token-bucket limiter in the gateway returns 429 on abuse.
+Directories starting with `_` (e.g. `apps/_template/`) are scaffolds and are
+excluded from the registry entirely. The same applies under `connectors/` and
+`themes/`; one generator,
+[`generate-project-registry.ts`](../scripts/generate-project-registry.ts),
+produces all three registries.
 
 ---
 
-## Reference Files
+## What this buys you
+
+- **Credentials never hit the browser.** Decrypted in the context builder,
+  injected into connector instances; the response carries only what the handler
+  returns.
+- **Auth is done once, in one place.** Apps cannot forget to check.
+- **Connector reuse.** Configure Gmail once; any app declaring it gets a
+  ready-to-call instance, tenant-wide or per-user.
+- **Per-app DB isolation** by construction, via the prefix.
+- **Declared capability.** `db`, `notifications`, `services`, `env`, `http` are
+  each null unless asked for — the manifest is the grant.
+- **Platform features are free.** Rate limiting, telemetry, budgets, schema
+  validation and audit apply to every app at once, because every handler speaks
+  the same declaration.
+
+---
+
+## Reference files
 
 | File | Responsibility |
 |------|----------------|
-| [src/app/api/apps/[...slug]/route.ts](../src/app/api/apps/%5B...slug%5D/route.ts) | The gateway — auth, access, context build, dispatch |
-| [src/lib/apps/context.ts](../src/lib/apps/context.ts) | `buildAppContext` — user, connectors, scoped DB, hooks |
-| [src/lib/apps/scoped-db.ts](../src/lib/apps/scoped-db.ts) | Per-app scoped database client |
-| [src/lib/apps/sdk.ts](../src/lib/apps/sdk.ts) | Client-side `createAppClient` SDK |
-| [src/lib/connectors/config.ts](../src/lib/connectors/config.ts) | Credential encryption/decryption |
-| [src/lib/hooks/types.ts](../src/lib/hooks/types.ts) | `AppContext`, `WidgetProps`, hook types |
-| [src/lib/rate-limit.ts](../src/lib/rate-limit.ts) | Per-IP token-bucket rate limiter |
-| [src/lib/safe-error.ts](../src/lib/safe-error.ts) | Production-safe error message helper |
-| [eslint.config.mjs](../eslint.config.mjs) | Restricted-import rules on `apps/**` |
-| [apps/_template/api/hello/route.ts](../apps/_template/api/hello/route.ts) | Canonical example of a handler |
-| [apps/_template/widgets/hello-mix.tsx](../apps/_template/widgets/hello-mix.tsx) | Canonical example of a widget calling its own route |
+| [`src/lib/apps/dispatch.ts`](../src/lib/apps/dispatch.ts) | **The pipeline** — every step above |
+| [`src/app/api/apps/[...slug]/route.ts`](../src/app/api/apps/%5B...slug%5D/route.ts) | Authenticated mount binding |
+| [`src/app/api/p/[appSlug]/[[...slug]]/route.ts`](../src/app/api/p/%5BappSlug%5D/%5B%5B...slug%5D%5D/route.ts) | Public mount binding |
+| [`src/lib/apps/auth-tier.ts`](../src/lib/apps/auth-tier.ts) | Tier resolution, mount eligibility |
+| [`src/lib/apps/route.ts`](../src/lib/apps/route.ts) | `defineRoute`, `runRoute`, roles, schemas, budget |
+| [`src/lib/apps/api-router.ts`](../src/lib/apps/api-router.ts) | URL → on-disk route pattern |
+| [`src/lib/apps/context.ts`](../src/lib/apps/context.ts) | The three context builders |
+| [`src/lib/apps/call.ts`](../src/lib/apps/call.ts) | `callAppRoute` — in-process invocation |
+| [`src/lib/apps/scoped-db.ts`](../src/lib/apps/scoped-db.ts) | `ScopedClient`, `ReadOnlyScopedClient` |
+| [`src/lib/apps/http.ts`](../src/lib/apps/http.ts) | Egress allowlist, SSRF containment |
+| [`src/lib/apps/api-keys.ts`](../src/lib/apps/api-keys.ts) | The `key` tier |
+| [`src/lib/apps/csrf.ts`](../src/lib/apps/csrf.ts) | Double-submit CSRF verification |
+| [`src/lib/apps/sdk.ts`](../src/lib/apps/sdk.ts) | Client-side `createAppClient` |
+| [`src/lib/connectors/config.ts`](../src/lib/connectors/config.ts) | Tenant credential encryption |
+| [`src/lib/connectors/user-config.ts`](../src/lib/connectors/user-config.ts) | Per-user OAuth grants |
+| [`src/lib/hooks/types.ts`](../src/lib/hooks/types.ts) | `AppContext`, `PublicAppContext`, `WidgetProps` |
+| [`src/lib/rate-limit.ts`](../src/lib/rate-limit.ts) | Token-bucket limiter |
+| [`eslint.config.mjs`](../eslint.config.mjs) | The tiered import restrictions |
+| [`apps/_template/api/hello/route.ts`](../apps/_template/api/hello/route.ts) | Canonical handler |
+| [`apps/_template/widgets/hello-mix.tsx`](../apps/_template/widgets/hello-mix.tsx) | Canonical widget |

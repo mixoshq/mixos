@@ -1,14 +1,88 @@
-# MixOS
+<p align="center">
+  <img src="public/themes/mixos/logo.png" alt="MixOS" width="96" height="92">
+</p>
 
-Internal operating system for MixOS, built with [Next.js](https://nextjs.org).
-Deploys to [Vercel](https://vercel.com), backed by [Supabase](https://supabase.com)
-Postgres. **Locally the whole system — app, Postgres, PostgREST, and the
-scheduler tick — runs in Docker on your machine**, so nobody needs a cloud
-project to get started.
+<h1 align="center">MixOS</h1>
 
-> **New here?** If you're using Claude in VSCode, run the `/mix-init` skill. It
-> detects what you're missing, installs it, and boots the stack for you — then
-> `/mix-help` to figure out what to build. The manual steps are below.
+<p align="center">
+  A self-hostable platform for building small internal apps —
+  each one a folder, not a project.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: MPL 2.0" src="https://img.shields.io/badge/license-MPL--2.0-brightgreen.svg"></a>
+  <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-black.svg">
+  <img alt="Node 22+" src="https://img.shields.io/badge/node-22%2B-brightgreen.svg">
+</p>
+
+---
+
+MixOS gives a team one place to sign in, one set of roles, one look, and one
+set of credentials for the outside world — and then lets each small tool live as
+a folder inside it. Drop a directory under `apps/`, declare a manifest, and it
+shows up in the launcher with authentication, permissions, its own database
+tables, scheduled jobs, notifications, and an MCP surface already wired up.
+
+It is built with [Next.js](https://nextjs.org) and backed by
+[Supabase](https://supabase.com) Postgres. **Locally the whole system — app,
+Postgres, PostgREST, and the scheduler tick — runs in Docker on your machine**,
+so you don't need a cloud project to get started.
+
+Three extension points, in increasing order of scope:
+
+|                | What it is                                            | Lives in             | Guide                                        |
+| -------------- | ----------------------------------------------------- | -------------------- | -------------------------------------------- |
+| **Apps**       | A tool people use: pages, API routes, tables, jobs    | `apps/<slug>/`       | [apps/AGENTS.md](apps/AGENTS.md)             |
+| **Connectors** | A shared, credentialed link to an external service    | `connectors/<name>/` | [connectors/AGENTS.md](connectors/AGENTS.md) |
+| **Themes**     | The colours, type, and logo every app renders through | `themes/<slug>/`     | [themes/AGENTS.md](themes/AGENTS.md)         |
+
+## Quick start
+
+Two steps. Clone the repo:
+
+```bash
+git clone <repo-url>
+cd mixos
+```
+
+Then open it in VSCode and run **`/mixos init`** in Claude Code:
+
+```
+/mixos init
+```
+
+That skill is the setup. It surveys what your machine is missing, asks once
+before changing anything, installs Homebrew / Node / Docker Desktop / the VSCode
+extensions, boots the whole stack in Docker, applies every migration, seeds an
+admin, and hands you a login for
+[http://localhost:3000](http://localhost:3000). Budget 5–15 minutes on a first
+run — most of it is Docker pulling images.
+
+From there, `/mixos help` explains how apps, connectors, and themes relate and
+recommends what to build first.
+
+The guided installer covers **macOS**. MixOS itself runs fine on Linux and on
+Windows via WSL2 — only the install commands differ, and everything after
+"Docker Desktop and Node 22 are present" is identical everywhere. Not using
+Claude Code, or want to know what the skill actually does? The same steps by
+hand are under [Prerequisites](#prerequisites) and
+[Manual setup](#manual-setup).
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Prerequisites](#prerequisites)
+- [Manual setup](#manual-setup)
+- [Running locally](#running-locally)
+- [Alternative: hosted Supabase](#alternative-hosted-supabase)
+- [Extending MixOS](#extending-mixos)
+- [Authentication](#authentication)
+- [Connectors](#connectors)
+- [Connecting Claude (MCP)](#connecting-claude-mcp)
+- [Developing](#developing)
+- [Troubleshooting](#troubleshooting)
+- [Hosting MixOS](#hosting-mixos)
+- [Licence](#licence)
 
 ## Prerequisites
 
@@ -16,8 +90,8 @@ project to get started.
   to be worked on in. After installing, add these two extensions (Extensions
   view → search by ID, or run the `code` commands below):
   - **Anthropic.claude-code** — Claude Code, the assistant that drives the
-    guided skills (`/mix-init`, `/mix-help`, `/mix-app`, `/mix-connector`,
-    `/mix-deploy`).
+    guided `/mixos` command (`/mixos init`, `/mixos help`, `/mixos app`,
+    `/mixos connector`, `/mixos theme`, `/mixos deploy`).
   - **esbenp.prettier-vscode** — Prettier, for consistent formatting.
 
   ```bash
@@ -28,11 +102,12 @@ project to get started.
   (`code` on the command line requires the
   [VSCode shell command](https://code.visualstudio.com/docs/setup/mac#_launching-from-the-command-line);
   open VSCode and run **Shell Command: Install 'code' command in PATH** from the
-  Command Palette if it isn't available. `/mix-init` installs both extensions for
+  Command Palette if it isn't available. `/mixos init` installs both extensions for
   you automatically.)
+
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) — runs the
-  local database and, in the default workflow, the app itself. Install the
-  **cask**, not the CLI-only formula:
+  local database and, in the default workflow, the app itself. On macOS install
+  the **cask**, not the CLI-only formula:
 
   ```bash
   brew install --cask docker-desktop
@@ -44,17 +119,16 @@ project to get started.
   companies, but organizations above **250 employees or $10M annual revenue**
   need a paid subscription — [OrbStack](https://orbstack.dev) is a drop-in
   alternative if that applies to you.
+
 - [Node.js](https://nodejs.org) 22+ — the version is pinned in `.nvmrc`, so
   `nvm use` selects it for you. Node runs the boot script and the Supabase CLI
   on the host even when the app itself runs in a container.
 - npm
 
-## Setup
+## Manual setup
 
-**The automated path:** run `/mix-init` in Claude (VSCode). It surveys what's
-missing, asks once, installs Homebrew / Node / Docker Desktop / the VSCode
-extensions, boots the stack, and hands you a login. Everything below is what it
-does by hand.
+This is what [`/mixos init`](#quick-start) does on your behalf. Follow it if you
+aren't using Claude Code, or if you'd rather drive the steps yourself.
 
 1. Install Docker Desktop and start it once. The first launch shows a license
    agreement and asks for your password to install a privileged helper — that
@@ -89,7 +163,7 @@ does by hand.
    of in a log you never look at. Ctrl-C ends the session: it stops the app
    containers and leaves the Supabase stack running, so the next boot skips the
    slow part. `npm run docker:down` stops that too. If you need the command to
-   *finish* instead — a script, or Claude booting the stack for you — add
+   _finish_ instead — a script, or Claude booting the stack for you — add
    `--detach`, described under [Running locally](#running-locally).
 
 4. Open [http://localhost:3000](http://localhost:3000) and log in with the
@@ -122,7 +196,13 @@ it. The flag composes with the prod profile: `npm run docker:prod -- --detach`.
 
 Note the bare `--`: it is npm's separator for arguments meant for the script
 rather than for npm itself, so `npm run dev:docker --detach` silently does
-*not* detach.
+_not_ detach.
+
+A second checkout can run at the same time as this one by naming itself in
+`.env.instance` (copy `.env.instance.example`) — its own compose project, its
+own Supabase stack, its own database and ports. Without that file a checkout is
+`mixos` on port 3000, exactly as above. See
+[Local development in Docker](docs/local-docker.md#more-than-one-instance-on-one-machine).
 
 Use **`http://localhost:3000`**, not `http://127.0.0.1:3000` — Next.js dev mode
 rejects `/_next/*` requests (including the hot-reload websocket) from origins it
@@ -161,16 +241,18 @@ global install.
 
    ```bash
    cp .env.local.example .env.local
+   npm run keys:generate        # prints a fresh value for every platform key
    ```
 
    Populate `.env.local`. From the Supabase dashboard you need `SUPABASE_URL`
    and `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API) plus `DATABASE_URL`
    (Project Settings → Database → **Transaction pooler**, port 6543 — not the
-   direct 5432 endpoint). `AUTH_SECRET`, `CONNECTOR_ENCRYPTION_KEY`,
-   `APP_UNLOCK_SECRET`, and `CRON_SECRET` can be generated with the one-liners
-   in the comments. Secrets for a real deployment live in the team's MixOS
-   1Password vault — request access from Anthony (amix@gmail.com) if you
-   need them.
+   direct 5432 endpoint). The cryptographic keys — `AUTH_SECRET`, `CRON_SECRET`,
+   and the six independent keys inventoried in
+   [`src/lib/env/keys.ts`](src/lib/env/keys.ts) — come from `npm run keys:generate`;
+   `npm run keys:check` exits non-zero if any is missing or malformed. Each key
+   protects exactly one thing, so rotating one has a bounded blast radius; see
+   [docs/security-architecture.md](docs/security-architecture.md).
 
 2. Apply the schema:
 
@@ -212,23 +294,115 @@ Scheduled jobs do **not** fire on this path — there is no cron sidecar in fron
 of a bare `npm run dev`. Trigger a tick by hand with
 `npx tsx scripts/run-scheduled-jobs.ts`.
 
+## Extending MixOS
+
+Everything you build lives in one of three top-level folders. Nothing is
+registered in a central file: the registry is generated from the folders
+themselves (`npm run registry`, which `dev` and `build` run for you), so adding
+a directory with a valid manifest is the whole installation step.
+
+Each guide below is the authoritative spec — file layout, manifest fields, APIs,
+and the invariants that are easy to get wrong. Read the relevant one in full
+before writing code; don't infer conventions from surrounding code alone.
+
+### Apps → [`apps/AGENTS.md`](apps/AGENTS.md)
+
+An app is a folder under `apps/<slug>/` with an `app.json` manifest. The folder
+name _is_ the slug. From the manifest an app can declare pages, API routes,
+its own Postgres tables (namespaced `_app_<slug>_`), scheduled jobs, web push
+notifications, MCP tools, role requirements, and public or password-protected
+surfaces. The platform supplies auth, navigation, theming, telemetry, and
+per-app data isolation; the app supplies the parts that are actually specific to
+it. Start from [`apps/_template/`](apps/_template/).
+
+Deep dives live in [`docs/apps/`](docs/apps/): [architecture](docs/apps/architecture.md),
+[pages](docs/apps/pages.md), [API routes](docs/apps/api-routes.md),
+[database](docs/apps/database.md), [roles](docs/apps/roles.md),
+[scheduled jobs](docs/apps/scheduled-jobs.md), [notifications](docs/apps/notifications.md),
+[widgets](docs/apps/widgets.md), [MCP](docs/apps/mcp.md), and [UX](docs/apps/ux.md).
+
+### Connectors → [`connectors/AGENTS.md`](connectors/AGENTS.md)
+
+A connector is a folder under `connectors/<name>/` with a `connector.json`
+manifest, wrapping one external service (Gmail, Slack, GitHub, …). It owns the
+credential handling, the scopes it may request, retry and failure semantics, and
+the typed client apps call — so several apps can share one authenticated link
+instead of each rolling its own. Credentials are entered in the admin UI and
+encrypted at rest, never committed. Start from [`connectors/_template/`](connectors/_template/)
+or [`connectors/_template-oauth/`](connectors/_template-oauth/).
+
+Deep dives live in [`docs/connectors/`](docs/connectors/): [architecture](docs/connectors/architecture.md),
+[implementation](docs/connectors/implementation.md), [credentials](docs/connectors/credentials.md),
+[scopes](docs/connectors/scopes.md), [webhooks](docs/connectors/webhooks.md),
+[failure handling](docs/connectors/failure-handling.md), and
+[usage in apps](docs/connectors/usage-in-apps.md).
+
+### Themes → [`themes/AGENTS.md`](themes/AGENTS.md)
+
+A theme is a folder under `themes/<slug>/` holding a `theme.json` of design
+tokens plus its own logo, icons, and fonts. Every app renders through the active
+theme, so a single switch restyles the whole system — apps never hard-code
+colour. Contrast is checked, not assumed. Start from [`themes/_template/`](themes/_template/)
+and compare against the shipped [`mixos`](themes/mixos/) and
+[`mixos-dark`](themes/mixos-dark/).
+
+Deep dives live in [`docs/themes/`](docs/themes/): [architecture](docs/themes/architecture.md),
+[tokens](docs/themes/tokens.md), [authoring](docs/themes/authoring.md),
+[assets](docs/themes/assets.md), and [contrast](docs/themes/contrast.md).
+
+### The guided path
+
+If you're working with Claude Code in VSCode, the `/mixos` command scaffolds any
+of the three for you and reads the right guide first. Run `/mixos` on its own for
+the list of actions; add `-q` to any action to have Claude ask clarifying
+questions before it starts.
+
+- **`/mixos help`** — new here or unsure what to build? It explains how apps,
+  connectors, and themes relate, asks what you're trying to do, and recommends
+  what to build and which docs to read.
+- **`/mixos app`** — create, update, or design-review an app under `apps/`.
+- **`/mixos convert`** — turn an existing application (a local folder, a git URL,
+  or code you've staged here) into a MixOS app. It inventories the original,
+  writes a conversion plan to `apps/<slug>/plans/`, stops for your approval, then
+  builds the first slice.
+- **`/mixos connector`** — create or update a connector under `connectors/`.
+- **`/mixos theme`** — create or update a theme under `themes/`.
+- **`/mixos deploy`** — commit what you have in sensible commits, push, and
+  open the pull request (branching first if you are on `main`). `--reset`
+  brings you back to a fresh `main` after the PR merges.
+
 ## Authentication
 
-Uses [NextAuth (Auth.js)](https://authjs.dev) with email + password as
-the default sign-in method. An admin can enable generic OIDC SSO at
-`/admin/authentication`; when SSO is on the login page hides the
-password form and shows only a "Login with SSO" button.
+Uses [NextAuth (Auth.js)](https://authjs.dev) with email and password as the only
+sign-in method. The first account comes from `npm run seed-admin`; after that an
+admin creates and manages people at
+[/admin/users](http://localhost:3000/admin/users). Setting
+`ALLOWED_EMAIL_DOMAINS` restricts sign-in to a comma-separated list of email
+domains; left blank, any provisioned address may sign in.
+
+Sessions are JWTs, but admin status and a per-user session version are re-read
+from the database on every session resolution rather than trusted for the
+token's lifetime — so a demotion, a deletion, or an explicit revocation takes
+effect on the next request instead of at token expiry. Apps declare which roles
+they require, enforced per request; see [docs/apps/roles.md](docs/apps/roles.md).
 
 ## Connectors
 
-Connectors integrate MixOS with external services (HubSpot, Notion, GitHub, etc.).
+Connectors integrate MixOS with external services (monday.com, Slack, GitHub, etc.).
 Their API keys are **not** environment variables — an admin enters them in the UI
 at [/admin/connectors](http://localhost:3000/admin/connectors), and MixOS encrypts
-them in the database (`CONNECTOR_ENCRYPTION_KEY`).
+them in the database with `CONNECTOR_ENCRYPTION_KEY`.
 
-The keys themselves live in the team's **MixOS 1Password vault**. To get them,
-**request access from Anthony (amix@gmail.com)**. **Never share these keys
-with anyone**, even if you've been granted access.
+You obtain each credential from that service's own developer console (an API key,
+or an OAuth client for connectors that use it), following the setup guide shown on
+the connector's tile in the registry. Because they are entered through the UI and
+stored encrypted, no external credential ever belongs in this repo, in
+`.env.local`, or in a deployment's environment variables.
+
+Connectors marked `userScoped` are different: each person connects their own
+account at [/account/connections](http://localhost:3000/account/connections), and
+those grants are encrypted under a separate key. See
+[docs/connectors/credentials.md](docs/connectors/credentials.md).
 
 ## Connecting Claude (MCP)
 
@@ -236,7 +410,7 @@ MixOS runs an MCP server so Claude can answer questions using data from your app
 In Claude, add a custom connector pointing at:
 
 ```
-https://mix.mysite.com/api/mcp        # or http://localhost:3000/api/mcp in dev
+https://<your-mixos-domain>/api/mcp    # or http://localhost:3000/api/mcp in dev
 ```
 
 You'll be sent to MixOS to sign in and tick which apps the connection may read.
@@ -249,29 +423,31 @@ them to yours.
 
 ## Developing
 
-To build on MixOS, work from a feature branch and use the guided skills (Claude in
-VSCode):
+Work from a feature branch; `/mixos deploy` creates one if you are still on
+`main`, commits your work, and opens the pull request (with a detailed
+description). It stops at opening the PR,
+since merging is what deploys to production. Without GitHub / `gh` access it
+hands you a ready-to-open PR link and body to paste.
 
-- **`/mix-help`** — new here or unsure what to build? It explains how apps and
-  connectors relate, asks what you're trying to do, and recommends what to build
-  and which docs to read.
-- **`/mix-app`** — create or update an app under `apps/`. Spec:
-  [apps/AGENTS.md](apps/AGENTS.md).
-- **`/mix-connector`** — create or update a connector under `connectors/`. Spec:
-  [connectors/AGENTS.md](connectors/AGENTS.md).
-- **`/mix-deploy`** — create your feature branch and, when you're ready, open the
-  Pull Request (with a detailed description) for you.
+Checks that gate a pull request — run them before pushing:
 
-`/mix-deploy` handles branching and the PR so you never commit to `main` directly;
-it stops at opening the PR, since merging is what deploys to production. No GitHub
-/ `gh` access? It hands you a ready-to-open PR link and body to paste, or contact
-Anthony or another developer to open it for you.
+```bash
+npm run lint
+npm run typecheck
+npm run build
+npm run verify:connectors   # connector manifests match their implementations
+```
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) gates every pull request
+with lint, `npm audit --audit-level=high`, typecheck, and build — no database is
+involved. `verify:connectors` is a local check; run it after touching a
+connector manifest.
 
 There is no publish step. `.githooks/pre-commit` runs
 [`scripts/stamp-updated.ts`](scripts/stamp-updated.ts), which stamps `lastUpdated`
-on every app or connector with a file in the commit and re-stages the manifest —
-so the date shown in the App Manager and Connector Registry always matches the
-last commit that touched it. Preview what would be stamped with
+on every app, connector, or theme with a file in the commit and re-stages the
+manifest — so the date shown in the App Manager and Connector Registry always
+matches the last commit that touched it. Preview what would be stamped with
 `npx tsx scripts/stamp-updated.ts --dry-run`.
 
 Recent, developer-facing changes are summarized in [WHATS-NEW.md](WHATS-NEW.md);
@@ -301,7 +477,7 @@ Deeper Docker-specific symptoms are in
   in the second column of that output and re-run. By far the most common cause
   is a host `npm run dev` you forgot about, still holding 3000.
 
-  Starting *another* `npm run dev` is not a way out of this: it collides on the
+  Starting _another_ `npm run dev` is not a way out of this: it collides on the
   same port, and on the Docker path there is no `.env.local` and no database
   running outside the stack, so a host server has no `SUPABASE_URL`, no
   `SUPABASE_SERVICE_ROLE_KEY` and no `DATABASE_URL` — every request fails with
@@ -311,16 +487,17 @@ Deeper Docker-specific symptoms are in
   with `docker compose -p mixos stop app-dev`, and point a host `.env.local` at
   `127.0.0.1` following
   [docs/local-docker.md](docs/local-docker.md#running-nextjs-on-the-host-against-the-container-backend).
+
 - **The first `npm run dev:docker` looks hung** — the Supabase CLI is pulling
   Postgres, Kong, PostgREST, and Studio images, several GB in total, and prints
   nothing while it does. Give it 5–15 minutes on a first run. `docker images`
   in another terminal shows progress.
 - **`self-signed certificate` / TLS or SSL errors from Postgres** — `PGSSLMODE`
   is unset. [src/lib/db/pg-options.ts](src/lib/db/pg-options.ts) deliberately
-  defaults to `ssl: "require"` because the production database is a hosted
-  service on the public internet, but the local container speaks plaintext.
-  `.env.docker` sets `PGSSLMODE=disable` for the Docker path; add it to
-  `.env.local` yourself if you point a host process at a local Postgres.
+  defaults to `ssl: "require"` because a hosted database sits on the public
+  internet, but the local container speaks plaintext. `.env.docker` sets
+  `PGSSLMODE=disable` for the Docker path; add it to `.env.local` yourself if
+  you point a host process at a local Postgres.
 - **`Missing required Supabase env vars`** — `SUPABASE_URL` and
   `SUPABASE_SERVICE_ROLE_KEY` are unset. On the Docker path they're generated
   into `.env.docker.local` by `npm run dev:docker`; if that file is missing or
@@ -339,33 +516,111 @@ Deeper Docker-specific symptoms are in
   `npm run dev:docker` starts from an empty database, re-migrates, and re-seeds
   the admin. Local-only data (connector credentials, app rows) is gone; nothing
   in a deployment is touched.
-- **Scheduled jobs** — they *do* fire on the Docker path. A `cron` sidecar calls
+- **Scheduled jobs** — they _do_ fire on the Docker path. A `cron` sidecar calls
   `GET /api/cron` with `Authorization: Bearer $CRON_SECRET` every 5 minutes,
   which is byte-for-byte what Vercel Cron does in production. Watch it with
   `docker compose -p mixos logs -f cron`. On the hosted-Supabase path (bare
   `npm run dev`) there is no ticker; run one manually with
   `npx tsx scripts/run-scheduled-jobs.ts`.
 
-## Deploying
+## Hosting MixOS
 
-Vercel builds and deploys directly from GitHub: a Preview deployment per pull
-request, Production on merge to `main`. Docker is a local development tool only —
-no image is built or pushed by CI, and there is no build or deploy step in this
-repo's CI. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) only gates PRs
-with lint, typecheck, and build, with no database.
+A MixOS deployment is two things: a Next.js server and a Postgres database.
+The path this repo is set up for is **Vercel + Supabase** — a Preview deployment
+per pull request, Production on merge to `main`.
 
-One-time setup:
+Docker is a local development tool here: no image is built or pushed by CI, and
+there is no build or deploy step in this repo's CI —
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) only gates pull requests
+(see [Developing](#developing)). Deployment is Vercel watching the repository.
 
-1. Import the repo into Vercel. The framework preset and build command are
+### Vercel + Supabase
+
+1. **Create a Supabase project** for the deployment — separate from anything you
+   develop against. Note `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
+   (Project Settings → API) and the **transaction pooler** connection string,
+   port 6543 (Project Settings → Database).
+
+2. **Import the repo into Vercel.** The framework preset and build command are
    detected automatically.
-2. Set the environment variables from `.env.local.example` in the Vercel project
-   (Settings → Environment Variables). `NEXTAUTH_URL` should be the production
-   domain; `CRON_SECRET` is required or `/api/cron` refuses to run. **Nothing
-   from `.env.docker` belongs here** — those values are public.
-3. Push the schema to the production Supabase project: `npm run db:push`.
-4. Seed the first admin (`npm run seed-admin` against the production
-   `DATABASE_URL`), then remove `INITIAL_ADMIN_*`.
 
-`vercel.json` registers the scheduler cron (`/api/cron`, every 5 minutes). Note
-that Vercel's Hobby plan only permits **daily** cron schedules — the 5-minute
-cadence needs a Pro plan.
+3. **Set the environment variables** from
+   [`.env.local.example`](.env.local.example) in the Vercel project
+   (Settings → Environment Variables):
+   - `NEXTAUTH_URL` — the production domain. It is what OAuth redirect URIs and
+     the MCP resource identifier are built from, and it is deliberately never
+     derived from a request header.
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` — from step 1.
+     The service role key bypasses Row-Level Security; treat it as a full
+     database credential and never expose it to the browser.
+   - The cryptographic keys — generate a fresh set with `npm run keys:generate`
+     and paste them in. `CRON_SECRET` is required or `/api/cron` refuses to run.
+     Never reuse a local value.
+   - Optional: `ALLOWED_EMAIL_DOMAINS` to restrict who may sign in, and the
+     `VAPID_*` keys if any app uses web push notifications.
+
+   **Nothing from [`.env.docker`](.env.docker) belongs here** — those values are
+   public.
+
+4. **Apply the schema** against the production database:
+
+   ```bash
+   npx supabase link --project-ref <production-project-ref>
+   npm run db:push        # platform schema
+   npm run migrate:apps   # per-app tables, with DATABASE_URL pointed at production
+   ```
+
+5. **Seed the first admin** — set `INITIAL_ADMIN_EMAIL` and
+   `INITIAL_ADMIN_PASSWORD`, run `npm run seed-admin` against the production
+   `DATABASE_URL`, then remove both variables.
+
+6. **Configure connectors** in the running deployment at `/admin/connectors`.
+   Connector credentials are entered in the UI and encrypted in the database —
+   they are not environment variables, and do not need to be set on Vercel.
+
+[`vercel.json`](vercel.json) registers the scheduler cron (`/api/cron`, every 5
+minutes). Note that Vercel's Hobby plan only permits **daily** cron schedules —
+the 5-minute cadence needs a Pro plan, and Hobby also caps function duration at
+60s, which truncates a long scheduler tick (harmlessly: each job is claimed with
+an atomic Postgres update, so the next tick resumes).
+
+### Hosting it somewhere else
+
+Nothing in the platform requires Vercel specifically. It is a standard Next.js
+server: `npm ci && npm run build && npm start` behind the same environment
+variables works on any Node 22+ host. The repo's [`Dockerfile`](Dockerfile) is a
+real production build of the same thing — a multi-stage image running Next.js
+standalone output as `node server.js`, with a `/api/health/live` healthcheck.
+`npm run docker:prod` runs it locally against the Docker Postgres, which is how
+to reproduce a deploy before you trust it. Postgres does not have to be
+Supabase-hosted either, as long as PostgREST is reachable at `SUPABASE_URL` and
+the connection string points at the same database.
+
+Two things you have to replace yourself off Vercel:
+
+- **The scheduler tick.** `vercel.json` is Vercel-specific. Anything that can
+  make an authenticated HTTP request on a schedule will do —
+  `GET /api/cron` with `Authorization: Bearer $CRON_SECRET`. That is exactly
+  what the local `cron` sidecar in [`docker-compose.yml`](docker-compose.yml)
+  does, and it is a working reference.
+- **Preview deployments per pull request**, if you want them.
+
+Before exposing a deployment publicly, read
+[docs/security-architecture.md](docs/security-architecture.md) — the trust
+boundaries, the key inventory and what rotating each key costs, and the
+Row-Level Security coverage — and
+[docs/secure-edge-gateway-architecture.md](docs/secure-edge-gateway-architecture.md)
+for the request path in front of it.
+
+## Licence
+
+MixOS is licensed under the **Mozilla Public License 2.0** ([`LICENSE`](LICENSE)).
+
+The platform is copyleft; **what you build on it is yours.** Apps, connectors
+and themes under `apps/`, `connectors/` and `themes/` are not Covered Software
+and may be licensed however you like, including proprietary — importing
+platform code does not change that. The scaffolding templates are public domain
+(CC0) so a copied template never carries obligations into your work.
+
+See [`LICENSING.md`](LICENSING.md) for the boundary in detail, why MPL was
+chosen over GPL and AGPL, and the trademark and contribution terms.

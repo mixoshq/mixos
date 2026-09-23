@@ -1,11 +1,19 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * The public app API surface: `/api/p/<slug>/<path>`.
  *
- * The anonymous-only view of the same pipeline the authenticated mount uses —
+ * The cookie-less view of the same pipeline the authenticated mount uses —
  * `dispatchAppRoute` with `mount: "public"`, which narrows the eligible tiers to
- * `password` and `public`. A route declaring only identity tiers is a 404 here,
- * never a 401, so probing this surface cannot tell "exists but forbidden" from
- * "no such route".
+ * `password`, `key` and `public`. A route declaring only identity tiers is a 404
+ * here, never a 401, so probing this surface cannot tell "exists but forbidden"
+ * from "no such route".
+ *
+ * `key` is served here and nowhere else: `/api/apps` sits behind the proxy's
+ * cookie-presence check, so a machine-to-machine caller carrying an API key and
+ * no cookie would be redirected to /login before the dispatcher ever ran.
  *
  * This path is in the proxy's public prefix list, so "no session cookie" is the
  * expected state and nothing upstream will have bounced the caller to /login.
@@ -34,7 +42,10 @@ async function handle(
 }
 
 export const GET = (req: Request, ctx: RouteContext) => handle(req, ctx, "GET");
-export const POST = (req: Request, ctx: RouteContext) => handle(req, ctx, "POST");
+export const POST = (req: Request, ctx: RouteContext) =>
+  handle(req, ctx, "POST");
 export const PUT = (req: Request, ctx: RouteContext) => handle(req, ctx, "PUT");
-export const PATCH = (req: Request, ctx: RouteContext) => handle(req, ctx, "PATCH");
-export const DELETE = (req: Request, ctx: RouteContext) => handle(req, ctx, "DELETE");
+export const PATCH = (req: Request, ctx: RouteContext) =>
+  handle(req, ctx, "PATCH");
+export const DELETE = (req: Request, ctx: RouteContext) =>
+  handle(req, ctx, "DELETE");

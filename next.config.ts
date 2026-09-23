@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -81,11 +85,18 @@ const nextConfig: NextConfig = {
       {
         source: "/(.*)",
         headers: [
-          // No third-party embedder any more — the Chrome new-tab extension
-          // that needed `chrome-extension://<id>` here has been removed, so
-          // this is back to a plain same-origin-only frame policy.
-          { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
+          // Content-Security-Policy is NOT set here. It carries a per-request
+          // nonce and therefore lives in src/proxy.ts. Setting it in both places
+          // would not merge the two policies — the browser intersects them, so
+          // the result would be stricter than either and fail in ways neither
+          // file explains. `frame-ancestors 'self'` moved there intact.
           { key: "X-Content-Type-Options", value: "nosniff" },
+          // HTTPS-only for a year, subdomains included. Harmless on plain http
+          // (browsers ignore it off TLS), so it needs no environment guard.
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=31536000; includeSubDomains",
+          },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
             key: "Permissions-Policy",

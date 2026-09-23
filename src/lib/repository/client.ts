@@ -1,0 +1,419 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+/**
+ * The HTTP client for the mixos.org repository — the only module that knows
+ * mixos.org has URLs.
+ *
+ * Three calls:
+ *
+ *   GET /api/v1/search                → a page of SUMMARIES
+ *   GET /api/v1/<kind>/<slug>         → one full listing
+ *   GET /api/v1/<kind>/<slug>/install → an InstallManifest
+ *
+ * ── WHY SEARCH AND DETAIL ARE SEPARATE CALLS ────────────────────────────────
+ *
+ * Because the repository makes them separate shapes. `/search` returns
+ * `ExtensionSummary` — no `sourceRepo`, no `releases`, no `description` — which
+ * is what keeps a page of 24 small. Everything the browse grid renders comes
+ * from a summary; the detail call happens once, when an admin opens the
+ * register dialog and those facts start to matter.
+ *
+ * ── STATE OF THE UPSTREAM ───────────────────────────────────────────────────
+ *
+ * The endpoints are live, and the catalogue behind them is seeded: every
+ * release currently publishes `sha256-PLACEHOLDER-<slug>` in place of a real
+ * checksum. Browsing works against it; installing does not and must not, which
+ * `isVerifiableHash` is what enforces. `MIXOS_REPOSITORY_URL` still exists so an
+ * instance can be pointed at a local checkout of the site (`astro dev`, port
+ * 4321) or a fixture, and "the repository is not answering" stays a first-class
+ * rendered state rather than an error page.
+ *
+ * ── WHAT THIS MODULE REFUSES TO DO ──────────────────────────────────────────
+ *
+ * It does not fetch code, and it does not decide anything. It parses a remote
+ * payload into the shapes in `./types` and hands them on. Verification,
+ * validation and the filesystem all live in `./install`, downstream of here,
+ * because a module that both talks to the network and writes to disk is one
+ * where the boundary between them stops being reviewable.
+ */
+
+import {
+  ExtensionSchema,
+  InstallManifestSchema,
+  KIND_SEGMENT,
+  PageSchema,
+  type Extension,
+  type ExtensionKind,
+  type ExtensionPage,
+  type InstallManifest,
+  type ListQuery,
+} from "./types";
+
+/**
+ * The repository this instance browses.
+ *
+ * Overridable so a deployment can point at a staging catalogue, an internal
+ * mirror, or — while the public API is still unbuilt — a local fixture server.
+ */
+export const DEFAULT_REPOSITORY_URL = "https://mixos.org";
+
+/**
+ * Hosts this instance will talk to over plaintext http.
+ *
+ * ── WHY HTTPS IS OTHERWISE REQUIRED ─────────────────────────────────────────
+ *
+ * This is where the `contentHash` comes from. A plaintext catalogue over a real
+ * network lets anyone on the path choose which hash this instance verifies
+ * against — and a hash the attacker picked verifies whatever the attacker sent,
+ * which quietly turns the entire install pipeline into a no-op. So the
+ * transport carrying the checksum has to be authenticated even though the
+ * download it describes is not.
+ *
+ * ── WHY THESE FOUR ARE EXEMPT ───────────────────────────────────────────────
+ *
+ * Because on all four the traffic never leaves the machine, so there is no path
+ * for anyone to be on. The first three are ordinary loopback. The fourth needs
+ * saying out loud:
+ *
+ * `host.docker.internal` is how a container reaches a port published on the
+ * host, and it is the ONLY way the Docker stack — the project's default local
+ * path — can reach a fixture server. Inside the container `localhost` is the
+ * container itself, so without this entry the documented way to exercise this
+ * feature locally does not work under the documented way to run the project.
+ *
+ * It is safe for a reason specific to it, not by analogy: the name is written
+ * into the container's hosts file by Docker itself, from the `extra_hosts:
+ * ["host.docker.internal:host-gateway"]` that every service in
+ * docker-compose.yml declares. It is not resolved over DNS, so there is no
+ * resolver for an attacker to answer, and Docker Desktop proxies it to host
+ * loopback. Same trust as `localhost`, reached from one hop away.
+ *
+ * NOT gated on NODE_ENV. `npm run docker:prod` runs the production-parity
+ * profile with NODE_ENV=production, and that is one of the profiles this entry
+ * exists to serve — a gate would disable it exactly where it is wanted. It
+ * costs nothing in a real deployment either: on Vercel the name does not
+ * resolve, so the request simply fails to connect.
+ *
+ * This mirrors the shape RFC 8252 gives OAuth redirect URIs, which the MCP
+ * authorization server already follows (docs/security-architecture.md §17):
+ * https everywhere, http on loopback.
+ */
+const PLAINTEXT_ALLOWED_HOSTS = new Set([
+  "localhost",
+  "127.0.0.1",
+  // WHATWG `URL` keeps the brackets on an IPv6 literal, so this is the form
+  // `url.hostname` actually produces for http://[::1]:8791.
+  "[::1]",
+  "host.docker.internal",
+]);
+
+/**
+ * Is this a build cut from a release tag?
+ *
+ * `MIXOS_RELEASE` carries the tag (`v1.2.0`) and is stamped by the
+ * tag-triggered build, nothing else. It is deliberately NOT `NODE_ENV` —
+ * `npm run docker:prod` runs the production-parity profile with
+ * NODE_ENV=production, and that profile exists precisely so a developer can
+ * exercise a production shape locally, including against a local catalogue.
+ * Keying the lock on NODE_ENV would take that away to catch a case NODE_ENV
+ * does not actually identify.
+ */
+export function isReleaseBuild(): boolean {
+  return (process.env.MIXOS_RELEASE || "").trim() !== "";
+}
+
+/** Warn once per process, not once per request. */
+let overrideWarned = false;
+
+export function repositoryBaseUrl(): string {
+  // An EMPTY value counts as unset, not as a misconfiguration. `??` alone would
+  // let `MIXOS_REPOSITORY_URL=` — which is what a compose passthrough with no
+  // value substitutes, and what an untouched `.env` line looks like — fall
+  // through to `new URL("")` and fail the page with "not a valid URL" when the
+  // author plainly meant "use the default".
+  const configured = (process.env.MIXOS_REPOSITORY_URL || "").trim();
+
+  /*
+    A RELEASED BUILD ALWAYS SEARCHES mixos.org.
+
+    The override exists so the platform and the catalogue can be developed
+    against each other locally. That is a development affordance, and in a
+    shipped release it is a way for the wrong catalogue — someone's laptop, a
+    stale staging mirror, a value that leaked into a committed env file — to
+    become the source of the checksums every install on that deployment
+    verifies against. The checksum is the whole control; whoever chooses the
+    catalogue chooses what "verified" means.
+
+    IGNORED, NOT REFUSED. A release that failed to boot because of a stray
+    environment variable would be a worse outcome than one that quietly used the
+    right catalogue, and there is no case where refusing to start is the safer
+    branch: the correct value is known, so it is used and the mistake is logged.
+
+    This is the last of four layers, and the only one that survives a
+    misconfiguration applied AFTER the release is cut — see
+    docs/security-architecture.md §31.
+  */
+  if (configured && isReleaseBuild() && configured !== DEFAULT_REPOSITORY_URL) {
+    if (!overrideWarned) {
+      overrideWarned = true;
+      console.warn(
+        `[repository] Ignoring MIXOS_REPOSITORY_URL=${configured}: this is release ` +
+          `${process.env.MIXOS_RELEASE}, and a released build always searches ` +
+          `${DEFAULT_REPOSITORY_URL}. Unset the variable to silence this.`,
+      );
+    }
+    return DEFAULT_REPOSITORY_URL;
+  }
+
+  const raw = configured || DEFAULT_REPOSITORY_URL;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new RepositoryError(
+      `MIXOS_REPOSITORY_URL is not a valid URL: ${raw}`,
+      "config",
+    );
+  }
+  if (url.protocol !== "https:" && !PLAINTEXT_ALLOWED_HOSTS.has(url.hostname)) {
+    throw new RepositoryError(
+      `MIXOS_REPOSITORY_URL must use https on ${url.hostname}. Plaintext is ` +
+        `accepted only where the traffic cannot leave this machine: ` +
+        `${[...PLAINTEXT_ALLOWED_HOSTS].join(", ")}.`,
+      "config",
+    );
+  }
+  return url.origin;
+}
+
+/** Where the failure was, so the UI can say something better than "error". */
+export type RepositoryFailure =
+  /** MIXOS_REPOSITORY_URL itself is wrong. An admin has to fix the deployment. */
+  | "config"
+  /** No answer: DNS, connection refused, timeout. The common case today. */
+  | "unreachable"
+  /** Answered, but not with a success status. */
+  | "status"
+  /** Answered successfully with something that is not the documented shape. */
+  | "malformed"
+  /** The listing or release genuinely is not there. */
+  | "not-found";
+
+export class RepositoryError extends Error {
+  constructor(
+    message: string,
+    readonly failure: RepositoryFailure,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = "RepositoryError";
+  }
+}
+
+/**
+ * Bounded on purpose, and short.
+ *
+ * These calls run inside a server action while an admin waits on a spinner. A
+ * repository that is slow is, from this page's point of view, a repository that
+ * is down, and saying so in eight seconds is better than holding the request
+ * open until the platform's own function timeout kills it with no message.
+ */
+const REQUEST_TIMEOUT_MS = 8_000;
+
+/**
+ * Cap on a catalogue response. Search results are metadata — tagline,
+ * categories, a few release rows — and 4 MB is already far past a page of them.
+ * The cap exists because `res.json()` on an unbounded body is a memory
+ * exhaustion primitive handed to whoever controls the other end.
+ */
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+async function getJson(path: string, params?: URLSearchParams): Promise<unknown> {
+  const url = new URL(path, repositoryBaseUrl());
+  if (params) url.search = params.toString();
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { accept: "application/json" },
+      // Catalogue answers are advisory and change; nothing downstream trusts a
+      // cached copy, since what is actually trusted is the content hash.
+      cache: "no-store",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      redirect: "follow",
+    });
+  } catch (err) {
+    throw new RepositoryError(
+      `Could not reach ${url.origin}: ${err instanceof Error ? err.message : String(err)}`,
+      "unreachable",
+    );
+  }
+
+  if (res.status === 404) {
+    throw new RepositoryError(`Not found in the repository: ${path}`, "not-found", 404);
+  }
+  if (!res.ok) {
+    throw new RepositoryError(
+      `The repository answered ${res.status} for ${path}.`,
+      "status",
+      res.status,
+    );
+  }
+
+  // Read as text with a length check rather than calling res.json() directly:
+  // the point is to stop before parsing something enormous, and json() has
+  // already buffered the whole body by the time it could be measured.
+  const body = await readBounded(res, MAX_RESPONSE_BYTES);
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    throw new RepositoryError(
+      `The repository returned something that is not JSON for ${path}.`,
+      "malformed",
+    );
+  }
+}
+
+/** Reads a response body, aborting once it exceeds `limit` bytes. */
+async function readBounded(res: Response, limit: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      throw new RepositoryError(
+        `The repository response exceeded ${limit} bytes.`,
+        "malformed",
+      );
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(concat(chunks, total));
+}
+
+function concat(chunks: Uint8Array[], total: number): Uint8Array {
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
+}
+
+/**
+ * Search the catalogue.
+ *
+ * `kind` is always sent by the callers here: each browse page is scoped to one
+ * kind, matching the admin page it hangs off. A cross-kind search would be a
+ * different page with a different button on it.
+ */
+export async function searchRepository(query: ListQuery): Promise<ExtensionPage> {
+  const params = new URLSearchParams();
+  if (query.kind) params.set("kind", query.kind);
+  if (query.q) params.set("q", query.q);
+  if (query.category) params.set("category", query.category);
+  if (query.author) params.set("author", query.author);
+  if (query.sort) params.set("sort", query.sort);
+  if (query.page) params.set("page", String(query.page));
+  if (query.pageSize) params.set("pageSize", String(query.pageSize));
+  if (query.featured !== undefined) params.set("featured", String(query.featured));
+
+  const raw = await getJson("/api/v1/search", params);
+  const parsed = PageSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new RepositoryError(
+      `The repository's search response did not match the expected shape: ${parsed.error.issues
+        .slice(0, 3)
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; ")}`,
+      "malformed",
+    );
+  }
+  // A listing of a kind other than the one asked for would install into the
+  // wrong directory downstream. Cheap to drop here; expensive to notice later.
+  const items = query.kind
+    ? parsed.data.items.filter((e) => e.kind === query.kind)
+    : parsed.data.items;
+  return { ...parsed.data, items };
+}
+
+/**
+ * One full listing.
+ *
+ * Everything the search endpoint leaves out: the GitHub repository, the release
+ * list, the description, the screenshots. Fetched on demand rather than folded
+ * into search, because folding it in is the thing the summary shape exists to
+ * avoid.
+ */
+export async function fetchExtension(
+  kind: ExtensionKind,
+  slug: string,
+): Promise<Extension> {
+  const raw = await getJson(`/api/v1/${KIND_SEGMENT[kind]}/${encodeURIComponent(slug)}`);
+  const parsed = ExtensionSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new RepositoryError(
+      `The repository's listing for ${slug} did not match the expected shape: ${parsed.error.issues
+        .slice(0, 3)
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; ")}`,
+      "malformed",
+    );
+  }
+  if (parsed.data.kind !== kind || parsed.data.slug !== slug) {
+    throw new RepositoryError(
+      `The repository returned ${parsed.data.kind}/${parsed.data.slug} when asked for ${kind}/${slug}.`,
+      "malformed",
+    );
+  }
+  return parsed.data;
+}
+
+/**
+ * Ask how to install one listing.
+ *
+ * `version` selects a specific release; omitting it takes whatever the
+ * repository considers current. The answer is a set of claims — a commit, a
+ * URL, a hash — none of which are acted on here.
+ */
+export async function fetchInstallManifest(
+  kind: ExtensionKind,
+  slug: string,
+  version?: string,
+): Promise<InstallManifest> {
+  const params = new URLSearchParams();
+  if (version) params.set("version", version);
+
+  const raw = await getJson(
+    `/api/v1/${KIND_SEGMENT[kind]}/${encodeURIComponent(slug)}/install`,
+    params,
+  );
+  const parsed = InstallManifestSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new RepositoryError(
+      `The repository's install manifest did not match the expected shape: ${parsed.error.issues
+        .slice(0, 3)
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; ")}`,
+      "malformed",
+    );
+  }
+  // The manifest decides a directory name and a download. Neither may be for
+  // something other than what was asked for, whatever the server says.
+  if (parsed.data.kind !== kind || parsed.data.slug !== slug) {
+    throw new RepositoryError(
+      `The repository returned an install manifest for ${parsed.data.kind}/${parsed.data.slug} ` +
+        `when asked for ${kind}/${slug}.`,
+      "malformed",
+    );
+  }
+  return parsed.data;
+}

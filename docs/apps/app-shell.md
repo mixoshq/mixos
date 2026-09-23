@@ -107,19 +107,33 @@ Pass `surface` to name what sits beneath the band. The active tab merges into th
 
 ## Cards: one shell per thing, and every card says who owns it
 
-Use [`Card`](../../src/components/ui/card.tsx) for the shell and `CardHeader` for the header row. They exist because 86 hand-rolled `rounded-xl border border-border bg-card` shells across 16 apps had drifted into different paddings, different header sizes, and h1–h4 for the same visual weight.
+Use [`Card`](../../src/components/ui/card.tsx) for the shell and `CardHeader` for the header row. They exist because 86 hand-rolled `rounded-lg border border-border bg-card` shells across 16 apps had drifted into different paddings, different header sizes, and h1–h4 for the same visual weight.
 
-**Two card families, and picking the wrong one is the usual mistake.** [`SectionCard`](../../src/components/ui/section-card.tsx) is a *form section* — small `h3` label, a `hint` line, evenly padded body, and a `SaveRow` footer whose absence is the read-only permission model. Use it on Configure pages and settings screens. `Card` is a *dashboard panel* — `text-lg` title, right-hand status slot, no footer. They share `CARD_SHELL`, so they can't drift on radius, border or fill.
+**Two card families, and picking the wrong one is the usual mistake.** [`SectionCard`](../../src/components/ui/section-card.tsx) is a *form section* — small `h3` label, a `hint` line, a rule under the header, and a `SaveRow` footer whose absence is the read-only permission model. Use it on Configure pages and settings screens. `Card` is a *dashboard panel* — `text-lg` title, an optional `description` line, right-hand status slot, no footer. They share `CARD_SHELL` **and the padding scale**, so they can't drift on radius, border, fill or inset.
+
+**The padding scale is one number: `5`.** Header, body and footer each inset by `5` on every side they own, so a headerless card is exactly `p-5`. Don't reach for `p-4`, `px-6 py-8` or `py-16` on a card — those were the old drift, and the analytics panels had been hand-rolled at `p-5` precisely because the primitive didn't offer it.
+
+**Inline cards are flat.** No `shadow-*`. The border is the edge. Elevation means "this floats above the page" and belongs only to `Dialog` (`shadow-xl`) and `Menu` (`shadow-lg`) — a shadow on an inline panel is a promise of depth the card doesn't keep.
+
+**`CARD_SHELL` vs `CARD_SURFACE`.** `CARD_SURFACE` is the chrome alone — radius, border, fill. `CARD_SHELL` is that plus the `.mix-card` theme hook, and is what an ordinary card wants. A surface owning a *different* hook — a widget (`.mix-widget`), a modal (`.mix-modal`), a dropdown (`.mix-popover`) — takes `CARD_SURFACE` and adds its own. Those are separate entries in `SURFACE_ALLOWLIST` so a theme can restyle dashboard widgets without also restyling every settings panel; handing them `CARD_SHELL` collapses four themeable surfaces into one.
+
+**Two tiers, and only the outer one is a card.** A repeated row or field group *inside* a card — the entry blocks in `apps/career`'s library, a `<fieldset>` of related inputs — is `rounded-md border border-border p-4` with **no fill of its own**. It sits on the card's ground. Giving it `bg-card` and `p-5` makes a card inside a card, which is the double-card bug below wearing a disguise.
 
 ```tsx
 <Card>
-  <CardHeader as="h2" title="Backlog composition" right={<span>updated 4m ago</span>} divided />
+  <CardHeader
+    as="h2"
+    title="Backlog composition"
+    description="Open items by track, over the selected range."
+    right={<span>updated 4m ago</span>}
+  />
   <CardBody>…</CardBody>
 </Card>
 ```
 
 - **`as` is not cosmetic.** The heading level is the document outline a screen-reader user navigates by. A card inside a section that already has an `<h2>` takes `as="h3"`. The visual size comes from the component; the level comes from where you are.
 - **`divided` draws the rule under the header.** Opt in per app and then be consistent — a page where some cards rule their header and some don't reads as unfinished.
+- **`description` is prose, and sits under the title, not in the row.** A sentence sharing a flex row with chips and a status slot wraps into a mess at narrow widths.
 - **`right` is for status, not actions.** A refresh button, a filter, a "notify" trigger belong in the body next to what they affect. The header's right slot is where "updated 4m ago" goes.
 
 ### A component owns its card, or it doesn't, and its name says which
@@ -254,7 +268,7 @@ Two different things get conflated, and they need different mechanisms:
 | Editing | **Still on** — the user is working | Off |
 | What's hidden | Internal-only content: ARR, CRM links, internal owner names | Everything not explicitly published |
 
-Screen-share mode is a client-side filter over the *same* page (`{!customerMode && <HubSpotLink />}`), persisted per user. A public page is a genuinely separate surface with its own route, its own auth, and `context.user === null`. Don't try to make one do the other's job: a client-side flag is not a security boundary, and a public page can't be edited.
+Screen-share mode is a client-side filter over the *same* page (`{!customerMode && <MondayLink />}`), persisted per user. A public page is a genuinely separate surface with its own route, its own auth, and `context.user === null`. Don't try to make one do the other's job: a client-side flag is not a security boundary, and a public page can't be edited.
 
 ## Designed states, by cause
 
@@ -265,7 +279,7 @@ One addition at this layer: **degrade, don't fail.** When an app pulls from seve
 ```tsx
 {data?.gongDegraded && (
   <div className="mb-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
-    Gong call data is temporarily unavailable — last-activity timing is using HubSpot activity only.
+    Gong call data is temporarily unavailable — last-activity timing is using monday.com activity only.
   </div>
 )}
 ```

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import type {
   AppContext,
   AppContextUser,
@@ -9,12 +13,20 @@ import type { BaseConnector } from "@/lib/connectors/types";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getDecryptedConfig } from "@/lib/connectors/config";
+import { getUserTokens } from "@/lib/connectors/user-config";
 import { createScopedClient } from "./scoped-db";
 import { createNotificationsClient } from "./notifications";
 import { createServicesClient } from "./services";
 import { createTelemetryClient, instrumentConnector } from "./telemetry";
 import { getUserAppRole } from "./access";
+import { loadAppEnv } from "./env";
+import { createHttpClient } from "./http";
 import { hooks } from "@/lib/hooks";
+
+/** One connector's manifest, or undefined if it is not in the registry. */
+function connectorManifest(name: string) {
+  return connectorRegistry.find((c) => c.name === name);
+}
 
 /** Declared telemetry method names for a connector, from the generated registry. */
 function connectorTelemetryMethods(connName: string): Set<string> {
@@ -29,6 +41,22 @@ function telemetryClientFor(manifest: AppManifest, userId: string | null) {
     declaredEvents: new Set(manifest.telemetry.map((t) => t.name)),
     userId,
   });
+}
+
+/**
+ * The containment pair every context gets, resolved the same way in all three
+ * builders so they cannot drift: settings the app declared, and an HTTP client
+ * bounded by the hosts it declared. Both are `[]`/`null` by default — an app
+ * that asked for neither can reach neither.
+ */
+async function buildContainment(manifest: AppManifest) {
+  return {
+    env: await loadAppEnv(manifest.slug, manifest.env ?? []),
+    http:
+      (manifest.egress ?? []).length > 0
+        ? createHttpClient(manifest.slug, manifest.egress)
+        : null,
+  };
 }
 
 export async function buildAppContext(
@@ -51,6 +79,7 @@ export async function buildAppContext(
   };
 
   const registrar = hooks.createRegistrar(manifest.slug);
+  const containment = await buildContainment(manifest);
 
   // Initialize declared connectors. Every connector is tenant-scoped: one
   // admin-configured credential set in `connector_configs`, shared by every
@@ -84,6 +113,7 @@ export async function buildAppContext(
     services,
     manifest,
     hooks: registrar,
+    ...containment,
   };
 
   return context;
@@ -106,6 +136,7 @@ export async function buildPublicAppContext(
 ): Promise<PublicAppContext> {
   const manifest = appRegistry.find((a) => a.slug === appSlug)!;
   const registrar = hooks.createRegistrar(manifest.slug);
+  const containment = await buildContainment(manifest);
   const connectors = await loadTenantConnectors(
     manifest,
     "buildPublicAppContext",
@@ -128,6 +159,7 @@ export async function buildPublicAppContext(
     services,
     manifest,
     hooks: registrar,
+    ...containment,
   };
 }
 
@@ -146,7 +178,16 @@ async function loadTenantConnectors(
 ): Promise<Record<string, BaseConnector>> {
   const connectors: Record<string, BaseConnector> = {};
 
-  for (const connName of manifest.connectors) {
+  /*
+    Optional connectors are built alongside required ones: "optional" describes
+    whether the APP can run without it, not whether the connector is reachable
+    when configured. A sub-component that declares one still needs it present in
+    `context.connectors` on the deployments that have it set up.
+  */
+  for (const connName of [
+    ...manifest.connectors,
+    ...(manifest.optionalConnectors ?? []),
+  ]) {
     try {
       const mod = await import(`@connectors/${connName}/index`);
       const ConnectorClass =
@@ -160,6 +201,56 @@ async function loadTenantConnectors(
       } catch (err) {
         console.error(`[${logTag}] getDecryptedConfig failed for "${connName}":`, err);
         tenantCreds = null;
+      }
+
+      /*
+        A user-scoped connector resolves against the CALLER's grant.
+
+        The client id and secret still come from the tenant row — the
+        application is registered once — and only the tokens are the person's
+        own. Two ways this legitimately produces nothing:
+
+          · no user in this context (a scheduled job, a public page). The build
+            guard rejects a job declaring one, so reaching here means a surface
+            that genuinely has no caller.
+          · the user has never connected.
+
+        Either way the connector is OMITTED rather than handed over unusable.
+        An app already checks `context.connectors.x` for presence; a connector
+        that is present and throws on first use is a worse contract than one
+        that is absent, and the absence is the same shape the app must already
+        handle for a connector an admin has not configured.
+      */
+      if (connectorManifest(connName)?.userScoped) {
+        if (!userId) {
+          console.warn(
+            `[${logTag}] "${connName}" is user-scoped and this context has no user — omitted`,
+          );
+          continue;
+        }
+        let userTokens: Record<string, string> | null = null;
+        try {
+          userTokens = await getUserTokens(userId, connName);
+        } catch (err) {
+          console.error(`[${logTag}] getUserTokens failed for "${connName}":`, err);
+          continue;
+        }
+        if (!userTokens) continue; // not connected — nothing to hand over
+
+        try {
+          await instance.initialize({ ...(tenantCreds ?? {}), ...userTokens });
+        } catch (err) {
+          console.error(`[${logTag}] ${connName}.initialize() threw:`, err);
+          continue;
+        }
+
+        connectors[connName] = instrumentConnector(instance, {
+          connectorSlug: connName,
+          methods: connectorTelemetryMethods(connName),
+          callerAppSlug: manifest.slug,
+          userId,
+        });
+        continue;
       }
 
       if (tenantCreds) {
@@ -212,6 +303,7 @@ export async function buildSystemAppContext(
 ): Promise<SystemAppContext> {
   const manifest = appRegistry.find((a) => a.slug === appSlug)!;
   const registrar = hooks.createRegistrar(manifest.slug);
+  const containment = await buildContainment(manifest);
   const connectors = await loadTenantConnectors(
     manifest,
     "buildSystemAppContext",
@@ -237,5 +329,6 @@ export async function buildSystemAppContext(
     services,
     manifest,
     hooks: registrar,
+    ...containment,
   };
 }

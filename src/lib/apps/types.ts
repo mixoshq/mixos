@@ -1,3 +1,9 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+import type { Screenshot } from "../screenshots";
+
 /**
  * How a caller may authenticate to a page or API route.
  *
@@ -36,7 +42,11 @@ export const ALL_ROUTE_AUTHS: readonly RouteAuth[] = [
  * from — so "what is reachable without signing in" stays answerable from one
  * generated file rather than from reading every manifest.
  */
-export const ANONYMOUS_AUTHS: readonly RouteAuth[] = ["password", "key", "public"];
+export const ANONYMOUS_AUTHS: readonly RouteAuth[] = [
+  "password",
+  "key",
+  "public",
+];
 
 export function isAnonymousAuth(auth: RouteAuth): boolean {
   return ANONYMOUS_AUTHS.includes(auth);
@@ -62,6 +72,8 @@ export function publicGateFor(
   if (!auths || auths.length === 0) return "none";
   if (auths.includes("public")) return "open";
   if (auths.includes("password")) return "password";
+  // `key` is authenticated by a header, not a cookie, so the public mount serves
+  // it without a gate of its own — `resolveAuthTier` does the checking.
   if (auths.includes("key")) return "key";
   return "none";
 }
@@ -71,6 +83,15 @@ export interface AppManifest {
   slug: string;
   name: string;
   description: string;
+  /**
+   * One line that says what the app is for, for a listing that has room for a
+   * sentence and not a paragraph — the catalogue grid, a tile subtitle.
+   *
+   * Distinct from `description`, which is the full explanation. An app that
+   * sets only one of the two is the normal case; the UI falls back to
+   * `description` when this is null. Maps to a catalogue listing's `tagline`.
+   */
+  tagline: string | null;
   icon: string;
   /**
    * Names of connectors this app uses. Every connector is tenant-scoped: one
@@ -78,10 +99,25 @@ export interface AppManifest {
    * users. An admin must configure each one before the app can be registered.
    */
   connectors: string[];
+  /**
+   * Connectors a part of this app uses but which it works without. Never gates
+   * registration; present in `context.connectors` only when configured, so app
+   * code must handle the entry being missing.
+   */
+  optionalConnectors: string[];
   database: boolean;
   /** When true, the app can send Web Push via `context.notifications`. */
   notifications: boolean;
   hasPages: boolean;
+  /**
+   * How many pages the app serves — every directory under `pages/` holding a
+   * `Main.tsx`, at any depth. Derived by the registry generator; never set in
+   * app.json.
+   *
+   * Can be 0 while `hasPages` is true: a `pages/` directory with a shared
+   * component in it and no `Main.tsx` is non-empty but serves nothing.
+   */
+  pageCount: number;
   /** When true, the app is implicitly granted to every user and cannot be revoked. */
   global: boolean;
   /**
@@ -109,6 +145,39 @@ export interface AppManifest {
     listens: { actions: string[]; filters: string[] };
   };
   authors: AppAuthor[];
+  /**
+   * Search and browse terms for the catalogue. Lowercase, because a facet list
+   * dedupes on the exact string and `Gmail` next to `gmail` is two facets for
+   * one idea. Defaults to `[]`.
+   */
+  keywords: string[];
+  /**
+   * Listing gallery, from `apps/<slug>/screenshots/`. Defaults to `[]`.
+   *
+   * Partly authored, partly derived: `app.json` declares `file`, `alt` and
+   * `caption`; the generator verifies the file, measures it, and fills in
+   * `url`, `width` and `height`. Never written by hand in full.
+   */
+  screenshots: Screenshot[];
+  /**
+   * SPDX identifier or expression for the app's licence (e.g. `MPL-2.0`), or
+   * `UNLICENSED` for one that is not redistributable. `null` when undeclared —
+   * which a catalogue must read as "unknown", never as "permissive".
+   */
+  license: string | null;
+  /**
+   * Where the app lives for someone who wants to read about it — a homepage,
+   * a docs site, a repository directory. Maps to a catalogue listing's
+   * `homepageUrl`. `null` when the app declares none.
+   */
+  appUrl: string | null;
+  /**
+   * Where a user takes a problem with this app — an issue tracker, a support
+   * page. Maps to a catalogue listing's `issuesUrl`. Kept separate from
+   * `appUrl` because "read about it" and "something is broken" are different
+   * destinations, and collapsing them sends bug reports to a marketing page.
+   */
+  appSupportUrl: string | null;
   /**
    * Epoch millis of the last commit that touched this item, stamped into the
    * manifest by scripts/stamp-updated.ts. Null when nothing has been committed
@@ -184,6 +253,13 @@ export interface AppManifest {
    * Defaults to `[]`.
    */
   consumes: ServiceDependency[];
+  /**
+   * Hooks this app fires and who may listen. Two-sided consent, default-deny —
+   * the generator rejects a listener the emitter did not allow. Defaults to `[]`.
+   */
+  emits: HookEmit[];
+  /** Hooks from other apps this app listens for. Defaults to `[]`. */
+  listensTo: HookListen[];
   /**
    * Read-only tools this app contributes to the MixOS MCP server. Each entry's
    * `name` maps to a handler at `apps/<slug>/mcp/<name>.ts` (default export
@@ -418,7 +494,7 @@ export const MIXOS_SOURCE = "mixos";
  *
  * Everything here is written for a model, and a model reads it pooled into one
  * flat list beside tools from every other server the user has connected —
- * HubSpot's, Notion's, whatever else. That shared list is the reason the
+ * monday.com's, Slack's, whatever else. That shared list is the reason the
  * `sources` / `notCovered` fields exist and the reason the build rejects
  * jurisdiction language: a tool that claims a whole subject area ("start here
  * for any question about X") outranks a neighbouring tool that only described
@@ -456,7 +532,7 @@ export interface McpToolDefinition {
    * declared, so a tool cannot claim provenance it doesn't have.
    *
    * Rendered into the description as a `Built from:` line. It is what lets a
-   * model tell "the joined, cached view of HubSpot" apart from "HubSpot", and
+   * model tell "the joined, cached view of monday.com" apart from "monday.com", and
    * so hand a raw-record question to the source system's own connector.
    */
   sources: string[];
@@ -470,6 +546,24 @@ export interface McpToolDefinition {
    * no Gong calls") over a hedge ("may be incomplete").
    */
   notCovered?: string;
+}
+
+/**
+ * A hook this app fires, and the apps allowed to listen.
+ *
+ * The push counterpart of `provides`. Before this, cross-app hook listening was
+ * the only channel between two apps with no consent on either side.
+ */
+export interface HookEmit {
+  name: string;
+  description?: string;
+  consumers: string[] | "*";
+}
+
+/** A hook this app listens for, declared by the listener. */
+export interface HookListen {
+  app: string;
+  hook: string;
 }
 
 /** A dependency on another app's service, declared by the consumer. */

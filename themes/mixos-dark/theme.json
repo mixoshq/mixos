@@ -1,0 +1,58 @@
+{
+  "name": "MixOS Dark",
+  "description": "Slate and cyan on a dark ground, drawn from the MixOS brand guidelines v1.0.",
+  "tagline": "Slate and cyan on a dark ground",
+  "keywords": [
+    "dark",
+    "default",
+    "brand"
+  ],
+  "screenshots": [
+    {
+      "file": "screenshots/menu-bar-and-widget.png",
+      "alt": "The MixOS menu bar over a dashboard widget in the dark palette.",
+      "caption": "Menu bar and a dashboard widget"
+    }
+  ],
+  "license": "MPL-2.0",
+  "themeUrl": "https://github.com/italianst4/mixos/tree/main/themes/mixos-dark",
+  "themeSupportUrl": "https://github.com/italianst4/mixos/issues",
+  "authors": [
+    {
+      "name": "MixOS Core Team",
+      "email": "core@mixos.local"
+    }
+  ],
+  "fonts": [
+    {
+      "family": "Plus Jakarta Sans",
+      "file": "fonts/jakarta-variable.woff2",
+      "weight": "400 800",
+      "style": "normal",
+      "display": "swap"
+    },
+    {
+      "family": "Inter",
+      "file": "fonts/inter-variable.woff2",
+      "weight": "300 600",
+      "style": "normal",
+      "display": "swap"
+    },
+    {
+      "family": "JetBrains Mono",
+      "file": "fonts/jetbrains-variable.woff2",
+      "weight": "400 700",
+      "style": "normal",
+      "display": "swap"
+    }
+  ],
+  "assets": {
+    "logo": "logo.png",
+    "favicon": "favicon.png",
+    "appIcon192": "icon-192.png",
+    "appIcon512": "icon-512.png"
+  },
+  "surfaces": [],
+  "escapes": [],
+  "lastUpdated": "2026-09-23T04:10:34.453Z"
+}

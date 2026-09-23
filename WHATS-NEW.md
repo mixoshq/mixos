@@ -9,6 +9,137 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-09-23
+
+- **Listing screenshots.** An app or theme can ship a gallery for its catalogue
+  listing: put images in `apps/<slug>/screenshots/` (or `themes/<slug>/`) and
+  declare them in the manifest as `screenshots: [{ file, alt?, caption? }]`. The
+  build verifies each file, measures it, and fills in `url`, `width` and
+  `height` — never write those by hand. `.png`/`.jpg`/`.webp` only (no SVG: a
+  screenshot is a raster, and an SVG is a script-bearing document served from an
+  unauthenticated URL), max 8, 2 MB each, 640px wide minimum. Only declared
+  files are published, so a draft left in the directory stays local.
+- **An app serves nothing until it is activated.** A newly registered app
+  arrives INACTIVE and an admin turns it on from the Apps page. Deactivating is
+  a switch rather than a deletion: grants, installs, passwords and dashboard
+  widgets all survive it, and reactivating puts everyone's dashboard back as
+  they left it. The vocabulary split follows — an admin *installs* an app on the
+  instance, a user *enables* it for themselves.
+- **A checkout can be its own instance.** Copy `.env.instance.example` to
+  `.env.instance` and give it a `MIXOS_INSTANCE`, a `MIXOS_PORT` and a
+  `MIXOS_SUPABASE_PORT_BASE`, and that checkout boots its own compose project,
+  its own Supabase stack and its own database, alongside an existing one. This
+  is what makes it possible to author an extension in one tree and install it
+  from the catalogue into another, which registration otherwise refuses because
+  the directory already exists. **Without the file nothing changes:** a checkout
+  is still `mixos` on port 3000 with Supabase on 54321. One consequence — since
+  `supabase/config.toml` now reads its project id and ports from `env(...)`,
+  reach the CLI through `npm run supabase -- <command>`; a bare `supabase …`
+  resolves an empty project id.
+
+## 2026-09-13
+
+- **`app.json` is the only app manifest form.** An app whose whole manifest was
+  the default export of `app.ts` no longer loads. The reason is the install
+  path: a manifest that is static text can be schema-checked *before* any of the
+  package executes, and a manifest that is a module has to be imported before
+  there is anything to validate — the wrong order for a package that just
+  arrived from the Registry. **Migrating:** move every field to `app.json`, and
+  move widget `config` arrays built from preset helpers into an optional
+  `widgets.ts` beside it, default-exporting an object keyed by each widget's
+  `component` path. The generator refuses to guess when the two disagree: a key
+  matching no widget is an error, and so is a widget declaring `config` in both
+  files. Plain config needs no `widgets.ts` at all — leave it inline in the JSON.
+
+- **Connectors and themes get listing metadata and a `README.md`.** Both
+  manifests now take the same optional catalogue fields apps already had —
+  `tagline`, `keywords` (max 10, lowercase, no duplicates), `license`, and a
+  pair of URLs (`connectorUrl` / `connectorSupportUrl`, `themeUrl` /
+  `themeSupportUrl`). Alongside them, an optional `README.md` at the extension's
+  root is its long-form description on the public listing, the same convention
+  apps adopted. Templates ship both, filled in as placeholders.
+
+- **Guide diagrams render as diagrams.** A ```` ```mermaid ```` fence in
+  `docs/` now draws in the in-app guides instead of showing an admin the raw
+  source, matching how mixos.org renders the same files. The ASCII diagrams in
+  the apps, connectors, theme and security docs are converted. Mermaid is a
+  dynamic import, so only an opened guide tab pays for it.
+
+## 2026-08-29
+
+- **Six independent platform keys.** Five of them used to be
+  `CONNECTOR_ENCRYPTION_KEY` itself or derived from it, which made the base key
+  impossible to rotate: changing it broke every stored connector credential,
+  every MCP token, every app API key and every unlock cookie at once. Each
+  purpose now has its own environment variable with a bounded blast radius.
+  Generate them with **`npm run keys:generate`** (or `--missing` to fill gaps),
+  and check a deployment with **`npm run keys:check`**. Local Docker already has
+  them in `.env.docker` — nothing to do there.
+
+- **Lint gates PRs again, and CI audits dependencies.** The `continue-on-error`
+  on CI's lint step is gone now that the 10 pre-existing react-hooks errors are
+  fixed. This matters more than style: `eslint.config.mjs` is where the
+  client/server boundary is enforced — no raw `fetch` in app code, no
+  `process.env`, no connector or DB client outside the server tier — and all of
+  it was advisory while the step could not fail a build. A new
+  `npm audit --audit-level=high` step runs beside it.
+
+- **Connector scopes live in `connector.json`.** `auth.scopes` is now the
+  provider's whole documented catalogue, each entry flagged with whether this
+  connector asks for it, and only
+  `npx tsx scripts/check-scopes.ts <name> --write` writes it — so a provider
+  quietly adding a write scope shows up in a diff rather than in a database row
+  an admin populated by pressing a button. What the provider *actually granted*
+  is recorded per-scope at the OAuth callback, which is the only moment it can
+  change. `icon` is now a full path (`"assets/icon.svg"`, not `"icon.svg"`).
+
+- **Admin actions are recorded.** Who configured a connector, who granted a
+  person access to an app, who set the password on a public page — none of it
+  was written down before, on a platform whose admins hold every third-party
+  credential in the deployment. Values are never logged, only which keys were set.
+
+- **Sessions can be revoked one user at a time.** A `session_version` counter
+  carried in the JWT and compared on every session resolution, so "this person
+  left" no longer means rotating `AUTH_SECRET` and signing out everybody.
+
+- **RLS is enforced by a backstop, not a hand-kept list.** `npm run migrate:apps`
+  now enables row-level security on every uncovered table in `public`, app
+  tables included — they were never covered, because an app's own `create table`
+  lands in `public` exactly as written.
+
+- **`-q` on any `/mix-*` command** makes it ask you 3–5 clarifying questions
+  before it plans or writes anything.
+
+
+## 2026-08-28
+
+- **Themes are a first-class abstraction.** `themes/<slug>/` sits beside `apps/`
+  and `connectors/`, with its own manifest, guide and **`/mixos theme`** command.
+  A theme declares **exactly one palette**: light is what an install gets by
+  default, and a dark look ships as a *separate installable theme*
+  (`mixos-dark`) rather than a mode you switch inside the current one.
+
+- **`/mixos convert`** turns an existing application into a MixOS app under
+  `apps/`.
+
+- **Connectors carry their own setup guide.** `connector.json` gained a
+  structured `setup` block — the provider-side steps, links, and a note that can
+  hang off each of the registry's own "save credentials / connect / verify"
+  buttons, including this deployment's redirect URI. `description` is now capped
+  at 140 characters and describes *the service*; provisioning prose belongs in
+  `setup`. A connector can also ship `assets/icon.png` for its registry tile.
+
+- **Per-user connectors.** A connector may declare `"userScoped": true`
+  (three-legged OAuth only). Each person then authorizes their own account at
+  **Account → Connections**, instead of everyone sharing the one grant an admin
+  connected. The client ID and secret stay tenant-wide — the *application* is
+  registered once, only the *grant* is personal.
+
+- **Gmail connector.** Read-only access to a shared mailbox: search with Gmail's
+  `q` syntax, threads, labels, attachments, and message bodies decoded out of
+  MIME.
+
+
 ## 2026-08-24
 
 - **Local development now runs in Docker.** One command brings up Supabase
@@ -105,7 +236,7 @@ just pulled.
   npm run migrate:apps  # per-app tables   → apps/*/migrations/
   ```
 
-  Full walkthrough in [README.md](README.md), or run `/mix-init` for a guided
+  Full walkthrough in [README.md](README.md), or run `/mixos init` for a guided
   setup.
 
 - **Publishing an app or connector.** *(Superseded 2026-08-24 — `/mix-publish`

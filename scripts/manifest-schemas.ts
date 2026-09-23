@@ -1,9 +1,17 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { z } from "zod";
 import { assertValidCron } from "../src/lib/apps/cron";
+import {
+  SCREENSHOT_DIR,
+  SCREENSHOT_MAX_COUNT,
+} from "../src/lib/screenshots";
 
 /**
  * Zod schemas for the *on-disk* manifest shapes — `apps/<slug>/app.json`
- * (or the default export of `app.ts`) and `connectors/<name>/connector.json`.
+ * and `connectors/<name>/connector.json`.
  *
  * These validate what a developer writes, NOT the fully-derived registry
  * entry: fields the generator fills in from the filesystem (`slug`,
@@ -21,11 +29,10 @@ import { assertValidCron } from "../src/lib/apps/cron";
  * `src/lib/connectors/types.ts`; keep these schemas in step with them.
  */
 
-const authorSchema = z
-  .strictObject({
-    name: z.string().min(1),
-    email: z.string().min(1),
-  });
+const authorSchema = z.strictObject({
+  name: z.string().min(1),
+  email: z.string().min(1),
+});
 
 const sizeSchema = z.strictObject({
   w: z.number(),
@@ -72,7 +79,9 @@ const cadenceSchema = z
       .number()
       .int()
       .min(5)
-      .refine((n) => n % 5 === 0, { message: "everyMinutes must be a multiple of 5" })
+      .refine((n) => n % 5 === 0, {
+        message: "everyMinutes must be a multiple of 5",
+      })
       .optional(),
     // Standard 5-field CRON expression, evaluated at 5-minute tick resolution.
     cron: z.string().min(1).optional(),
@@ -174,6 +183,123 @@ const appEnvFieldSchema = z.strictObject({
 });
 
 /**
+ * A one-line summary for a listing that has room for a sentence, not a
+ * paragraph. Capped rather than merely encouraged: an over-long tagline is not
+ * a style problem but a layout one — the catalogue grid truncates it, so the
+ * half the author cared about is the half that disappears.
+ */
+const taglineSchema = z
+  .string()
+  .min(1)
+  .max(
+    100,
+    "tagline is a single line for a listing card — keep it under 100 characters and put the full explanation in `description`",
+  )
+  .regex(/^[^\n\r]+$/, "tagline is a single line — no line breaks");
+
+/**
+ * One screenshot for the extension's listing gallery.
+ *
+ * Shape only. Whether the file exists, whether it is an image at all, and how
+ * wide it is are the generator's business — this schema cannot open a file, and
+ * a path that merely *looks* right is worth nothing.
+ *
+ * `file` carries its `screenshots/` prefix rather than leaving the directory
+ * implied, the same way a connector's `icon` is written `assets/icon.svg`: the
+ * manifest should say where the file actually is, so a reader can find it
+ * without knowing a convention.
+ *
+ * `alt` is optional, but a renderer is told to treat its absence as "none
+ * supplied" rather than "decorative" — see `src/lib/screenshots.ts`.
+ */
+const screenshotSchema = z.strictObject({
+  file: z
+    .string()
+    .min(SCREENSHOT_DIR.length + 2)
+    .refine(
+      (v) => v.startsWith(`${SCREENSHOT_DIR}/`) && !v.includes(".."),
+      `must be a path inside the extension's own ${SCREENSHOT_DIR}/ directory, written out in full — e.g. "${SCREENSHOT_DIR}/dashboard.png"`,
+    ),
+  alt: z.string().min(1).optional(),
+  caption: z.string().min(1).optional(),
+});
+
+/**
+ * The gallery, newest-idea-first: whatever order the author lists is the order
+ * it renders. Capped here as well as in the generator so an over-long array
+ * fails with a schema message pointing at the field.
+ */
+const screenshotsSchema = z
+  .array(screenshotSchema)
+  .max(
+    SCREENSHOT_MAX_COUNT,
+    `at most ${SCREENSHOT_MAX_COUNT} screenshots — a gallery longer than that is not read`,
+  );
+
+/**
+ * One search/browse term. Lowercase and space- or hyphen-separated.
+ *
+ * The case rule is the load-bearing one: a facet list dedupes on the exact
+ * string, so `Gmail` next to `gmail` renders as two filters for one idea and
+ * splits the results between them.
+ */
+const keywordSchema = z
+  .string()
+  .min(2)
+  .max(32)
+  .regex(
+    /^[a-z0-9]+(?:[ -][a-z0-9]+)*$/,
+    "keywords are lowercase words separated by single spaces or hyphens (e.g. \"email\", \"time tracking\", \"crm\")",
+  );
+
+/** SPDX identifier characters — no spaces; operators are matched separately. */
+const SPDX_ID = /^[A-Za-z0-9][A-Za-z0-9.+-]*$/;
+
+/**
+ * An SPDX licence identifier or expression, or `UNLICENSED`.
+ *
+ * Validated as a shape rather than against the full SPDX list, which is ~600
+ * entries and grows. That still rejects the mistake worth rejecting: prose.
+ * `"MIT License"` and `"Apache 2.0"` are what an author reaches for by default,
+ * and a catalogue that has to parse those cannot answer "is this
+ * redistributable" for anyone.
+ */
+const licenseSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine(
+    (v) =>
+      v === "UNLICENSED" ||
+      v
+        .replace(/[()]/g, "")
+        .split(/ (?:AND|OR|WITH) /)
+        .every((part) => SPDX_ID.test(part)),
+    'license must be an SPDX identifier or expression — e.g. "MPL-2.0", "Apache-2.0 WITH LLVM-exception", or "UNLICENSED" for something not redistributable. Prose like "MIT License" is not one.',
+  );
+
+/**
+ * A link the platform renders for a user. `https` only.
+ *
+ * Both listing URLs are shown on pages served over https, so an `http` link is
+ * a downgrade the browser will warn about or block outright — and the author
+ * would never see it, because their own dev server is http.
+ */
+const listingUrlSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (v) => {
+      try {
+        return new URL(v).protocol === "https:";
+      } catch {
+        return false;
+      }
+    },
+    "must be an absolute https:// URL",
+  );
+
+/**
  * A host `context.http` may reach.
  *
  * Bare hostname only — no scheme, port, path or credentials — because the
@@ -242,6 +368,30 @@ const syncDefinitionSchema = z.strictObject({
   budgetMs: z.number().int().min(1_000).max(300_000),
 });
 
+/**
+ * A hook this app fires, and who may listen.
+ *
+ * Cross-app hook listening was the one channel between apps with NO consent at
+ * all: any app could `addAction("other-app:thing", fn)` using the full prefixed
+ * name and observe another app's events. App Services requires two-sided
+ * consent for a *pull*; a push had none.
+ *
+ * So an emitter now declares its consumers, exactly as `provides` does, and the
+ * generator enforces both sides. Undeclared is default-deny.
+ */
+const hookEmitSchema = z.strictObject({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  // An allowlist of app slugs, or "*" for any app that declares the dependency.
+  consumers: z.union([z.array(z.string().min(1)), z.literal("*")]),
+});
+
+/** A hook this app listens for, named as `<emitter-slug>:<hook>`. */
+const hookListenSchema = z.strictObject({
+  app: z.string().min(1),
+  hook: z.string().min(1),
+});
+
 const appTelemetryEventSchema = z.strictObject({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -250,6 +400,25 @@ const appTelemetryEventSchema = z.strictObject({
 const connectorTelemetryEventSchema = z.strictObject({
   method: z.string().min(1),
   description: z.string().optional(),
+  /**
+   * Does this method change anything upstream?
+   *
+   * This is the gap the platform could not close before. MCP tools are
+   * read-only, enforced three ways for `ctx.db` — type, runtime Proxy, ESLint —
+   * but `docs/apps/mcp.md` had to say outright: "Connectors are the gap the
+   * platform can't close. It cannot know which connector methods mutate... a
+   * reviewer has to confirm it."
+   *
+   * Declared here, the platform can. The MCP context wraps `ctx.connectors` and
+   * throws on a method marked `mutates`, so a read-only tool calling a write is
+   * a runtime error rather than a blocking review finding somebody has to catch.
+   *
+   * Defaults to `false`, which is safe for the wrong reason and stated here so
+   * nobody mistakes it for a guarantee: an UNDECLARED method is invisible to
+   * this check entirely. Declaring a connector's writes is what buys the
+   * enforcement.
+   */
+  mutates: z.boolean().optional(),
 });
 
 const serviceDefinitionSchema = z.strictObject({
@@ -301,7 +470,8 @@ const JURISDICTION_CLAIMS: { pattern: RegExp; why: string }[] = [
     why: "it claims a subject area, which is always wider than the data",
   },
   {
-    pattern: /\b(?:always|by default)\s+(?:use|call|prefer|reach for|start with)\b/i,
+    pattern:
+      /\b(?:always|by default)\s+(?:use|call|prefer|reach for|start with)\b/i,
     why: "an unconditional routing instruction leaves no room for a better source",
   },
   {
@@ -309,7 +479,8 @@ const JURISDICTION_CLAIMS: { pattern: RegExp; why: string }[] = [
     why: "ranking this tool against others is a claim a description cannot support",
   },
   {
-    pattern: /\b(?:authoritative|canonical|definitive|single|sole|only)\s+source\b/i,
+    pattern:
+      /\b(?:authoritative|canonical|definitive|single|sole|only)\s+source\b/i,
     why: "a sole-source claim suppresses tools that may be better suited",
   },
   {
@@ -380,6 +551,32 @@ const mcpToolDefinitionSchema = z.strictObject({
 const MAX_MCP_TOOLS_PER_APP = 5;
 
 /**
+ * Cap on catalogue keywords per extension. Facets are only useful while they
+ * discriminate; an extension that tags itself with everything is
+ * indistinguishable from one that tags itself with nothing, and it dilutes
+ * every facet it joins for the extensions that belong there.
+ */
+const MAX_APP_KEYWORDS = 10;
+
+/**
+ * The catalogue keyword list, shared by apps, connectors and themes.
+ *
+ * Defined once because all three feed the same browse and search surfaces on
+ * mixos.org. Three separate copies of this would drift, and the first symptom
+ * would be a connector allowed twelve keywords while an app is allowed ten —
+ * which nobody would notice until the facet list was already skewed.
+ */
+const catalogueKeywordsSchema = z
+  .array(keywordSchema)
+  .max(
+    MAX_APP_KEYWORDS,
+    `at most ${MAX_APP_KEYWORDS} keywords — a list that claims every facet describes nothing`,
+  )
+  .refine((k) => new Set(k).size === k.length, {
+    message: "duplicate keyword",
+  });
+
+/**
  * The auths a page or route may accept.
  *
  * The gateway resolves the *strongest* one the caller actually presents and
@@ -414,9 +611,45 @@ export const RawAppManifestSchema = z
     lastUpdated: z.iso.datetime().optional(),
 
     description: z.string().optional(),
+    /**
+     * One line for a listing card. `description` is the full explanation; this
+     * is the version that fits next to the icon in a grid.
+     */
+    tagline: taglineSchema.optional(),
     icon: z.string().optional(),
     authors: z.array(authorSchema).optional(),
+    /**
+     * Catalogue search and browse terms. Lowercase, deduplicated, and capped —
+     * a manifest listing twenty keywords is claiming every facet rather than
+     * describing itself, which makes the facets useless for everyone.
+     */
+    keywords: catalogueKeywordsSchema.optional(),
+    /**
+     * Listing gallery. Files live under `apps/<slug>/screenshots/`; the
+     * generator verifies, measures and publishes each one.
+     */
+    screenshots: screenshotsSchema.optional(),
+    /** SPDX identifier or expression, or `UNLICENSED`. */
+    license: licenseSchema.optional(),
+    /** Homepage, docs, or repository directory for the app. */
+    appUrl: listingUrlSchema.optional(),
+    /** Where a user reports a problem with the app. */
+    appSupportUrl: listingUrlSchema.optional(),
     connectors: z.array(z.string().min(1)).optional(),
+    /**
+     * Connectors a PART of this app uses, which the app works without.
+     *
+     * The difference from `connectors` is what happens when one is not
+     * configured: a required connector refuses the app's registration, because
+     * the app cannot function; an optional one never blocks anything, and the
+     * sub-component that needs it is the only thing that degrades. Use it for
+     * the widget nobody would uninstall the app over.
+     *
+     * Optional connectors are still built into `context.connectors` when they
+     * ARE configured, and are still declarable as a sync source or MCP tool
+     * dependency — app code must simply cope with the entry being absent.
+     */
+    optionalConnectors: z.array(z.string().min(1)).optional(),
     database: z.boolean().optional(),
     notifications: z.boolean().optional(),
     global: z.boolean().optional(),
@@ -433,6 +666,10 @@ export const RawAppManifestSchema = z
     // Each name additionally verified on disk by the generator
     // (apps/<slug>/jobs/<name>.ts).
     schedules: z.array(scheduleSchema).optional(),
+    // Cross-app hook wiring. `emits[].consumers` is the emitter's allowlist and
+    // `listensTo` is the consumer's declaration; the generator enforces both.
+    emits: z.array(hookEmitSchema).optional(),
+    listensTo: z.array(hookListenSchema).optional(),
     // Declarative incremental syncs. Each name is additionally verified on disk
     // by the generator (apps/<slug>/sync/<name>.ts, a `defineSync` default
     // export), and `source` is cross-checked against the declared connectors.
@@ -459,11 +696,15 @@ export const RawAppManifestSchema = z
       )
       .optional(),
   })
-  .refine((m) => m.defaultRole == null || !!m.roles?.some((r) => r.key === m.defaultRole), {
-    message:
-      'defaultRole must match one of the declared roles[].key (and roles must be declared)',
-    path: ["defaultRole"],
-  })
+  .refine(
+    (m) =>
+      m.defaultRole == null || !!m.roles?.some((r) => r.key === m.defaultRole),
+    {
+      message:
+        "defaultRole must match one of the declared roles[].key (and roles must be declared)",
+      path: ["defaultRole"],
+    },
+  )
   .superRefine((m, ctx) => {
     // A page is loaded by a browser following a link; there is nowhere to put a
     // bearer token. Accepting `key` there would read as an exposed surface and
@@ -521,10 +762,50 @@ const connectorAuthSchema = z
     tokenUrl: z.url().optional(),
     tokenAuth: z.enum(["basic", "post"]).optional(),
     authorizeUrl: z.url().optional(),
-    scopes: z.array(z.string().min(1)).optional(),
+    /**
+     * Every scope this API documents, each flagged with whether this connector
+     * asks for it. Written by the dev-time scopes refresh
+     * (`scripts/check-scopes.ts <connector> --write`), which reads `scopesUrl`;
+     * the registry never fetches it.
+     *
+     * One array rather than two because the catalogue and the request are the
+     * same list seen from two angles, and keeping them apart is how they drift.
+     * `requested` is REQUIRED and never inferred: the refresh writes far more
+     * entries than a connector asks for, so a missing flag defaulting to true
+     * would silently request the provider's entire catalogue.
+     */
+    scopes: z
+      .array(
+        z.strictObject({
+          scope: z.string().min(1),
+          /** The provider's own wording, as shown on their consent screen. */
+          description: z.string().min(1).optional(),
+          access: z.enum(["read", "write", "read-write"]).optional(),
+          /** Does this connector ask for it at authorization time? */
+          requested: z.boolean(),
+        }),
+      )
+      .optional(),
+    /**
+     * The provider's own scope/permission reference page.
+     *
+     * The dev-time scopes refresh reads it to render permissions in the
+     * provider's words — "View your records and settings" instead of
+     * `.../auth/records.readonly`, which tells a non-technical admin nothing.
+     * Point it at the page that TABULATES scopes against descriptions, not at
+     * the API home page: the parser reads table rows out of it.
+     */
+    scopesUrl: z
+      .url()
+      .refine((u) => u.startsWith("https://"), "must be an https:// URL")
+      .optional(),
   })
   .superRefine((a, ctx) => {
-    if (a.strategy === "apiKey" && (a.in === "header" || a.in === "query") && !a.name) {
+    if (
+      a.strategy === "apiKey" &&
+      (a.in === "header" || a.in === "query") &&
+      !a.name
+    ) {
       ctx.addIssue({
         code: "custom",
         message: `auth.in "${a.in}" requires auth.name (the header or query-parameter to send the key in)`,
@@ -628,38 +909,371 @@ const credentialFieldSchema = z.strictObject({
   type: z.enum(["text", "password"]),
 });
 
-export const RawConnectorManifestSchema = z.strictObject({
-  name: z.string().min(1),
-  displayName: z.string().min(1),
-  /** ISO 8601 date-time, stamped by scripts/stamp-updated.ts. Never hand-edited. */
-  lastUpdated: z.iso.datetime().optional(),
-  description: z.string().optional(),
-  credentialFields: z.array(credentialFieldSchema).optional(),
-  authors: z.array(authorSchema).optional(),
-  telemetry: z.array(connectorTelemetryEventSchema).optional(),
-  auth: connectorAuthSchema.optional(),
-  http: connectorHttpSchema.optional(),
-  webhook: connectorWebhookSchema.optional(),
-}).superRefine((m, ctx) => {
-  // Every credential key the policy reads must be a field the admin is
-  // actually asked for. A mismatch here is invariant 10 failing silently: the
-  // connector reads a key nobody ever filled in.
-  const declared = new Set((m.credentialFields ?? []).map((f) => f.key));
-  const referenced = [
-    ...(m.auth?.credentialKeys ?? []),
-    ...(m.webhook ? [m.webhook.secretKey] : []),
-  ];
-  for (const key of referenced) {
-    if (!declared.has(key)) {
+/**
+ * A link an admin follows to provision the credential — a provider console, an
+ * API-key page, a scope reference.
+ *
+ * `https:` only, enforced here rather than sanitized at render time. The admin
+ * page turns these into real anchors, so a `javascript:` or `data:` URL in a
+ * manifest would be a stored XSS with an admin session attached. Failing the
+ * build is the cheaper place to catch it, and a connector legitimately needing
+ * a plain-http setup link does not exist.
+ */
+const connectorDocLinkSchema = z.strictObject({
+  label: z.string().min(1),
+  url: z
+    .url()
+    .refine((u) => u.startsWith("https://"), "must be an https:// URL"),
+});
+
+const connectorSetupStepSchema = z
+  .strictObject({
+    /**
+     * The instruction, and only the instruction — one imperative sentence. The UI
+     * numbers these, so don't number them here.
+     */
+    text: z.string().min(1),
+    /**
+     * Why the step is that way, behind a "?" the reader opens if they care.
+     *
+     * This is where the paragraph goes that a careful author wants to include and
+     * a reader following instructions does not want in their way — Gmail's step
+     * "set User type to Internal" is four words of instruction carrying thirty
+     * words of justification about CASA assessments and 7-day refresh tokens.
+     * Inline, that buries the instruction; deleted, the next person changes the
+     * setting back. A tooltip is the shape that fits: available, not in the way.
+     *
+     * Rationale only. Anything the reader must DO belongs in `text`, because a
+     * tooltip is not somewhere an instruction can live.
+     */
+    why: z
+      .string()
+      .min(1)
+      .max(
+        300,
+        "a tooltip, not an essay — put anything longer in the connector's docs",
+      )
+      .optional(),
+    /** Where this step is carried out, when it happens somewhere else. */
+    link: connectorDocLinkSchema.optional(),
+    /**
+     * Literal values the step tells the admin to choose — "Internal", "Web
+     * application". Each is emboldened where it appears in `text`, so the thing
+     * to type or pick is findable without reading the sentence twice.
+     *
+     * Values, not emphasis: this is for a string the admin must match exactly in
+     * someone else's form, and every entry must actually appear in `text`, which
+     * the build checks.
+     */
+    values: z.array(z.string().min(1)).optional(),
+    /**
+     * Render this deployment's redirect URI, with a copy button, directly beneath
+     * this step.
+     *
+     * Declared rather than inferred: the redirect URI is the one value in the
+     * whole guide the manifest cannot contain — it is built from the running
+     * deployment's origin — and it is useless anywhere except beside the step
+     * that asks you to paste it into someone else's form.
+     */
+    showRedirectUri: z.boolean().optional(),
+  })
+  .superRefine((step, ctx) => {
+    for (const value of step.values ?? []) {
+      // Same whole-phrase rule the UI uses to find them; a value that is not in
+      // the sentence would simply never render, which is a silent no-op.
+      const pattern = new RegExp(
+        `(^|[^\\w])${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w])`,
+      );
+      if (!pattern.test(step.text)) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `values entry ${JSON.stringify(value)} does not appear in this step's text, ` +
+            "so nothing would be emboldened. Match it exactly, or drop it.",
+          path: ["values"],
+        });
+      }
+    }
+  });
+
+/**
+ * Provisioning instructions, structured so the admin page can render them as a
+ * numbered list with working links.
+ *
+ * This exists because `description` could not carry a link. It is also the only
+ * way the platform can interleave a fact the manifest cannot know — chiefly the
+ * redirect URI, which is derived from this deployment's origin at runtime —
+ * into the middle of a provider's own steps, which is exactly where an admin
+ * needs it.
+ */
+/**
+ * Notes attached to the platform's own setup steps.
+ *
+ * The registry generates "save credentials", "authorize" and "verify" itself —
+ * it knows when each is done, because it can check. What it cannot know is the
+ * one provider-specific warning that belongs at each: for Gmail, that whoever
+ * approves the consent screen is the mailbox everyone will then read. Putting
+ * that at the top of the dialog shows it on arrival, minutes before it matters
+ * and long before it means anything; here it appears attached to the button it
+ * is about.
+ */
+const connectorSetupNotesSchema = z.strictObject({
+  credentials: z.string().min(1).optional(),
+  authorize: z.string().min(1).optional(),
+  verify: z.string().min(1).optional(),
+});
+
+const connectorSetupSchema = z.strictObject({
+  /**
+   * Label for the provider-side step — "Create a Google Cloud OAuth app".
+   * Defaults to "Get your credentials", which is accurate but says less.
+   */
+  title: z.string().min(1).max(60).optional(),
+  /**
+   * The provider-side work only — what an admin does in someone else's console
+   * before they have anything to paste in. Do NOT list "save the credentials",
+   * "press Connect" or "test the connection": the registry renders those as its
+   * own steps and, unlike these, knows whether they are done.
+   */
+  steps: z.array(connectorSetupStepSchema).min(1),
+  notes: connectorSetupNotesSchema.optional(),
+  /** Reference material — scope tables, API docs. Not steps to carry out. */
+  docs: z.array(connectorDocLinkSchema).optional(),
+});
+
+/**
+ * Path to the connector's icon, relative to its own `assets/` directory.
+ *
+ * Written as the real relative path — `assets/icon.svg`, not `icon.svg` — so
+ * the manifest says where the file actually is rather than leaving `assets/`
+ * implied. Constrained to that directory: the generator copies `assets/` into
+ * `public/connector-assets/<name>/` and builds a URL from this value, so an
+ * absolute path, a `..` segment or a URL would either escape that directory or
+ * silently produce a broken `<img>`. The generator additionally proves the file
+ * exists, and that a raster icon is a square of at least 512x512 or an SVG
+ * carries a viewBox — see validateConnectorIcon().
+ */
+const connectorIconSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (v) =>
+      v.startsWith("assets/") &&
+      !v.includes("..") &&
+      !/^[a-z][a-z0-9+.-]*:/i.test(v) &&
+      v.length > "assets/".length,
+    'must be a path inside the connector\'s own assets/ directory, written out in full — e.g. "assets/icon.svg"',
+  );
+
+export const RawConnectorManifestSchema = z
+  .strictObject({
+    name: z.string().min(1),
+    displayName: z.string().min(1),
+    icon: connectorIconSchema.optional(),
+    /**
+     * Each person signs into their own account, rather than everyone sharing one
+     * the admin connected.
+     *
+     * The default — and the right answer for most connectors — is tenant-scoped:
+     * one credential set, one grant, and every user of every app sees the same
+     * response. Set this only when one shared account is genuinely wrong, as it
+     * is for a person's own mail or calendar. It costs the property that made the
+     * tenant model easy to reason about, so it is opt-in and narrow.
+     *
+     * Three-legged OAuth only. See docs/connectors/architecture.md.
+     */
+    userScoped: z.boolean().optional(),
+    /** ISO 8601 date-time, stamped by scripts/stamp-updated.ts. Never hand-edited. */
+    lastUpdated: z.iso.datetime().optional(),
+    /**
+     * What the SERVICE is — "Highly popular email service by Google" — not what
+     * this connector does with it, and not how to set it up.
+     *
+     * Capped because this field is where a 1,400-character block of numbered
+     * setup steps once lived, for want of anywhere better; `setup` is that
+     * somewhere now, and a limit is what stops the prose migrating back. 140 is
+     * two real sentences — and the registry tile shows the first 15 words of it,
+     * so the cap also bounds how far a tile can be from the whole truth.
+     */
+    description: z
+      .string()
+      .max(
+        140,
+        'keep it to ~2 sentences about the service itself. Provisioning steps go in "setup"',
+      )
+      .optional(),
+    /**
+     * One line for a listing card.
+     *
+     * Distinct from `description`, which answers "what is this service?" in up
+     * to 140 characters. This is the version that fits beside the icon in a
+     * catalogue grid, and for most connectors only one of the two is worth
+     * writing — `description` stands in where this is absent.
+     */
+    tagline: taglineSchema.optional(),
+    /** Catalogue search and browse terms. */
+    keywords: catalogueKeywordsSchema.optional(),
+    /**
+     * SPDX identifier or expression, or `UNLICENSED`.
+     *
+     * The connector's own licence, not the upstream service's terms. A
+     * connector is code someone redistributes; whether the API it talks to is
+     * free to use is a different question and not one a manifest can answer.
+     */
+    license: licenseSchema.optional(),
+    /** Homepage, docs, or repository directory for the connector. */
+    connectorUrl: listingUrlSchema.optional(),
+    /** Where a user reports a problem with the connector. */
+    connectorSupportUrl: listingUrlSchema.optional(),
+    setup: connectorSetupSchema.optional(),
+    credentialFields: z.array(credentialFieldSchema).optional(),
+    authors: z.array(authorSchema).optional(),
+    telemetry: z.array(connectorTelemetryEventSchema).optional(),
+    auth: connectorAuthSchema.optional(),
+    http: connectorHttpSchema.optional(),
+    webhook: connectorWebhookSchema.optional(),
+  })
+  .superRefine((m, ctx) => {
+    // Per-user credentials only mean something for a flow where each person can
+    // present their own identity. An API key is one string an admin pastes; a
+    // "user-scoped" one would be the tenant key wearing a label.
+    if (m.userScoped && m.auth?.strategy !== "oauth2_authorization_code") {
       ctx.addIssue({
         code: "custom",
         message:
-          `references credential "${key}", which is not in credentialFields. ` +
-          `Declared: ${declared.size ? [...declared].join(", ") : "(none)"}.`,
-        path: ["credentialFields"],
+          `"userScoped" requires auth.strategy "oauth2_authorization_code"; ` +
+          `this connector uses "${m.auth?.strategy ?? "none"}". There is no ` +
+          `per-user equivalent of an API key an admin pastes once.`,
+        path: ["userScoped"],
       });
     }
-  }
+
+    // The redirect URI belongs to the three-legged flow and nothing else, and an
+    // OAuth connector that never shows it strands the admin: it cannot be
+    // guessed, and the provider rejects the authorization without it. So it is
+    // required exactly once, and rejected everywhere else.
+    const redirectSteps = (m.setup?.steps ?? []).filter(
+      (s) => s.showRedirectUri,
+    );
+    const isThreeLegged = m.auth?.strategy === "oauth2_authorization_code";
+    if (redirectSteps.length > 0 && !isThreeLegged) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "showRedirectUri is only meaningful for auth.strategy " +
+          `"oauth2_authorization_code"; this connector uses "${m.auth?.strategy ?? "none"}".`,
+        path: ["setup", "steps"],
+      });
+    }
+    if (isThreeLegged && m.setup && redirectSteps.length !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `exactly one setup step must set "showRedirectUri": true (found ${redirectSteps.length}). ` +
+          "A three-legged connector cannot be configured without registering the redirect URI upstream.",
+        path: ["setup", "steps"],
+      });
+    }
+
+    // Every credential key the policy reads must be a field the admin is
+    // actually asked for. A mismatch here is invariant 10 failing silently: the
+    // connector reads a key nobody ever filled in.
+    const declared = new Set((m.credentialFields ?? []).map((f) => f.key));
+    const referenced = [
+      ...(m.auth?.credentialKeys ?? []),
+      ...(m.webhook ? [m.webhook.secretKey] : []),
+    ];
+    for (const key of referenced) {
+      if (!declared.has(key)) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `references credential "${key}", which is not in credentialFields. ` +
+            `Declared: ${declared.size ? [...declared].join(", ") : "(none)"}.`,
+          path: ["credentialFields"],
+        });
+      }
+    }
+  });
+
+// ── themes ───────────────────────────────────────────────────────────────────
+
+const themeFontFaceSchema = z.strictObject({
+  family: z.string().min(1),
+  /** Path relative to the theme's assets/ directory. Existence checked by the generator. */
+  file: z.string().min(1),
+  weight: z.union([z.number().int().min(1).max(1000), z.string().min(1)]),
+  style: z.enum(["normal", "italic"]).default("normal"),
+  display: z.enum(["auto", "block", "swap", "fallback", "optional"]).optional(),
+});
+
+const themeAssetsSchema = z.strictObject({
+  logo: z.string().min(1).optional(),
+  favicon: z.string().min(1).optional(),
+  appIcon192: z.string().min(1).optional(),
+  appIcon512: z.string().min(1).optional(),
+  preview: z.string().min(1).optional(),
+});
+
+/**
+ * Escaping the contrast gate is possible, declared, and visible — never silent,
+ * and never a flag that merely turns the check off. The theme must name the
+ * exact pair, so the escape stays scoped to the one decision that was actually
+ * reviewed, and `reason` must be a sentence someone can act on. The generator
+ * additionally rejects an escape for a pair that passes: a stale escape reads
+ * as "reviewed and accepted" while protecting nothing.
+ */
+const themeEscapeSchema = z.strictObject({
+  rule: z.literal("contrast-aa"),
+  pair: z.string().min(1),
+  reason: z
+    .string()
+    .min(15, "give a reason a reviewer can act on, not a placeholder"),
+});
+
+export const RawThemeManifestSchema = z.strictObject({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  /**
+   * One line for a listing card. `description` is the full explanation; this is
+   * the version that fits under the theme's name in a catalogue grid.
+   */
+  tagline: taglineSchema.optional(),
+  /** Catalogue search and browse terms. */
+  keywords: catalogueKeywordsSchema.optional(),
+  /**
+   * SPDX identifier or expression, or `UNLICENSED`.
+   *
+   * Worth stating explicitly for a theme even though it is "only" CSS: a theme
+   * carries fonts and brand assets, and whether those may be redistributed is
+   * exactly the question a licence answers.
+   */
+  license: licenseSchema.optional(),
+  /** Homepage, docs, or repository directory for the theme. */
+  themeUrl: listingUrlSchema.optional(),
+  /** Where a user reports a problem with the theme. */
+  themeSupportUrl: listingUrlSchema.optional(),
+  authors: z.array(authorSchema).optional(),
+  /** ISO 8601 date-time, stamped by scripts/stamp-updated.ts. Never hand-edited. */
+  lastUpdated: z.iso.datetime().optional(),
+  fonts: z.array(themeFontFaceSchema).optional(),
+  assets: themeAssetsSchema.optional(),
+  /**
+   * Listing gallery, under `themes/<slug>/screenshots/`.
+   *
+   * Distinct from `assets.preview`, which is the admin picker's thumbnail and
+   * stays where it is. The picker shows one image beside a live swatch row;
+   * a listing shows a gallery to someone who has not installed the theme and
+   * cannot see those swatches at all.
+   */
+  screenshots: screenshotsSchema.optional(),
+  /**
+   * Allowlisted .mix-* surfaces this theme styles. Cross-checked against
+   * theme.css by the generator in both directions, so it can neither
+   * under-report a theme's reach nor carry a stale entry.
+   */
+  surfaces: z.array(z.string().min(1)).optional(),
+  escapes: z.array(themeEscapeSchema).optional(),
 });
 
 /**
