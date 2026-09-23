@@ -47,3 +47,10 @@ create index if not exists idx_admin_audit_log_actor
 -- Same rule as every other table: RLS on, no policies. 0001's catalog sweep has
 -- already run by the time this file applies, so this migration enables it itself.
 alter table public.admin_audit_log enable row level security;
+
+-- The schema version this file brings the database to. See 0007 and OS-UPDATES.md.
+insert into public.platform_settings (key, value)
+values ('platform_schema_version', '4')
+on conflict (key) do update
+  set value = excluded.value,
+      updated_at = now();
