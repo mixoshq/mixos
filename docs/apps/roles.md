@@ -2,7 +2,7 @@
 
 App grants are **binary** at the platform level — a user either has the app or they don't. For finer-grained, in-app permissions (e.g. "admin" vs "read-only", "editor" vs "approver"), an app declares its own **roles**.
 
-Roles are **isolated to your app**: the role keys mean nothing outside it, and the platform provides only the membership check. *Your app* decides what each role is allowed to do — MOS never enforces a policy on your behalf.
+Roles are **isolated to your app**: the role keys mean nothing outside it, and the platform provides only the membership check. *Your app* decides what each role is allowed to do — MixOS never enforces a policy on your behalf.
 
 ## Declaring roles
 
@@ -28,8 +28,8 @@ Rules enforced by the registry generator (a violation aborts the build):
 
 ## How a user gets a role
 
-- When an admin grants the app to a user (User Management → expand a user → **Grant**), the user receives `defaultRole`.
-- An admin can change a user's role anytime via the **role dropdown** next to the app in User Management.
+- When an admin grants the app to a user (Users → open a user → **App Access** → **Grant**), the user receives `defaultRole`.
+- An admin can change a user's role anytime via the **role dropdown** next to the app on that same tab.
 - A user with **no explicitly-set role resolves to `defaultRole`**. This covers pre-existing grants (no migration/backfill needed) and every user of a `global` app (which writes no grant rows until a role is assigned).
 
 One role per user per app. Assigning a role to a `global` app writes a grant row that carries *only* the role — it does not change who can access the app (global access still applies to everyone).

@@ -105,7 +105,7 @@ export default function MyPage() {
     return (
       <div className="p-6">
         <Skeleton className="h-8 w-48 mb-6" />
-        <div className="rounded-xl border border-border bg-card">
+        <div className="rounded-lg border border-border bg-card">
           {Array.from({ length: 6 }, (_, i) => (
             <div key={i} className="flex items-center gap-4 border-b px-4 py-3">
               <Skeleton className="h-4 flex-1" />

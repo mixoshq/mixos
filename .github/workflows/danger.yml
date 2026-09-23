@@ -1,6 +1,7 @@
 name: Danger
 
-# Applies the `os-change` review label and per-app / per-connector scope labels
+# Applies the `os-change` review label and per-app / per-connector / per-theme
+# scope labels
 # based on which paths a PR touches. See dangerfile.ts.
 
 on:
@@ -14,6 +15,12 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
+      # Danger reports its verdict as a commit status as well as a comment.
+      # Without this it logs "Could not add a commit status, the GitHub token
+      # for Danger does not have access rights" on every run — the failure
+      # still propagates through the exit code, but the check never appears
+      # next to the commit, which is where a reviewer looks for it.
+      statuses: write
     steps:
       - uses: actions/checkout@v4
 

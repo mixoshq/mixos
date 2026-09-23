@@ -21,11 +21,14 @@ This is the key rule and it is deliberate. **You do not import anything, and you
 
 The reason: apps never touch a connector directly — they reach it through the platform proxy `context.connectors.<name>`. That proxy is where instrumentation lives. When you declare a method in `telemetry`, the proxy wraps that method and records one event per call. Your connector class is untouched.
 
-```
-app API route ──> context.connectors["my-service"].enrichPerson(...)
-                        │  (platform proxy)
-                        ├─> calls your connector method unchanged
-                        └─> records one telemetry_events row (source_type: "connector")
+```mermaid
+flowchart TD
+    ROUTE["app API route"] --> PROXY
+
+    PROXY["context.connectors['my-service'].enrichPerson(…)<br/>the platform proxy"]
+
+    PROXY --> CALL["calls your connector method<br/>unchanged"]
+    PROXY --> ROW["records one telemetry_events row<br/>source_type: 'connector'"]
 ```
 
 Only the method name and the declared, non-sensitive metadata are recorded — **never** call arguments, response bodies, credentials, or tokens.

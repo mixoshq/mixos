@@ -2,23 +2,23 @@
 
 ## Context
 
-MOS deploys to Vercel with a hosted Supabase Postgres. Local development
+MixOS deploys to Vercel with a hosted Supabase Postgres. Local development
 currently requires each developer to create their own Supabase cloud project,
 copy four secrets out of its dashboard, link the CLI, push the schema, and seed
 an admin by hand — the path documented in [README.md](../../README.md) and
-walked through by [`/mix-init`](../../.claude/commands/mix-init.md).
+walked through by [`/mixos init`](../../.claude/skills/mixos/actions/init.md).
 
 That is a lot of setup for a repo whose audience explicitly includes
-non-technical builders (`/mix-help`, `/mix-init`), and it makes every developer
+non-technical builders (`/mixos help`, `/mixos init`), and it makes every developer
 share or duplicate cloud infrastructure just to run the app.
 
-**Goal:** a new person installs nothing by hand, runs `/mix-init`, and ends up
+**Goal:** a new person installs nothing by hand, runs `/mixos init`, and ends up
 with the whole system — Next.js app *and* Supabase — running in Docker on their
 machine, logged in as an admin.
 
 ### What the codebase actually needs from Supabase
 
-This is the finding that shapes the whole design. MOS uses a very narrow slice
+This is the finding that shapes the whole design. MixOS uses a very narrow slice
 of Supabase. [src/lib/db/server.ts](../../src/lib/db/server.ts) documents the
 only two data paths:
 
@@ -81,12 +81,12 @@ Locked with the user before writing this plan.
    credentials survive restarts.
 5. **Fix all 5 typecheck errors** as part of this work.
 6. **Docker becomes the documented default.** README Setup/Running and
-   `/mix-init` are rewritten around it; the hosted-Supabase + host-Node path
+   `/mixos init` are rewritten around it; the hosted-Supabase + host-Node path
    stays documented as the alternative.
 7. **CI is unchanged.** [.github/workflows/ci.yml](../../.github/workflows/ci.yml)
    stays lint → typecheck → build with no database, which is what its comments
    deliberately describe.
-8. **`/mix-init` is the installer**, not just a doc walkthrough. It:
+8. **`/mixos init` is the installer**, not just a doc walkthrough. It:
    - targets **macOS only** — other platforms get a clear message and a pointer
      to the manual docs rather than a guessed path;
    - standardizes on **Docker Desktop**;
@@ -211,7 +211,7 @@ map, and troubleshooting. The README links here rather than absorbing it.
 - **[.env.local.example](../../.env.local.example)** — a header note pointing at
   the Docker path, and `PGSSLMODE=disable` guidance for a local Postgres.
 - **[.gitignore](../../.gitignore)** — add `.env.docker.local`.
-- **[.claude/commands/mix-init.md](../../.claude/commands/mix-init.md)** —
+- **[.claude/skills/mixos/actions/init.md](../../.claude/skills/mixos/actions/init.md)** —
   rewritten per decision 8. New shape:
 
   - **Step 0 — platform gate.** Not macOS → say so, link the manual docs, stop.
@@ -230,7 +230,7 @@ map, and troubleshooting. The README links here rather than absorbing it.
   - **Step 5 — boot.** `npm run dev:docker`, then confirm
     `/api/health/ready` returns 200.
   - **Step 6 — hand off.** Print the URL and the seeded admin credentials from
-    `.env.docker`, and point at `/mix-help`.
+    `.env.docker`, and point at `/mixos help`.
 
   The existing Step 0 "already set up?" short-circuit is kept, re-pointed at the
   Docker signals.
@@ -259,7 +259,7 @@ map, and troubleshooting. The README links here rather than absorbing it.
    `127.0.0.1:54321` / `:54322`, per decision 2.
 9. **Restart preserves data.** `docker:down` then `dev:docker` again — the
    seeded admin and any connector config survive.
-10. **`/mix-init` on a clean machine.** Ideally a fresh macOS user account. At
+10. **`/mixos init` on a clean machine.** Ideally a fresh macOS user account. At
     minimum, walk each detection branch with the tool artificially absent.
 
 ## Open items to confirm during implementation

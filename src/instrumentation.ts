@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // THIS FILE MUST LIVE AT src/instrumentation.ts, beside src/app — not at the
 // repo root. Next derives the directory it scans for the hook as
 // `<appDir>/..`, which for src/app is src/, and it reads that one directory

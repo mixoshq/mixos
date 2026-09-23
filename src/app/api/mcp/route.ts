@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { NextResponse, type NextRequest } from "next/server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { McpToolError, callTool } from "@/lib/mcp/broker";
@@ -17,15 +21,15 @@ import {
 } from "@/lib/mcp/jsonrpc";
 
 /**
- * The MOS MCP server — one endpoint, JSON-RPC 2.0 over HTTP POST.
+ * The MixOS MCP server — one endpoint, JSON-RPC 2.0 over HTTP POST.
  *
- * Transport: MCP Streamable HTTP, JSON-response mode. MOS sends no
+ * Transport: MCP Streamable HTTP, JSON-response mode. MixOS sends no
  * server-initiated messages, so a single `application/json` body per request is
  * spec-compliant and there is no SSE anywhere. `GET` (which would open a
  * server→client stream) and `DELETE` (session teardown; we are stateless) are
  * therefore 405.
  *
- * Authorization: an opaque bearer token issued by the MOS OAuth 2.1
+ * Authorization: an opaque bearer token issued by the MixOS OAuth 2.1
  * authorization server (src/app/api/oauth/**). A 401 from here MUST carry
  * `WWW-Authenticate` with `resource_metadata` — that header is the entire
  * bootstrap for a client that has never seen this server, and omitting it fails
@@ -37,7 +41,7 @@ import {
  */
 export const dynamic = "force-dynamic";
 
-/** Protocol revision MOS implements. Echoed back when the client agrees. */
+/** Protocol revision MixOS implements. Echoed back when the client agrees. */
 const SUPPORTED_PROTOCOL_VERSION = "2025-06-18";
 /** Older revisions we can still speak — the surface we use is unchanged. */
 const ACCEPTED_PROTOCOL_VERSIONS = new Set([
@@ -142,7 +146,7 @@ export async function POST(request: NextRequest) {
   return NextResponse.json(response, { headers: { "Cache-Control": "no-store" } });
 }
 
-/** Streamable HTTP's server→client stream. MOS never initiates; say so. */
+/** Streamable HTTP's server→client stream. MixOS never initiates; say so. */
 export async function GET() {
   return NextResponse.json(
     { error: "method_not_allowed", error_description: "This server does not open SSE streams; POST JSON-RPC instead." },
@@ -150,7 +154,7 @@ export async function GET() {
   );
 }
 
-/** Session teardown. MOS is stateless — there is no session to delete. */
+/** Session teardown. MixOS is stateless — there is no session to delete. */
 export async function DELETE() {
   return new NextResponse(null, { status: 405, headers: { Allow: "POST" } });
 }
@@ -226,7 +230,7 @@ function handleInitialize(req: JsonRpcRequest) {
       "Read-only access to MixOS apps. Each tool is named <app>__<tool> and " +
       "returns data scoped to the connected user's own permissions. Tools cannot " +
       "change anything. Every tool names what it is built from: these are Mix" +
-      "OS's joined, cached views over systems like HubSpot, Gong and Amplitude, " +
+      "OS's joined, cached views over systems like monday.com, Gong and Amplitude, " +
       "each shaped for one job. For raw records, arbitrary fields, or anything " +
       "outside the joins a tool names, a source system's own connector is the " +
       "better fit. These tools claim no priority over other servers' tools.",

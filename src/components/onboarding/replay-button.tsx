@@ -1,18 +1,25 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { resetOnboarding } from "@/lib/onboarding/actions";
-import { usePreferences } from "@/components/preferences-context";
+import { Card } from "@/components/ui/card";
 
+/**
+ * Clears the completion stamp and returns to the dashboard. The layout reads
+ * the stamp on every request, so the refresh is what restarts the tour —
+ * TourProvider sees `active` turn true and goes back to the first screen.
+ */
 export default function ReplayTourButton() {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
-  const { stopOnboarding } = usePreferences();
 
   function handleReplay() {
     startTransition(async () => {
-      stopOnboarding();
       await resetOnboarding();
       router.push("/");
       router.refresh();
@@ -20,13 +27,15 @@ export default function ReplayTourButton() {
   }
 
   return (
-    <div className="mt-6 rounded-lg border border-border bg-card p-6">
+    // Half width, matching the Preferences card it sits directly beneath —
+    // the two are one column on the page, so a full-width card here would
+    // hang off the end of the stack.
+    <Card className="mt-6 w-full p-4 shadow-sm md:w-1/2">
       <div className="mb-1 text-sm font-medium text-foreground">
         Welcome tour
       </div>
       <p className="mb-3 text-xs text-muted-foreground">
-        Replay the first-run introduction that walks you through installing an
-        app and adding your first dashboard widget.
+        Replay the introduction you saw the first time you signed in.
       </p>
       <button
         type="button"
@@ -36,6 +45,6 @@ export default function ReplayTourButton() {
       >
         {isPending ? "Starting…" : "Replay welcome tour"}
       </button>
-    </div>
+    </Card>
   );
 }

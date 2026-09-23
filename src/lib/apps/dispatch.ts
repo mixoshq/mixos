@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * The app API gateway.
  *
@@ -33,9 +37,14 @@ import { appRegistry } from "@/generated/app-registry";
 import { resolveRoutePath } from "@/lib/apps/api-router";
 import { buildAppContext, buildPublicAppContext } from "@/lib/apps/context";
 import { getClientIp } from "@/lib/apps/public-access";
-import { isRouteDefinition, runRoute, type ResolvedContext } from "@/lib/apps/route";
+import {
+  isRouteDefinition,
+  runRoute,
+  type ResolvedContext,
+} from "@/lib/apps/route";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { resolveAuthTier, type AppMount } from "@/lib/apps/auth-tier";
+import { needsCsrf, verifyCsrf } from "@/lib/apps/csrf";
 import type { RouteAuth } from "@/lib/apps/types";
 
 /**
@@ -94,7 +103,10 @@ function tooManyRequests(retryAfterMs: number) {
 
 /** 404 rather than 401/403 wherever telling the two apart would be an oracle. */
 function notFound() {
-  return NextResponse.json({ error: "Not found", code: "NOT_FOUND" }, { status: 404 });
+  return NextResponse.json(
+    { error: "Not found", code: "NOT_FOUND" },
+    { status: 404 },
+  );
 }
 
 export interface DispatchOptions {
@@ -205,6 +217,9 @@ export async function dispatchAppRoute({
       appSlug,
       accepted: declaration.auth,
       mount,
+      request,
+      method,
+      routePattern: routeKey,
     });
   } catch (err) {
     console.error(`[gateway] ${appSlug}: auth resolution failed:`, err);
@@ -244,7 +259,32 @@ export async function dispatchAppRoute({
         );
   }
 
-  // 9 — identity-aware limits. The subject is the user where we have one and the
+  // 9 — CSRF, for cookie-authenticated mutations only.
+  //
+  // Placed here rather than earlier because it is only meaningful once we know
+  // the caller rode in on a cookie. The `password`, `key` and `public` tiers
+  // carry no ambient credential for a cross-site request to borrow, and the
+  // public mount serves nothing else — requiring a token there would break every
+  // API-key integration to defend against nothing.
+  //
+  // `SameSite=Lax` is still the primary defence (docs/security-architecture.md
+  // §7). This is the second lock, and the one that does not depend on the
+  // browser implementing Lax correctly.
+  if (
+    mount === "authenticated" &&
+    needsCsrf(method) &&
+    (resolution.tier === "session" || resolution.tier === "signed-in") &&
+    !verifyCsrf(request)
+  ) {
+    // 403 with a distinct code: the SDK clears its cached token and retries once
+    // on a 403, which is what recovers a token that expired mid-session.
+    return NextResponse.json(
+      { error: "Invalid or missing CSRF token", code: "CSRF_FAILED" },
+      { status: 403 },
+    );
+  }
+
+  // 10 — identity-aware limits. The subject is the user where we have one and the
   // IP where we do not, so an anonymous flood is still bounded per route.
   const subject = resolution.dbUser?.id ?? ip;
   const userLimit = await userAppLimiter.consume(`${subject}::${appSlug}`);
@@ -255,7 +295,7 @@ export async function dispatchAppRoute({
   );
   if (!routeLimit.allowed) return tooManyRequests(routeLimit.retryAfterMs);
 
-  // 10 — build the context the resolved tier earns. `auth` is attached here
+  // 11 — build the context the resolved tier earns. `auth` is attached here
   // rather than inside the builders so the tier decision and the context that
   // records it cannot come from two different places.
   let context: ResolvedContext;
@@ -267,7 +307,10 @@ export async function dispatchAppRoute({
           ? { ...base, user: withoutAppRoles(base.user), auth: resolution.tier }
           : { ...base, auth: resolution.tier };
     } else {
-      context = { ...(await buildPublicAppContext(appSlug)), auth: resolution.tier };
+      context = {
+        ...(await buildPublicAppContext(appSlug)),
+        auth: resolution.tier,
+      };
     }
   } catch (err) {
     console.error(`[gateway] ${appSlug}: context build failed:`, err);
@@ -277,7 +320,7 @@ export async function dispatchAppRoute({
     );
   }
 
-  // 11 — run it. Role enforcement lives inside runRoute so every caller of a
+  // 12 — run it. Role enforcement lives inside runRoute so every caller of a
   // route, including Phase 2's in-process `context.call()`, passes through it.
   return runRoute(declaration, request, {
     context,
@@ -305,26 +348,29 @@ export async function dispatchAppRoute({
  * A `signed-in` route is for surfaces that are meaningful without membership.
  * If it needs a role, it needs `session`.
  */
-function withoutAppRoles<T extends { roles: string[]; hasRole: (r: string[]) => boolean }>(
-  user: T,
-): T {
+function withoutAppRoles<
+  T extends { roles: string[]; hasRole: (r: string[]) => boolean },
+>(user: T): T {
   return { ...user, roles: [], hasRole: () => false };
 }
 
 /** Does any declared auth reach callers on this mount? */
 function servedHere(accepted: readonly RouteAuth[], mount: AppMount): boolean {
   // Deliberately mirrors ELIGIBLE_BY_MOUNT in auth-tier.ts rather than
-  // re-deriving the answer. `key` is absent from both: it has no implementation,
-  // so counting it here would import a key-only route's module on the public
-  // mount purely to refuse it a step later.
+  // re-deriving the answer. Keep the two in step: a tier admitted here but not
+  // there imports an app module only to refuse it a step later, and a tier
+  // admitted there but not here is unreachable no matter what a route declares.
   const serves = (a: RouteAuth) =>
     mount === "public"
-      ? a === "password" || a === "public"
+      ? a === "password" || a === "key" || a === "public"
       : a === "session" || a === "signed-in" || a === "public";
   return accepted.some(serves);
 }
 
-function sameAuthSet(a: readonly RouteAuth[], b: readonly RouteAuth[]): boolean {
+function sameAuthSet(
+  a: readonly RouteAuth[],
+  b: readonly RouteAuth[],
+): boolean {
   return [...a].sort().join(",") === [...b].sort().join(",");
 }
 
@@ -345,7 +391,10 @@ export function extractPathParams(
   for (let i = 0; i < pattern.length; i++) {
     const part = pattern[i];
     if (!part.startsWith("[") || !part.endsWith("]")) continue;
-    const bare = part.slice(1, -1).replace(/^\.\.\./, "").replace(/^\[|\]$/g, "");
+    const bare = part
+      .slice(1, -1)
+      .replace(/^\.\.\./, "")
+      .replace(/^\[|\]$/g, "");
     params[bare] = part.includes("...")
       ? segments.slice(i).join("/")
       : (segments[i] ?? "");

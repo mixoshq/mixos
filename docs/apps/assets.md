@@ -155,6 +155,48 @@ const myFont = localFont({
 });
 ```
 
+## Screenshots
+
+Images for the app's **catalogue listing** — what someone looks at while deciding whether to install. These are the one category of app asset that is not co-located and imported, because nothing in the app renders them: the listing does, from a public URL.
+
+Put the files in `screenshots/` (a sibling of `assets/`, not inside it) and declare them in `app.json`:
+
+```json
+"screenshots": [
+  {
+    "file": "screenshots/dashboard.png",
+    "alt": "The main dashboard showing this quarter's pipeline",
+    "caption": "Everything on one screen"
+  },
+  { "file": "screenshots/settings.png" }
+]
+```
+
+`file` carries its `screenshots/` prefix, the same way a connector's icon is written `assets/icon.svg` — the manifest says where the file actually is rather than leaving the directory implied. `alt` and `caption` are optional; write `alt` anyway, because omitting it does not make the image decorative, it makes it unlabelled. The order you declare is the order the gallery renders, so lead with the view that answers "what is this?".
+
+You never write `url`, `width` or `height`. The build measures the file and fills those in, which is what lets a gallery reserve the right box before the image loads.
+
+### Why not just put one in the README
+
+Because it would not work. The listing renderer resolves a relative image path against mixos.org rather than against your repo, so an `![](./screenshots/dashboard.png)` in `README.md` publishes as a dead link — and you never see it, because the same file renders correctly on GitHub. The manifest field is the supported route. See [Architecture](./architecture.md#what-the-renderer-does-to-it).
+
+### What the build enforces
+
+| Rule | Limit | Why |
+| --- | --- | --- |
+| Format | `.png`, `.jpg`, `.jpeg`, `.webp` | No SVG. A screenshot is a raster by definition, and an SVG is a script-bearing document rather than an image — these are served from an unauthenticated URL. |
+| Count | 8 | A gallery nobody scrolls past item eight. |
+| File size | 2 MB each | They live in the repo and go over the wire on a listing page. |
+| Minimum width | 640px | Below that it is a thumbnail and ships visibly soft on a high-DPI display. |
+
+Height and aspect ratio are deliberately unconstrained: a full page, a single widget and a modal are different shapes, and forcing one aspect would letterbox two of them. Any violation aborts the build with a message naming the file and the measured value.
+
+### Where they end up
+
+Declared files are copied to `/screenshots/apps/<slug>/<name>` and served **without authentication** — a listing is read by someone who has not installed the app and has no session, so a gallery behind the auth redirect is a gallery with no audience.
+
+Only declared files are copied. A draft or a reject left sitting in `screenshots/` never reaches a public URL, which is the property that makes the directory safe to work in.
+
 ## Summary
 
 | Asset type | Approach |
@@ -163,3 +205,4 @@ const myFont = localFont({
 | Scoped CSS | CSS Modules (`.module.css`) |
 | Utility CSS | Tailwind (available everywhere) |
 | Fonts | `next/font` (Google or local) |
+| Listing screenshots | Declare in `app.json` `screenshots`, files in `screenshots/` |

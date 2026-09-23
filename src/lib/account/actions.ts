@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use server";
 
 import { revalidatePath } from "next/cache";
@@ -5,13 +9,13 @@ import { createServiceClient } from "@/lib/db/server";
 import { requireServerSession } from "@/lib/auth/session";
 import { getUserById } from "@/lib/apps/access";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
-import { isSsoEnabled } from "@/lib/auth/auth-config-store";
 import { safeErrorMessage } from "@/lib/safe-error";
 import type { AccountActionState } from "@/lib/account/state";
+import { revokeUserSessions } from "@/lib/auth/revocation";
 
 export async function updateDisplayName(
   _prev: AccountActionState,
-  formData: FormData
+  formData: FormData,
 ): Promise<AccountActionState> {
   try {
     const session = await requireServerSession();
@@ -30,17 +34,22 @@ export async function updateDisplayName(
     revalidatePath("/account");
     return { error: null, success: "Display name updated." };
   } catch (err) {
-    return { error: safeErrorMessage(err, "Failed to update display name."), success: null };
+    return {
+      error: safeErrorMessage(err, "Failed to update display name."),
+      success: null,
+    };
   }
 }
 
 export async function updateEmail(
   _prev: AccountActionState,
-  formData: FormData
+  formData: FormData,
 ): Promise<AccountActionState> {
   try {
     const session = await requireServerSession();
-    const email = String(formData.get("email") ?? "").trim().toLowerCase();
+    const email = String(formData.get("email") ?? "")
+      .trim()
+      .toLowerCase();
     if (!email) return { error: "Email is required.", success: null };
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       return { error: "Enter a valid email address.", success: null };
@@ -69,31 +78,33 @@ export async function updateEmail(
     revalidatePath("/account");
     return { error: null, success: "Email updated." };
   } catch (err) {
-    return { error: safeErrorMessage(err, "Failed to update email."), success: null };
+    return {
+      error: safeErrorMessage(err, "Failed to update email."),
+      success: null,
+    };
   }
 }
 
 export async function updatePassword(
   _prev: AccountActionState,
-  formData: FormData
+  formData: FormData,
 ): Promise<AccountActionState> {
   try {
-    if (await isSsoEnabled()) {
-      return {
-        error: "Password login is disabled while SSO is enabled.",
-        success: null,
-      };
-    }
-
     const session = await requireServerSession();
     const current = String(formData.get("currentPassword") ?? "");
     const next = String(formData.get("newPassword") ?? "");
     const confirm = String(formData.get("confirmPassword") ?? "");
 
     if (!next || next.length < 10)
-      return { error: "New password must be at least 10 characters.", success: null };
+      return {
+        error: "New password must be at least 10 characters.",
+        success: null,
+      };
     if (next !== confirm)
-      return { error: "New password and confirmation do not match.", success: null };
+      return {
+        error: "New password and confirmation do not match.",
+        success: null,
+      };
 
     const dbUser = await getUserById(session.user.id);
     if (!dbUser) return { error: "User not found.", success: null };
@@ -102,7 +113,8 @@ export async function updatePassword(
       if (!current)
         return { error: "Enter your current password.", success: null };
       const ok = await verifyPassword(current, dbUser.password_hash);
-      if (!ok) return { error: "Current password is incorrect.", success: null };
+      if (!ok)
+        return { error: "Current password is incorrect.", success: null };
     }
 
     const newHash = await hashPassword(next);
@@ -116,9 +128,31 @@ export async function updatePassword(
       .eq("id", session.user.id);
     if (error) throw new Error(error.message);
 
+    // The credential every existing token was minted from is gone, so the
+    // tokens go with it. This is the case a "change your password" flow exists
+    // for: someone else may be holding a session.
+    //
+    // Deliberately AFTER the update and deliberately not fatal — a password that
+    // changed but sessions that survived is recoverable by the admin
+    // force-signout; a password that silently did not change is not.
+    try {
+      await revokeUserSessions(session.user.id);
+    } catch (revokeErr) {
+      console.error(
+        "[account] password changed but session revocation failed:",
+        revokeErr,
+      );
+    }
+
     revalidatePath("/account");
-    return { error: null, success: "Password updated." };
+    return {
+      error: null,
+      success: "Password updated. Other sessions have been signed out.",
+    };
   } catch (err) {
-    return { error: safeErrorMessage(err, "Failed to update password."), success: null };
+    return {
+      error: safeErrorMessage(err, "Failed to update password."),
+      success: null,
+    };
   }
 }

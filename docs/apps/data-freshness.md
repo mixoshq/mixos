@@ -1,8 +1,63 @@
 # Data Freshness (incremental sync, snapshots, caching)
 
+## Declare the sync; don't hand-roll it
+
+Everything below describes a shape apps used to build by hand — and one app got
+it wrong in the most expensive way available: it persisted a provider's
+pagination cursor between scheduler ticks, the provider expired it before the
+next tick, and the job failed on the same dead cursor **278 times over 19 days**
+without the watermark advancing once.
+
+That shape is now the platform's, and the cursor never leaves the run:
+
+```jsonc
+// app.json
+"sync": [{
+  "name": "calls",
+  "schedule": { "everyMinutes": 60 },
+  "source": "gong",
+  "window": { "coldStartDays": 30, "defaultDays": 7, "minDays": 1 },
+  "budgetMs": 200000
+}]
+```
+
+```ts
+// apps/<slug>/sync/calls.ts
+import { defineSync } from "@/lib/apps/sync";
+
+export default defineSync<Call>({
+  fetchPage: async (ctx, { from, to, cursor, signal }) => {
+    const page = await ctx.connectors.gong.listCalls({ from, to, cursor, signal });
+    return { items: page.calls, nextCursor: page.cursor };
+  },
+  upsert: async (ctx, calls) => {
+    for (const c of calls) await ctx.db!.table("calls").upsert(toRow(c), { onConflict: "id" });
+  },
+});
+```
+
+That is the whole app. The platform owns:
+
+| Concern | What it does |
+| --- | --- |
+| The cursor | Lives inside one run's loop and is **never handed to you**. There is nowhere to persist it, which is what makes the 19-day bug unrepresentable rather than merely documented. |
+| The watermark | Advances **only** on a window that actually drained. An interrupted run costs nothing, because the writes are upserts. |
+| The budget | Checked at every page boundary against both the clock and `ctx.signal` — the deadline alone misses an admin abort, the signal alone fires only once you have overrun. |
+| Window tuning | Halved when a window does not drain, relaxed back toward the default when it does, and the size persisted so a shrink survives the tick boundary. Relaxing matters as much as shrinking. |
+| The empty guard | A drained window that returned nothing does **not** advance the watermark — an upstream outage returns zero rows, not an error, and writing that through blanks every card. |
+| The state table | `_sync_state` is created for you by `npm run migrate:apps`. You never write a migration for it, and it has **no cursor column**. |
+
+A sync appears at **Administration → Scheduled Jobs** like any other job — same
+atomic claim, same enable/disable toggle, same run history — because it *is* one,
+under a reserved `sync:` name.
+
+Everything below is still worth reading: it is why the platform does what it
+does, and it is the reference for the cases a declared sync does not cover (a
+stepped backfill, a snapshot table, a stale-while-revalidate cache).
+
 ## Overview
 
-Most MOS apps show data that lives somewhere slow — a CRM, a call recorder, a
+Most MixOS apps show data that lives somewhere slow — a CRM, a call recorder, a
 warehouse, a mailbox. Fetching it on the request path makes a page that takes
 fifteen seconds to open; fetching all of it on every scheduler tick makes a job
 that times out. This guide is the standard shape for the middle: **a background
@@ -303,7 +358,7 @@ rebuild reuses a lookup captured before the sync that prompted it:
 // Resolved inside the closure, so a background revalidation picks up a snapshot
 // written since the cached payload was built.
 getCached(db, BOOK_CACHE_KEY, async () =>
-  buildAccountBook(hubspot, db, directory, await loadHealthLookup(db, databricks)),
+  buildAccountBook(monday, db, directory, await loadHealthLookup(db, databricks)),
 );
 ```
 

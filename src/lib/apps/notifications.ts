@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { hasAppGrant } from "./access";
 import { sendPushToUsers } from "@/lib/push/server";
 
@@ -10,7 +14,7 @@ export interface SendNotificationArgs {
   url?: string;
   /** Coalesces notifications that share a tag in the OS tray. */
   tag?: string;
-  /** Icon URL; falls back to the MOS app icon in the service worker. */
+  /** Icon URL; falls back to the MixOS app icon in the service worker. */
   icon?: string;
 }
 

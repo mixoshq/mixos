@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
@@ -20,14 +24,31 @@ import { MOS_SOURCE } from "../src/lib/apps/types";
 import type {
   ConnectorAuthPolicy,
   ConnectorHttpPolicy,
+  ConnectorSetupGuide,
   ConnectorTelemetryDefinition,
   ConnectorWebhookPolicy,
 } from "../src/lib/connectors/types";
 import {
   RawAppManifestSchema,
   RawConnectorManifestSchema,
+  RawThemeManifestSchema,
   formatZodError,
 } from "./manifest-schemas";
+import type {
+  ThemeAssets,
+  ThemeFontFace,
+  ThemeManifest,
+} from "../src/lib/themes/types";
+import { compileTheme, ThemeError } from "./theme-css";
+import type { Screenshot, ScreenshotKind } from "../src/lib/screenshots";
+import {
+  SCREENSHOT_EXTENSIONS,
+  SCREENSHOT_MAX_BYTES,
+  SCREENSHOT_MAX_COUNT,
+  SCREENSHOT_MIN_WIDTH,
+  screenshotUrl,
+} from "../src/lib/screenshots";
+import * as ts from "typescript";
 
 /**
  * Thrown when an app's manifest contains an invalid visibility declaration.
@@ -42,7 +63,6 @@ class FatalManifestError extends Error {
     this.name = "FatalManifestError";
   }
 }
-
 
 /**
  * Manifests store `lastUpdated` as an ISO 8601 string (legible in a diff);
@@ -75,17 +95,73 @@ const APPS_DIR = path.resolve(__dirname, "../apps");
 const CONNECTORS_DIR = path.resolve(__dirname, "../connectors");
 const OUTPUT_DIR = path.resolve(__dirname, "../src/generated");
 const APP_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "app-registry.ts");
-const CONNECTOR_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "connector-registry.ts");
+const APP_CLIENTS_FILE = path.resolve(OUTPUT_DIR, "app-clients.ts");
+const APP_PAGE_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-page-loaders.ts");
+const CONNECTOR_REGISTRY_FILE = path.resolve(
+  OUTPUT_DIR,
+  "connector-registry.ts",
+);
+const THEMES_DIR = path.resolve(__dirname, "../themes");
+const MIGRATIONS_DIR = path.resolve(__dirname, "../supabase/migrations");
+const BUILD_INFO_FILE = path.resolve(OUTPUT_DIR, "build-info.ts");
+const THEME_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "theme-registry.ts");
+const THEMES_CSS_FILE = path.resolve(OUTPUT_DIR, "themes.css");
+const THEME_TOKENS_FILE = path.resolve(OUTPUT_DIR, "theme-tokens.json");
+const PUBLIC_THEMES_DIR = path.resolve(__dirname, "../public/themes");
+// NOT public/connectors: `/connectors/*` is already a signed-in page route
+// (/connectors/guide), so assets served from there redirect to /login for
+// anyone without a session — including next/image's optimizer, which fetches
+// the source URL server-side with no cookies and would fail on every icon.
+const PUBLIC_CONNECTORS_DIR = path.resolve(
+  __dirname,
+  "../public/connector-assets",
+);
+// Listing galleries for apps and themes, copied out of <ext>/screenshots/.
+// One prefix for both kinds, segmented by kind underneath, because the rules
+// are identical and a second prefix would be a second proxy exemption to keep
+// in step. Exempted from the auth matcher in src/proxy.ts for the same reason
+// theme assets and connector icons are: a listing is read by someone deciding
+// whether to install, which is necessarily before they have a session.
+const PUBLIC_SCREENSHOTS_DIR = path.resolve(__dirname, "../public/screenshots");
 
 function scanPages(dir: string, slug: string, prefix: string, out: string[]) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      scanPages(path.join(dir, entry.name), slug, prefix + entry.name + "/", out);
+      scanPages(
+        path.join(dir, entry.name),
+        slug,
+        prefix + entry.name + "/",
+        out,
+      );
     } else if (entry.name === "Main.tsx" || entry.name === "Main.ts") {
       const key = `${slug}/pages/${prefix}Main`;
-      out.push(`  "${key}": () => import("@apps/${slug}/pages/${prefix}${entry.name}"),`);
+      out.push(
+        `  "${key}": () => import("@apps/${slug}/pages/${prefix}${entry.name}"),`,
+      );
     }
   }
+}
+
+/**
+ * How many pages an app serves.
+ *
+ * Same rule `scanPages` uses to build the loader map, and the same terminal
+ * files `validateVisibilityMap` resolves a `pageVisibility` key against: a page
+ * IS a directory holding `Main.tsx`/`Main.ts`, at any depth. Counting entries in
+ * `pages/` instead would count the folders on the way down, and counting the
+ * `pageVisibility` keys would count only the pages whose auth was overridden —
+ * usually none of them.
+ */
+function countPages(dir: string): number {
+  let n = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      n += countPages(path.join(dir, entry.name));
+    } else if (entry.name === "Main.tsx" || entry.name === "Main.ts") {
+      n++;
+    }
+  }
+  return n;
 }
 
 // Core hook names are never slug-prefixed. Keep in sync with CORE_HOOKS in
@@ -158,29 +234,129 @@ function scanHooks(appDir: string, slug: string): HookScan {
 }
 
 /**
- * Load an app manifest from either `app.ts` (for manifests that use preset
- * helpers or other TS composition) or `app.json` (the original static form).
- * `app.ts` takes precedence when both exist.
+ * Load an app manifest.
+ *
+ * `app.json` is the only manifest form. It is static text, which means the
+ * install path can schema-check the bytes BEFORE anything executes — see
+ * preflight() in src/lib/repository/install.ts. An earlier design also accepted
+ * an `app.ts` whose default export was the whole manifest; that inverted the
+ * order, because the module had to be imported before there was anything to
+ * validate. For apps arriving from the Registry that is the wrong way round.
+ *
+ * The one thing JSON cannot express is a config field built from a helper, so
+ * that — and only that — moved to an optional `widgets.ts`. See
+ * loadWidgetConfigs() below.
  */
 async function loadAppManifest(
   appDir: string,
 ): Promise<Record<string, unknown> | null> {
-  const tsPath = path.join(appDir, "app.ts");
-  if (fs.existsSync(tsPath)) {
-    // tsx's ESM loader handles transpilation. Append a cache-busting query so
-    // repeated generator runs during `next dev` pick up manifest edits.
-    const href = `${pathToFileURL(tsPath).href}?t=${Date.now()}`;
-    const mod = (await import(href)) as { default?: unknown };
-    if (!mod.default || typeof mod.default !== "object") return null;
-    return mod.default as Record<string, unknown>;
-  }
-
   const jsonPath = path.join(appDir, "app.json");
-  if (fs.existsSync(jsonPath)) {
-    return JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
+  if (!fs.existsSync(jsonPath)) return null;
+
+  const manifest = JSON.parse(
+    fs.readFileSync(jsonPath, "utf-8"),
+  ) as Record<string, unknown>;
+
+  await applyWidgetConfigs(appDir, manifest);
+  return manifest;
+}
+
+/**
+ * Merge `widgets.ts` config fields into the manifest's widget entries.
+ *
+ * A widget's `config` is the one part of a manifest that repeats: four widgets
+ * wanting a title, a selection and a display mode is the same four field
+ * objects written out four times. Helpers in @/lib/apps/widget-config-presets
+ * collapse that, and they also derive the widget's config TYPE — neither of
+ * which JSON can do.
+ *
+ * So `widgets.ts` is optional, and narrow: it supplies config arrays and
+ * nothing else. Identity, permissions, egress, roles and every other field a
+ * reviewer cares about stay in `app.json`, as text.
+ *
+ *     // apps/my-app/widgets.ts
+ *     export default {
+ *       "widgets/favorites.tsx": favoritesConfigFields,
+ *     };
+ *
+ * Keyed by `component`, which is a path and therefore already unique within an
+ * app — `name` is prose and free to collide.
+ *
+ * ## Drift is refused, not reconciled
+ *
+ * Splitting one manifest across two files invents a way for them to disagree.
+ * Both directions throw rather than shrug: a key naming no widget is a typo or
+ * a rename that missed a file, and a widget declaring `config` in BOTH places
+ * has two sources of truth and no rule for picking one. Neither is a state
+ * anyone means to be in, and a generator that quietly picks a winner is how
+ * someone edits the file that is being ignored.
+ *
+ * Worth knowing where that throw lands: the caller catches it, warns, and skips
+ * the app — the same handling a malformed `app.json` gets. So the build still
+ * succeeds and the app is absent from the registry rather than wrong in it.
+ * That is this generator's existing severity for a broken manifest, not a
+ * judgement about drift specifically.
+ */
+async function applyWidgetConfigs(
+  appDir: string,
+  manifest: Record<string, unknown>,
+): Promise<void> {
+  const tsPath = path.join(appDir, "widgets.ts");
+  if (!fs.existsSync(tsPath)) return;
+
+  const slug = path.basename(appDir);
+
+  // tsx's ESM loader handles transpilation. Append a cache-busting query so
+  // repeated generator runs during `next dev` pick up edits.
+  const href = `${pathToFileURL(tsPath).href}?t=${Date.now()}`;
+  const mod = (await import(href)) as { default?: unknown };
+  const byComponent = mod.default;
+
+  if (!byComponent || typeof byComponent !== "object" || Array.isArray(byComponent)) {
+    throw new Error(
+      `apps/${slug}/widgets.ts must default-export an object keyed by each ` +
+        `widget's "component" path, e.g. { "widgets/foo.tsx": fooConfigFields }.`,
+    );
   }
 
-  return null;
+  const widgets = Array.isArray(manifest.widgets)
+    ? (manifest.widgets as Record<string, unknown>[])
+    : [];
+  const declared = new Set(
+    widgets.map((w) => String(w.component ?? "")).filter(Boolean),
+  );
+
+  for (const [component, fields] of Object.entries(
+    byComponent as Record<string, unknown>,
+  )) {
+    if (!declared.has(component)) {
+      throw new Error(
+        `apps/${slug}/widgets.ts has config for "${component}", which no widget ` +
+          `in app.json declares. Known components: ${[...declared].join(", ") || "(none)"}.`,
+      );
+    }
+    if (!Array.isArray(fields)) {
+      throw new Error(
+        `apps/${slug}/widgets.ts: "${component}" must map to an array of config fields.`,
+      );
+    }
+  }
+
+  for (const widget of widgets) {
+    const component = String(widget.component ?? "");
+    const fields = (byComponent as Record<string, unknown>)[component];
+    if (fields === undefined) continue;
+    if (widget.config !== undefined) {
+      throw new Error(
+        `apps/${slug}: widget "${component}" declares config in BOTH app.json and ` +
+          `widgets.ts. Keep it in one — app.json for plain fields, widgets.ts for ` +
+          `fields built from presets.`,
+      );
+    }
+    // Plain data by the time it lands here; the registry is serialised with
+    // JSON.stringify, so anything else would not survive the write.
+    widget.config = fields;
+  }
 }
 
 /**
@@ -214,7 +390,9 @@ function validateVisibilityMap(
     );
   }
   const out: Record<string, RouteAuth[]> = {};
-  for (const [key, value] of Object.entries(raw as Record<string, RouteAuth[]>)) {
+  for (const [key, value] of Object.entries(
+    raw as Record<string, RouteAuth[]>,
+  )) {
     // Reject obvious key mistakes early so paths stay POSIX-shaped.
     if (key.startsWith("/") || key.endsWith("/") || key.includes("\\")) {
       throw new FatalManifestError(
@@ -317,7 +495,12 @@ function paramsForPath(routePath: string): string[] {
   return routePath
     .split("/")
     .filter((seg) => seg.startsWith("[") && seg.endsWith("]"))
-    .map((seg) => seg.slice(1, -1).replace(/^\.\.\./, "").replace(/^\[|\]$/g, ""));
+    .map((seg) =>
+      seg
+        .slice(1, -1)
+        .replace(/^\.\.\./, "")
+        .replace(/^\[|\]$/g, ""),
+    );
 }
 
 /**
@@ -329,8 +512,8 @@ function paramsForPath(routePath: string): string[] {
  * radius of executing app code at build time". A route contract cannot be read
  * that way: `auth`, `roles` and `budget` could be recovered from an AST, but
  * the Zod schemas cannot, and a contract the build can only half-read is one
- * the build can only half-enforce. So this follows the `app.ts` precedent
- * instead, which has imported app code since the manifest gained a TS form.
+ * the build can only half-enforce. So it imports, as `widgets.ts` does for
+ * config fields a manifest cannot express in JSON.
  *
  * The blast radius is real and worth naming: a module-level side effect in a
  * route or anything it imports will run during `npm run build`. That is an
@@ -354,7 +537,9 @@ async function scanApiRoutes(
     // an existence check on `route.ts` alone, so a `.tsx` route would be hoisted
     // into the registry, be declarable as public, and 404 forever. Rejecting it
     // at build time beats shipping a route that reads as live and is not.
-    const routeFile = [path.join(dir, "route.ts")].find((f) => fs.existsSync(f));
+    const routeFile = [path.join(dir, "route.ts")].find((f) =>
+      fs.existsSync(f),
+    );
     const strayTsx = path.join(dir, "route.tsx");
     if (!routeFile && fs.existsSync(strayTsx)) {
       throw new FatalManifestError(
@@ -378,7 +563,8 @@ async function scanApiRoutes(
 
       // The root route is `api/index/route.ts`, and its declaration key is the
       // empty string, matching `apiVisibility`.
-      const routePath = segments.join("/") === "index" ? "" : segments.join("/");
+      const routePath =
+        segments.join("/") === "index" ? "" : segments.join("/");
 
       // Optional catch-alls are rejected rather than half-supported. Stripping
       // the brackets off `[[...rest]]` yields the param name `...rest`, which a
@@ -568,6 +754,42 @@ function validateRouteContracts(
  * and the closed rule set are already schema-validated; a duplicate would leave
  * two different reasons on the record for one exception.
  */
+/**
+ * Two-sided consent for cross-app hooks, mirroring `validateServiceWiring`.
+ *
+ * A listener must declare what it listens for, and the emitter must allow that
+ * listener. Either half missing is a build failure — the same default-deny App
+ * Services has had all along, applied to the one channel that never had it.
+ */
+function validateHookWiring(manifests: AppManifest[]): void {
+  const bySlug = new Map(manifests.map((m) => [m.slug, m]));
+
+  for (const consumer of manifests) {
+    for (const dep of consumer.listensTo ?? []) {
+      const provider = bySlug.get(dep.app);
+      if (!provider) {
+        throw new FatalManifestError(
+          `apps/${consumer.slug}/app.json: listensTo names app "${dep.app}", which does not exist.`,
+        );
+      }
+      const emit = (provider.emits ?? []).find((e) => e.name === dep.hook);
+      if (!emit) {
+        throw new FatalManifestError(
+          `apps/${consumer.slug}/app.json: listensTo "${dep.app}:${dep.hook}", but "${dep.app}" does not declare that hook under \`emits\`.`,
+        );
+      }
+      const allowed =
+        emit.consumers === "*" || emit.consumers.includes(consumer.slug);
+      if (!allowed) {
+        throw new FatalManifestError(
+          `apps/${dep.app} does not allow "${consumer.slug}" to listen to "${dep.hook}". ` +
+            `Add it to that hook's \`consumers\`, or use "*".`,
+        );
+      }
+    }
+  }
+}
+
 function validateEscapes(
   raw: { rule: string; reason: string }[] | undefined,
   slug: string,
@@ -587,7 +809,14 @@ function validateEscapes(
 
 /** Carry through declared app settings, failing on a duplicate key. */
 function validateEnv(
-  raw: { key: string; label: string; type: "text" | "password"; required?: boolean }[] | undefined,
+  raw:
+    | {
+        key: string;
+        label: string;
+        type: "text" | "password";
+        required?: boolean;
+      }[]
+    | undefined,
   slug: string,
 ): AppEnvField[] {
   if (!raw || raw.length === 0) return [];
@@ -880,6 +1109,301 @@ function validateConnectorTelemetry(
   }));
 }
 
+// ── screenshots ──────────────────────────────────────────────────────────────
+
+/**
+ * Verify, measure and resolve an extension's declared screenshots.
+ *
+ * Shared verbatim between apps and themes. The rules have to be identical
+ * across the two or an author learns the convention twice and gets it wrong
+ * once; the limits themselves live in `src/lib/screenshots.ts` so the docs and
+ * the schema quote the same numbers this function enforces.
+ *
+ * Every failure aborts the build. A screenshot is listing imagery, so the
+ * failure mode of letting a bad one through is not a crash but a published
+ * listing with a hole in it — which the author never sees, because they are
+ * looking at their local copy where the file is right there.
+ *
+ * Errors name the file and the measured value rather than restating the rule,
+ * for the same reason `validateConnectorIcon` does: "is 412x260, below the
+ * 640px minimum" is actionable, "invalid screenshot" is not.
+ */
+function validateScreenshots(
+  declared: { file: string; alt?: string; caption?: string }[] | undefined,
+  kind: ScreenshotKind,
+  slug: string,
+  dir: string,
+): Screenshot[] {
+  const entries = declared ?? [];
+  if (entries.length === 0) return [];
+
+  const manifest = kind === "apps" ? "app.json" : "theme.json";
+  const where = `${kind}/${slug}`;
+
+  // The schema caps this too; re-checked here because the generator is what
+  // actually copies the files, and a limit enforced in only one of two places
+  // is a limit that moves when someone edits the other.
+  if (entries.length > SCREENSHOT_MAX_COUNT) {
+    throw new FatalManifestError(
+      `${where}/${manifest}: declares ${entries.length} screenshots, above the ` +
+        `maximum of ${SCREENSHOT_MAX_COUNT}.`,
+    );
+  }
+
+  const seen = new Set<string>();
+  const out: Screenshot[] = [];
+
+  for (const entry of entries) {
+    // A duplicate is always a copy-paste slip: the same image twice in a
+    // gallery reads as a rendering bug to whoever is looking at the listing.
+    if (seen.has(entry.file)) {
+      throw new FatalManifestError(
+        `${where}/${manifest}: screenshots lists "${entry.file}" twice.`,
+      );
+    }
+    seen.add(entry.file);
+
+    const file = path.join(dir, entry.file);
+    if (!fs.existsSync(file)) {
+      throw new FatalManifestError(
+        `${where}/${manifest}: screenshots names "${entry.file}", which does not ` +
+          `exist. Expected it at ${where}/${entry.file}.`,
+      );
+    }
+
+    const ext = path.extname(entry.file).toLowerCase();
+    if (!(SCREENSHOT_EXTENSIONS as readonly string[]).includes(ext)) {
+      throw new FatalManifestError(
+        `${where}/${entry.file} is a ${ext || "extensionless"} file. ` +
+          `Screenshots must be ${SCREENSHOT_EXTENSIONS.join(", ")} — notably not ` +
+          `.svg, which is a script-bearing document rather than an image, and ` +
+          `these are served from an unauthenticated path.`,
+      );
+    }
+
+    const buf = fs.readFileSync(file);
+    if (buf.byteLength > SCREENSHOT_MAX_BYTES) {
+      const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+      throw new FatalManifestError(
+        `${where}/${entry.file} is ${mb(buf.byteLength)}, above the ` +
+          `${mb(SCREENSHOT_MAX_BYTES)} limit. Re-export it, or ship it as .webp.`,
+      );
+    }
+
+    const size = readImageSize(buf);
+    if (!size) {
+      throw new FatalManifestError(
+        `${where}/${entry.file} could not be read as a ${ext.slice(1)} image. ` +
+          `Either it is not one, or it is truncated — re-export it.`,
+      );
+    }
+    if (size.width < SCREENSHOT_MIN_WIDTH) {
+      throw new FatalManifestError(
+        `${where}/${entry.file} is ${size.width}x${size.height}, below the ` +
+          `${SCREENSHOT_MIN_WIDTH}px minimum width. Below that it is a ` +
+          `thumbnail, and it ships visibly soft on a high-DPI display.`,
+      );
+    }
+
+    out.push({
+      file: entry.file,
+      url: screenshotUrl(kind, slug, entry.file),
+      alt: entry.alt ?? null,
+      caption: entry.caption ?? null,
+      width: size.width,
+      height: size.height,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Copy an extension's screenshots to public/screenshots/<kind>/<slug>/.
+ *
+ * Only the declared files, unlike a theme's `assets/` which is copied
+ * wholesale: an undeclared image in the directory is a draft or a reject, and
+ * publishing it to an unauthenticated URL because it happened to be sitting
+ * beside the real ones is not a behaviour anyone would ask for.
+ */
+function copyScreenshots(
+  screenshots: Screenshot[],
+  kind: ScreenshotKind,
+  slug: string,
+  dir: string,
+): void {
+  if (screenshots.length === 0) return;
+  const dest = path.join(PUBLIC_SCREENSHOTS_DIR, kind, slug);
+  fs.mkdirSync(dest, { recursive: true });
+  for (const shot of screenshots) {
+    fs.copyFileSync(
+      path.join(dir, shot.file),
+      path.join(dest, path.basename(shot.file)),
+    );
+  }
+}
+
+// ── themes ───────────────────────────────────────────────────────────────────
+
+/** Recursively copy a theme's assets into public/themes/<slug>/. */
+function copyDir(from: string, to: string): void {
+  if (!fs.existsSync(from)) return;
+  fs.mkdirSync(to, { recursive: true });
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const src = path.join(from, entry.name);
+    const dst = path.join(to, entry.name);
+    if (entry.isDirectory()) copyDir(src, dst);
+    else fs.copyFileSync(src, dst);
+  }
+}
+
+/**
+ * Every path in `assets` must resolve to a real file. A manifest naming a
+ * missing logo does not degrade gracefully — it ships a broken <img> into the
+ * menu bar of every page in the install.
+ */
+function validateThemeAssets(
+  assets: ThemeAssets,
+  slug: string,
+  dir: string,
+): ThemeAssets {
+  for (const [key, rel] of Object.entries(assets)) {
+    if (typeof rel !== "string") continue;
+    if (!fs.existsSync(path.join(dir, "assets", rel))) {
+      throw new ThemeError(
+        `themes/${slug}/theme.json: assets.${key} is "${rel}", which does not exist. ` +
+          `Expected it at themes/${slug}/assets/${rel}.`,
+      );
+    }
+  }
+  return assets;
+}
+
+/**
+ * A declared font must exist AND be referenced by an @font-face in theme.css.
+ * A manifest font nobody @font-faces is a file shipped to every user for
+ * nothing; an @font-face with no manifest entry hides a dependency from review.
+ */
+function validateThemeFonts(
+  fonts: ThemeFontFace[],
+  slug: string,
+  dir: string,
+  css: string,
+): ThemeFontFace[] {
+  for (const font of fonts) {
+    if (!fs.existsSync(path.join(dir, "assets", font.file))) {
+      throw new ThemeError(
+        `themes/${slug}/theme.json: fonts[] names "${font.file}", which does not exist. ` +
+          `Expected it at themes/${slug}/assets/${font.file}.`,
+      );
+    }
+    if (!css.includes(font.file)) {
+      throw new ThemeError(
+        `themes/${slug}/theme.json: fonts[] declares "${font.file}", but no @font-face in ` +
+          `theme.css loads it. A font file shipped to every user and never used is pure weight.`,
+      );
+    }
+  }
+  return fonts;
+}
+
+async function scanThemes(): Promise<{
+  themes: ThemeManifest[];
+  css: string;
+  tokens: Record<string, Record<string, string>>;
+}> {
+  if (!fs.existsSync(THEMES_DIR)) {
+    return { themes: [], css: "", tokens: {} };
+  }
+
+  const themes: ThemeManifest[] = [];
+  const cssParts: string[] = [];
+  const tokens: Record<string, Record<string, string>> = {};
+
+  const entries = fs
+    .readdirSync(THEMES_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith("_"))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const entry of entries) {
+    const slug = entry.name;
+    const dir = path.join(THEMES_DIR, slug);
+
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+      throw new ThemeError(
+        `themes/${slug}: a theme folder name is its slug and appears in a CSS attribute ` +
+          `selector — use lowercase letters, digits and hyphens.`,
+      );
+    }
+
+    const manifestPath = path.join(dir, "theme.json");
+    if (!fs.existsSync(manifestPath)) {
+      // As with apps: plans/ may precede the thing it plans.
+      if (fs.existsSync(path.join(dir, "plans"))) {
+        console.log(`  themes/${slug}/ — planned, not yet built (plans/ only)`);
+      } else {
+        console.warn(`  Skipping themes/${slug}/ — no theme.json`);
+      }
+      continue;
+    }
+
+    const parsed = RawThemeManifestSchema.safeParse(
+      JSON.parse(fs.readFileSync(manifestPath, "utf-8")),
+    );
+    if (!parsed.success) {
+      throw new ThemeError(
+        `themes/${slug}/theme.json failed validation:\n${formatZodError(parsed.error)}`,
+      );
+    }
+    const r = parsed.data;
+
+    const compiled = compileTheme({
+      slug,
+      dir,
+      escapes: r.escapes ?? [],
+      declaredSurfaces: r.surfaces ?? [],
+    });
+
+    const rawCss = fs.readFileSync(path.join(dir, "theme.css"), "utf-8");
+    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir, rawCss);
+    const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
+    const screenshots = validateScreenshots(r.screenshots, "themes", slug, dir);
+
+    copyDir(path.join(dir, "assets"), path.join(PUBLIC_THEMES_DIR, slug));
+    copyScreenshots(screenshots, "themes", slug, dir);
+
+    cssParts.push(
+      `/* ── ${slug} ─────────────────────────────── */\n${compiled.css}`,
+    );
+    tokens[slug] = compiled.tokens;
+
+    themes.push({
+      slug,
+      name: r.name,
+      description: r.description,
+      authors: normalizeAuthors(r.authors),
+      fonts,
+      assets,
+      screenshots,
+      surfaces: compiled.surfaces,
+      escapes: r.escapes ?? [],
+      assetBase: `/themes/${slug}`,
+      swatches: compiled.swatches,
+      typefaces: compiled.typefaces,
+      lastUpdated: parseLastUpdated(r.lastUpdated),
+    });
+
+    const escaped = (r.escapes ?? []).length;
+    console.log(
+      `  ${slug} — ${compiled.report.length} contrast pairs verified` +
+        (escaped > 0 ? `, ${escaped} escaped` : ""),
+    );
+    if (process.env.THEME_REPORT) console.log(compiled.report.join("\n"));
+  }
+
+  return { themes, css: cssParts.join("\n\n"), tokens };
+}
+
 async function scanApps(): Promise<AppManifest[]> {
   if (!fs.existsSync(APPS_DIR)) {
     fs.mkdirSync(APPS_DIR, { recursive: true });
@@ -897,17 +1421,32 @@ async function scanApps(): Promise<AppManifest[]> {
     try {
       raw = await loadAppManifest(appDir);
     } catch (err) {
-      console.warn(`  Skipping ${entry.name}/ — failed to load manifest: ${err}`);
+      console.warn(
+        `  Skipping ${entry.name}/ — failed to load manifest: ${err}`,
+      );
       continue;
     }
     if (!raw) {
-      console.warn(`  Skipping ${entry.name}/ — no app.ts or app.json found`);
+      // A folder holding only plans/ is a legitimate state: a build plan is
+      // written where the app will live, before the app exists. Reporting that
+      // as a warning trains people to ignore warnings. See docs/plans/README.md.
+      if (fs.existsSync(path.join(appDir, "plans"))) {
+        console.log(
+          `  apps/${entry.name}/ — planned, not yet built (plans/ only)`,
+        );
+      } else {
+        console.warn(`  Skipping ${entry.name}/ — no app.json found`);
+      }
       continue;
     }
 
     try {
       const pagesDir = path.join(APPS_DIR, entry.name, "pages");
-      const hasPages = fs.existsSync(pagesDir) && fs.readdirSync(pagesDir).length > 0;
+      const hasPages =
+        fs.existsSync(pagesDir) && fs.readdirSync(pagesDir).length > 0;
+      // Zero is possible while `hasPages` is true — a `pages/` directory
+      // holding only a component with no `Main.tsx` beside it serves nothing.
+      const pageCount = hasPages ? countPages(pagesDir) : 0;
 
       // Schema-validate the on-disk manifest: types, required fields, unknown
       // keys, and the defaultRole↔roles cross-check. A violation aborts the
@@ -955,25 +1494,48 @@ async function scanApps(): Promise<AppManifest[]> {
         slug: entry.name,
         name: r.name,
         description: r.description ?? "",
+        tagline: r.tagline ?? null,
         icon: r.icon ?? "box",
         connectors: r.connectors ?? [],
+        optionalConnectors: r.optionalConnectors ?? [],
         database: r.database ?? false,
         notifications: r.notifications ?? false,
         hasPages,
+        pageCount,
         global: r.global ?? false,
         roles: r.roles ?? [],
         defaultRole: r.defaultRole ?? null,
         hookCounts: hookScan.counts,
         hooks: { emits: hookScan.emits, listens: hookScan.listens },
         authors: normalizeAuthors(r.authors),
+        keywords: r.keywords ?? [],
+        screenshots: validateScreenshots(
+          r.screenshots,
+          "apps",
+          entry.name,
+          appDir,
+        ),
+        license: r.license ?? null,
+        appUrl: r.appUrl ?? null,
+        appSupportUrl: r.appSupportUrl ?? null,
         lastUpdated: parseLastUpdated(raw.lastUpdated),
         widgets: (r.widgets ?? []).map((w) => {
           const component = w.component;
           const filename = path.basename(component, path.extname(component));
-          return { ...w, id: filename, component, defaultSize: w.defaultSize ?? { w: 4, h: 3 } };
+          return {
+            ...w,
+            id: filename,
+            component,
+            defaultSize: w.defaultSize ?? { w: 4, h: 3 },
+          };
         }),
         schedules,
-        sync: validateSyncs(r.sync, entry.name, appDir, r.connectors ?? []),
+        sync: validateSyncs(r.sync, entry.name, appDir, [
+          ...(r.connectors ?? []),
+          ...(r.optionalConnectors ?? []),
+        ]),
+        emits: r.emits ?? [],
+        listensTo: r.listensTo ?? [],
         escapes: validateEscapes(r.escapes, entry.name),
         env: validateEnv(r.env, entry.name),
         egress: r.egress ?? [],
@@ -981,13 +1543,30 @@ async function scanApps(): Promise<AppManifest[]> {
         telemetry: validateAppTelemetry(r.telemetry, entry.name),
         provides: validateProvides(r.provides, entry.name, appDir),
         consumes: normalizeConsumes(r.consumes),
-        mcp: validateMcpTools(r.mcp, entry.name, appDir, r.connectors ?? []),
+        mcp: validateMcpTools(r.mcp, entry.name, appDir, [
+          ...(r.connectors ?? []),
+          ...(r.optionalConnectors ?? []),
+        ]),
         ...(pageVisibility ? { pageVisibility } : {}),
         ...(apiVisibility ? { apiVisibility } : {}),
       };
 
+      copyScreenshots(manifest.screenshots, "apps", entry.name, appDir);
+
       manifests.push(manifest);
       console.log(`  App: ${manifest.name} (/${manifest.slug})`);
+
+      // A missing README is VALID and must never fail a build — an app without
+      // one still lists, on its manifest `description`. It is worth one line
+      // anyway, because the cost lands somewhere the author cannot see it: the
+      // public listing renders a paragraph where a page of prose belongs, and
+      // nothing on this instance looks any different. Said once per app, at the
+      // moment the app is registered, which is when the gap is cheap to close.
+      if (!fs.existsSync(path.join(appDir, "README.md"))) {
+        console.warn(
+          `    No README.md — mixos.org will publish this app's listing from its one-line "description". See docs/apps/architecture.md.`,
+        );
+      }
     } catch (err) {
       // FatalManifestError aborts the entire generator run — see class doc.
       if (err instanceof FatalManifestError) throw err;
@@ -997,6 +1576,7 @@ async function scanApps(): Promise<AppManifest[]> {
 
   // App Services two-sided consent: every consumes ↔ provides pair must agree.
   validateServiceWiring(manifests);
+  validateHookWiring(manifests);
 
   return manifests;
 }
@@ -1004,7 +1584,11 @@ async function scanApps(): Promise<AppManifest[]> {
 interface ConnectorManifestOut {
   name: string;
   displayName: string;
+  /** Public URL of the copied icon, or absent when the connector ships none. */
+  icon?: string;
+  userScoped?: boolean;
   description: string;
+  setup?: ConnectorSetupGuide;
   credentialFields: { key: string; label: string; type: string }[];
   authors: AppAuthor[];
   lastUpdated: number | null;
@@ -1012,6 +1596,330 @@ interface ConnectorManifestOut {
   auth?: ConnectorAuthPolicy;
   http?: ConnectorHttpPolicy;
   webhook?: ConnectorWebhookPolicy;
+}
+
+/**
+ * Base-class contract, not app-callable surface. The platform calls these; an
+ * app never can, so they are not capabilities and are not declared.
+ */
+const CONNECTOR_RESERVED_METHODS = new Set([
+  "initialize",
+  "testConnection",
+  "handleWebhook",
+]);
+
+/**
+ * Every public method on a connector class must be declared in `telemetry`.
+ *
+ * WHY THIS IS A BUILD ERROR AND NOT A LINT. The Connector Registry's Access tab
+ * answers "what can this reach, and can it change anything" from `telemetry`
+ * plus each entry's `mutates`. That answer is only trustworthy if the list is
+ * COMPLETE — and `telemetry` was designed as opt-in instrumentation, so nothing
+ * made it so. A connector could ship a `sendMessage()`, leave it undeclared,
+ * and the tab would report "no method changes anything upstream" about a
+ * connector that sends mail.
+ *
+ * Under-reporting is the one failure a permissions view cannot have: the whole
+ * reason an admin opens it is to find out what this thing could do to their
+ * data. Over-reporting is a nuisance; under-reporting is a false assurance.
+ *
+ * Parsed from the AST rather than by regex, because the answer has to be right:
+ * a regex cannot tell a method on the connector class from one on a helper
+ * class in the same file, nor see the `private` that makes it not count.
+ */
+function validateConnectorMethods(
+  name: string,
+  dir: string,
+  telemetry: ConnectorTelemetryDefinition[],
+): void {
+  const entry = path.join(dir, "index.ts");
+  if (!fs.existsSync(entry)) return;
+
+  const source = ts.createSourceFile(
+    entry,
+    fs.readFileSync(entry, "utf-8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+
+  const declared = new Set(telemetry.map((t) => t.method));
+  const undeclared: string[] = [];
+
+  for (const statement of source.statements) {
+    if (!ts.isClassDeclaration(statement)) continue;
+    // Only a class that extends something — i.e. the connector, not a local
+    // helper or a plain data class defined alongside it.
+    const extendsClause = statement.heritageClauses?.some(
+      (h) => h.token === ts.SyntaxKind.ExtendsKeyword,
+    );
+    if (!extendsClause) continue;
+
+    for (const member of statement.members) {
+      if (!ts.isMethodDeclaration(member) || !ts.isIdentifier(member.name))
+        continue;
+      const modifiers = ts.getModifiers(member) ?? [];
+      const hidden = modifiers.some(
+        (m) =>
+          m.kind === ts.SyntaxKind.PrivateKeyword ||
+          m.kind === ts.SyntaxKind.ProtectedKeyword ||
+          m.kind === ts.SyntaxKind.StaticKeyword,
+      );
+      const methodName = member.name.text;
+      if (
+        hidden ||
+        methodName.startsWith("#") ||
+        CONNECTOR_RESERVED_METHODS.has(methodName) ||
+        declared.has(methodName)
+      ) {
+        continue;
+      }
+      undeclared.push(methodName);
+    }
+  }
+
+  if (undeclared.length > 0) {
+    throw new Error(
+      `connector.json: these public methods are not declared in "telemetry": ` +
+        `${undeclared.join(", ")}.\n` +
+        `  The Connector Registry reports what a connector can do from that list, ` +
+        `so an undeclared method is one an admin is never told about — and if it ` +
+        `writes, the registry says this connector changes nothing.\n` +
+        `  Add each with a description and, when it changes anything upstream, ` +
+        `"mutates": true. Make it private if apps should not call it.`,
+    );
+  }
+}
+
+/**
+ * The Connector Registry contract: what a connector must declare for its admin
+ * experience to exist at all.
+ *
+ * These are not stylistic preferences. Each one is a specific hole in the
+ * registry when it is absent:
+ *
+ *   · no `icon`         — an unidentifiable tile in a grid of tiles
+ *   · no `setup`        — a Configure wizard whose first step is blank, so the
+ *                         admin is asked for a Client ID with no idea where to
+ *                         get one
+ *   · no `scopesUrl`    — a permissions list that can never be populated, and
+ *                         no way to answer "what can this reach"
+ *
+ * Reported together rather than one per run: an author adding a connector
+ * should learn everything that is missing in one build, not discover it three
+ * builds in a row.
+ *
+ * See docs/connectors/registry-ux.md.
+ */
+function validateRegistryContract(
+  name: string,
+  raw: {
+    icon?: string;
+    auth?: { scopesUrl?: string };
+    setup?: { title?: string; steps?: unknown[] };
+  },
+): void {
+  const missing: string[] = [];
+
+  if (!raw.icon) {
+    missing.push(
+      '"icon" — a square PNG/WebP/SVG of at least 512x512 in this connector\'s assets/',
+    );
+  }
+  if (!raw.auth?.scopesUrl) {
+    missing.push(
+      '"auth.scopesUrl" — the provider\'s scope reference page, which the registry parses to list permissions in plain English',
+    );
+  }
+  if (!raw.setup?.title) {
+    missing.push(
+      '"setup.title" — the label for the provider-side step, e.g. "Create a Google Cloud OAuth app"',
+    );
+  }
+  if (!raw.setup?.steps || raw.setup.steps.length === 0) {
+    missing.push(
+      '"setup.steps" — at least one step covering what the admin does in the provider\'s own console',
+    );
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `connector.json is missing what the Connector Registry needs:\n` +
+        missing.map((m) => `    - ${m}`).join("\n") +
+        `\n  Every connector ships a configuration experience; these are the parts ` +
+        `the platform cannot invent. See docs/connectors/registry-ux.md.`,
+    );
+  }
+}
+
+/** Smallest edge a connector icon may have, and it must be square. */
+const CONNECTOR_ICON_MIN = 512;
+
+/**
+ * Read an image's pixel dimensions from its header.
+ *
+ * Deliberately not an image library. The only fact needed here is width and
+ * height, both of which sit in the first few dozen bytes of a PNG or WebP, and
+ * `sharp` is present in this tree only as a transitive dependency of Next —
+ * importing it in the build would be depending on someone else's dependency.
+ *
+ * Returns null for a format whose header isn't parsed here, which the caller
+ * treats as "cannot measure", not as "passes".
+ */
+function readImageSize(buf: Buffer): { width: number; height: number } | null {
+  // PNG: 8-byte signature, then IHDR carrying two big-endian uint32s.
+  if (buf.length >= 24 && buf.readUInt32BE(0) === 0x89504e47) {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+
+  // WebP: RIFF container, and three sub-formats that each store size differently.
+  if (
+    buf.length >= 30 &&
+    buf.toString("ascii", 0, 4) === "RIFF" &&
+    buf.toString("ascii", 8, 12) === "WEBP"
+  ) {
+    const chunk = buf.toString("ascii", 12, 16);
+    if (chunk === "VP8 ") {
+      // Lossy: 14-bit dimensions after the 3-byte start code.
+      return {
+        width: buf.readUInt16LE(26) & 0x3fff,
+        height: buf.readUInt16LE(28) & 0x3fff,
+      };
+    }
+    if (chunk === "VP8L") {
+      // Lossless: 14 bits each, packed across a 32-bit little-endian read.
+      const bits = buf.readUInt32LE(21);
+      return {
+        width: (bits & 0x3fff) + 1,
+        height: ((bits >> 14) & 0x3fff) + 1,
+      };
+    }
+    if (chunk === "VP8X") {
+      // Extended: 24-bit canvas size, stored minus one.
+      const u24 = (o: number) =>
+        buf[o] | (buf[o + 1] << 8) | (buf[o + 2] << 16);
+      return { width: u24(24) + 1, height: u24(27) + 1 };
+    }
+  }
+
+  // JPEG: unlike PNG and WebP there is no fixed offset. Dimensions live in a
+  // Start-Of-Frame marker, which sits after a variable run of other segments
+  // (JFIF/Exif headers, quantisation tables, comments), so the only way to
+  // find it is to walk the segment chain.
+  //
+  // Worth the extra code rather than letting `.jpg` return null: a caller
+  // reads null as "cannot measure", so a screenshot format the build cannot
+  // measure is one the minimum-width rule silently stops covering — and JPEG
+  // is the format a screenshot is most likely to arrive in.
+  if (buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+    let o = 2;
+    while (o + 9 < buf.length) {
+      // Segments are 0xFF followed by a marker; 0xFF is also the padding byte,
+      // so skip any run of them before reading the marker itself.
+      if (buf[o] !== 0xff) {
+        o++;
+        continue;
+      }
+      let marker = buf[o + 1];
+      while (marker === 0xff && o + 2 < buf.length) {
+        o++;
+        marker = buf[o + 1];
+      }
+
+      // Standalone markers carrying no payload: RSTn, SOI, TEM. Nothing to skip.
+      if ((marker >= 0xd0 && marker <= 0xd9) || marker === 0x01) {
+        o += 2;
+        continue;
+      }
+
+      const len = buf.readUInt16BE(o + 2);
+      // SOF0–SOF15, excluding DHT (0xC4), JPG (0xC8) and DAC (0xCC), which
+      // share the 0xCn range but are not frame headers.
+      if (
+        marker >= 0xc0 &&
+        marker <= 0xcf &&
+        marker !== 0xc4 &&
+        marker !== 0xc8 &&
+        marker !== 0xcc
+      ) {
+        // Payload: 1 byte precision, then height and width as big-endian uint16.
+        return {
+          height: buf.readUInt16BE(o + 5),
+          width: buf.readUInt16BE(o + 7),
+        };
+      }
+
+      // A malformed length would otherwise spin here forever.
+      if (len < 2) return null;
+      o += 2 + len;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Prove a declared icon exists and is the shape the registry grid assumes.
+ *
+ * A wrong-sized icon does not degrade gracefully: the grid scales every tile
+ * identically, so a 40x40 mark ships visibly blurred and a non-square one ships
+ * stretched. Both are cheaper to catch here, where the message can name the
+ * measured size, than in review.
+ *
+ * SVG is exempt from the pixel check — it has no intrinsic pixel size — but is
+ * required to declare a viewBox, without which it cannot scale into the tile at
+ * all.
+ */
+function validateConnectorIcon(icon: string, name: string, dir: string): void {
+  // `icon` already carries its "assets/" prefix, so resolve it against the
+  // connector root rather than re-adding the directory.
+  const file = path.join(dir, icon);
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      `connector.json: icon is "${icon}", which does not exist. ` +
+        `Expected it at connectors/${name}/${icon}.`,
+    );
+  }
+
+  const ext = path.extname(icon).toLowerCase();
+  if (![".png", ".webp", ".svg"].includes(ext)) {
+    throw new Error(
+      `connector.json: icon "${icon}" is a ${ext || "extensionless"} file. ` +
+        `Connector icons must be .png, .webp or .svg.`,
+    );
+  }
+
+  if (ext === ".svg") {
+    const svg = fs.readFileSync(file, "utf-8");
+    if (!/\bviewBox\s*=/.test(svg)) {
+      throw new Error(
+        `connectors/${name}/${icon} has no viewBox, so it cannot scale ` +
+          `into the registry tile. Add one to the <svg> element.`,
+      );
+    }
+    return;
+  }
+
+  const size = readImageSize(fs.readFileSync(file));
+  if (!size) {
+    throw new Error(
+      `connectors/${name}/assets/${icon} could not be read as a ${ext.slice(1)} ` +
+        `image. Re-export it, or ship an .svg instead.`,
+    );
+  }
+  if (size.width !== size.height) {
+    throw new Error(
+      `connectors/${name}/assets/${icon} is ${size.width}x${size.height}. ` +
+        `A connector icon must be square — the registry grid renders every tile ` +
+        `at the same aspect, so this one would ship stretched.`,
+    );
+  }
+  if (size.width < CONNECTOR_ICON_MIN) {
+    throw new Error(
+      `connectors/${name}/assets/${icon} is ${size.width}x${size.height}, below ` +
+        `the ${CONNECTOR_ICON_MIN}x${CONNECTOR_ICON_MIN} minimum. Smaller than ` +
+        `that visibly blurs on a high-DPI display.`,
+    );
+  }
 }
 
 async function scanConnectors(): Promise<ConnectorManifestOut[]> {
@@ -1051,10 +1959,39 @@ async function scanConnectors(): Promise<ConnectorManifestOut[]> {
         );
       }
 
+      // Icon: proven to exist and to be a square >= 512x512 before anything
+      // references it, then copied out with the rest of the connector's assets.
+      // The registry contract first: a missing icon and a missing setup guide
+      // are one report, not a build each.
+      validateRegistryContract(entry.name, raw);
+      if (raw.icon) validateConnectorIcon(raw.icon, entry.name, connectorDir);
+      // Completeness of the capability list, which the Access tab presents as
+      // exhaustive. Runs before the manifest is emitted so a gap cannot ship.
+      validateConnectorMethods(
+        entry.name,
+        connectorDir,
+        validateConnectorTelemetry(raw.telemetry, entry.name),
+      );
+      copyDir(
+        path.join(connectorDir, "assets"),
+        path.join(PUBLIC_CONNECTORS_DIR, entry.name),
+      );
+
       const manifest: ConnectorManifestOut = {
         name: raw.name,
         displayName: raw.displayName,
+        // Stored as the URL the browser will request, not the authoring path,
+        // so no call site has to know where assets get copied to.
+        ...(raw.icon
+          ? {
+              // `assets/` is where the file lives in the repo; the copy lands
+              // directly under the connector's public directory, so strip it.
+              icon: `/connector-assets/${entry.name}/${raw.icon.replace(/^assets\//, "")}`,
+            }
+          : {}),
+        ...(raw.userScoped ? { userScoped: true } : {}),
         description: raw.description ?? "",
+        ...(raw.setup ? { setup: raw.setup as ConnectorSetupGuide } : {}),
         credentialFields: raw.credentialFields ?? [],
         authors: normalizeAuthors(raw.authors),
         lastUpdated: parseLastUpdated(raw.lastUpdated),
@@ -1064,7 +2001,9 @@ async function scanConnectors(): Promise<ConnectorManifestOut[]> {
         // here — the registry records what was declared, not what was assumed.
         ...(raw.auth ? { auth: raw.auth as ConnectorAuthPolicy } : {}),
         ...(raw.http ? { http: raw.http as ConnectorHttpPolicy } : {}),
-        ...(raw.webhook ? { webhook: raw.webhook as ConnectorWebhookPolicy } : {}),
+        ...(raw.webhook
+          ? { webhook: raw.webhook as ConnectorWebhookPolicy }
+          : {}),
       };
 
       connectors.push(manifest);
@@ -1081,10 +2020,114 @@ async function scanConnectors(): Promise<ConnectorManifestOut[]> {
   return connectors;
 }
 
+/**
+ * A scheduled job runs with no user, so it can never resolve a user-scoped
+ * connector's grant — the connector would simply be absent at 3am and present
+ * in a page request, which is the kind of difference nobody finds by reading.
+ *
+ * Rejected at build time rather than logged at runtime: a job that quietly does
+ * nothing is the most expensive way to learn this.
+ */
+function validateUserScopedUsage(
+  apps: AppManifest[],
+  connectors: ConnectorManifestOut[],
+): void {
+  const userScoped = new Set(
+    connectors.filter((c) => c.userScoped).map((c) => c.name),
+  );
+  if (userScoped.size === 0) return;
+
+  for (const app of apps) {
+    const declared = [...app.connectors, ...(app.optionalConnectors ?? [])];
+    const offending = declared.filter((name) => userScoped.has(name));
+    if (offending.length === 0) continue;
+
+    const jobs = [
+      ...(app.schedules ?? []).map((s) => `schedule "${s.name}"`),
+      ...(app.sync ?? []).map((s) => `sync "${s.name}"`),
+    ];
+    if (jobs.length === 0) continue;
+
+    throw new Error(
+      `apps/${app.slug}/app.json declares the user-scoped connector(s) ` +
+        `${offending.join(", ")} and also ${jobs.join(", ")}.\n` +
+        `  A scheduled job runs with no user, so there is no grant to resolve ` +
+        `and the connector would be absent every time the job ran.\n` +
+        `  Use a tenant-scoped connector for background work, or move the ` +
+        `connector-dependent part into a request the user makes.`,
+    );
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Build stamp                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The highest-numbered migration in supabase/migrations/.
+ *
+ * This is the schema the code being built expects, and it is derived from the
+ * filesystem rather than hand-maintained for the obvious reason: a constant
+ * somebody has to remember to bump alongside a file they just added is a
+ * constant that will disagree with the directory within a month.
+ *
+ * Files are `NNNN_name.sql`. Anything that does not start with digits is not a
+ * migration the Supabase CLI will apply in order, so it is ignored here too.
+ */
+function expectedSchemaVersion(): number {
+  if (!fs.existsSync(MIGRATIONS_DIR)) return 0;
+  const numbers = fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .map((f) => Number(/^(\d+)/.exec(f)?.[1] ?? NaN))
+    .filter((n) => Number.isInteger(n));
+  return numbers.length ? Math.max(...numbers) : 0;
+}
+
+/**
+ * The one build-time fact the running server cannot work out for itself.
+ *
+ * Everything else about build identity is a RUNTIME variable, and deliberately:
+ * `MIXOS_RELEASE` already carries the tag and is stamped into the runner stage
+ * by the tag build (see the Dockerfile, and `isReleaseBuild` in
+ * src/lib/repository/client.ts). Baking a second copy of the version in here
+ * would create two sources of truth for one fact, and the one in the generated
+ * file would be the stale one — it is written by the builder stage, which never
+ * sees the runner stage's ARG.
+ *
+ * The schema version is different. It is derived from `supabase/migrations/`,
+ * and that directory is not copied into the runner image at all, so the number
+ * has to travel with the build or not exist.
+ *
+ * NOTE: no timestamp and no commit here. Every value in this file is stable for
+ * a given checkout, so re-running the generator rewrites an identical file and
+ * the dev server has nothing to recompile. A timestamp — or a git SHA, which
+ * moves on every commit — would invalidate that on every `predev`.
+ */
+function writeBuildInfo(): void {
+  const schema = expectedSchemaVersion();
+
+  const output = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+//
+// Derived from supabase/migrations/ at build time, because that directory does
+// not exist in the runner image. See src/lib/platform/schema-version.ts for
+// what this gates, and src/lib/platform/version.ts for the runtime half of
+// build identity.
+
+/** Highest migration number in supabase/migrations/ at build time. */
+export const EXPECTED_SCHEMA_VERSION = ${schema};
+`;
+
+  fs.writeFileSync(BUILD_INFO_FILE, output, "utf-8");
+  console.log(`Build stamp: expected schema version ${schema}`);
+}
+
 async function main() {
   if (!fs.existsSync(OUTPUT_DIR)) {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
   }
+
+  writeBuildInfo();
 
   console.log("Scanning apps...");
   const apps = await scanApps();
@@ -1107,7 +2150,7 @@ async function main() {
       if (fs.existsSync(widgetFile)) {
         const key = `${app.slug}/${widget.component}`;
         widgetImports.push(
-          `  "${key}": () => import("@apps/${app.slug}/${widget.component}"),`
+          `  "${key}": () => import("@apps/${app.slug}/${widget.component}"),`,
         );
       }
     }
@@ -1123,14 +2166,17 @@ export const appRegistry: AppManifest[] = ${JSON.stringify(apps, null, 2)};
 export const appSlugs = [${slugs}] as const;
 export type AppSlug = (typeof appSlugs)[number];
 
-// Static import maps — Turbopack requires statically analyzable imports
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const pageLoaders: Record<string, () => Promise<{ default: ComponentType<any> }>> = {
-${pageImports.join("\n")}
-};
-
-// Widget modules may also export an optional \`resolveConfig\` that the
-// config modal calls to fill in dynamic options/defaults at open time.
+// NOTE: \`pageLoaders\` deliberately lives in ./app-page-loaders, NOT here.
+//
+// Client components import this file for \`appRegistry\` and \`widgetLoaders\`.
+// If the page loaders lived alongside them, every app PAGE would be pulled into
+// the client graph too — and a page is a server component, free to reach the
+// database or a connector through \`callAppRoute\`. That made a single
+// server-rendered page fail the whole client build with a module-not-found
+// several layers deep in the platform.
+//
+// Widget modules may also export an optional \`resolveConfig\` that the config
+// modal calls to fill in dynamic options/defaults at open time.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const widgetLoaders: Record<string, () => Promise<{ default: ComponentType<any>; resolveConfig?: (args: { appSlug: string }) => Promise<ResolvedConfig> | ResolvedConfig }>> = {
 ${widgetImports.join("\n")}
@@ -1139,6 +2185,91 @@ ${widgetImports.join("\n")}
 
   fs.writeFileSync(APP_REGISTRY_FILE, appOutput, "utf-8");
   console.log(`\nGenerated app registry with ${apps.length} app(s)`);
+
+  // Server-only. See the note in the registry above.
+  const pageLoadersOutput = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+//
+// SERVER ONLY. App pages are server components and may reach the database or a
+// connector via callAppRoute, so this map must never enter the client graph.
+// Its single consumer is src/lib/apps/loader.ts.
+import type { ComponentType } from "react";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const pageLoaders: Record<string, () => Promise<{ default: ComponentType<any> }>> = {
+${pageImports.join("\n")}
+};
+`;
+  fs.writeFileSync(APP_PAGE_LOADERS_FILE, pageLoadersOutput, "utf-8");
+
+  // ── Typed client surface ──────────────────────────────────────────────────
+  //
+  // A TYPE-ONLY map from `<slug>` → `"<METHOD> /<pattern>"` → the route's own
+  // `defineRoute` result. `typeof import(...)` is an inline type query, so
+  // nothing here survives compilation and no app module is loaded at runtime.
+  //
+  // This is what turns `client.get<T>()` — an assertion the author could get
+  // wrong silently — into `client.call("GET /items", …)` with the input and
+  // output inferred from the schemas the route actually declared. It only works
+  // because `RouteDefinition` is generic in those two shapes; a non-generic one
+  // would erase them at the export boundary.
+  // Templates are skipped by the registry (they are scaffolds, not apps) but
+  // they ARE the canonical worked example, and an example that does not compile
+  // as written teaches the wrong thing. So their routes get type entries here —
+  // type-only, so nothing is registered and nothing loads at runtime.
+  const templateRoutes: { slug: string; routes: RouteContract[] }[] = [];
+  for (const entry of fs.readdirSync(APPS_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith("_")) continue;
+    const dir = path.join(APPS_DIR, entry.name);
+    if (!fs.existsSync(path.join(dir, "app.json"))) continue;
+    try {
+      templateRoutes.push({
+        slug: entry.name,
+        routes: await scanApiRoutes(dir, entry.name),
+      });
+    } catch (err) {
+      console.warn(
+        `  Skipping types for template ${entry.name}/ — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  const clientEntries = [
+    ...apps.map((a) => ({ slug: a.slug, routes: a.routes ?? [] })),
+    ...templateRoutes,
+  ]
+    .map((app) => {
+      const routes = app.routes.flatMap((route) =>
+        route.methods.map((m) => {
+          const modulePath = route.path === "" ? "index" : route.path;
+          return `    "${m.method} /${route.path}": typeof import("@apps/${app.slug}/api/${modulePath}/route").${m.method};`;
+        }),
+      );
+      if (routes.length === 0) return `  "${app.slug}": Record<string, never>;`;
+      return `  "${app.slug}": {\n${routes.join("\n")}\n  };`;
+    })
+    .join("\n");
+
+  const clientsOutput = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+//
+// Type-only. Every entry is an inline \`typeof import(...)\` query, so this file
+// compiles away entirely and never loads an app module at runtime.
+
+/**
+ * Every app's declared routes, keyed by slug and then by \`"<METHOD> /<pattern>"\`.
+ * The pattern keeps its \`[param]\` segments — values travel in the call's input,
+ * never in the key.
+ */
+export interface AppRouteTypes {
+${clientEntries || "  // no apps"}
+}
+
+export type AppWithRoutes = keyof AppRouteTypes;
+`;
+
+  fs.writeFileSync(APP_CLIENTS_FILE, clientsOutput, "utf-8");
+  console.log(
+    `Generated typed client surface for ${apps.reduce((n, a) => n + (a.routes?.length ?? 0), 0)} route(s)`,
+  );
 
   console.log("\nScanning connectors...");
   const connectors = await scanConnectors();
@@ -1153,8 +2284,74 @@ export type ConnectorName = (typeof connectorNames)[number];
 `;
 
   fs.writeFileSync(CONNECTOR_REGISTRY_FILE, connectorOutput, "utf-8");
-  console.log(`Generated connector registry with ${connectors.length} connector(s)`);
+  console.log(
+    `Generated connector registry with ${connectors.length} connector(s)`,
+  );
 
+  // Both registries are in hand here, which is what this check needs.
+  validateUserScopedUsage(apps, connectors);
+
+  console.log("\nScanning themes...");
+  const { themes, css: themeCss, tokens: themeTokens } = await scanThemes();
+
+  if (themes.length === 0) {
+    throw new ThemeError(
+      "No themes found under themes/. The platform renders entirely through theme tokens, " +
+        "so an install with no theme has no colours, no type and no radii at all.",
+    );
+  }
+
+  // The fallback when the database has no active-theme row yet — a fresh
+  // install, or a row naming a theme that has since been uninstalled.
+  // Alphabetically first, so the choice is deterministic rather than dependent
+  // on directory iteration order.
+  const fallbackTheme = themes[0].slug;
+
+  fs.writeFileSync(
+    THEMES_CSS_FILE,
+    `/* AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+ *
+ * Every installed theme, each scoped to [data-theme="<slug>"]. All of them are
+ * bundled so that switching the active theme is a database write and an
+ * attribute swap on <html>, not a rebuild and a redeploy.
+ */
+${themeCss}
+`,
+    "utf-8",
+  );
+
+  const themeOutput = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+import type { ThemeManifest } from "@/lib/themes/types";
+
+export const themeRegistry: ThemeManifest[] = ${JSON.stringify(themes, null, 2)};
+
+export const themeSlugs = [${themes.map((t) => `"${t.slug}"`).join(", ")}] as const;
+export type ThemeSlug = (typeof themeSlugs)[number];
+
+/**
+ * Used when the database has no active-theme row, or names a theme that is no
+ * longer installed. Alphabetically first among installed themes.
+ */
+export const FALLBACK_THEME: ThemeSlug = "${fallbackTheme}";
+
+export function getTheme(slug: string): ThemeManifest {
+  return themeRegistry.find((t) => t.slug === slug) ?? themeRegistry[0];
+}
+`;
+  fs.writeFileSync(THEME_REGISTRY_FILE, themeOutput, "utf-8");
+
+  // Read by eslint-rules/no-low-contrast-token-pairs.mjs, which cannot import
+  // TypeScript and must not re-parse CSS. It lints against the fallback theme:
+  // which theme is *active* is a runtime database value the build cannot know.
+  fs.writeFileSync(
+    THEME_TOKENS_FILE,
+    JSON.stringify({ fallback: fallbackTheme, tokens: themeTokens }, null, 2),
+    "utf-8",
+  );
+
+  console.log(
+    `Generated theme registry with ${themes.length} theme(s); fallback is "${fallbackTheme}"`,
+  );
 }
 
 main().catch((err) => {

@@ -272,7 +272,7 @@ used to be an in-process `setInterval` started from `instrumentation.ts`; that
 cannot work on Vercel, where a function instance is frozen between requests and
 torn down when idle, so a timer set 5 minutes out would rarely fire.
 
-Who that caller is depends on how you are running MOS. **This is the part to get
+Who that caller is depends on how you are running MixOS. **This is the part to get
 straight before you conclude a job "isn't running":**
 
 - **In production — Vercel Cron**, registered in `vercel.json` and authenticated

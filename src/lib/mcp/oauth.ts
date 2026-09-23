@@ -1,11 +1,22 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
+import { docsUrl } from "@/lib/docs";
 import { getAppOrigin } from "@/lib/env/origin";
+import { platformKey } from "@/lib/env/keys";
 
 /**
- * Crypto and metadata for MOS-as-OAuth-2.1-authorization-server.
+ * Crypto and metadata for MixOS-as-OAuth-2.1-authorization-server.
  *
- * This is MOS acting as an authorization *server*: MCP clients authenticate
- * *to* MOS. Nothing here reaches out to a third-party identity provider.
+ * This is MixOS acting as an authorization *server*: MCP clients authenticate
+ * *to* MixOS. Nothing here reaches out to a third-party identity provider.
  *
  * Security model:
  *  - Clients are PUBLIC — no client_secret is ever issued. PKCE S256 is the
@@ -21,9 +32,7 @@ import { getAppOrigin } from "@/lib/env/origin";
  *    request, and that is worth one indexed lookup per call.
  */
 
-const DERIVE_LABEL = "mixmcp-oauth-token-key-v1";
-
-/** Scope string this AS issues. Read-only is the only mode MOS supports today. */
+/** Scope string this AS issues. Read-only is the only mode MixOS supports today. */
 export const MCP_SCOPE = "mcp:read";
 
 export const ACCESS_TOKEN_TTL_SEC = 60 * 60; // 1 hour
@@ -31,20 +40,15 @@ export const REFRESH_TOKEN_TTL_SEC = 30 * 24 * 60 * 60; // 30 days
 export const AUTH_CODE_TTL_SEC = 60; // 1 minute — exchanged immediately
 
 /**
- * Key used to digest codes and tokens before storage. Derived from
- * CONNECTOR_ENCRYPTION_KEY via HMAC with a fixed label, exactly as
- * `getUnlockSigningKey()` does — HMAC is a PRF, so leaking this key cannot be
- * used to recover the base key or decrypt connector credentials. Bump the label
- * to invalidate every issued token without rotating the base key.
+ * Key used to digest codes and tokens before storage.
+ *
+ * Its own environment variable (`MCP_TOKEN_KEY`) rather than a derivative of
+ * `CONNECTOR_ENCRYPTION_KEY`. Rotating it invalidates every issued MCP token and
+ * code — clients re-authorize — and touches nothing else. See
+ * `src/lib/env/keys.ts` for the full inventory and each key's blast radius.
  */
 function getTokenKey(): Buffer {
-  const enc = process.env.CONNECTOR_ENCRYPTION_KEY;
-  if (!enc || enc.length < 32) {
-    throw new Error(
-      "Cannot issue MCP tokens: CONNECTOR_ENCRYPTION_KEY is not set (the token digest key is derived from it).",
-    );
-  }
-  return createHmac("sha256", Buffer.from(enc, "hex")).update(DERIVE_LABEL).digest();
+  return platformKey("mcpToken");
 }
 
 /** Digest a code or token for storage/lookup. Never store the raw value. */
@@ -66,10 +70,15 @@ export const newClientId = () => randomSecret("ros_client");
  * `plain` is not accepted — OAuth 2.1 requires S256 where the client can do it,
  * and every MCP client can.
  */
-export function verifyPkce(codeVerifier: string, storedChallenge: string): boolean {
+export function verifyPkce(
+  codeVerifier: string,
+  storedChallenge: string,
+): boolean {
   // RFC 7636: 43–128 chars from the unreserved set.
   if (codeVerifier.length < 43 || codeVerifier.length > 128) return false;
-  const computed = createHash("sha256").update(codeVerifier).digest("base64url");
+  const computed = createHash("sha256")
+    .update(codeVerifier)
+    .digest("base64url");
   const a = Buffer.from(computed);
   const b = Buffer.from(storedChallenge);
   if (a.length !== b.length) return false;
@@ -77,9 +86,9 @@ export function verifyPkce(codeVerifier: string, storedChallenge: string): boole
 }
 
 /**
- * The canonical resource identifier for the MOS MCP server (RFC 8707). Clients
+ * The canonical resource identifier for the MixOS MCP server (RFC 8707). Clients
  * send this as `resource` on authorize and token requests; we reject mismatches
- * so a token minted for MOS cannot be replayed at another resource server.
+ * so a token minted for MixOS cannot be replayed at another resource server.
  *
  * Origin comes from `getAppOrigin()` (NEXTAUTH_URL), never the Host header — a
  * host-injection would otherwise let an attacker steer redirect URIs.
@@ -106,7 +115,7 @@ export function protectedResourceMetadata() {
     scopes_supported: [MCP_SCOPE],
     bearer_methods_supported: ["header"],
     resource_name: "MixOS",
-    resource_documentation: `${origin}/apps/guide`,
+    resource_documentation: docsUrl("reference/apps/mcp"),
   };
 }
 
@@ -126,7 +135,7 @@ export function authorizationServerMetadata() {
     token_endpoint_auth_methods_supported: ["none"],
     code_challenge_methods_supported: ["S256"],
     revocation_endpoint_auth_methods_supported: ["none"],
-    service_documentation: `${origin}/apps/guide`,
+    service_documentation: docsUrl("reference/apps/mcp"),
   };
 }
 
@@ -180,5 +189,8 @@ export function isAcceptableRedirectUri(uri: string): boolean {
     );
   }
   // Native app custom scheme, e.g. "claude://oauth/callback".
-  return /^[a-z][a-z0-9+.-]*:$/.test(parsed.protocol) && parsed.protocol !== "javascript:";
+  return (
+    /^[a-z][a-z0-9+.-]*:$/.test(parsed.protocol) &&
+    parsed.protocol !== "javascript:"
+  );
 }

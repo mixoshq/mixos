@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * Stamp `lastUpdated` on every app/connector manifest the current commit touches.
  *
@@ -6,7 +10,7 @@
  *   npx tsx scripts/stamp-updated.ts --files a b  # stamp as if these paths changed
  *
  * `lastUpdated` means "this app/connector changed in this commit". It is written
- * by `.githooks/pre-commit` (and by `/mix-deploy`, which calls the same script so
+ * by `.githooks/pre-commit` (and by `/mixos deploy`, which calls the same script so
  * the stamp lands in the diff you review). It replaced `/mos-publish`, which made
  * the date mean "the author ran a command" — accurate, but only when someone
  * remembered to run it, which is the failure mode this removes.
@@ -36,16 +40,23 @@ import { execFileSync } from "child_process";
 const ROOT = path.resolve(__dirname, "..");
 
 /** Directories whose subdirectories are independently stampable units. */
-const ROOTS = ["apps", "connectors"] as const;
+const ROOTS = ["apps", "connectors", "themes"] as const;
 
 interface Target {
-  /** "apps" | "connectors" */
+  /** "apps" | "connectors" | "themes" */
   root: string;
   /** Directory name, which is the slug (an invariant the generator enforces). */
   slug: string;
   /** Repo-relative path to the manifest. */
   manifestRel: string;
-  /** True for an `app.ts` module manifest, which is never rewritten. */
+  /**
+   * True for a manifest this script must not rewrite.
+   *
+   * Nothing sets it today: every manifest is JSON and every one is stampable.
+   * It stays because the caller still branches on it, and because the reason it
+   * existed — a manifest that was code — is exactly the shape that could come
+   * back.
+   */
   isModule: boolean;
   /** Repo-relative paths of the changed files under this directory. */
   changed: string[];
@@ -98,22 +109,26 @@ function stagedFiles(): string[] {
 }
 
 /**
- * Resolve which manifest a directory owns. Mirrors `loadAppManifest()` in
- * scripts/generate-project-registry.ts: `app.ts` wins over `app.json` when both
- * exist, because that is the one the generator reads — stamping the other would
- * write a value nothing consumes.
+ * Resolve which manifest a directory owns.
+ *
+ * One candidate per kind now. This used to mirror a precedence rule in
+ * `loadAppManifest()` — `app.ts` over `app.json` — which existed so that
+ * stamping did not write a value nothing consumes. With `app.json` the sole
+ * manifest there is nothing to prefer.
+ *
+ * `widgets.ts` is deliberately not considered: it carries config fields, not
+ * the `lastUpdated` this script stamps.
  */
 function resolveManifest(
   root: string,
   slug: string,
 ): { rel: string; isModule: boolean } | null {
-  const dir = path.join(ROOT, root, slug);
-  if (root === "connectors") {
-    const rel = `connectors/${slug}/connector.json`;
+  if (root === "connectors" || root === "themes") {
+    const rel =
+      root === "connectors"
+        ? `connectors/${slug}/connector.json`
+        : `themes/${slug}/theme.json`;
     return fs.existsSync(path.join(ROOT, rel)) ? { rel, isModule: false } : null;
-  }
-  if (fs.existsSync(path.join(dir, "app.ts"))) {
-    return { rel: `apps/${slug}/app.ts`, isModule: true };
   }
   const jsonRel = `apps/${slug}/app.json`;
   return fs.existsSync(path.join(ROOT, jsonRel))
@@ -133,8 +148,8 @@ function collectTargets(changed: string[]): Target[] {
     // `_`-prefixed directories are templates — the same convention the registry
     // generator skips. They are scaffolding, not shippable units.
     if (slug.startsWith("_")) continue;
-    // Files directly under apps/ or connectors/ (e.g. AGENTS.md) belong to no
-    // app.
+    // Files directly under apps/, connectors/ or themes/ (e.g. AGENTS.md) belong
+    // to no app.
     if (parts.length < 3) continue;
 
     const key = `${root}/${slug}`;
@@ -366,7 +381,7 @@ function main(): void {
 
   // A TS manifest is never rewritten: a bad edit to arbitrary TypeScript breaks
   // the build for everyone. Warn loudly and let the commit through — the same
-  // "checks warn, they don't block" stance /mix-deploy takes everywhere else.
+  // stance /mixos deploy takes toward a manifest it cannot safely edit.
   for (const target of manual) {
     console.warn(
       `\n${prefix} ${target.manifestRel} is a TypeScript manifest — not stamped.\n` +

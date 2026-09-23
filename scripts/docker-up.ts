@@ -1,5 +1,9 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Boots the whole local stack in one command: Supabase (Postgres + PostgREST +
-// Studio) through the Supabase CLI, then MOS itself through Docker Compose.
+// Studio) through the Supabase CLI, then MixOS itself through Docker Compose.
 //
 // The step order is not cosmetic — each step produces something the next one
 // needs:
@@ -55,11 +59,23 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { resolveInstance } from "./instance";
 
 const ROOT = path.resolve(__dirname, "..");
 
-/** Compose project name. Frozen: docker-down.ts and the docs assume it too. */
-const COMPOSE_PROJECT = "mixos";
+// Resolved FIRST, because it writes MIXOS_* into process.env and every child
+// process below — `docker compose`, the Supabase CLI — reads its identity from
+// there. See scripts/instance.ts.
+const INSTANCE = resolveInstance();
+
+/**
+ * Compose project name.
+ *
+ * `mixos` unless this checkout says otherwise in `.env.instance`. It has to
+ * match docker-down.ts, which resolves the same way from the same file rather
+ * than repeating a literal.
+ */
+const COMPOSE_PROJECT = INSTANCE.name;
 
 // Used for the *pre-start* port check, when there is no running stack to ask,
 // and for the `--detach` readiness poll, which has to name a port before the
@@ -67,10 +83,10 @@ const COMPOSE_PROJECT = "mixos";
 // status`, which is authoritative even if someone edits supabase/config.toml;
 // the app port is ours and is fixed by docker-compose.yml's publish.
 const PORTS = {
-  app: 3000,
-  supabaseApi: 54321,
-  supabaseDb: 54322,
-  supabaseStudio: 54323,
+  app: INSTANCE.ports.app,
+  supabaseApi: INSTANCE.ports.supabaseApi,
+  supabaseDb: INSTANCE.ports.supabaseDb,
+  supabaseStudio: INSTANCE.ports.supabaseStudio,
 } as const;
 
 /** How long to wait for the Docker daemon after launching Docker Desktop. */
@@ -366,7 +382,7 @@ function readSupabaseStatus(): SupabaseStatus {
     throw new SetupError(
       "`supabase status -o json` did not include SERVICE_ROLE_KEY.",
       "supabase/config.toml needs `[auth] enabled = true` — the CLI only emits the " +
-        "key set when the auth container is running, even though MOS never calls " +
+        "key set when the auth container is running, even though MixOS never calls " +
         "Supabase Auth. Set it, then run `npm run docker:down && npm run dev:docker`.",
     );
   }
@@ -707,7 +723,7 @@ async function preflight(opts: {
   // The app port is always contested: compose publishes it. The Supabase ports
   // only matter when we are about to start the stack — if it is already up, it
   // is *supposed* to be holding them.
-  const portsToCheck: Array<[number, string]> = [[PORTS.app, "the MOS app"]];
+  const portsToCheck: Array<[number, string]> = [[PORTS.app, "the MixOS app"]];
   if (!supabaseRunning) {
     portsToCheck.push(
       [PORTS.supabaseApi, "the Supabase API gateway (Kong)"],
@@ -915,7 +931,7 @@ function printBanner(opts: {
 
   console.log(`\n${rule}`);
   console.log(
-    `  ${c.bold(`MOS is starting — ${prod ? "prod" : "dev"} profile`)}`,
+    `  ${c.bold(`MixOS is starting — ${prod ? "prod" : "dev"} profile`)}`,
   );
   console.log("");
   console.log(`  App        ${c.bold("http://localhost:3000")}`);
@@ -1184,7 +1200,7 @@ function parseArgs(argv: string[]): Args {
 }
 
 const HELP = `
-Boot the local MOS stack: Supabase (Postgres + PostgREST + Studio) and the app.
+Boot the local MixOS stack: Supabase (Postgres + PostgREST + Studio) and the app.
 
   npm run dev:docker              dev profile — source bind-mounted, hot reload
   npm run docker:prod             prod profile — production-parity standalone image

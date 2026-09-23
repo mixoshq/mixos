@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Stops everything `scripts/docker-up.ts` started, in the reverse order: the app
 // containers first (they hold open Postgres connections), then the Supabase
 // stack.
@@ -20,12 +24,19 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { resolveInstance } from "./instance";
 import readline from "node:readline/promises";
 
 const ROOT = path.resolve(__dirname, "..");
 
-/** Must match scripts/docker-up.ts and the `name:` in docker-compose.yml. */
-const COMPOSE_PROJECT = "mixos";
+/**
+ * Which instance to take down.
+ *
+ * Resolved from `.env.instance` exactly as docker-up.ts does, so a `down` in a
+ * checkout stops that checkout's stack and leaves another instance's running.
+ * A literal here was what made the two scripts have to agree by hand.
+ */
+const COMPOSE_PROJECT = resolveInstance().name;
 /** Must match `project_id` in supabase/config.toml. */
 const SUPABASE_PROJECT = "mixos";
 
@@ -81,7 +92,7 @@ function supabaseBin(): string | null {
  * Ask before destroying data.
  *
  * Refuses rather than assuming "yes" when stdin is not a terminal: this script
- * is reachable from `/mix-init` and from CI-ish contexts, and a silently
+ * is reachable from `/mixos init` and from CI-ish contexts, and a silently
  * auto-confirmed database wipe is exactly the surprise worth engineering
  * against. `--yes` is the explicit opt-in.
  */
@@ -156,7 +167,7 @@ function parseArgs(argv: string[]): Args {
 }
 
 const HELP = `
-Stop the local MOS stack.
+Stop the local MixOS stack.
 
   npm run docker:down             stop the app and Supabase, keep the database
   npm run docker:reset            also delete the database (asks first)

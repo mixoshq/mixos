@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { z } from "zod";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
@@ -7,7 +11,7 @@ import type { McpToolContext } from "@/lib/hooks/types";
 import { hasAppGrant } from "@/lib/apps/access";
 
 /**
- * Tool discovery and naming for the MOS MCP server.
+ * Tool discovery and naming for the MixOS MCP server.
  *
  * A tool is reachable only at the intersection of three independent gates:
  *

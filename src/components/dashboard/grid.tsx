@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import {
@@ -20,8 +24,12 @@ import type { AppManifest, WidgetDefinition } from "@/lib/apps/types";
 import WidgetWrapper from "./widget-wrapper";
 import WidgetCatalog from "./widget-catalog";
 import { useDashboardEdit } from "./edit-mode-context";
+import { useTour } from "@/components/onboarding/tour-context";
+import { DASHBOARD_STEP } from "@/components/onboarding/steps";
 
 import "react-grid-layout/css/styles.css";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Breakpoint = "lg" | "md" | "sm";
 
@@ -41,15 +49,26 @@ export default function DashboardGrid({
   const [widgetList, setWidgetList] = useState<DashboardWidget[]>(widgets);
   const { width, containerRef } = useContainerWidth();
   const { isEditing, setIsEditing } = useDashboardEdit();
+  // The welcome tour asks for "Edit Dashboard" and then points at a widget
+  // card, so during the tour entering edit mode opens the catalog straight
+  // away — as it does for an empty dashboard anyway, where the only thing to
+  // do in edit mode is add something.
+  const { phase: tourPhase, guideStep } = useTour();
+  const tourActive = tourPhase === "guide";
+  // The tour talks about the menu bar before it talks about the dashboard.
+  // Until it gets there, an empty dashboard shows nothing at all — "Your
+  // dashboard is empty" and its button would be competing with the bubble
+  // for the eye, and the button is the very thing that step asks for.
+  const emptyStateHidden = tourPhase !== "done" && guideStep < DASHBOARD_STEP;
   const currentBreakpointRef = useRef<Breakpoint>("lg");
-  const [pencilVisible, setPencilVisible] = useState(true);
   const [isDraggingWidget, setIsDraggingWidget] = useState(false);
   const [isCollapsing, setIsCollapsing] = useState(false);
   const [isExpanding, setIsExpanding] = useState(false);
   const pillRef = useRef<HTMLDivElement>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(
-    null,
-  );
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const handleBreakpointChange = useCallback((newBreakpoint: Breakpoint) => {
@@ -58,28 +77,38 @@ export default function DashboardGrid({
 
   // Fade the pencil out after 20s of no cursor motion on the dashboard; any
   // mouse movement re-shows it and resets the timer.
+  //
+  // Visibility is DERIVED from which arming generation last timed out, rather
+  // than reset by a synchronous setState in the effect body. Changing edit mode
+  // or the widget count changes the generation, which makes the pencil visible
+  // again without the effect having to write state on the way in.
+  const armKey = `${isEditing}:${widgetList.length}`;
+  const [idleSince, setIdleSince] = useState<string | null>(null);
+  const pencilVisible =
+    isEditing || widgetList.length === 0 || idleSince !== armKey;
+
   useEffect(() => {
-    if (isEditing || widgetList.length === 0) {
-      setPencilVisible(true);
-      return;
-    }
+    if (isEditing || widgetList.length === 0) return;
     const el = containerRef.current;
     if (!el) return;
 
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const arm = () => {
-      setPencilVisible(true);
+    const scheduleHide = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => setPencilVisible(false), 20_000);
+      timer = setTimeout(() => setIdleSince(armKey), 20_000);
+    };
+    const onMove = () => {
+      setIdleSince(null);
+      scheduleHide();
     };
 
-    arm();
-    el.addEventListener("mousemove", arm);
+    scheduleHide();
+    el.addEventListener("mousemove", onMove);
     return () => {
-      el.removeEventListener("mousemove", arm);
+      el.removeEventListener("mousemove", onMove);
       if (timer) clearTimeout(timer);
     };
-  }, [isEditing, widgetList.length, containerRef]);
+  }, [isEditing, widgetList.length, containerRef, armKey]);
 
   // Dismiss the right-click context menu on outside click, Escape, or scroll.
   useEffect(() => {
@@ -117,35 +146,29 @@ export default function DashboardGrid({
     [isEditing],
   );
 
-  const handleLayoutChange = useCallback(
-    (newLayout: RGLLayout) => {
-      // Only persist changes made at the `lg` breakpoint. Smaller breakpoints
-      // render an auto-compacted view; saving those would overwrite the user's
-      // real layout and fail to restore it when the browser resizes back up.
-      if (currentBreakpointRef.current !== "lg") return;
-      const mapped: LayoutItem[] = newLayout.map((item: RGLLayoutItem) => ({
-        i: item.i,
-        x: item.x,
-        y: item.y,
-        w: item.w,
-        h: item.h,
-        minW: item.minW,
-        minH: item.minH,
-      }));
-      setLayout(mapped);
-      saveLayout(mapped);
-    },
-    []
-  );
+  const handleLayoutChange = useCallback((newLayout: RGLLayout) => {
+    // Only persist changes made at the `lg` breakpoint. Smaller breakpoints
+    // render an auto-compacted view; saving those would overwrite the user's
+    // real layout and fail to restore it when the browser resizes back up.
+    if (currentBreakpointRef.current !== "lg") return;
+    const mapped: LayoutItem[] = newLayout.map((item: RGLLayoutItem) => ({
+      i: item.i,
+      x: item.x,
+      y: item.y,
+      w: item.w,
+      h: item.h,
+      minW: item.minW,
+      minH: item.minH,
+    }));
+    setLayout(mapped);
+    saveLayout(mapped);
+  }, []);
 
-  const handleRemoveWidget = useCallback(
-    async (instanceId: string) => {
-      await removeWidget(instanceId);
-      setWidgetList((prev) => prev.filter((w) => w.id !== instanceId));
-      setLayout((prev) => prev.filter((item) => item.i !== instanceId));
-    },
-    []
-  );
+  const handleRemoveWidget = useCallback(async (instanceId: string) => {
+    await removeWidget(instanceId);
+    setWidgetList((prev) => prev.filter((w) => w.id !== instanceId));
+    setLayout((prev) => prev.filter((item) => item.i !== instanceId));
+  }, []);
 
   // Click the pencil → mount the pill but immediately animate it FROM the
   // pencil's slot TO its natural centered position. Mirror of the collapse so
@@ -157,14 +180,18 @@ export default function DashboardGrid({
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+    const openCatalog = widgetList.length === 0 || tourActive;
+
     if (reduced) {
       setIsEditing(true);
+      if (openCatalog) setCatalogOpen(true);
       return;
     }
 
     setIsExpanding(true);
     setIsEditing(true);
-  }, [isExpanding, isCollapsing, setIsEditing]);
+    if (openCatalog) setCatalogOpen(true);
+  }, [isExpanding, isCollapsing, setIsEditing, widgetList.length, tourActive]);
 
   // Once the pill mounts in expand mode, measure its natural rect, then run
   // the reverse WAAPI keyframes. useLayoutEffect runs synchronously after
@@ -302,12 +329,12 @@ export default function DashboardGrid({
         );
       }
     },
-    []
+    [],
   );
 
   const resolveWidgetDef = (
     appSlug: string,
-    widgetId: string
+    widgetId: string,
   ): { app: AppManifest; def: WidgetDefinition } | null => {
     const app = availableApps.find((a) => a.slug === appSlug);
     if (!app) return null;
@@ -319,19 +346,33 @@ export default function DashboardGrid({
   return (
     <div
       className="relative h-full"
+      // The resize handles are rendered by react-grid-layout whether or not
+      // resizing is on, so the stylesheet needs to know when the dashboard is
+      // being edited to show them. One attribute here beats a class on every
+      // grid item.
+      data-dashboard-editing={isEditing || undefined}
       ref={containerRef}
       onContextMenu={handleContextMenu}
     >
       {widgetList.length === 0 ? (
-        <div className="flex h-full flex-col items-center justify-center gap-4">
+        <div
+          className={cn(
+            "flex h-full flex-col items-center justify-center gap-4",
+            emptyStateHidden && "invisible",
+            tourActive && !emptyStateHidden && "tour-screen-in",
+          )}
+        >
           <p className="text-lg text-muted-foreground">
             Your dashboard is empty
           </p>
           {!isEditing && (
             <button
-              onClick={() => setIsEditing(true)}
-              data-tour="edit-dashboard-btn"
-              className="flex items-center gap-2 rounded-lg bg-mixcharcoal px-4 py-2 text-sm font-medium text-white hover:bg-mixcharcoal/90"
+              onClick={() => {
+                setIsEditing(true);
+                setCatalogOpen(true);
+              }}
+              data-tour="edit-dashboard"
+              className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
             >
               Edit Dashboard
             </button>
@@ -360,11 +401,12 @@ export default function DashboardGrid({
             {widgetList.map((widget) => {
               const resolved = resolveWidgetDef(
                 widget.app_slug,
-                widget.widget_id
+                widget.widget_id,
               );
               return (
                 <div
                   key={widget.id}
+                  data-tour-widget-instance={widget.app_slug}
                   onDoubleClick={() => {
                     if (!isEditing) handleEnterEdit();
                   }}
@@ -387,7 +429,8 @@ export default function DashboardGrid({
           onClick={handleEnterEdit}
           aria-label="Edit dashboard"
           title="Edit dashboard"
-          className={`group fixed bottom-6 right-6 z-40 flex h-9 items-center overflow-hidden rounded-full bg-mixgrey px-2.5 text-white shadow-sm backdrop-blur transition-opacity duration-500 hover:bg-mixgrey/90 ${
+          data-tour="dashboard-pencil"
+          className={`group fixed bottom-6 right-6 z-40 flex h-9 items-center overflow-hidden rounded-full bg-primary px-2.5 text-white shadow-sm backdrop-blur transition-opacity duration-500 hover:bg-primary/90 ${
             pencilVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >
@@ -407,8 +450,8 @@ export default function DashboardGrid({
         >
           <button
             onClick={() => setCatalogOpen(true)}
-            data-tour="add-widget-btn"
             disabled={isCollapsing || isExpanding}
+            data-tour="add-widget"
             className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium hover:bg-accent ${
               isCollapsing || isExpanding
                 ? "pointer-events-none opacity-0"
@@ -420,9 +463,9 @@ export default function DashboardGrid({
           </button>
           <button
             onClick={handleDoneEditing}
-            data-tour="done-editing-btn"
             disabled={isCollapsing || isExpanding}
-            className={`flex items-center gap-1.5 whitespace-nowrap rounded-full bg-mixgrey px-3 py-1.5 text-sm font-medium text-white hover:bg-mixgrey/90 ${
+            data-tour="done-editing"
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded-full bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary/90 ${
               isCollapsing || isExpanding
                 ? "pointer-events-none opacity-0"
                 : "transition-opacity duration-200"
@@ -437,7 +480,11 @@ export default function DashboardGrid({
         <div
           ref={contextMenuRef}
           role="menu"
-          className="fixed z-50 min-w-[160px] rounded-lg border border-border bg-card py-1 shadow-lg"
+          className={cn(
+            "mix-popover",
+            CARD_SURFACE,
+            "fixed z-50 min-w-[160px] py-1 shadow-lg",
+          )}
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >
           <button
@@ -457,6 +504,7 @@ export default function DashboardGrid({
       {catalogOpen && (
         <WidgetCatalog
           apps={availableApps}
+          backdrop={!tourActive}
           onClose={() => setCatalogOpen(false)}
           onWidgetAdded={handleWidgetAdded}
         />
