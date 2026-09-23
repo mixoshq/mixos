@@ -33,8 +33,8 @@ export default function AppToggleList({
   const [actionError, setActionError] = useState<string | null>(null);
   const router = useRouter();
 
-  // Block install when this app declares user-scoped connectors the user
-  // hasn't connected. Uninstall is always allowed.
+  // Block enabling when this app declares user-scoped connectors the user
+  // hasn't connected. Disabling is always allowed.
   const blockInstall = !installed && missingUserConnectors.length > 0;
   const toggleDisabled = isPending || blockInstall;
 
@@ -94,13 +94,13 @@ export default function AppToggleList({
                 installed ? "text-brand" : "text-muted-foreground"
               }`}
             >
-              {installed ? "Installed" : "Not installed"}
+              {installed ? "Enabled" : "Disabled"}
             </span>
             <button
               onClick={handleToggle}
               disabled={toggleDisabled}
               aria-disabled={toggleDisabled}
-              aria-label={installed ? "Uninstall" : "Install"}
+              aria-label={installed ? "Disable" : "Enable"}
               title={
                 blockInstall
                   ? `Connect ${missingUserConnectors.map((m) => m.displayName).join(", ")} first`

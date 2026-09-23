@@ -4,8 +4,15 @@
 
 "use client";
 
+import { setAppActiveAction } from "@/lib/apps/admin-actions";
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  ShieldCheck,
+  XCircle,
+} from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/input";
@@ -26,7 +33,7 @@ import { KIND_LABEL } from "@/lib/repository/types";
  *
  * ── WHY THIS IS A DIALOG AND NOT A ONE-CLICK BUTTON ─────────────────────────
  *
- * Registering copies third-party code into this instance's source tree and
+ * Installing copies third-party code into this instance's source tree and
  * makes it installable by everyone on the deployment. The facts that decide
  * whether that is a good idea — which commit, which checksum, what the
  * publisher says it will reach — are exactly the facts a one-click button
@@ -44,10 +51,18 @@ import { KIND_LABEL } from "@/lib/repository/types";
  */
 export default function RegisterDialog({
   extension,
+  activateAfterInstall = false,
   onClose,
   onRegistered,
 }: {
   extension: ExtensionSummary | null;
+  /**
+   * Turn the app on as part of installing it ("Install & Activate"). Only
+   * apps have this switch, and only an install that succeeded gets this far —
+   * activating something that failed to land would leave the instance
+   * pointing at code it does not have.
+   */
+  activateAfterInstall?: boolean;
   onClose: () => void;
   /** Told the identifier so the grid can flip the tile to "Installed". */
   onRegistered: (slug: string) => void;
@@ -58,6 +73,7 @@ export default function RegisterDialog({
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<RegisterOutcome | null>(null);
   const [acceptYanked, setAcceptYanked] = useState(false);
+  const [activateError, setActivateError] = useState<string | null>(null);
 
   const slug = extension?.slug ?? null;
   const kind = extension?.kind ?? null;
@@ -98,12 +114,31 @@ export default function RegisterDialog({
         version: manifest?.version,
         allowYanked: acceptYanked,
       });
+      if (res.ok && activateAfterInstall && kind === "app") {
+        try {
+          await setAppActiveAction(slug, true);
+        } catch (err) {
+          // The install DID happen; only the switch failed. Saying so beats
+          // reporting the whole thing as a failure and having the admin
+          // install it a second time.
+          setActivateError(
+            err instanceof Error ? err.message : "Could not activate the app.",
+          );
+        }
+      }
       setOutcome(res);
       if (res.ok) onRegistered(slug);
     } finally {
       setBusy(false);
     }
-  }, [kind, slug, manifest?.version, acceptYanked, onRegistered]);
+  }, [
+    kind,
+    slug,
+    manifest?.version,
+    acceptYanked,
+    onRegistered,
+    activateAfterInstall,
+  ]);
 
   if (!extension || !kind) return null;
 
@@ -114,7 +149,11 @@ export default function RegisterDialog({
     <Dialog
       open
       onClose={onClose}
-      title={outcome?.ok ? `${extension.name} registered` : `Register ${extension.name}`}
+      title={
+        outcome?.ok
+          ? `${extension.name} installed`
+          : `Install ${extension.name}`
+      }
       subtitle={
         outcome
           ? undefined
@@ -136,7 +175,7 @@ export default function RegisterDialog({
             <Button
               variant="primary"
               busy={busy}
-              busyLabel="Verifying and registering…"
+              busyLabel="Verifying and installing…"
               disabled={!manifest || blocked}
               onClick={register}
             >
@@ -147,10 +186,13 @@ export default function RegisterDialog({
       }
     >
       {outcome ? (
-        <OutcomePanel outcome={outcome} />
+        <OutcomePanel outcome={outcome} activateError={activateError} />
       ) : resolveError ? (
         <div className="space-y-4">
-          <Notice tone="danger" icon={<XCircle className="h-4 w-4" aria-hidden />}>
+          <Notice
+            tone="danger"
+            icon={<XCircle className="h-4 w-4" aria-hidden />}
+          >
             {resolveError}
           </Notice>
           {listing && (
@@ -179,14 +221,19 @@ export default function RegisterDialog({
       ) : (
         <div className="space-y-5">
           {yanked && (
-            <Notice tone="warning" icon={<AlertTriangle className="h-4 w-4" aria-hidden />}>
+            <Notice
+              tone="warning"
+              icon={<AlertTriangle className="h-4 w-4" aria-hidden />}
+            >
               <p className="font-medium">
                 Version {manifest.version} has been withdrawn by its publisher.
               </p>
-              {manifest.yankedReason && <p className="mt-1">{manifest.yankedReason}</p>}
+              {manifest.yankedReason && (
+                <p className="mt-1">{manifest.yankedReason}</p>
+              )}
               <Checkbox
                 className="mt-3"
-                label="Register it anyway."
+                label="Install it anyway."
                 checked={acceptYanked}
                 onChange={(e) => setAcceptYanked(e.target.checked)}
               />
@@ -198,14 +245,16 @@ export default function RegisterDialog({
               What will be fetched and verified
             </h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              The code is downloaded from GitHub at the exact commit below, not from
-              mixos.org. It is only written to this instance if its checksum matches
-              what the repository published.
+              The code is downloaded from GitHub at the exact commit below, not
+              from mixos.org. It is only written to this instance if its
+              checksum matches what the repository published.
             </p>
             <dl className="mt-3 grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-sm">
               <Row label="Version">
                 {manifest.version}{" "}
-                <span className="text-muted-foreground">({manifest.gitTag})</span>
+                <span className="text-muted-foreground">
+                  ({manifest.gitTag})
+                </span>
               </Row>
               {listing && (
                 <Row label="Source">
@@ -220,10 +269,14 @@ export default function RegisterDialog({
                 </Row>
               )}
               <Row label="Commit">
-                <code className="break-all font-mono text-xs">{manifest.commitSha}</code>
+                <code className="break-all font-mono text-xs">
+                  {manifest.commitSha}
+                </code>
               </Row>
               <Row label="Checksum">
-                <code className="break-all font-mono text-xs">{manifest.contentHash}</code>
+                <code className="break-all font-mono text-xs">
+                  {manifest.contentHash}
+                </code>
               </Row>
               {manifest.subpath && (
                 <Row label="Subdirectory">
@@ -232,8 +285,12 @@ export default function RegisterDialog({
               )}
               <Row label="Installs to">
                 <code className="font-mono text-xs">
-                  {kind === "connector" ? "connectors" : kind === "theme" ? "themes" : "apps"}/
-                  {manifest.slug}
+                  {kind === "connector"
+                    ? "connectors"
+                    : kind === "theme"
+                      ? "themes"
+                      : "apps"}
+                  /{manifest.slug}
                 </code>
               </Row>
             </dl>
@@ -244,9 +301,9 @@ export default function RegisterDialog({
               What the publisher says it needs
             </h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Declared on the mixos.org listing. What this instance actually enforces
-              comes from the manifest inside the package, once the registry checks have
-              run on it.
+              Declared on the mixos.org listing. What this instance actually
+              enforces comes from the manifest inside the package, once the
+              registry checks have run on it.
             </p>
             {manifest.permissions.length === 0 ? (
               <p className="mt-3 text-sm text-muted-foreground">
@@ -256,8 +313,12 @@ export default function RegisterDialog({
               <ul className="mt-3 space-y-2">
                 {manifest.permissions.map((p) => (
                   <li key={p.scope} className="text-sm">
-                    <code className="font-mono text-xs text-foreground">{p.scope}</code>
-                    <span className="ml-2 text-muted-foreground">{p.reason}</span>
+                    <code className="font-mono text-xs text-foreground">
+                      {p.scope}
+                    </code>
+                    <span className="ml-2 text-muted-foreground">
+                      {p.reason}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -275,7 +336,13 @@ export default function RegisterDialog({
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
@@ -299,7 +366,9 @@ function Notice({
     success: "border-success/40 bg-success/10",
   } as const;
   return (
-    <div className={`rounded-lg border px-4 py-3 text-sm text-foreground ${TONES[tone]}`}>
+    <div
+      className={`rounded-lg border px-4 py-3 text-sm text-foreground ${TONES[tone]}`}
+    >
       <div className="flex gap-2">
         <span className="mt-0.5 shrink-0">{icon}</span>
         <div className="min-w-0">{children}</div>
@@ -317,14 +386,37 @@ function Notice({
  * as another red box saying "failed" would waste the only signal this pipeline
  * exists to produce.
  */
-function OutcomePanel({ outcome }: { outcome: RegisterOutcome }) {
+function OutcomePanel({
+  outcome,
+  activateError,
+}: {
+  outcome: RegisterOutcome;
+  /** Set when the install landed but "Install & Activate" could not finish. */
+  activateError: string | null;
+}) {
   if (outcome.ok) {
     const r = outcome.result;
     return (
       <div className="space-y-4">
-        <Notice tone="success" icon={<CheckCircle2 className="h-4 w-4" aria-hidden />}>
+        {/* The install is what this panel reports; a failed activation is a
+            separate, smaller fact — and one with an obvious next step, which
+            is why it names where to finish the job. */}
+        {activateError && (
+          <Notice
+            tone="warning"
+            icon={<XCircle className="h-4 w-4" aria-hidden />}
+          >
+            Installed, but could not activate it: {activateError} Turn it on
+            from the Apps page.
+          </Notice>
+        )}
+        <Notice
+          tone="success"
+          icon={<CheckCircle2 className="h-4 w-4" aria-hidden />}
+        >
           <p className="font-medium">
-            Checksum verified and {r.registry.ok ? "registry checks passed" : "written to disk"}.
+            Checksum verified and{" "}
+            {r.registry.ok ? "registry checks passed" : "written to disk"}.
           </p>
           <p className="mt-1">{r.nextStep}</p>
         </Notice>

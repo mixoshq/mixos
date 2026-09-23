@@ -23,6 +23,7 @@ interface Props {
   grantCountsBySlug: Record<string, number>;
   /** Live table counts per slug. A slug with no tables is absent, meaning 0. */
   tableCountsBySlug: Record<string, number>;
+  activeBySlug: Record<string, boolean>;
 }
 
 export default function AppRegistryList({
@@ -30,6 +31,7 @@ export default function AppRegistryList({
   missingConnectorsBySlug,
   grantCountsBySlug,
   tableCountsBySlug,
+  activeBySlug,
 }: Props) {
   const [query, setQuery] = useState("");
   const lower = query.toLowerCase();
@@ -82,6 +84,9 @@ export default function AppRegistryList({
               missingConnectors={missingConnectorsBySlug[app.slug] ?? []}
               grantCount={grantCountsBySlug[app.slug] ?? 0}
               tableCount={tableCountsBySlug[app.slug] ?? 0}
+              // Absent means the registry sync has not run since this app
+              // appeared, which is not the same as active.
+              isActive={activeBySlug[app.slug] === true}
             />
           ))}
         </div>

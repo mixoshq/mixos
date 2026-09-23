@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { cache } from "react";
 import { createServiceClient } from "@/lib/db/server";
 import { appRegistry } from "@/generated/app-registry";
 
@@ -129,7 +130,7 @@ async function installGlobalApps(
   supabase: ReturnType<typeof createServiceClient>,
   userId: string,
 ): Promise<void> {
-  const slugs = getGlobalAppSlugs();
+  const slugs = await filterActiveApps(getGlobalAppSlugs());
   if (slugs.length === 0) return;
   const { error } = await supabase.from("user_apps").upsert(
     slugs.map((app_slug, position) => ({
@@ -142,6 +143,81 @@ async function installGlobalApps(
   if (error) throw new Error(`Failed to install global apps: ${error.message}`);
 }
 
+/**
+ * Is this app active on this instance?
+ *
+ * `apps.is_active` is an admin's switch, set on the Apps page and untouched by
+ * the registry sync, so it survives a redeploy. Deactivating is meant to be
+ * complete rather than cosmetic: an inactive app is filtered out of every list
+ * AND refused by every gate — `hasAppGrant` (pages, MCP, OAuth) and
+ * `resolveAuthTier` (every API route and public page) both call this. Hiding
+ * an app that still answers requests would be a claim the platform does not
+ * keep.
+ *
+ * A missing row reads as INACTIVE. The row is written by the registry sync, so
+ * its absence means an app the platform does not know about; defaulting that
+ * to "serve it" would make a failed sync an availability decision.
+ *
+ * Deduped per request: a single page render asks this for every widget on the
+ * dashboard, and they are all the same question. `cache` is React's
+ * request-scoped memo, so it never outlives the request that made it and an
+ * admin's activation takes effect on the next one.
+ */
+export const isAppActive = cache(async (slug: string): Promise<boolean> => {
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from("apps")
+    .select("is_active")
+    .eq("slug", slug)
+    .maybeSingle();
+  return data?.is_active === true;
+});
+
+/** The subset of `slugs` that are active, in the order given. */
+export async function filterActiveApps(slugs: string[]): Promise<string[]> {
+  const active = await Promise.all(slugs.map((slug) => isAppActive(slug)));
+  return slugs.filter((_, i) => active[i]);
+}
+
+/**
+ * Set by an admin on the Apps page. Inactive apps are refused everywhere.
+ *
+ * An upsert rather than an update, because the row is normally written by the
+ * registry sync and an app installed from the catalogue is activated before
+ * that sync has run — "Install & Activate" would otherwise update zero rows
+ * and report success for nothing. The manifest supplies the columns the sync
+ * would have; a slug with no manifest is refused by the caller.
+ */
+export async function setAppActive(
+  slug: string,
+  isActive: boolean,
+): Promise<void> {
+  const manifest = appRegistry.find((a) => a.slug === slug);
+  const supabase = createServiceClient();
+  const { error } = await supabase.from("apps").upsert(
+    {
+      slug,
+      name: manifest?.name ?? slug,
+      description: manifest?.description ?? null,
+      icon: manifest?.icon ?? null,
+      is_active: isActive,
+    },
+    { onConflict: "slug" },
+  );
+  if (error) throw new Error(`Failed to update ${slug}: ${error.message}`);
+}
+
+/** Every app's active flag, for the admin list. */
+export async function getAppActiveMap(): Promise<Record<string, boolean>> {
+  const supabase = createServiceClient();
+  const { data } = await supabase.from("apps").select("slug, is_active");
+  const out: Record<string, boolean> = {};
+  for (const row of (data ?? []) as { slug: string; is_active: boolean }[]) {
+    out[row.slug] = row.is_active;
+  }
+  return out;
+}
+
 export async function getUserApps(userId: string): Promise<string[]> {
   const supabase = createServiceClient();
   const { data, error } = await supabase
@@ -150,7 +226,9 @@ export async function getUserApps(userId: string): Promise<string[]> {
     .eq("user_id", userId);
 
   if (error) throw new Error(`Failed to get user apps: ${error.message}`);
-  return data.map((row: { app_slug: string }) => row.app_slug);
+  return filterActiveApps(
+    data.map((row: { app_slug: string }) => row.app_slug),
+  );
 }
 
 export async function getUserGrantedSlugs(userId: string): Promise<string[]> {
@@ -165,13 +243,16 @@ export async function getUserGrantedSlugs(userId: string): Promise<string[]> {
     data.map((row: { app_slug: string }) => row.app_slug),
   );
   for (const slug of getGlobalAppSlugs()) explicit.add(slug);
-  return Array.from(explicit);
+  return filterActiveApps(Array.from(explicit));
 }
 
 export async function hasAppGrant(
   userId: string,
   appSlug: string,
 ): Promise<boolean> {
+  // Before the grant, and before the global-app shortcut: a deactivated app is
+  // not one anybody holds, however they came by it.
+  if (!(await isAppActive(appSlug))) return false;
   if (isGlobalApp(appSlug)) return true;
 
   const supabase = createServiceClient();
@@ -189,6 +270,7 @@ export async function hasAppAccess(
   userId: string,
   appSlug: string,
 ): Promise<boolean> {
+  if (!(await isAppActive(appSlug))) return false;
   const supabase = createServiceClient();
   const { data } = await supabase
     .from("user_apps")

@@ -4,11 +4,12 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import type { AppManifest } from "@/lib/apps/types";
 import LucideIcon from "@/components/lucide-icon";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status";
+import { setAppActiveAction } from "@/lib/apps/admin-actions";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
@@ -33,6 +34,8 @@ interface AppTileProps {
   grantCount: number;
   /** Tables in this app's scoped database, counted live. */
   tableCount: number;
+  /** Whether the app serves anything on this instance. */
+  isActive: boolean;
 }
 
 /**
@@ -41,7 +44,7 @@ interface AppTileProps {
  * This was a full-width row in a divided list, which made apps the odd
  * abstraction out: connectors and themes were already tiles, so an admin moving
  * between the three registries met three different objects. The shell here is
- * the connector tile's, to the class — same `mix-card` rounded-xl border, same
+ * the connector tile's, to the class — same `mix-card` rounded-lg border, same
  * padding, same icon plate, same path-and-action floor, same provenance footer.
  *
  * WHAT DID NOT COME ACROSS IS THE TINT. The connector tile washes its card in a
@@ -56,8 +59,16 @@ export default function AppTile({
   missingConnectors,
   grantCount,
   tableCount,
+  isActive,
 }: AppTileProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+
+  function toggleActive() {
+    startTransition(async () => {
+      await setAppActiveAction(app.slug, !isActive);
+    });
+  }
 
   /*
     An unconfigured connector is a warning here, not a gate. It used to block
@@ -65,7 +76,12 @@ export default function AppTile({
     GRANTING the app to someone, which is enforced in /admin/users — so this
     strip says what is wrong and where the consequence lands, and stops there.
   */
+  // An app whose connectors are not configured cannot serve a request, so
+  // activating it would put a broken app in front of everyone. Deactivating
+  // stays available whatever the state — the way out of a mistake must never
+  // be gated on the thing that made it.
   const missingSomething = missingConnectors.length > 0;
+  const blockActivate = !isActive && missingSomething;
 
   /*
     The six Composition facts, in the order the dialog's panel states them — a
@@ -138,8 +154,13 @@ export default function AppTile({
         badge its own fill, which reads as four severities when it is really
         four measurements — and six of those would be a traffic light.
       */}
-      {pills.length > 0 && (
+      {(pills.length > 0 || !isActive) && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {/* The one pill here that is a state rather than a measurement, so
+              the one that gets a tone. Nothing marks an active app: active is
+              what every app in a working instance is, and a green pill on
+              every tile would be a row of decoration. */}
+          {!isActive && <StatusPill tone="warning">Inactive</StatusPill>}
           {pills.map((text) => (
             <StatusPill key={text} tone="neutral">
               {text}
@@ -177,18 +198,40 @@ export default function AppTile({
             to do on an app card — an app has no configuration to finish, so
             nothing here ever demotes to the secondary fill the connector tile
             uses for a connector that is already set up. */}
-        <Button
-          variant="primary"
-          size="sm"
-          className="shrink-0"
-          onClick={() => setDetailsOpen(true)}
-          // The tile names the app above this control, but a screen reader
-          // moving button to button does not carry that with it: a registry of
-          // forty apps otherwise announces forty buttons called "Details".
-          aria-label={`Details for ${app.name}`}
-        >
-          Details
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Activate is the primary action while an app is off — it is the
+              one thing standing between the app and being usable. Once it is
+              on, Details takes the fill back and turning it off becomes the
+              quiet action, which is the right weight for something that
+              removes an app from everyone at once. */}
+          <Button
+            variant={isActive ? "ghost" : "primary"}
+            size="sm"
+            disabled={pending || blockActivate}
+            onClick={toggleActive}
+            aria-label={`${isActive ? "Deactivate" : "Activate"} ${app.name}`}
+            title={
+              blockActivate
+                ? `Configure ${missingConnectors
+                    .map((m) => m.displayName)
+                    .join(", ")} first`
+                : undefined
+            }
+          >
+            {pending ? "Saving…" : isActive ? "Deactivate" : "Activate"}
+          </Button>
+          <Button
+            variant={isActive ? "primary" : "ghost"}
+            size="sm"
+            onClick={() => setDetailsOpen(true)}
+            // The tile names the app above this control, but a screen reader
+            // moving button to button does not carry that with it: a registry of
+            // forty apps otherwise announces forty buttons called "Details".
+            aria-label={`Details for ${app.name}`}
+          >
+            Details
+          </Button>
+        </div>
       </div>
 
       {/* Identical to the connector and theme tiles' footers, deliberately: an
