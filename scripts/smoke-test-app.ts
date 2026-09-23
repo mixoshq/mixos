@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * Smoke-test an app's connector data path against a running dev server.
  *
@@ -7,7 +11,7 @@
  *
  * Walks apps/<slug>/api/**\/route.ts, fetches every GET route through the
  * /api/apps/[...slug] gateway, and classifies the response so the caller
- * (typically the /mix-app skill) can decide what to do next.
+ * (typically the /mixos app skill) can decide what to do next.
  *
  * Outcome classes are documented inline on the Outcome type below. Exit
  * code is 0 only if every route lands on an OK_* / UNCONFIGURED_TENANT /
@@ -161,7 +165,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
   console.log(
-    `[smoke] ${failing.length} route(s) need attention. See "When the smoke test fails" in /mix-app.`,
+    `[smoke] ${failing.length} route(s) need attention. See "When the smoke test fails" in /mixos app.`,
   );
   process.exit(1);
 }

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 // Boots the whole local stack in one command: Supabase (Postgres + PostgREST +
 // Studio) through the Supabase CLI, then MixOS itself through Docker Compose.
 //
@@ -55,11 +59,23 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { resolveInstance } from "./instance";
 
 const ROOT = path.resolve(__dirname, "..");
 
-/** Compose project name. Frozen: docker-down.ts and the docs assume it too. */
-const COMPOSE_PROJECT = "mixos";
+// Resolved FIRST, because it writes MIXOS_* into process.env and every child
+// process below — `docker compose`, the Supabase CLI — reads its identity from
+// there. See scripts/instance.ts.
+const INSTANCE = resolveInstance();
+
+/**
+ * Compose project name.
+ *
+ * `mixos` unless this checkout says otherwise in `.env.instance`. It has to
+ * match docker-down.ts, which resolves the same way from the same file rather
+ * than repeating a literal.
+ */
+const COMPOSE_PROJECT = INSTANCE.name;
 
 // Used for the *pre-start* port check, when there is no running stack to ask,
 // and for the `--detach` readiness poll, which has to name a port before the
@@ -67,10 +83,10 @@ const COMPOSE_PROJECT = "mixos";
 // status`, which is authoritative even if someone edits supabase/config.toml;
 // the app port is ours and is fixed by docker-compose.yml's publish.
 const PORTS = {
-  app: 3000,
-  supabaseApi: 54321,
-  supabaseDb: 54322,
-  supabaseStudio: 54323,
+  app: INSTANCE.ports.app,
+  supabaseApi: INSTANCE.ports.supabaseApi,
+  supabaseDb: INSTANCE.ports.supabaseDb,
+  supabaseStudio: INSTANCE.ports.supabaseStudio,
 } as const;
 
 /** How long to wait for the Docker daemon after launching Docker Desktop. */

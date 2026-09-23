@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * Stale-while-revalidate cache for connector-heavy read payloads.
  *
@@ -63,6 +67,25 @@ export interface SwrCacheOptions {
    * intermittent and load-dependent, which is the worst kind.
    */
   namespace: string;
+  /**
+   * Whether entries belong to ONE PERSON or to the whole deployment. Required —
+   * there is no default, because the safe answer depends on what is being cached
+   * and a wrong guess is a cross-user data leak.
+   *
+   *  · `false` — the payload is the same for everyone. A tenant connector returns
+   *    the same response regardless of who asked, so one entry serves all.
+   *  · `true`  — the payload is one person's. Every call must then pass a
+   *    `userId`, which is folded into both the stored key and the in-process
+   *    coalescing key. Omitting it throws rather than caching.
+   *
+   * WHY THIS IS NOT OPTIONAL. `userScoped` connectors mean a connector can answer
+   * differently per user. A cache keyed only on `"inbox"` would then serve the
+   * first caller's mail to everyone. The in-flight map is the sharper edge of the
+   * same problem: without the user in the key, a concurrent caller is handed
+   * someone else's build directly, with no database row involved. Making this a
+   * required field means the decision is made, in writing, at every call site.
+   */
+  userScoped: boolean;
   /** Younger than this → serve as-is, no refresh. Default 2 minutes. */
   softTtlMs?: number;
   /** Older than this → rebuild synchronously rather than serve stale. Default 1 hour. */
@@ -87,7 +110,7 @@ export interface SwrCache {
     db: ScopedClient | null,
     key: string,
     build: Build<T>,
-    opts?: { refresh?: boolean },
+    opts?: { refresh?: boolean; userId?: string },
   ): Promise<{ payload: T; cached: boolean }>;
 
   /**
@@ -106,6 +129,7 @@ export interface SwrCache {
   peekCached<T>(
     db: ReadOnlyScopedClient | null,
     key: string,
+    opts?: { userId?: string },
   ): Promise<{ payload: T; ageMs: number } | null>;
 
   /**
@@ -113,7 +137,11 @@ export interface SwrCache {
    * concurrent stale rebuild can't re-insert the pre-delete payload. For
    * write-path and post-job invalidation. Best-effort.
    */
-  deleteCached(db: ScopedClient | null, key: string): Promise<void>;
+  deleteCached(
+    db: ScopedClient | null,
+    key: string,
+    opts?: { userId?: string },
+  ): Promise<void>;
 }
 
 /** An in-flight build plus the invalidation generation it started at, so a caller
@@ -137,16 +165,43 @@ const g: SwrGlobals = ((
 export function createSwrCache(options: SwrCacheOptions): SwrCache {
   const {
     namespace,
+    userScoped,
     softTtlMs = 2 * 60 * 1000,
     hardTtlMs = 60 * 60 * 1000,
     table = "swr_cache",
   } = options;
 
+  /**
+   * Fold the caller into the key when this cache holds per-person data.
+   *
+   * Applied ONCE at the edge of each public method, so the derived key is what
+   * reaches the database row, the in-flight map and the generation counter
+   * alike. Deriving it in one place is deliberate: the in-flight map is the
+   * easiest of the three to forget, and the one where a miss hands another
+   * user's payload over directly rather than through a row someone might notice.
+   *
+   * Throws on a missing `userId` rather than silently caching globally. A loud
+   * failure in development is the whole point — the quiet version of this bug is
+   * one person's mail rendered on another person's dashboard.
+   */
+  const storageKey = (key: string, userId?: string): string => {
+    if (!userScoped) return key;
+    if (!userId) {
+      throw new Error(
+        `swr-cache "${namespace}": this cache is userScoped, so every call must ` +
+          `pass a userId (e.g. { userId: context.user.id }). Caching per-user ` +
+          `data under a shared key would serve one person's data to another.`,
+      );
+    }
+    return `u\0${userId}\0${key}`;
+  };
+
   // A NUL separator can't appear in a namespace or a cache key, so no pair of
   // (namespace, key) can collide with another by concatenation.
   const scoped = (key: string) => `${namespace}\0${key}`;
 
-  const generationOf = (key: string): number => g.generations.get(scoped(key)) ?? 0;
+  const generationOf = (key: string): number =>
+    g.generations.get(scoped(key)) ?? 0;
   const bumpGeneration = (key: string): void => {
     g.generations.set(scoped(key), generationOf(key) + 1);
   };
@@ -182,10 +237,12 @@ export function createSwrCache(options: SwrCacheOptions): SwrCache {
   ): Promise<void> {
     // Best-effort — a failed cache write still returns fresh data to the caller.
     try {
-      await db.table(table).upsert(
-        { cache_key: key, payload, fetched_at: new Date().toISOString() },
-        { onConflict: "cache_key" },
-      );
+      await db
+        .table(table)
+        .upsert(
+          { cache_key: key, payload, fetched_at: new Date().toISOString() },
+          { onConflict: "cache_key" },
+        );
     } catch {
       /* ignore */
     }
@@ -229,10 +286,14 @@ export function createSwrCache(options: SwrCacheOptions): SwrCache {
   return {
     async getCached<T>(
       db: ScopedClient | null,
-      key: string,
+      rawKey: string,
       build: Build<T>,
-      opts: { refresh?: boolean } = {},
+      opts: { refresh?: boolean; userId?: string } = {},
     ): Promise<{ payload: T; cached: boolean }> {
+      // Derived FIRST, and before the `!db` short-circuit: a userScoped cache
+      // called without a userId is a programming error whether or not the app
+      // has a database yet, and it should surface the same way in both cases.
+      const key = storageKey(rawKey, opts.userId);
       if (!db) return { payload: await build(), cached: false };
 
       if (opts.refresh) {
@@ -262,13 +323,20 @@ export function createSwrCache(options: SwrCacheOptions): SwrCache {
 
     async peekCached<T>(
       db: ReadOnlyScopedClient | null,
-      key: string,
+      rawKey: string,
+      opts: { userId?: string } = {},
     ): Promise<{ payload: T; ageMs: number } | null> {
+      const key = storageKey(rawKey, opts.userId);
       if (!db) return null;
       return readCache<T>(db, key);
     },
 
-    async deleteCached(db: ScopedClient | null, key: string): Promise<void> {
+    async deleteCached(
+      db: ScopedClient | null,
+      rawKey: string,
+      opts: { userId?: string } = {},
+    ): Promise<void> {
+      const key = storageKey(rawKey, opts.userId);
       bumpGeneration(key);
       if (!db) return;
       try {

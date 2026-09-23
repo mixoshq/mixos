@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 /**
@@ -19,6 +23,8 @@
 
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { CARD_SHELL } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /** Why there is nothing to show. Drives the default copy and whether an action
  *  is required. */
@@ -31,8 +37,10 @@ export type EmptyCause =
   /** There is genuinely no data yet — a new install, an unsynced source. */
   | "no-data";
 
-const DASHED_PANEL =
-  "flex flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-card p-10 text-center";
+const DASHED_PANEL = cn(
+  CARD_SHELL,
+  "flex flex-1 items-center justify-center border-dashed p-5 text-center",
+);
 
 interface EmptyStateProps {
   cause: EmptyCause;
@@ -58,7 +66,10 @@ const DEFAULT_TITLE: Record<EmptyCause, string> = {
  */
 export function EmptyState(
   props: EmptyStateProps &
-    ({ cause: "no-filter"; action: NonNullable<EmptyStateProps["action"]> } | { cause: "no-match" | "no-data" }),
+    (
+      | { cause: "no-filter"; action: NonNullable<EmptyStateProps["action"]> }
+      | { cause: "no-match" | "no-data" }
+    ),
 ) {
   const { cause, title, body, action } = props as EmptyStateProps;
   return (
@@ -130,7 +141,12 @@ export function PendingState({
   chips?: string[];
 }) {
   return (
-    <div className="flex h-full min-h-[300px] flex-1 items-center justify-center rounded-xl border border-border bg-card p-8">
+    <div
+      className={cn(
+        CARD_SHELL,
+        "flex h-full min-h-[300px] flex-1 items-center justify-center p-5",
+      )}
+    >
       <div className="max-w-md text-center">
         <Loader2
           aria-hidden

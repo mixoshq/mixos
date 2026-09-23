@@ -1,12 +1,16 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import {
   createContext,
   useContext,
-  useState,
-  useEffect,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { createLocalStore } from "@/lib/local-store";
 
 export type MenuBarMode = "always" | "hidden";
 export type MenuBarAppDisplay = "icon" | "icon-and-name";
@@ -19,15 +23,6 @@ interface Preferences {
 interface PreferencesContextValue extends Preferences {
   setMenuBar: (v: MenuBarMode) => void;
   setMenuBarAppDisplay: (v: MenuBarAppDisplay) => void;
-  onboardingActive: boolean;
-  onboardingStep: number;
-  startOnboarding: () => void;
-  advanceOnboarding: () => void;
-  setOnboardingStep: (step: number) => void;
-  stopOnboarding: () => void;
-  showCongratulations: boolean;
-  triggerCongratulations: () => void;
-  dismissCongratulations: () => void;
 }
 
 const DEFAULTS: Preferences = {
@@ -36,93 +31,34 @@ const DEFAULTS: Preferences = {
 };
 
 const STORAGE_KEY = "mixpreferences";
-const ONBOARDING_STATE_KEY = "mixonboarding";
 
-interface OnboardingState {
-  active: boolean;
-  step: number;
-}
+/**
+ * Module-level store rather than state hydrated by an effect. See
+ * `createLocalStore` for why, and `docs/apps/app-shell.md` for the pattern.
+ */
+const prefsStore = createLocalStore<Preferences>(STORAGE_KEY, DEFAULTS, (raw) => {
+  const parsed = (raw ?? {}) as Partial<Preferences>;
+  return {
+    menuBar: parsed.menuBar === "hidden" ? "hidden" : "always",
+    menuBarAppDisplay:
+      parsed.menuBarAppDisplay === "icon" ? "icon" : "icon-and-name",
+  };
+});
 
 const PreferencesContext = createContext<PreferencesContextValue>({
   ...DEFAULTS,
   setMenuBar: () => {},
   setMenuBarAppDisplay: () => {},
-  onboardingActive: false,
-  onboardingStep: 0,
-  startOnboarding: () => {},
-  advanceOnboarding: () => {},
-  setOnboardingStep: () => {},
-  stopOnboarding: () => {},
-  showCongratulations: false,
-  triggerCongratulations: () => {},
-  dismissCongratulations: () => {},
 });
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {
-  const [prefs, setPrefs] = useState<Preferences>(DEFAULTS);
-  const [onboarding, setOnboarding] = useState<OnboardingState>({
-    active: false,
-    step: 0,
-  });
-  const [showCongratulations, setShowCongratulations] = useState(false);
+  const prefs = useSyncExternalStore(
+    prefsStore.subscribe,
+    prefsStore.read,
+    prefsStore.server,
+  );
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<Preferences>;
-        setPrefs({
-          menuBar: parsed.menuBar === "hidden" ? "hidden" : "always",
-          menuBarAppDisplay:
-            parsed.menuBarAppDisplay === "icon" ? "icon" : "icon-and-name",
-        });
-      }
-      const onboardingRaw = localStorage.getItem(ONBOARDING_STATE_KEY);
-      if (onboardingRaw) {
-        const parsed = JSON.parse(onboardingRaw) as Partial<OnboardingState>;
-        setOnboarding({
-          active: parsed.active === true,
-          step: typeof parsed.step === "number" ? parsed.step : 0,
-        });
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  function update(next: Preferences) {
-    setPrefs(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // ignore
-    }
-  }
-
-  function persistOnboarding(next: OnboardingState) {
-    setOnboarding(next);
-    try {
-      localStorage.setItem(ONBOARDING_STATE_KEY, JSON.stringify(next));
-    } catch {
-      // ignore
-    }
-  }
-
-  function startOnboarding() {
-    persistOnboarding({ active: true, step: 0 });
-  }
-
-  function advanceOnboarding() {
-    persistOnboarding({ active: true, step: onboarding.step + 1 });
-  }
-
-  function setOnboardingStep(step: number) {
-    persistOnboarding({ active: true, step });
-  }
-
-  function stopOnboarding() {
-    persistOnboarding({ active: false, step: 0 });
-  }
+  const update = prefsStore.write;
 
   return (
     <PreferencesContext.Provider
@@ -131,15 +67,6 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
         setMenuBar: (v) => update({ ...prefs, menuBar: v }),
         setMenuBarAppDisplay: (v) =>
           update({ ...prefs, menuBarAppDisplay: v }),
-        onboardingActive: onboarding.active,
-        onboardingStep: onboarding.step,
-        startOnboarding,
-        advanceOnboarding,
-        setOnboardingStep,
-        stopOnboarding,
-        showCongratulations,
-        triggerCongratulations: () => setShowCongratulations(true),
-        dismissCongratulations: () => setShowCongratulations(false),
       }}
     >
       {children}

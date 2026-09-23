@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useState } from "react";
@@ -79,7 +83,7 @@ export function ManifestField({
       <div className="flex items-center gap-2">
         <p className="font-mono text-sm font-medium">{name}</p>
         {required && (
-          <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-xs font-medium text-destructive">
+          <span className="rounded bg-destructive px-1.5 py-0.5 text-xs font-medium text-destructive-foreground">
             required
           </span>
         )}

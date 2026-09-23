@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
@@ -65,7 +69,10 @@ const PUBLIC_ROUTE_PREFIXES = [
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_ROUTE_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`) || pathname.startsWith(`${p}?`)
+    (p) =>
+      pathname === p ||
+      pathname.startsWith(`${p}/`) ||
+      pathname.startsWith(`${p}?`),
   );
 }
 
@@ -78,17 +85,97 @@ function hasSessionCookie(request: NextRequest): boolean {
   );
 }
 
+/**
+ * Per-request CSP with a fresh nonce.
+ *
+ * WHY HERE AND NOT next.config.ts. A nonce has to be unique per request, so it
+ * cannot come from static header config. Next reads the nonce out of this header
+ * during SSR and applies it to its own framework scripts and bundles, which is
+ * what makes `strict-dynamic` workable without hand-annotating every tag.
+ *
+ * The CSP is set in exactly ONE place. Two `Content-Security-Policy` headers are
+ * INTERSECTED by the browser, not merged, so leaving the old static
+ * `frame-ancestors` header in next.config.ts alongside this one would silently
+ * produce a policy stricter than either.
+ *
+ * `frame-ancestors 'self'` is carried over deliberately — MixOS frames its own
+ * pages, and this is the only clickjacking control (X-Frame-Options is not set,
+ * and frame-ancestors supersedes it).
+ *
+ * `script-src` is the point of the exercise. `'strict-dynamic'` means a script
+ * that carries the nonce may load further scripts, and nothing else may — so an
+ * injected `<script>` an attacker plants in the DOM does not run, because it
+ * cannot guess the nonce.
+ *
+ * `style-src` keeps `'unsafe-inline'`, and that is a considered trade rather than
+ * an oversight: React writes `style={{...}}` attributes throughout the dashboard
+ * (the drag-and-drop grid computes positions inline), a style attribute cannot
+ * execute script, and the XSS protection here comes from `script-src`. Tightening
+ * this means moving to `style-src-attr` plumbing for no meaningful gain.
+ *
+ * `connect-src 'self'` reinforces the egress boundary from the browser side: app
+ * client code reaches its own routes through the SDK and has no business opening
+ * a socket to anywhere else. Raw `fetch` is already lint-banned in `apps/**`.
+ *
+ * DEV. React uses `eval` in development to reconstruct server error stacks, so
+ * `'unsafe-eval'` is required there and only there.
+ *
+ * COST, stated plainly: a nonce forces every page to be dynamically rendered,
+ * because the nonce only exists once a request does. Static optimization, ISR and
+ * PPR are off. For a signed-in dashboard that already reads a session cookie on
+ * every page this changes almost nothing; the one surface that could have been
+ * cached is the public `/p/<slug>` view.
+ */
+function buildCsp(nonce: string): string {
+  const isDev = process.env.NODE_ENV === "development";
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' blob: data: https:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "worker-src 'self'",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'self'",
+    ...(isDev ? [] : ["upgrade-insecure-requests"]),
+  ].join("; ");
+}
+
+/**
+ * Attach the nonce to the REQUEST headers as well as the response.
+ *
+ * Next parses the nonce out of the request's `Content-Security-Policy` during
+ * render; `x-nonce` is what a server component reads if it ever needs to hand
+ * the nonce to a third-party script tag itself.
+ */
+function withCsp(request: NextRequest): NextResponse {
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const csp = buildCsp(nonce);
+
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", csp);
+
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set("Content-Security-Policy", csp);
+  return response;
+}
+
 export default function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (isPublic(pathname)) return NextResponse.next();
+  if (isPublic(pathname)) return withCsp(request);
 
   if (!hasSessionCookie(request)) {
     const url = new URL("/login", request.url);
     return NextResponse.redirect(url);
   }
 
-  return NextResponse.next();
+  return withCsp(request);
 }
 
 export const config = {
@@ -99,7 +186,31 @@ export const config = {
   // them and falls back to /favicon.ico. That is why the customer portal and the
   // login page both showed the root favicon whatever their <link> tags said.
   // These are logos: public by nature, and never a place a secret can hide.
+  //
+  // `themes/` is exempt for the same reason, and one sharper one: the sign-in
+  // page itself is themed. With the theme's fonts and logo behind the auth
+  // redirect, the one page every user sees before they have a session is the
+  // one page that renders unstyled. A theme asset is a font file, a logo or a
+  // favicon — the same "public by nature" category as the icons above.
+  //
+  // `connector-assets/` is a connector's icon, copied out of
+  // connectors/<name>/assets by the registry generator. Same category again: a
+  // third party's logo, committed in the repo, never a place a secret can hide.
+  // It is deliberately NOT served from `/connectors/`, which is a signed-in
+  // page route (/connectors/guide) — exempting that prefix would take the guard
+  // off a real page, and leaving it unexempted breaks the icons, because
+  // next/image's optimizer fetches the source URL server-side with no cookies
+  // and gets the redirect to /login.
+  //
+  // `screenshots/` is an app's or theme's listing gallery, copied out of
+  // <ext>/screenshots/ by the same generator. The category argument is the
+  // same, but the reason it MUST be unauthenticated is stronger than for the
+  // others: a screenshot exists to be looked at by someone deciding whether to
+  // install, which is necessarily before they have a session — a gallery behind
+  // the auth redirect is a gallery with no audience. Only manifest-declared
+  // files are copied here, so an undeclared draft sitting in the source
+  // directory never reaches this path.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
+    "/((?!_next/static|_next/image|themes/|connector-assets/|screenshots/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
   ],
 };

@@ -8,7 +8,7 @@ To use a connector in your app, add its name to the `connectors` array in your `
 // app.json
 {
   "name": "My App",
-  "connectors": ["my-service", "hubspot"]
+  "connectors": ["my-service", "monday"]
 }
 ```
 

@@ -36,25 +36,51 @@ jobs:
 
       - run: npm ci
 
-      # NON-BLOCKING, deliberately and temporarily. `npm run lint` currently
-      # reports 10 pre-existing errors that predate the Vercel migration — 7x
-      # react-hooks/set-state-in-effect, 1x react-hooks/refs, 1x
-      # react-hooks/static-components, plus an unescaped entity — spread across
-      # 9 dashboard/admin components. Fixing them means reworking component
-      # render logic, which was out of scope for this change.
+      # BLOCKING. It was `continue-on-error` while 10 pre-existing react-hooks
+      # errors were outstanding; those are fixed and the count is zero, so the
+      # exemption is gone.
       #
-      # Typecheck and build below ARE blocking and both pass. Once the 10 are
-      # fixed, delete this comment and the `continue-on-error` line so lint
-      # gates PRs like the others.
+      # This matters more than a style gate. `eslint.config.mjs` is where the
+      # client/server boundary is enforced — no raw `fetch` in app code, no
+      # `process.env`, no connector or DB client outside the server tier, no
+      # constructing a scoped DB client for another app's prefix. Every one of
+      # those is an `error`, and while this step could not fail a PR, all of them
+      # were advisory. docs/security-architecture.md §3.3 calls this layer "Build
+      # fails on violation"; this line is what makes that sentence true.
+      #
+      # Warnings stay non-fatal: eslint exits non-zero on errors only.
       - name: Lint
         run: npm run lint
-        continue-on-error: true
+
+      # Dependency advisories. `--audit-level=high` rather than a clean slate:
+      # a low advisory in a dev-only transitive must not block a release, and a
+      # threshold nobody can meet is a threshold everybody learns to ignore.
+      #
+      # This step is the point of the exercise. The first audit run against this
+      # repo returned 2 critical and 6 high — both criticals in the auth library
+      # — not because anything regressed, but because nothing was looking.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      # BLOCKING, and cheap. MIXOS_REPOSITORY_URL decides which catalogue's
+      # checksums an install verifies downloads against, so a value that reaches
+      # a release decides what "verified" means on every deployment of it. The
+      # variable legitimately points at localhost while the platform and the
+      # catalogue are developed against each other — this is what stops that
+      # convenience from travelling in a committed file.
+      #
+      # Runs on every push and PR rather than only on the tag: catching it here
+      # means the fix is an edit, where catching it at the tag means recutting a
+      # release. See docs/security-architecture.md §31.
+      - name: Repository URL is not pinned away from mixos.org
+        run: npm run verify:repository-url
 
       - name: Typecheck
         run: npm run typecheck
 
       # `prebuild` regenerates src/generated/app-registry.ts, so this also
-      # catches a malformed app.json / connector.json manifest.
+      # catches a malformed app.json / connector.json / theme.json manifest, and
+      # a theme.css that violates the token contract.
       #
       # No database or secrets are provided on purpose. The Postgres pool is a
       # lazy proxy (src/lib/db/client.ts) and the Supabase client is created

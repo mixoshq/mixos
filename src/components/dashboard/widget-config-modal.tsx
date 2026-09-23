@@ -1,12 +1,18 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { X, GripVertical, Plus } from "lucide-react";
 import type { WidgetDefinition, WidgetConfigField } from "@/lib/apps/types";
 import type { ResolvedConfig } from "@/lib/hooks/types";
 import { widgetLoaders } from "@/generated/app-registry";
 import { useListReorder } from "@/lib/dnd/use-list-reorder";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface WidgetConfigModalProps {
   appSlug: string;
@@ -34,7 +40,10 @@ export default function WidgetConfigModal({
       try {
         const key = `${appSlug}/${widget.component}`;
         const loader = widgetLoaders[key];
-        if (!loader) { setLoading(false); return; }
+        if (!loader) {
+          setLoading(false);
+          return;
+        }
         const mod = await loader();
         if (mod.resolveConfig) {
           const resolved = await mod.resolveConfig({ appSlug });
@@ -48,27 +57,24 @@ export default function WidgetConfigModal({
     resolve();
   }, [appSlug, widget.component]);
 
-  // Initialize defaults
-  useEffect(() => {
-    if (!widget.config) return;
+  // Derived, not written by an effect. The old version setState'd inside an
+  // effect that also depended on `config`, which is the cascading-render shape
+  // React's rule flags — and it re-ran on every keystroke to re-merge defaults
+  // that had not changed.
+  const effectiveConfig = useMemo(() => {
     const defaults: Record<string, unknown> = {};
-    for (const field of widget.config) {
-      if (field.default !== undefined && !(field.key in config)) {
-        defaults[field.key] = field.default;
-      }
-      // Use resolved defaults if available
-      if (resolvedConfig[field.key]?.default !== undefined) {
-        defaults[field.key] = resolvedConfig[field.key].default;
-      }
+    for (const field of widget.config ?? []) {
+      if (field.default !== undefined) defaults[field.key] = field.default;
+      const resolvedDefault = resolvedConfig[field.key]?.default;
+      if (resolvedDefault !== undefined) defaults[field.key] = resolvedDefault;
     }
-    if (Object.keys(defaults).length > 0) {
-      setConfig((prev) => ({ ...defaults, ...prev }));
-    }
+    // A value the user actually set always wins over a default.
+    return { ...defaults, ...config };
   }, [widget.config, resolvedConfig, config]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(config);
+    onSave(effectiveConfig);
   };
 
   const renderField = (field: WidgetConfigField) => {
@@ -77,8 +83,8 @@ export default function WidgetConfigModal({
 
     switch (field.type) {
       case "multiselect": {
-        const selected = Array.isArray(config[field.key])
-          ? (config[field.key] as string[])
+        const selected = Array.isArray(effectiveConfig[field.key])
+          ? (effectiveConfig[field.key] as string[])
           : [];
         if (field.ordered) {
           return (
@@ -131,7 +137,7 @@ export default function WidgetConfigModal({
       case "select":
         return (
           <select
-            value={(config[field.key] as string) ?? ""}
+            value={(effectiveConfig[field.key] as string) ?? ""}
             onChange={(e) =>
               setConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
             }
@@ -150,7 +156,7 @@ export default function WidgetConfigModal({
           <label className="flex items-center gap-2">
             <input
               type="checkbox"
-              checked={!!config[field.key]}
+              checked={!!effectiveConfig[field.key]}
               onChange={(e) =>
                 setConfig((prev) => ({
                   ...prev,
@@ -166,7 +172,7 @@ export default function WidgetConfigModal({
         return (
           <input
             type="number"
-            value={(config[field.key] as number) ?? ""}
+            value={(effectiveConfig[field.key] as number) ?? ""}
             onChange={(e) =>
               setConfig((prev) => ({
                 ...prev,
@@ -180,7 +186,7 @@ export default function WidgetConfigModal({
         return (
           <input
             type="text"
-            value={(config[field.key] as string) ?? ""}
+            value={(effectiveConfig[field.key] as string) ?? ""}
             onChange={(e) =>
               setConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
             }
@@ -195,8 +201,11 @@ export default function WidgetConfigModal({
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div
-        data-tour="widget-config-modal"
-        className="mx-4 w-full max-w-md rounded-xl border border-border bg-card shadow-xl"
+        className={cn(
+          "mix-modal",
+          CARD_SURFACE,
+          "mx-4 w-full max-w-md shadow-xl",
+        )}
       >
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-lg font-semibold">Configure {widget.name}</h2>
@@ -246,8 +255,7 @@ export default function WidgetConfigModal({
               </button>
               <button
                 type="submit"
-                data-tour="widget-config-submit"
-                className="rounded-md bg-mixnavy px-4 py-2 text-sm font-medium text-white hover:bg-mixnavy/90"
+                className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
               >
                 {submitLabel}
               </button>
@@ -311,7 +319,6 @@ function OrderedMultiselect({
             {selected.map((value, i) => (
               <li
                 key={`${fieldKey}-${value}`}
-                data-tour="widget-config-selected-item"
                 {...getItemProps(i)}
                 className={`flex items-center gap-2 rounded px-1.5 py-1 text-sm ${
                   dragOverIndex === i && dragIndex !== null && dragIndex !== i

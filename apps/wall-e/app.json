@@ -1,0 +1,39 @@
+{
+  "name": "Wall·E",
+  "description": "A dashboard widget with a different inspirational line from WALL·E every hour.",
+  "tagline": "A different line from WALL·E every hour",
+  "icon": "bot",
+  "authors": [
+    {
+      "name": "Anthony Montalbano",
+      "email": "amontalbano@gmail.com"
+    }
+  ],
+  "keywords": [
+    "quotes",
+    "fun",
+    "dashboard",
+    "hourly"
+  ],
+  "license": "MPL-2.0",
+  "connectors": [],
+  "database": false,
+  "notifications": false,
+  "global": true,
+  "widgets": [
+    {
+      "name": "Wall-E",
+      "description": "One line from WALL·E, chosen at random and stable until the top of the next hour.",
+      "defaultSize": {
+        "w": 4,
+        "h": 2
+      },
+      "minSize": {
+        "w": 2,
+        "h": 1
+      },
+      "component": "widgets/quote-of-the-day.tsx"
+    }
+  ],
+  "lastUpdated": "2026-09-23T04:12:04.914Z"
+}

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useMemo, useState } from "react";
@@ -7,9 +11,17 @@ import type { DashboardWidget, LayoutItem } from "@/lib/dashboard/actions";
 import { addWidget } from "@/lib/dashboard/actions";
 import WidgetConfigModal from "./widget-config-modal";
 import LucideIcon from "@/components/lucide-icon";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface WidgetCatalogProps {
   apps: AppManifest[];
+  /**
+   * Dim the page behind the dialog. Default true. The welcome tour turns it
+   * off: it is already spotlighting one card in here, and a second fade
+   * underneath it reads as the page being broken rather than focused.
+   */
+  backdrop?: boolean;
   onClose: () => void;
   onWidgetAdded: (widget: DashboardWidget, layoutItem: LayoutItem) => void;
 }
@@ -21,6 +33,7 @@ type FlatWidget = {
 
 export default function WidgetCatalog({
   apps,
+  backdrop = true,
   onClose,
   onWidgetAdded,
 }: WidgetCatalogProps) {
@@ -104,10 +117,21 @@ export default function WidgetCatalog({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-        <div className="mx-4 w-full max-w-5xl rounded-xl border border-border bg-card shadow-xl">
+      <div
+        className={cn(
+          "fixed inset-0 z-50 flex items-center justify-center",
+          backdrop && "bg-black/50",
+        )}
+      >
+        <div
+          className={cn(
+            "mix-modal",
+            CARD_SURFACE,
+            "mx-4 w-full max-w-5xl shadow-xl",
+          )}
+        >
           {/* Header */}
-          <div className="flex items-center justify-between rounded-t-xl bg-mixnavy px-6 py-4">
+          <div className="flex items-center justify-between rounded-t-xl bg-brand px-6 py-4">
             <h2 className="text-lg font-semibold text-white">Add Widget</h2>
             <div className="flex items-center gap-2">
               {/* Search */}
@@ -230,7 +254,7 @@ function WidgetCard({
 }) {
   return (
     <div
-      data-tour-widget={app.slug}
+      data-tour={`widget-${app.slug}`}
       className="flex flex-col gap-3 rounded-lg border border-border p-4"
     >
       <div className="flex items-start gap-3">
@@ -251,7 +275,7 @@ function WidgetCard({
       <button
         type="button"
         onClick={onSelect}
-        className="self-end rounded-full bg-mixnavy px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-mixnavy/85"
+        className="self-end rounded-full bg-brand px-3 py-1.5 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand/85"
       >
         Add to Dashboard
       </button>

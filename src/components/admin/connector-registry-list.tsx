@@ -1,10 +1,23 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import type { ConnectorManifest } from "@/lib/connectors/types";
+import type { ConnectorVerification } from "@/lib/connectors/config";
+import type { ConnectorAccess } from "@/lib/connectors/access";
+import type { ScopeStatusRow } from "@/lib/connectors/scope-status";
+import type { ConnectorScope } from "@/lib/connectors/types";
+import type { ConnectorDependents } from "@/lib/connectors/dependents";
+import type { ConnectorConfigState } from "@/lib/connectors/status";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
-import ConnectorRegistryRow from "./connector-registry-row";
+import ConnectorTile from "./connector-tile";
+import ConnectorConfigureDialog from "./connector-configure-dialog";
+import { CARD_SHELL } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /** Connection state for a three-legged connector; null for every other kind. */
 export interface ConnectorOAuthStatus {
@@ -13,16 +26,42 @@ export interface ConnectorOAuthStatus {
   expiresAt: number | null;
   /** Redirect URI to register upstream; null when no origin is configured. */
   redirectUri: string | null;
+  /**
+   * Every scope the provider documents, each flagged `requested`. The consent
+   * screen only ever asks for the requested subset; the rest is the catalogue
+   * the Scopes tab renders.
+   */
+  scopes: ConnectorScope[];
 }
 
 export type ConnectorWithStatus = ConnectorManifest & {
-  configured: boolean;
+  /**
+   * Derived server-side by `connectorConfigState()` — the same function the
+   * runtime's `configured` getter uses, so the tile cannot claim a connector is
+   * ready when no app could call it.
+   */
+  state: ConnectorConfigState;
+  /**
+   * When Test Connection last actually succeeded. Distinct from `state`, which
+   * only knows what is stored — a complete credential set the upstream rejects
+   * still reads as "ready".
+   */
+  verification: ConnectorVerification;
+  /** Granted scopes and observed usage — see lib/connectors/access.ts. */
+  access: ConnectorAccess;
+  /** Cached plain-English permissions from the provider's reference page. */
+  scopeStatus: ScopeStatusRow[];
+  /** Which apps declare this connector, required vs optional. */
+  dependents: ConnectorDependents;
   oauth: ConnectorOAuthStatus | null;
 };
 
 interface Props {
   connectors: ConnectorWithStatus[];
-  configureAction: (formData: FormData) => void;
+  /** Connector whose dialog should be open on load — set by the OAuth return. */
+  initialOpen?: string | null;
+  /** Returns whether the connector now holds a usable credential set. */
+  configureAction: (formData: FormData) => Promise<boolean>;
   testAction: (connectorName: string) => Promise<ConnectorTestOutcome>;
 }
 
@@ -36,38 +75,81 @@ const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
 
 export default function ConnectorRegistryList({
   connectors,
+  initialOpen = null,
   configureAction,
   testAction,
 }: Props) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
+  /** Which connector's dialog is open. One at a time, by name. */
+  const [openName, setOpenName] = useState<string | null>(initialOpen);
+  /**
+   * Whether the open dialog was opened by the URL or by a click. Only the URL
+   * case means "you were already mid-setup" — it is set by the OAuth return —
+   * so only that case lands on the Configure tab. A tile click always starts on
+   * Details, including a second click on the same connector.
+   */
+  const [openedFromUrl, setOpenedFromUrl] = useState(initialOpen !== null);
+
+  function openTile(name: string) {
+    setOpenedFromUrl(false);
+    setOpenName(name);
+  }
+
   const lower = query.toLowerCase();
+  /*
+    Everything written about a connector, not just what its tile shows. The
+    words an admin actually types — "mailbox", "consent screen" — live in the
+    setup prose, and `description` is a 140-character blurb about the service.
+    Searching only the visible fields would find almost none of them.
+  */
+  const haystacks = useMemo(
+    () =>
+      new Map(
+        connectors.map((c) => {
+          const parts = [c.displayName, c.name, c.description];
+          if (c.setup) {
+            for (const step of c.setup.steps) {
+              parts.push(step.text);
+              if (step.why) parts.push(step.why);
+            }
+            if (c.setup.notes) {
+              parts.push(...Object.values(c.setup.notes).filter(Boolean));
+            }
+          }
+          return [c.name, parts.join(" ").toLowerCase()] as const;
+        }),
+      ),
+    [connectors],
+  );
   const searchMatches = useMemo(
     () =>
-      connectors.filter((c) => {
-        if (!query) return true;
-        return (
-          c.displayName.toLowerCase().includes(lower) ||
-          c.name.toLowerCase().includes(lower) ||
-          c.description.toLowerCase().includes(lower)
-        );
-      }),
-    [connectors, query, lower],
+      connectors.filter(
+        (c) => !query || (haystacks.get(c.name)?.includes(lower) ?? false),
+      ),
+    [connectors, query, lower, haystacks],
   );
+
+  // "Configured" means ready to be called. A three-legged connector awaiting
+  // authorization is not — it files under Unconfigured, matching what the tile
+  // says and what the runtime does.
   const counts = useMemo(() => {
     let configured = 0;
     let unconfigured = 0;
     for (const c of searchMatches) {
-      if (c.configured) configured++;
+      if (c.state === "ready") configured++;
       else unconfigured++;
     }
     return { all: searchMatches.length, configured, unconfigured };
   }, [searchMatches]);
+
   const filtered = searchMatches.filter((c) => {
-    if (status === "configured") return c.configured;
-    if (status === "unconfigured") return !c.configured;
+    if (status === "configured") return c.state === "ready";
+    if (status === "unconfigured") return c.state !== "ready";
     return true;
   });
+
+  const openConnector = connectors.find((c) => c.name === openName) ?? null;
 
   return (
     <>
@@ -77,9 +159,10 @@ export default function ConnectorRegistryList({
           <input
             type="text"
             placeholder="Search connectors..."
+            aria-label="Search connectors"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            className="w-full rounded-lg border border-input bg-background py-2 pl-9 pr-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
         <div
@@ -99,7 +182,7 @@ export default function ConnectorRegistryList({
                 onClick={() => setStatus(opt.value)}
                 className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${
                   active
-                    ? "bg-mixnavy text-white"
+                    ? "bg-brand text-brand-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
@@ -107,8 +190,8 @@ export default function ConnectorRegistryList({
                 <span
                   className={`rounded px-1.5 py-px text-xs tabular-nums ${
                     active
-                      ? "bg-white/20 text-white"
-                      : "bg-muted text-muted-foreground"
+                      ? "bg-white/20 text-brand-foreground"
+                      : "bg-muted text-foreground"
                   }`}
                 >
                   {count}
@@ -118,26 +201,44 @@ export default function ConnectorRegistryList({
           })}
         </div>
       </div>
-      <div className="rounded-xl border border-border bg-card shadow-sm">
-        <div className="divide-y divide-border">
-          {filtered.length > 0 ? (
-            filtered.map((connector) => (
-              <ConnectorRegistryRow
-                key={connector.name}
-                connector={connector}
-                configureAction={configureAction}
-                testAction={testAction}
-              />
-            ))
-          ) : (
-            <div className="px-6 py-8 text-center text-muted-foreground">
-              {query || status !== "all"
-                ? "No connectors match your filters."
-                : "No connectors registered. Add a connector to the /connectors directory."}
-            </div>
-          )}
+
+      {filtered.length > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filtered.map((connector) => (
+            <ConnectorTile
+              key={connector.name}
+              connector={connector}
+              onConfigure={() => openTile(connector.name)}
+            />
+          ))}
         </div>
-      </div>
+      ) : (
+        <div
+          className={cn(CARD_SHELL, "p-5 text-center text-muted-foreground")}
+        >
+          {query || status !== "all"
+            ? "No connectors match your filters."
+            : "No connectors registered. Add a connector to the /connectors directory."}
+        </div>
+      )}
+
+      {/*
+        One dialog for the whole grid rather than one per tile. Mounting a
+        focus-trapping dialog under every card would put N copies of its key
+        handlers on the document, and unmounting on close is what resets the
+        save/test state between connectors.
+      */}
+      {openConnector && (
+        <ConnectorConfigureDialog
+          key={openConnector.name}
+          connector={openConnector}
+          open
+          initialTab={openedFromUrl ? "configure" : "details"}
+          onClose={() => setOpenName(null)}
+          configureAction={configureAction}
+          testAction={testAction}
+        />
+      )}
     </>
   );
 }

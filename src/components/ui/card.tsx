@@ -1,8 +1,12 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 /**
  * Card chrome: one shell, one header row, one body.
  *
  * WHY THIS EXISTS. Before this file there were **86 hand-rolled
- * `rounded-xl border border-border bg-card` shells across 16 apps**, and they had
+ * `rounded-lg border border-border bg-card` shells across 16 apps**, and they had
  * drifted the way copies do. Within a single app, four cards carried
  * `h2 text-lg`, `h2 text-sm` and `h3 text-sm` between them; some padded the whole
  * card with `p-4` while others padded header and body separately. Across apps the
@@ -31,20 +35,66 @@
  * padded body, and a `SaveRow` footer whose absence is the read-only permission
  * model. This one is a **dashboard panel**: `text-lg` title, a right-hand status
  * slot, no footer. Settings screen → `SectionCard`. Panel of numbers or a chart →
- * `Card`. `SectionCard` borrows `CARD_SHELL` from here so the two can't drift on
- * radius, border or fill.
+ * `Card`. `SectionCard` borrows `CARD_SHELL` **and the `5` padding scale** from
+ * here so the two can't drift on radius, border, fill or inset.
+ *
+ * FLOATING SURFACES take `CARD_SHELL` and nothing else. `Dialog` and `Menu` share
+ * this radius, border and fill so every surface in the product has one edge
+ * treatment, but they keep their own insets and their own `shadow-*`: a modal
+ * over a scrim needs elevation to read as lifted, and a menu's rows pad
+ * themselves, so `p-5` around them would be wrong. Inline cards are flat.
  *
  * See docs/apps/app-shell.md#cards-one-shell-per-thing-and-every-card-says-who-owns-it.
  */
 import type { ReactNode } from "react";
 
 /** The shell. No padding of its own — header and body pad themselves. */
-export const CARD_SHELL = "rounded-xl border border-border bg-card";
-/** Header row. The padding AND the type size live here, nowhere else. */
-export const CARD_HEADER = "flex flex-wrap items-center gap-2 px-4 py-3";
+/**
+ * `mix-card` is a THEME HOOK, not a style. It carries no rules of its own — it
+ * exists so a theme can reach this surface (see themes/AGENTS.md) without
+ * selecting a utility class that a refactor is free to change. Every hook in
+ * src/components/ui/ works the same way, and the allowlist of legal hooks lives
+ * in src/lib/themes/tokens.ts.
+ *
+ * WHICH ONE TO IMPORT. `CARD_SURFACE` is the chrome alone — radius, border,
+ * fill. `CARD_SHELL` is that chrome plus the `.mix-card` hook, and it is what an
+ * ordinary card wants.
+ *
+ * A surface that owns a **different** hook takes `CARD_SURFACE` and adds its own:
+ * a widget is `.mix-widget`, a modal `.mix-modal`, a dropdown `.mix-popover`, and
+ * those are separate entries in `SURFACE_ALLOWLIST` precisely so a theme can
+ * restyle dashboard widgets without also restyling every panel on the settings
+ * page. Handing them `CARD_SHELL` would quietly merge four themeable surfaces
+ * into one and there would be no way for a theme to tell them apart again.
+ */
+export const CARD_SURFACE = "rounded-lg border border-border bg-card";
+export const CARD_SHELL = `mix-card ${CARD_SURFACE}`;
+/**
+ * THE PADDING SCALE IS ONE NUMBER: 5.
+ *
+ * Header, body and divided body all inset by `5` on every side they own, so a
+ * headerless card is exactly `p-5` and a card with a header reads as one evenly
+ * inset block. Before this there were two scales — `px-4 py-3` on the header and
+ * `px-4 pb-4 pt-3` on the body — which is why a card's top inset (12px) never
+ * matched its sides (16px), and why the analytics panels had been hand-rolled at
+ * `p-5` instead of using this file at all.
+ *
+ * The header carries `pb-0` and lets the body's own `p-5` open the gap beneath
+ * the title, rather than both sides contributing padding into the same seam. Two
+ * components padding one gap is how the old numbers drifted apart.
+ *
+ * **No elevation here on purpose.** Inline cards are flat — the border is the
+ * edge. Elevation belongs only to surfaces that genuinely float above the page
+ * (`Dialog`, `Menu`), and those add their own `shadow-*` on top of this shell.
+ */
+export const CARD_HEADER = "px-5 pt-5 pb-0";
+/** The title row inside the header. A `description` line sits under it, not in it. */
+export const CARD_HEADER_ROW = "flex flex-wrap items-center gap-2";
 export const CARD_TITLE = "text-lg font-semibold text-foreground";
-/** Body padding, no separating rule. */
-export const CARD_BODY = "px-4 pb-4 pt-3";
+/** Sub-line under a card title. `text-sm`, one step down from `CARD_TITLE`. */
+export const CARD_DESCRIPTION = "mt-0.5 text-sm text-muted-foreground";
+/** Body padding, no separating rule. Also the whole inset of a headerless card. */
+export const CARD_BODY = "p-5";
 /** Body padding plus the rule that separates it from the header. */
 export const CARD_BODY_DIVIDED = `border-t border-border ${CARD_BODY}`;
 /** Right-aligned header slot — a count, an age, a status. */
@@ -92,6 +142,7 @@ export function Card({
 export function CardHeader({
   title,
   as = "h2",
+  description,
   right,
   className,
   children,
@@ -105,6 +156,12 @@ export function CardHeader({
    * case, not because h2 is the safe answer.
    */
   as?: "h2" | "h3" | "h4" | "p";
+  /**
+   * A sentence under the title saying what the panel is showing. Rendered
+   * **below** the title row, not inside it — it is prose, and prose in a flex row
+   * that also holds chips and a status slot wraps into a mess at narrow widths.
+   */
+  description?: ReactNode;
   /** Status shown at the right end of the row. */
   right?: ReactNode;
   className?: string;
@@ -114,9 +171,12 @@ export function CardHeader({
   const Tag = as;
   return (
     <div className={`${CARD_HEADER}${className ? ` ${className}` : ""}`}>
-      <Tag className={CARD_TITLE}>{title}</Tag>
-      {children}
-      {right != null && <span className={CARD_HEADER_RIGHT}>{right}</span>}
+      <div className={CARD_HEADER_ROW}>
+        <Tag className={CARD_TITLE}>{title}</Tag>
+        {children}
+        {right != null && <span className={CARD_HEADER_RIGHT}>{right}</span>}
+      </div>
+      {description != null && <p className={CARD_DESCRIPTION}>{description}</p>}
     </div>
   );
 }

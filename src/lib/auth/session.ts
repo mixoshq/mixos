@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { redirect } from "next/navigation";
 import { auth } from "./index";
 import type { Session } from "next-auth";
@@ -5,11 +9,7 @@ import type { Session } from "next-auth";
 /**
  * Session payload shape the rest of the codebase consumes.
  *
- * The previous implementation delegated to @montalbanowork/sso, where
- * session.user.id was the external SSO subject ID. With NextAuth +
- * email/password the id is now the internal users.id (UUID). Callers
- * that used to pass session.user.id to getUserBySSO() should use
- * getUserById() instead.
+ * `user.id` is the internal `users.id` UUID — pass it to `getUserById()`.
  */
 export interface SessionPayload {
   user: {
@@ -43,8 +43,5 @@ export async function requireReadOnlySession(): Promise<SessionPayload> {
   return session;
 }
 
-/**
- * Kept as an alias for code migrated from @montalbanowork/sso's
- * `requireServerSession`. Same behavior as `requireReadOnlySession`.
- */
+/** Alias retained for existing call sites. Same behavior as `requireReadOnlySession`. */
 export const requireServerSession = requireReadOnlySession;

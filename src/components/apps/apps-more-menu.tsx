@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 "use client";
 
 import { forwardRef } from "react";
@@ -8,6 +12,8 @@ import type {
   ListReorderItemProps,
   ListReorderDropTargetProps,
 } from "@/lib/dnd/use-list-reorder";
+import { CARD_SURFACE } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 type Props = {
   apps: AppManifest[];
@@ -38,7 +44,11 @@ const AppsMoreMenu = forwardRef<HTMLDivElement, Props>(function AppsMoreMenu(
     <div
       ref={ref}
       role="menu"
-      className="absolute right-0 top-full z-50 mt-1 w-56 rounded-lg border border-border bg-card py-1 shadow-lg"
+      className={cn(
+        "mix-popover",
+        CARD_SURFACE,
+        "absolute right-0 top-full z-50 mt-1 w-56 py-1 shadow-lg",
+      )}
       {...getDropTargetProps(offset + apps.length)}
     >
       {apps.map((app, m) => {
@@ -54,14 +64,16 @@ const AppsMoreMenu = forwardRef<HTMLDivElement, Props>(function AppsMoreMenu(
             key={app.slug}
             href={`/apps/${app.slug}`}
             onClick={onItemClick}
-            data-tour-app-nav={app.slug}
             {...getItemProps(globalIndex)}
             className={`flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent ${
               isActive
                 ? "bg-accent font-medium text-foreground"
                 : "text-foreground"
             } ${isDropTarget ? "bg-accent" : ""} ${
-              isDragging ? "opacity-50" : ""
+              // A ring rather than a fade: dimming the label thins
+              // `text-foreground` to 3.75:1, and "picked up" reads more clearly
+              // as an outline than as a ghost.
+              isDragging ? "bg-accent ring-2 ring-inset ring-ring" : ""
             }`}
           >
             <LucideIcon

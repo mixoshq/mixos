@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { sql } from "@/lib/db/client";
 import type { BaseConnector } from "@/lib/connectors/types";
 
@@ -62,12 +66,19 @@ export async function recordConnectorEvent(opts: {
   method: string;
   callerAppSlug: string;
   userId: string | null;
+  /** How the call settled. Omitted only if a caller cannot tell. */
+  outcome?: "ok" | "error";
+  /** ConnectorError category on failure — "denied" vs "throttled" vs "timed out". */
+  errorCategory?: string | null;
 }): Promise<void> {
   try {
     await sql`
       insert into public.telemetry_events
-        (source_type, source_slug, caller_app_slug, event_name, user_id)
-      values ('connector', ${opts.connectorSlug}, ${opts.callerAppSlug}, ${opts.method}, ${opts.userId})
+        (source_type, source_slug, caller_app_slug, event_name, user_id, outcome, error_category)
+      values (
+        'connector', ${opts.connectorSlug}, ${opts.callerAppSlug}, ${opts.method},
+        ${opts.userId}, ${opts.outcome ?? null}, ${opts.errorCategory ?? null}
+      )
     `;
   } catch {
     // best-effort
@@ -217,6 +228,12 @@ export async function pruneRouteTelemetry(retentionDays = 30): Promise<number> {
  * arguments, results, or credentials. Non-method access (e.g. the `configured`
  * getter) passes straight through.
  */
+/** ConnectorError carries a `category`; anything else is an unclassified fault. */
+function categoryOf(err: unknown): string | null {
+  const category = (err as { category?: unknown } | null)?.category;
+  return typeof category === "string" ? category : null;
+}
+
 export function instrumentConnector<T extends BaseConnector>(
   instance: T,
   opts: {
@@ -236,13 +253,54 @@ export function instrumentConnector<T extends BaseConnector>(
         typeof value === "function"
       ) {
         return (...args: unknown[]) => {
-          void recordConnectorEvent({
-            connectorSlug: opts.connectorSlug,
-            method: prop,
-            callerAppSlug: opts.callerAppSlug,
-            userId: opts.userId,
-          });
-          return (value as (...a: unknown[]) => unknown).apply(target, args);
+          const record = (
+            outcome: "ok" | "error",
+            errorCategory?: string | null,
+          ) =>
+            void recordConnectorEvent({
+              connectorSlug: opts.connectorSlug,
+              method: prop,
+              callerAppSlug: opts.callerAppSlug,
+              userId: opts.userId,
+              outcome,
+              errorCategory,
+            });
+
+          /*
+            Recorded when the call SETTLES, not when it starts.
+
+            The event used to be written up front, which made it a record of
+            "someone tried" — enough to attribute usage, useless for answering
+            "does this connector actually have the access it claims". The
+            tradeoff is real and deliberate: a call that never settles now
+            records nothing, where before it recorded an attempt.
+
+            The category comes off ConnectorError rather than off an HTTP
+            status, which is what keeps "denied" separate from "throttled" — a
+            403 means either, depending on the provider (see `rateLimitOn403`).
+          */
+          let result: unknown;
+          try {
+            result = (value as (...a: unknown[]) => unknown).apply(target, args);
+          } catch (err) {
+            record("error", categoryOf(err));
+            throw err;
+          }
+
+          if (result instanceof Promise) {
+            return result.then(
+              (v) => {
+                record("ok");
+                return v;
+              },
+              (err) => {
+                record("error", categoryOf(err));
+                throw err;
+              },
+            );
+          }
+          record("ok");
+          return result;
         };
       }
       return value;

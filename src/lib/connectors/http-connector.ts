@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { connectorRegistry } from "@/generated/connector-registry";
 import { ConnectorError, RETRYABLE_CATEGORIES } from "./errors";
 import type { ConnectorErrorCategory } from "./errors";
@@ -9,7 +13,8 @@ import {
   isSuccess,
   parseRetryAfter,
 } from "./status-map";
-import { TOKEN_KEYS, requestToken } from "./oauth";
+import { TOKEN_KEYS, requestToken, requestedScopes } from "./oauth";
+import { connectorConfigState } from "./status";
 import type {
   BaseConnector,
   ConnectorAuthPolicy,
@@ -101,25 +106,13 @@ export abstract class HttpConnector implements BaseConnector {
    * `auth.credentialKeys` when declared, so most connectors never write it.
    * `testConnection()` is the live proof — keeping the two separate is what
    * makes invariant 12 checkable instead of aspirational.
+   *
+   * The rule itself lives in `./status.ts`, because the Connector Registry has
+   * to answer the same question about credentials it has read but not
+   * instantiated. Two copies of it drifted once already — see that file.
    */
   get configured(): boolean {
-    // A three-legged connector with client credentials but no grant yet is
-    // *not* configured: an admin has filled the form but never pressed Connect,
-    // and no call can succeed. Invariant 12 means saying so.
-    if (this.auth.strategy === "oauth2_authorization_code") {
-      const [idKey, secretKey] = this.auth.credentialKeys ?? ["clientId", "clientSecret"];
-      return (
-        this.hasCredentials(idKey, secretKey) &&
-        (this.hasCredentials(TOKEN_KEYS.refresh) || this.hasCredentials(TOKEN_KEYS.access))
-      );
-    }
-
-    const keys = this.auth.credentialKeys;
-    if (keys && keys.length > 0) {
-      return keys.every((k) => (this.credentials[k] ?? "").length > 0);
-    }
-    // No declaration to go on: any credential at all counts as configured.
-    return Object.values(this.credentials).some((v) => (v ?? "").length > 0);
+    return connectorConfigState(this.auth, this.credentials) === "ready";
   }
 
   /**
@@ -147,7 +140,6 @@ export abstract class HttpConnector implements BaseConnector {
     // never touches, and a transient blip at the token endpoint would exclude
     // the connector entirely (invariant 11), turning "slow auth server" into
     // "app unavailable".
-
   }
 
   // ── Declared policy ───────────────────────────────────────────────────────
@@ -176,7 +168,10 @@ export abstract class HttpConnector implements BaseConnector {
 
   /** A `baseUrl` credential wins, so an admin can point at a sandbox. */
   protected get baseUrl(): string {
-    return (this.credentials.baseUrl || this.http.baseUrl || "").replace(/\/+$/, "");
+    return (this.credentials.baseUrl || this.http.baseUrl || "").replace(
+      /\/+$/,
+      "",
+    );
   }
 
   // ── The only outbound path ────────────────────────────────────────────────
@@ -196,10 +191,13 @@ export abstract class HttpConnector implements BaseConnector {
 
     const verb = (init.method ?? "GET").toUpperCase();
     const idempotent = opts.idempotent ?? IDEMPOTENT_VERBS.has(verb);
-    const maxAttempts = opts.maxAttempts ?? this.http.maxAttempts ?? DEFAULTS.maxAttempts;
-    const perAttemptMs = opts.timeoutMs ?? this.http.timeoutMs ?? DEFAULTS.timeoutMs;
+    const maxAttempts =
+      opts.maxAttempts ?? this.http.maxAttempts ?? DEFAULTS.maxAttempts;
+    const perAttemptMs =
+      opts.timeoutMs ?? this.http.timeoutMs ?? DEFAULTS.timeoutMs;
     const deadlineAt =
-      Date.now() + (opts.deadlineMs ?? this.http.deadlineMs ?? DEFAULTS.deadlineMs);
+      Date.now() +
+      (opts.deadlineMs ?? this.http.deadlineMs ?? DEFAULTS.deadlineMs);
     const retryOn: ReadonlySet<ConnectorErrorCategory> = this.http.retryOn
       ? new Set(this.http.retryOn)
       : RETRYABLE_CATEGORIES;
@@ -262,7 +260,8 @@ export abstract class HttpConnector implements BaseConnector {
         // Sleeping past the deadline is worse than failing now: a serverless
         // function that burns its wall clock waiting helps nobody, and the
         // caller can act on `retryAfterMs` itself.
-        if (Date.now() + delay > deadlineAt) throw this.withAttempts(err, attempt);
+        if (Date.now() + delay > deadlineAt)
+          throw this.withAttempts(err, attempt);
         await sleep(delay);
       }
     }
@@ -448,9 +447,10 @@ export abstract class HttpConnector implements BaseConnector {
 
     const maxPages = policy.maxPages ?? DEFAULTS.maxPages;
     const pageSize = policy.pageSize ?? DEFAULTS.pageSize;
-    const query: Record<string, string | number | boolean | undefined | null> = {
-      ...(opts.query ?? {}),
-    };
+    const query: Record<string, string | number | boolean | undefined | null> =
+      {
+        ...(opts.query ?? {}),
+      };
     if (policy.limitParam) query[policy.limitParam] = pageSize;
 
     let cursor: string | null = null;
@@ -523,17 +523,16 @@ export abstract class HttpConnector implements BaseConnector {
     return keys.every((k) => (this.credentials[k] ?? "").length > 0);
   }
 
-  private resolveUrl(
-    path: string,
-    query?: RequestOptions["query"],
-  ): string {
+  private resolveUrl(path: string, query?: RequestOptions["query"]): string {
     const absolute = /^https?:\/\//i.test(path);
     if (!absolute && !this.baseUrl) {
       throw new Error(
         `connector "${this.name}" has no base URL — set http.baseUrl in connector.json or add a baseUrl credential.`,
       );
     }
-    const url = new URL(absolute ? path : `${this.baseUrl}/${path.replace(/^\/+/, "")}`);
+    const url = new URL(
+      absolute ? path : `${this.baseUrl}/${path.replace(/^\/+/, "")}`,
+    );
 
     for (const [key, value] of Object.entries(query ?? {})) {
       if (value == null) continue;
@@ -543,19 +542,26 @@ export abstract class HttpConnector implements BaseConnector {
     // apiKey-in-query is applied last so it cannot be clobbered by a caller.
     const { strategy, in: where, name } = this.auth;
     if (strategy === "apiKey" && where === "query" && name) {
-      url.searchParams.set(name, this.credentials[this.apiKeyCredential()] ?? "");
+      url.searchParams.set(
+        name,
+        this.credentials[this.apiKeyCredential()] ?? "",
+      );
     }
     return url.toString();
   }
 
-  private async buildHeaders(callerHeaders: HeadersInit | undefined): Promise<Headers> {
+  private async buildHeaders(
+    callerHeaders: HeadersInit | undefined,
+  ): Promise<Headers> {
     const headers = new Headers(this.http.defaultHeaders ?? {});
     headers.set("accept", "application/json");
-    for (const [k, v] of Object.entries(await this.authHeaders())) headers.set(k, v);
+    for (const [k, v] of Object.entries(await this.authHeaders()))
+      headers.set(k, v);
     // Caller headers win — a method knows more about its own call than the
     // manifest does.
     if (callerHeaders) {
-      for (const [k, v] of new Headers(callerHeaders).entries()) headers.set(k, v);
+      for (const [k, v] of new Headers(callerHeaders).entries())
+        headers.set(k, v);
     }
     return headers;
   }
@@ -567,21 +573,30 @@ export abstract class HttpConnector implements BaseConnector {
   protected async authHeaders(): Promise<Record<string, string>> {
     const { strategy, in: where = "bearer", name, prefix } = this.auth;
 
-    if (strategy === "oauth2_client_credentials" || strategy === "oauth2_authorization_code") {
+    if (
+      strategy === "oauth2_client_credentials" ||
+      strategy === "oauth2_authorization_code"
+    ) {
       return { authorization: `Bearer ${await this.bearerToken()}` };
     }
 
     if (strategy === "apiKey") {
       const value = this.credentials[this.apiKeyCredential()] ?? "";
       if (where === "query") return {};
-      if (where === "header" && name) return { [name]: `${prefix ?? ""}${value}` };
+      if (where === "header" && name)
+        return { [name]: `${prefix ?? ""}${value}` };
       return { authorization: `${prefix ?? "Bearer "}${value}` };
     }
 
     if (strategy === "basic") {
-      const [userKey, passKey] = this.auth.credentialKeys ?? ["username", "password"];
+      const [userKey, passKey] = this.auth.credentialKeys ?? [
+        "username",
+        "password",
+      ];
       const raw = `${this.credentials[userKey] ?? ""}:${this.credentials[passKey] ?? ""}`;
-      return { authorization: `Basic ${Buffer.from(raw, "utf-8").toString("base64")}` };
+      return {
+        authorization: `Basic ${Buffer.from(raw, "utf-8").toString("base64")}`,
+      };
     }
 
     return {};
@@ -627,9 +642,13 @@ export abstract class HttpConnector implements BaseConnector {
 
   /** A valid bearer token, obtaining one if we don't already hold a live one. */
   private async bearerToken(): Promise<string> {
-    if (this.auth.strategy === "oauth2_authorization_code") return this.grantedToken();
+    if (this.auth.strategy === "oauth2_authorization_code")
+      return this.grantedToken();
 
-    if (this.accessToken && this.accessToken.expiresAt - TOKEN_SKEW_MS > Date.now()) {
+    if (
+      this.accessToken &&
+      this.accessToken.expiresAt - TOKEN_SKEW_MS > Date.now()
+    ) {
       return this.accessToken.value;
     }
     this.accessToken = await this.mintToken();
@@ -638,9 +657,13 @@ export abstract class HttpConnector implements BaseConnector {
 
   /** Exchange client credentials for a token. Lives only for this instance. */
   private async mintToken(): Promise<{ value: string; expiresAt: number }> {
-    const [idKey, secretKey] = this.auth.credentialKeys ?? ["clientId", "clientSecret"];
+    const [idKey, secretKey] = this.auth.credentialKeys ?? [
+      "clientId",
+      "clientSecret",
+    ];
     const params: Record<string, string> = { grant_type: "client_credentials" };
-    if (this.auth.scopes?.length) params.scope = this.auth.scopes.join(" ");
+    const scopes = requestedScopes(this.auth);
+    if (scopes.length) params.scope = scopes.join(" ");
 
     const token = await requestToken({
       policy: this.auth,
@@ -722,7 +745,10 @@ export abstract class HttpConnector implements BaseConnector {
 
 /** Exponential backoff with full jitter. Attempt is 1-based. */
 function backoff(attempt: number): number {
-  const ceiling = Math.min(DEFAULTS.backoffCapMs, DEFAULTS.backoffBaseMs * 2 ** (attempt - 1));
+  const ceiling = Math.min(
+    DEFAULTS.backoffCapMs,
+    DEFAULTS.backoffBaseMs * 2 ** (attempt - 1),
+  );
   return Math.random() * ceiling;
 }
 
@@ -735,7 +761,8 @@ function getPath(obj: unknown, path?: string): unknown {
   return path
     .split(".")
     .reduce<unknown>(
-      (acc, key) => (acc == null ? undefined : (acc as Record<string, unknown>)[key]),
+      (acc, key) =>
+        acc == null ? undefined : (acc as Record<string, unknown>)[key],
       obj,
     );
 }

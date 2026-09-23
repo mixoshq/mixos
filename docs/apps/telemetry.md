@@ -21,11 +21,12 @@ Each declared event is validated at registry-build time (like `widgets`, `schedu
 
 ## How it works
 
-```
-app declares events (app.json) ──> context.telemetry injected into API routes
-API route ──> context.telemetry.track("report_generated", { format: "pdf" })
-          ──> platform writes one row to public.telemetry_events (best-effort)
-admin Analytics page ──> aggregates rows by event, over time, by user
+```mermaid
+flowchart TD
+    DECL["app declares events<br/>(app.json)"] --> INJECT["context.telemetry injected<br/>into API routes"]
+    INJECT --> ROUTE["API route calls<br/>context.telemetry.track('report_generated', { format: 'pdf' })"]
+    ROUTE --> ROW["platform writes one row to<br/>public.telemetry_events<br/>best-effort"]
+    ROW --> PAGE["admin Analytics page<br/>aggregates by event, over time, by user"]
 ```
 
 1. The app declares its events in `app.json`.
@@ -106,7 +107,7 @@ Events are recorded in a platform-owned table, `public.telemetry_events`:
 | `properties` | `jsonb` — your dimensions bag |
 | `created_at` | timestamptz |
 
-There is intentionally **no foreign key** to `apps` — events stay attributed even after an app is deregistered, matching the existing `app_open_events` design.
+There is intentionally **no foreign key** to `apps` — events stay attributed even after an app is removed from the repo and swept out of `apps`, matching the existing `app_open_events` design.
 
 ## Limits
 

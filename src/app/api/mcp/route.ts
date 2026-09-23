@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import { NextResponse, type NextRequest } from "next/server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { McpToolError, callTool } from "@/lib/mcp/broker";
@@ -226,7 +230,7 @@ function handleInitialize(req: JsonRpcRequest) {
       "Read-only access to MixOS apps. Each tool is named <app>__<tool> and " +
       "returns data scoped to the connected user's own permissions. Tools cannot " +
       "change anything. Every tool names what it is built from: these are Mix" +
-      "OS's joined, cached views over systems like HubSpot, Gong and Amplitude, " +
+      "OS's joined, cached views over systems like monday.com, Gong and Amplitude, " +
       "each shaped for one job. For raw records, arbitrary fields, or anything " +
       "outside the joins a tool names, a source system's own connector is the " +
       "better fit. These tools claim no priority over other servers' tools.",

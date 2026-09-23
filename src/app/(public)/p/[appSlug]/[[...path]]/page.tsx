@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { appRegistry } from "@/generated/app-registry";
@@ -6,6 +10,8 @@ import { loadAppPage } from "@/lib/apps/loader";
 import { isAppUnlocked } from "@/lib/apps/public-access";
 import { hasAppPassword } from "@/lib/apps/app-password-store";
 import PasswordGate from "@/components/apps/password-gate";
+import { CARD_SHELL } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 interface Props {
   params: Promise<{ appSlug: string; path?: string[] }>;
@@ -55,11 +61,11 @@ export default async function PublicAppPage({ params }: Props) {
         );
         return (
           <div className="flex min-h-screen items-center justify-center bg-muted px-4">
-            <div className="max-w-sm rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm">
-              <h1 className="text-lg font-semibold text-gray-900">
+            <div className={cn(CARD_SHELL, "max-w-sm p-5 text-center")}>
+              <h1 className="text-lg font-semibold text-card-foreground">
                 This app is not available
               </h1>
-              <p className="mt-2 text-sm text-gray-600">
+              <p className="mt-2 text-sm text-muted-foreground">
                 The administrator hasn&apos;t finished setting up access for
                 this page. Please try again later.
               </p>
