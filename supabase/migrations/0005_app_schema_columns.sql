@@ -92,3 +92,10 @@ $$;
 
 revoke all on function public.get_app_schema(text) from public, anon, authenticated;
 grant execute on function public.get_app_schema(text) to service_role;
+
+-- The schema version this file brings the database to. See 0007 and OS-UPDATES.md.
+insert into public.platform_settings (key, value)
+values ('platform_schema_version', '5')
+on conflict (key) do update
+  set value = excluded.value,
+      updated_at = now();
