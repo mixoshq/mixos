@@ -201,7 +201,16 @@ export const config = {
   // off a real page, and leaving it unexempted breaks the icons, because
   // next/image's optimizer fetches the source URL server-side with no cookies
   // and gets the redirect to /login.
+  //
+  // `screenshots/` is an app's or theme's listing gallery, copied out of
+  // <ext>/screenshots/ by the same generator. The category argument is the
+  // same, but the reason it MUST be unauthenticated is stronger than for the
+  // others: a screenshot exists to be looked at by someone deciding whether to
+  // install, which is necessarily before they have a session — a gallery behind
+  // the auth redirect is a gallery with no audience. Only manifest-declared
+  // files are copied here, so an undeclared draft sitting in the source
+  // directory never reaches this path.
   matcher: [
-    "/((?!_next/static|_next/image|themes/|connector-assets/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
+    "/((?!_next/static|_next/image|themes/|connector-assets/|screenshots/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
   ],
 };

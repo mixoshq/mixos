@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import type { Screenshot } from "../screenshots";
+
 /**
  * How a caller may authenticate to a page or API route.
  *
@@ -149,6 +151,14 @@ export interface AppManifest {
    * one idea. Defaults to `[]`.
    */
   keywords: string[];
+  /**
+   * Listing gallery, from `apps/<slug>/screenshots/`. Defaults to `[]`.
+   *
+   * Partly authored, partly derived: `app.json` declares `file`, `alt` and
+   * `caption`; the generator verifies the file, measures it, and fills in
+   * `url`, `width` and `height`. Never written by hand in full.
+   */
+  screenshots: Screenshot[];
   /**
    * SPDX identifier or expression for the app's licence (e.g. `MPL-2.0`), or
    * `UNLICENSED` for one that is not redistributable. `null` when undeclared —

@@ -15,6 +15,8 @@
  * shape emitted into src/generated/theme-registry.ts.
  */
 
+import type { Screenshot } from "../screenshots";
+
 export interface ThemeAuthor {
   name: string;
   email: string;
@@ -106,6 +108,20 @@ export interface ThemeManifest {
   authors: ThemeAuthor[];
   fonts: ThemeFontFace[];
   assets: ThemeAssets;
+  /**
+   * Listing gallery, from `themes/<slug>/screenshots/`. Defaults to `[]`.
+   *
+   * Not a replacement for `assets.preview`, and the two answer different
+   * questions. `preview` is the admin picker's thumbnail, shown beside a live
+   * swatch row and a type specimen rendered from the theme's own resolved
+   * tokens — which is why the picker needs so little of it. A listing is seen
+   * by someone who has not installed the theme, so none of that is available
+   * and a picture is all there is.
+   *
+   * As with an app: `theme.json` declares `file`, `alt` and `caption`; the
+   * generator fills in `url`, `width` and `height`.
+   */
+  screenshots: Screenshot[];
   /** Allowlisted `.mix-*` surfaces this theme styles, cross-checked against theme.css. */
   surfaces: string[];
   escapes: ThemeEscape[];

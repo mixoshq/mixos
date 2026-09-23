@@ -67,3 +67,7 @@ supabase/.branches/
 # the copy drift from source.
 /public/themes/
 /public/connector-assets/
+# Listing galleries, copied out of apps/<slug>/screenshots and
+# themes/<slug>/screenshots by the same generator. Same reasoning, and the
+# source files are the committed ones.
+/public/screenshots/
