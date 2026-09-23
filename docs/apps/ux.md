@@ -19,7 +19,7 @@ become components have:
 | An icon-only `<button>` | `IconButton` | Shipping without an accessible name — `label` is required by the type. |
 | `<input>` / `<select>` / `<textarea>` | [`Input`](../../src/components/ui/input.tsx) inside [`Field`](../../src/components/ui/field.tsx) | A label pointing at nothing. `Field` owns the id and the `htmlFor` wiring. |
 | `<table>` | [`DataTable`](../../src/components/ui/data-table.tsx) | A skeleton that drifts from the table, and a page that scrolls sideways. |
-| A hand-rolled card shell | [`Card`](../../src/components/ui/card.tsx) / `SectionCard` | The 87th copy of `rounded-xl border border-border bg-card`. |
+| A hand-rolled card shell | [`Card`](../../src/components/ui/card.tsx) / `SectionCard` | The 87th copy of `rounded-lg border border-border bg-card`. |
 | A status colour picked by hand | [`Badge`](../../src/components/ui/badge.tsx) | A category chip rendered in `destructive` — tones split grading from distinguishing. |
 | A `useEffect` fetch + three booleans | [`useAppQuery`](../../src/lib/apps/use-app-query.ts) + [`AsyncView`](../../src/components/ui/async-view.tsx) | Shipping a surface with no loading, empty, or error state. |
 
@@ -284,7 +284,7 @@ Each of these is a real screen a user will hit. All four live in [`@/components/
 ## Spacing, type & motion
 
 - **Lean on the type scale and spacing utilities** rather than custom pixel values — consistency reads as quality. Use the `font-sans` (Roboto) stack the platform sets; don't pull in a competing font without reason.
-- **Respect the card radius** (widgets live in `rounded-xl` cards). Match it on inner surfaces so things nest cleanly.
+- **Respect the card radius** (widgets live in `rounded-lg` cards). Match it on inner surfaces so things nest cleanly.
 - **Keep motion subtle and fast** (~150–300ms, ease-out). Animate to communicate (a value updating, a panel opening), never to decorate. Honor `prefers-reduced-motion` — gate non-essential animation behind it.
 - **Touch/click targets are at least ~36–40px tall.** Don't ship tap targets only a few pixels high.
 
