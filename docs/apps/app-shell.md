@@ -107,7 +107,7 @@ Pass `surface` to name what sits beneath the band. The active tab merges into th
 
 ## Cards: one shell per thing, and every card says who owns it
 
-Use [`Card`](../../src/components/ui/card.tsx) for the shell and `CardHeader` for the header row. They exist because 86 hand-rolled `rounded-xl border border-border bg-card` shells across 16 apps had drifted into different paddings, different header sizes, and h1–h4 for the same visual weight.
+Use [`Card`](../../src/components/ui/card.tsx) for the shell and `CardHeader` for the header row. They exist because 86 hand-rolled `rounded-lg border border-border bg-card` shells across 16 apps had drifted into different paddings, different header sizes, and h1–h4 for the same visual weight.
 
 **Two card families, and picking the wrong one is the usual mistake.** [`SectionCard`](../../src/components/ui/section-card.tsx) is a *form section* — small `h3` label, a `hint` line, a rule under the header, and a `SaveRow` footer whose absence is the read-only permission model. Use it on Configure pages and settings screens. `Card` is a *dashboard panel* — `text-lg` title, an optional `description` line, right-hand status slot, no footer. They share `CARD_SHELL` **and the padding scale**, so they can't drift on radius, border, fill or inset.
 
