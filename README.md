@@ -198,6 +198,12 @@ Note the bare `--`: it is npm's separator for arguments meant for the script
 rather than for npm itself, so `npm run dev:docker --detach` silently does
 _not_ detach.
 
+A second checkout can run at the same time as this one by naming itself in
+`.env.instance` (copy `.env.instance.example`) — its own compose project, its
+own Supabase stack, its own database and ports. Without that file a checkout is
+`mixos` on port 3000, exactly as above. See
+[Local development in Docker](docs/local-docker.md#more-than-one-instance-on-one-machine).
+
 Use **`http://localhost:3000`**, not `http://127.0.0.1:3000` — Next.js dev mode
 rejects `/_next/*` requests (including the hot-reload websocket) from origins it
 doesn't recognize, and `127.0.0.1` isn't on that list, so the page loads broken.
