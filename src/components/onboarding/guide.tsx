@@ -40,7 +40,7 @@ const subscribeNoop = () => () => {};
 const getTrue = () => true;
 const getFalse = () => false;
 
-const BUBBLE_W = 352; // w-[22rem]; a constant so placement needs no measuring
+const BUBBLE_W = 416; // w-[26rem]; a constant so placement needs no measuring
 const BUBBLE_GAP = 12;
 const EDGE = 16;
 const ARROW = 12;
@@ -185,7 +185,7 @@ function Step({
         aria-labelledby="tour-step-title"
         className={cn(
           CARD_SURFACE,
-          "tour-screen-in fixed z-[95] w-[22rem] max-w-[calc(100vw-2rem)] p-4 shadow-lg",
+          "tour-screen-in fixed z-[95] w-[26rem] max-w-[calc(100vw-2rem)] p-4 shadow-lg",
         )}
         style={{ left, ...vertical }}
       >
@@ -206,9 +206,11 @@ function Step({
         >
           {step.title}
         </div>
-        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-          {step.body}
-        </p>
+        {step.body && (
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            {step.body}
+          </p>
+        )}
         <div className="mt-4 flex items-center justify-between">
           <span className="flex items-center gap-3 text-xs text-muted-foreground">
             {GUIDE_STEPS.indexOf(step) + 1} of {GUIDE_STEPS.length}

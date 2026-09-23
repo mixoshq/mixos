@@ -27,6 +27,11 @@ import { useTour } from "./tour-context";
  * a second on the welcome line, a beat and a half on the tagline before
  * "Let's begin" appears.
  *
+ * The reveal takes its time on purpose: the copy fades out completely
+ * (COPY_FADE_MS) before anything moves, and the flight and collapse are slow
+ * enough to be watched rather than glimpsed. This is the one moment that
+ * explains where the logo went.
+ *
  * THE REVEAL IS TWO FLIPs AND A COLLAPSE. The mark and the wordmark each fly
  * to their counterpart in the menu bar (measured, translate + uniform scale),
  * then the overlay's height collapses to the bar's bottom edge. Both are
@@ -38,8 +43,8 @@ import { useTour } from "./tour-context";
  * dashboard never paints underneath it first.
  */
 
-const FLY_MS = 700;
-const COLLAPSE_MS = 700;
+const FLY_MS = 1400;
+const COLLAPSE_MS = 1100;
 const FADE_MS = 300;
 /** How long the copy takes to fade, in and out. Matches `duration-500`. */
 const COPY_FADE_MS = 500;
@@ -62,20 +67,7 @@ const SCREENS: Beat[][] = [
     },
     {
       kind: "body",
-      text: "MixOS is a workspace of apps that connect your favorite tools (Gmail, Google Sheets, Slack, GitHub, Trello, etc.) into a single place, shaped around how you actually work.",
-      delay: 1000,
-    },
-    { kind: "next", delay: 500 },
-  ],
-  [
-    {
-      kind: "title",
-      text: "MixOS exists to make that more possible.",
-      delay: 200,
-    },
-    {
-      kind: "body",
-      text: "Instead of bouncing between a dozen tabs to copy, paste, and reconcile, MixOS pulls the apps and information you need into one dashboard, so your time goes to the work only you can do.",
+      text: "MixOS is a workspace of apps that connect your favorite tools (Google Sheets, Slack, GitHub, Trello, etc.) into a single place, shaped around how you actually work.",
       delay: 1000,
     },
     { kind: "next", delay: 500 },
@@ -155,11 +147,11 @@ function Takeover({ logo }: { logo: string | null }) {
       return () => timers.forEach(clearTimeout);
     }
 
-    // FLIP each piece of the lockup to its counterpart in the bar. Rects are
-    // all measured before any style changes, so each piece's own layout is
-    // its "first" state. Each is then pinned to the viewport at exactly that
-    // rect: the card is centred in an overlay that is about to shrink to
-    // 40px, and left in flow the pieces would ride up with it.
+    // FLIP each piece of the lockup to its counterpart in the bar: measure
+    // where it is, pin it to the viewport there, then transform to where it
+    // belongs. The pin matters because the card is centred in an overlay
+    // about to shrink to 40px, and left in flow the pieces would ride up
+    // with it.
     const pairs: [HTMLElement | null, HTMLElement | null][] = [
       [
         card.querySelector('[data-tour="login-mark"]'),
@@ -170,35 +162,42 @@ function Takeover({ logo }: { logo: string | null }) {
         barLockup.querySelector("span"),
       ],
     ];
-    const moves = pairs.flatMap(([from, to]) => {
-      if (!from || !to) return [];
-      return [
-        {
-          el: from,
-          a: from.getBoundingClientRect(),
-          b: to.getBoundingClientRect(),
-        },
-      ];
-    });
-    for (const { el, a } of moves) {
-      el.style.position = "fixed";
-      el.style.top = `${a.top}px`;
-      el.style.left = `${a.left}px`;
-      el.style.width = `${a.width}px`;
-      el.style.height = `${a.height}px`;
-      el.style.margin = "0";
-    }
-    void card.offsetWidth;
-
     // The copy fades out first (COPY_FADE_MS, driven by `revealing` in
-    // render); the logo flies only once the screen is empty, so the two
-    // motions are read one after the other rather than fighting for
-    // attention.
+    // render); nothing moves until the screen is empty, so the two motions
+    // are read one after the other rather than fighting for attention.
+    //
+    // Measuring and pinning also wait for that moment. Pinning takes the
+    // lockup out of flow, which pulls the rest of the card up by its
+    // height — harmless once the copy is invisible, a visible jolt if done
+    // while the user is still reading.
     timers.push(
       window.setTimeout(() => {
+        const moves = pairs.flatMap(([from, to]) => {
+          if (!from || !to) return [];
+          return [
+            {
+              el: from,
+              a: from.getBoundingClientRect(),
+              b: to.getBoundingClientRect(),
+            },
+          ];
+        });
+        for (const { el, a } of moves) {
+          el.style.position = "fixed";
+          el.style.top = `${a.top}px`;
+          el.style.left = `${a.left}px`;
+          el.style.width = `${a.width}px`;
+          el.style.height = `${a.height}px`;
+          el.style.margin = "0";
+        }
+        // Commit the pin as its own layout before the transform, or the
+        // browser coalesces both into one change and there is nothing to
+        // animate from.
+        void card.offsetWidth;
+
         for (const { el, a, b } of moves) {
           el.style.transformOrigin = "top left";
-          el.style.transition = `transform ${FLY_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`;
+          el.style.transition = `transform ${FLY_MS}ms cubic-bezier(0.32, 0, 0.2, 1)`;
           el.style.transform = `translate(${b.left - a.left}px, ${b.top - a.top}px) scale(${b.width / a.width})`;
         }
         timers.push(
@@ -207,7 +206,7 @@ function Takeover({ logo }: { logo: string | null }) {
             // to the viewport top and the bar is too, so they share a
             // coordinate.
             const barBottom = bar.getBoundingClientRect().bottom;
-            overlay.style.transition = `height ${COLLAPSE_MS}ms cubic-bezier(0.4, 0, 0.2, 1)`;
+            overlay.style.transition = `height ${COLLAPSE_MS}ms cubic-bezier(0.32, 0, 0.2, 1)`;
             overlay.style.height = `${barBottom}px`;
             timers.push(window.setTimeout(revealed, COLLAPSE_MS));
           }, FLY_MS),
