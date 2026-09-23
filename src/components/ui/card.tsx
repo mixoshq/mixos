@@ -6,7 +6,7 @@
  * Card chrome: one shell, one header row, one body.
  *
  * WHY THIS EXISTS. Before this file there were **86 hand-rolled
- * `rounded-xl border border-border bg-card` shells across 16 apps**, and they had
+ * `rounded-lg border border-border bg-card` shells across 16 apps**, and they had
  * drifted the way copies do. Within a single app, four cards carried
  * `h2 text-lg`, `h2 text-sm` and `h3 text-sm` between them; some padded the whole
  * card with `p-4` while others padded header and body separately. Across apps the
@@ -67,7 +67,7 @@ import type { ReactNode } from "react";
  * page. Handing them `CARD_SHELL` would quietly merge four themeable surfaces
  * into one and there would be no way for a theme to tell them apart again.
  */
-export const CARD_SURFACE = "rounded-xl border border-border bg-card";
+export const CARD_SURFACE = "rounded-lg border border-border bg-card";
 export const CARD_SHELL = `mix-card ${CARD_SURFACE}`;
 /**
  * THE PADDING SCALE IS ONE NUMBER: 5.

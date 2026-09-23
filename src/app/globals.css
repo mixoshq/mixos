@@ -96,10 +96,10 @@ h6 {
   font-family: var(--type-heading);
 }
 
-/* Match the widget card radius (rounded-xl = 0.75rem) on the drag/resize
+/* Match the widget card radius (rounded-lg = 0.5rem) on the drag/resize
    placeholder so the dropzone visually belongs to the same grid of cards. */
 .react-grid-item.react-grid-placeholder {
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
 }
 
 /* The widget resize handle.
