@@ -134,7 +134,7 @@ if ((res.status === 429 || res.status === 503) && attempt < MAX_RETRIES) {
 }
 ```
 
-Retry and throttling belong **here**, in the connector, not repeated in every app that calls it. See [`connectors/gmail/index.ts`](../../connectors/gmail/index.ts) for a worked example, and [Data Freshness](data-freshness.md) for how the calling job budgets around it.
+Retry and throttling belong **here**, in the connector, not repeated in every app that calls it. See the Gmail connector's [`index.ts`](https://github.com/italianst4/mixos-connector-gmail/blob/main/index.ts) for a worked example, and [Data Freshness](data-freshness.md) for how the calling job budgets around it.
 
 ## Credential Lifecycle
 

@@ -55,10 +55,10 @@ export async function getAppGrantCounts(): Promise<Record<string, number>> {
  * the list renders every app at once. Apps with no tables are absent — callers
  * read a missing key as 0.
  *
- * Assignment is LONGEST PREFIX FIRST, not first match. Slugs `career` and
- * `career-extra` produce prefixes `_app_career_` and `_app_career_extra_`, and
- * every table of the second one also starts with the first — so a naive scan
- * would file the whole of `career-extra` under `career`.
+ * Assignment is LONGEST PREFIX FIRST, not first match. Slugs `crm` and
+ * `crm-extra` produce prefixes `_app_crm_` and `_app_crm_extra_`, and every
+ * table of the second one also starts with the first — so a naive scan would
+ * file the whole of `crm-extra` under `crm`.
  */
 export async function getAppTableCounts(): Promise<Record<string, number>> {
   const session = await requireReadOnlySession();

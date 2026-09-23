@@ -117,7 +117,7 @@ Use [`Card`](../../src/components/ui/card.tsx) for the shell and `CardHeader` fo
 
 **`CARD_SHELL` vs `CARD_SURFACE`.** `CARD_SURFACE` is the chrome alone — radius, border, fill. `CARD_SHELL` is that plus the `.mix-card` theme hook, and is what an ordinary card wants. A surface owning a *different* hook — a widget (`.mix-widget`), a modal (`.mix-modal`), a dropdown (`.mix-popover`) — takes `CARD_SURFACE` and adds its own. Those are separate entries in `SURFACE_ALLOWLIST` so a theme can restyle dashboard widgets without also restyling every settings panel; handing them `CARD_SHELL` collapses four themeable surfaces into one.
 
-**Two tiers, and only the outer one is a card.** A repeated row or field group *inside* a card — the entry blocks in `apps/career`'s library, a `<fieldset>` of related inputs — is `rounded-md border border-border p-4` with **no fill of its own**. It sits on the card's ground. Giving it `bg-card` and `p-5` makes a card inside a card, which is the double-card bug below wearing a disguise.
+**Two tiers, and only the outer one is a card.** A repeated row or field group *inside* a card — the entries of an editable list, a `<fieldset>` of related inputs — is `rounded-md border border-border p-4` with **no fill of its own**. It sits on the card's ground. Giving it `bg-card` and `p-5` makes a card inside a card, which is the double-card bug below wearing a disguise.
 
 ```tsx
 <Card>

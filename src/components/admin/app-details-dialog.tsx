@@ -155,8 +155,8 @@ function FactsPanel({
  * The Database tab: a rail of tables beside the selected table's columns.
  *
  * WHY NOT ONE LONG LIST. A real app is not the two-table toy this started as —
- * `career` owns ten tables and its `applications` alone declares twenty-eight
- * columns. Rendered flat that is roughly a hundred and twenty lines of
+ * ten tables, one of them twenty-eight columns wide, is ordinary. Rendered
+ * flat that is roughly a hundred and twenty lines of
  * name-and-type in a panel eight of them tall, which is not a schema viewer, it
  * is a wall you scroll past. The rail turns "which tables are there" into one
  * glance and costs a single click to answer "what is in this one".
