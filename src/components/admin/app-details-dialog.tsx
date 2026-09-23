@@ -32,12 +32,7 @@ interface MissingConnector {
 }
 
 type DialogTab =
-  | "overview"
-  | "access"
-  | "wiring"
-  | "connectors"
-  | "mcp"
-  | "database";
+  "overview" | "access" | "wiring" | "connectors" | "mcp" | "database";
 
 /**
  * Every tab, on every app, always.
@@ -190,7 +185,11 @@ function SchemaBrowser({ tables }: { tables: AppSchemaTable[] }) {
         .map((t) => {
           const nameHit = t.name.toLowerCase().includes(needle);
           const cols = nameHit ? t.columns : t.columns.filter(matches);
-          return { table: t, cols, hits: nameHit ? t.columns.length : cols.length };
+          return {
+            table: t,
+            cols,
+            hits: nameHit ? t.columns.length : cols.length,
+          };
         })
         .filter((e) => e.cols.length > 0)
     : tables.map((t) => ({ table: t, cols: t.columns, hits: 0 }));
@@ -218,9 +217,7 @@ function SchemaBrowser({ tables }: { tables: AppSchemaTable[] }) {
       </div>
 
       {visible.length === 0 ? (
-        <Empty>
-          No table or column matches &ldquo;{filter.trim()}&rdquo;.
-        </Empty>
+        <Empty>No table or column matches &ldquo;{filter.trim()}&rdquo;.</Empty>
       ) : (
         <div className="mt-3 grid gap-4 sm:grid-cols-[minmax(11rem,14rem)_1fr]">
           {/* The rail. A list of buttons, not a <select>: ten tables are worth
@@ -384,8 +381,13 @@ export function MissingConnectorWarning({
     <p className="flex items-start gap-2 text-xs text-foreground">
       <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
       <span>
-        <span className="font-semibold">{app.name}</span> can&apos;t be granted
-        to anyone until{" "}
+        {/* "Activated", not "granted": activation is now the gate this warning
+            is actually blocking, and it is the button sitting a few pixels
+            below this sentence. Granting was never the first thing stopped —
+            an app whose connector is unconfigured cannot serve a request from
+            anyone, granted or not. */}
+        <span className="font-semibold">{app.name}</span> can&apos;t be
+        activated until{" "}
         {missingConnectors.map((m, i) => (
           <span key={m.name}>
             {i > 0 && (i === missingConnectors.length - 1 ? " and " : ", ")}
@@ -464,7 +466,10 @@ export default function AppDetailsDialog({
       subtitle={app.description}
       icon={
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-background">
-          <LucideIcon name={app.icon} className="h-4 w-4 text-muted-foreground" />
+          <LucideIcon
+            name={app.icon}
+            className="h-4 w-4 text-muted-foreground"
+          />
         </span>
       }
       footer={
@@ -492,7 +497,12 @@ export default function AppDetailsDialog({
         </code>
       }
       tabs={
-        <FolderTabs items={TABS} active={tab} onChange={setTab} surface="card" />
+        <FolderTabs
+          items={TABS}
+          active={tab}
+          onChange={setTab}
+          surface="card"
+        />
       }
     >
       {tab === "overview" && (
@@ -527,7 +537,9 @@ export default function AppDetailsDialog({
               <Row
                 label="Who can install it"
                 value={
-                  app.global ? "Anyone" : formatCount(grantCount, "granted user")
+                  app.global
+                    ? "Anyone"
+                    : formatCount(grantCount, "granted user")
                 }
               />
               <Row label="Pages" value={app.pageCount} />
@@ -542,7 +554,9 @@ export default function AppDetailsDialog({
                   label={
                     <span className="flex flex-wrap items-baseline gap-x-2">
                       <span className="text-foreground">{w.name}</span>
-                      <span>{formatCount(w.config?.length ?? 0, "setting")}</span>
+                      <span>
+                        {formatCount(w.config?.length ?? 0, "setting")}
+                      </span>
                     </span>
                   }
                   value={<Mono>{w.id}</Mono>}
@@ -621,7 +635,9 @@ export default function AppDetailsDialog({
               <div className="mt-2 space-y-3 text-sm text-muted-foreground">
                 {emits.length > 0 && (
                   <div>
-                    <p className="text-[10px] uppercase tracking-wider">Fires</p>
+                    <p className="text-[10px] uppercase tracking-wider">
+                      Fires
+                    </p>
                     <ul className="mt-0.5 space-y-0.5">
                       {emits.map((h) => (
                         <li key={`emit-${h}`}>
@@ -745,7 +761,8 @@ export default function AppDetailsDialog({
       {tab === "mcp" && (
         <section>
           <SectionHeading>
-            MCP tools{app.mcp.length ? ` — ${formatCount(app.mcp.length, "tool")}` : ""}
+            MCP tools
+            {app.mcp.length ? ` — ${formatCount(app.mcp.length, "tool")}` : ""}
           </SectionHeading>
           {app.mcp.length === 0 ? (
             <Empty>
