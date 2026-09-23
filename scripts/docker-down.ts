@@ -24,12 +24,19 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { resolveInstance } from "./instance";
 import readline from "node:readline/promises";
 
 const ROOT = path.resolve(__dirname, "..");
 
-/** Must match scripts/docker-up.ts and the `name:` in docker-compose.yml. */
-const COMPOSE_PROJECT = "mixos";
+/**
+ * Which instance to take down.
+ *
+ * Resolved from `.env.instance` exactly as docker-up.ts does, so a `down` in a
+ * checkout stops that checkout's stack and leaves another instance's running.
+ * A literal here was what made the two scripts have to agree by hand.
+ */
+const COMPOSE_PROJECT = resolveInstance().name;
 /** Must match `project_id` in supabase/config.toml. */
 const SUPABASE_PROJECT = "mixos";
 

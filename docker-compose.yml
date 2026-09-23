@@ -12,7 +12,12 @@
 # outside that network would — over the host, at host.docker.internal, on the
 # ports the CLI publishes (54321 api / 54322 postgres). Every service therefore
 # carries an extra_hosts entry; see the comment on the first one.
-name: mixos
+# The project name, and with it every container, volume and network this file
+# creates. `mixos` unless the checkout sets MIXOS_INSTANCE in .env.instance —
+# which is what lets a second checkout be a second INSTANCE rather than a
+# second process fighting this one for the same containers. The scripts resolve
+# it in scripts/instance.ts and export it before calling compose.
+name: ${MIXOS_INSTANCE:-mixos}
 
 services:
   # ---------------------------------------------------------------------------
@@ -72,7 +77,7 @@ services:
       # macOS: a container hitting host.docker.internal:<port> is proxied by the
       # Docker backend, which connects to the host over loopback, so a
       # 127.0.0.1-only publish still answers 200 from a sibling container.
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${MIXOS_PORT:-3000}:3000"
     volumes:
       # The working copy, so edits reach the dev server.
       - .:/app
@@ -155,7 +160,7 @@ services:
       # it presents as a finished deployment while still running on the
       # committed .env.docker credentials. Keep the two publishes identical —
       # an exposure that only exists under one profile is the kind nobody finds.
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${MIXOS_PORT:-3000}:3000"
     # No bind mount and no node_modules volume: this image is the artifact under
     # test. Mounting source over it would defeat the entire point of the profile.
     extra_hosts:
