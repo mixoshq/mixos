@@ -9,6 +9,34 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-09-23
+
+- **Listing screenshots.** An app or theme can ship a gallery for its catalogue
+  listing: put images in `apps/<slug>/screenshots/` (or `themes/<slug>/`) and
+  declare them in the manifest as `screenshots: [{ file, alt?, caption? }]`. The
+  build verifies each file, measures it, and fills in `url`, `width` and
+  `height` — never write those by hand. `.png`/`.jpg`/`.webp` only (no SVG: a
+  screenshot is a raster, and an SVG is a script-bearing document served from an
+  unauthenticated URL), max 8, 2 MB each, 640px wide minimum. Only declared
+  files are published, so a draft left in the directory stays local.
+- **An app serves nothing until it is activated.** A newly registered app
+  arrives INACTIVE and an admin turns it on from the Apps page. Deactivating is
+  a switch rather than a deletion: grants, installs, passwords and dashboard
+  widgets all survive it, and reactivating puts everyone's dashboard back as
+  they left it. The vocabulary split follows — an admin *installs* an app on the
+  instance, a user *enables* it for themselves.
+- **A checkout can be its own instance.** Copy `.env.instance.example` to
+  `.env.instance` and give it a `MIXOS_INSTANCE`, a `MIXOS_PORT` and a
+  `MIXOS_SUPABASE_PORT_BASE`, and that checkout boots its own compose project,
+  its own Supabase stack and its own database, alongside an existing one. This
+  is what makes it possible to author an extension in one tree and install it
+  from the catalogue into another, which registration otherwise refuses because
+  the directory already exists. **Without the file nothing changes:** a checkout
+  is still `mixos` on port 3000 with Supabase on 54321. One consequence — since
+  `supabase/config.toml` now reads its project id and ports from `env(...)`,
+  reach the CLI through `npm run supabase -- <command>`; a bare `supabase …`
+  resolves an empty project id.
+
 ## 2026-09-13
 
 - **`app.json` is the only app manifest form.** An app whose whole manifest was
