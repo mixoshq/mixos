@@ -21,6 +21,12 @@ just pulled.
   commit (`git commit -s`) and the MPL notice on every new platform file.
   `TRADEMARK.md` sets out what forks, extensions and hosting services can be
   called.
+- **Node 24.** `.nvmrc`, the Docker images and CI now run Node 24. 22 is still
+  the minimum, until it reaches end of life on 30 April 2027. `npm run dev`,
+  `build`, `typecheck`, `dev:docker` and the pre-commit hook now stop on an
+  older Node with an explanation, instead of failing deep inside the registry
+  generator. When a newer Node is installed but hidden from the shell, they say
+  where it is and how to put it first. The README has a requirements table.
 
 
 ## 2026-09-23
