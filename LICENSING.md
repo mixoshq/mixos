@@ -79,15 +79,18 @@ judged more valuable than the restriction.
 ## Trademark
 
 The MixOS name, wordmark and logo are **not** licensed by the MPL. A software
-licence grants copyright and patent rights, never trademark rights. Ask before
-shipping something that presents itself as MixOS.
+licence grants copyright and patent rights, never trademark rights. See
+[`TRADEMARK.md`](TRADEMARK.md) for what forks, extensions and hosting services
+can and can't be called.
 
 ## Contributing
 
 Contributions are accepted under MPL-2.0 — MPL §2 grants the licence from each
 Contributor directly, so no separate CLA is required. Sign off your commits
 (`git commit -s`) to certify the [Developer Certificate of
-Origin](https://developercertificate.org/).
+Origin](https://developercertificate.org/). See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the details, including the notice
+every new platform file must carry.
 
 ## Dependencies
 

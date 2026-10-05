@@ -628,5 +628,7 @@ and may be licensed however you like, including proprietary — importing
 platform code does not change that. The scaffolding templates are public domain
 (CC0) so a copied template never carries obligations into your work.
 
-See [`LICENSING.md`](LICENSING.md) for the boundary in detail, why MPL was
-chosen over GPL and AGPL, and the trademark and contribution terms.
+See [`LICENSING.md`](LICENSING.md) for the boundary in detail and why MPL was
+chosen over GPL and AGPL. Contributions are made under the Developer
+Certificate of Origin — see [`CONTRIBUTING.md`](CONTRIBUTING.md). The MixOS name
+and logo are covered separately by [`TRADEMARK.md`](TRADEMARK.md).

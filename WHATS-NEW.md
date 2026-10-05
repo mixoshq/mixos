@@ -17,6 +17,10 @@ just pulled.
   container writes the checkout as you rather than as root. The cron sidecar
   now reaches the app over the compose network, so a second instance's cron no
   longer calls the first instance's app.
+- **Contributing terms.** `CONTRIBUTING.md` asks for a DCO sign-off on every
+  commit (`git commit -s`) and the MPL notice on every new platform file.
+  `TRADEMARK.md` sets out what forks, extensions and hosting services can be
+  called.
 
 
 ## 2026-09-23
