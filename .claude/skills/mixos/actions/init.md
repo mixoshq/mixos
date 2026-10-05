@@ -97,7 +97,7 @@ this platform.
 | What | How to check | Notes |
 |---|---|---|
 | Homebrew — **macOS** | `command -v brew` | Needed for everything else on a Mac. |
-| Node | `node -v` | Needs **22 or newer** — compare the major version, do not require exactly 22. `.nvmrc` says 22, but `engines` says `>=22`, and a machine on Node 24 or 26 is fine. |
+| Node | `node -v` | Needs **22 or newer** — compare the major version, do not require an exact one. `.nvmrc` pins **24**, which is what to install when Node is missing or too old; `engines` says `>=22`, so a machine already on 22, 24 or 26 is fine. **If it is below 22, also run `node scripts/check-node.mjs`** — it needs no dependencies, runs on any old Node, and says whether a newer Node is already installed but hidden from this shell (see Step 3.2). |
 | nvm — **Linux, WSL** | `[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]` | How Node gets installed there: into the home folder, with no root. |
 | Dependencies | `[ -d node_modules ]` | |
 | Docker — **macOS** | `[ -d /Applications/Docker.app ]` | Filesystem check. **Never** use `brew ls --cask docker-desktop` — it exits 1 for Docker Desktop installed outside Homebrew, which is common. |
@@ -146,14 +146,14 @@ for" each. On **macOS**, something like:
 > Here's what's missing on your machine. I'll install all of it, in this order:
 >
 > 1. **Homebrew** — the macOS package manager everything else installs through.
-> 2. **Node 22** — runs the build tools and the local database CLI.
+> 2. **Node 24** — runs the build tools and the local database CLI.
 > 3. **Project dependencies** (`npm ci`) — about 90 seconds.
 > 4. **Docker Desktop** — runs MixOS and its database on your machine.
 > 5. **VSCode extensions** — Claude Code and Prettier.
 
 On **Linux**:
 
-> 1. **Node 22**, through nvm — runs the build tools and the local database
+> 1. **Node 24**, through nvm — runs the build tools and the local database
 >    CLI. It installs into your home folder; no password needed.
 > 2. **Project dependencies** (`npm ci`) — about 90 seconds.
 > 3. **Docker Engine** — runs MixOS and its database. This one needs
@@ -163,7 +163,7 @@ On **Linux**:
 
 On **WSL**, Docker is installed on the Windows side, by them:
 
-> 1. **Node 22**, through nvm — no password needed.
+> 1. **Node 24**, through nvm — no password needed.
 > 2. **Project dependencies** (`npm ci`) — about 90 seconds.
 > 3. **Docker Desktop for Windows** — runs MixOS and its database. You install
 >    this one in Windows; I'll tell you exactly what to click.
@@ -177,6 +177,11 @@ Then, on every platform:
 Wait for a yes. Skip anything already present and say so ("Node 24 is already
 installed, skipping"). After this point don't ask again unless something fails
 or a tool prompts for a password.
+
+If Step 1 found a newer Node that is installed but hidden, the Node line is not
+an install. Say what it is instead: "**Node 26 is already installed, but your
+shells find an old Node 16 first** — I'll add one line to `~/.zshenv` so every
+shell finds the new one. Nothing to download."
 
 ## Step 3 — Install, in dependency order
 
@@ -203,7 +208,34 @@ when it finishes. Then verify the result yourself — don't take "done" on faith
    isn't found afterward, run `eval "$(/opt/homebrew/bin/brew shellenv)"` and
    tell them to add that line to `~/.zprofile`.
 
-2. **Node 22+** (only if `node -v` is below 22, or Node is missing):
+2. **Node 24** (only if `node -v` is below 22, or Node is missing):
+
+   - **If a newer Node is already installed, but hidden** — Step 1's
+     `node scripts/check-node.mjs` named it. **Do not install another one.** The
+     shell cannot see the Node it already has, and it will not see a third
+     either. The common case is a Mac with an old nodejs.org installer in
+     `/usr/local/bin` and Homebrew's Node set up for login shells only
+     (`brew shellenv` in `~/.zprofile`). Your shells, git hooks and editors are
+     not login shells, so they find the old one. The fix is PATH:
+
+     - **Homebrew:** add the line the check printed —
+       `eval "$(/opt/homebrew/bin/brew shellenv)"`, with their Homebrew
+       prefix — to `~/.zshenv` (zsh) or `~/.bashrc` (bash), which every shell
+       reads. Append it; never rewrite the file.
+     - **nvm:** the `nvm alias default` line in the next bullet.
+
+     Your own shells may not pick that up during this session, so prefix every
+     remaining Node command with the same `eval` line, as for Homebrew in step 1,
+     and re-run `node scripts/check-node.mjs` to confirm it now exits silently.
+
+     Offer to remove the old install, but don't require it: once the newer Node
+     comes first, the old one is inert. A nodejs.org install is root-owned —
+     `pkgutil --pkgs | grep org.nodejs` identifies it, and
+     `pkgutil --files org.nodejs.node.pkg` lists exactly what it installed — so
+     removing it takes sudo, and is the person's to run: hand it over the way
+     the sudo note above describes. Any global
+     tools it carries (`ls /usr/local/lib/node_modules`) go with it, so name
+     them first; they reinstall under the new Node with `npm install -g`.
 
    - **If nvm is installed** — detect it by the *file*, not the command:
      `[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]`. `command -v nvm` will always come
@@ -216,7 +248,7 @@ when it finishes. Then verify the result yourself — don't take "done" on faith
      ```bash
      export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
      \. "$NVM_DIR/nvm.sh"
-     nvm install                          # reads .nvmrc — currently 22
+     nvm install                          # reads .nvmrc — currently 24
      nvm use
      nvm alias default "$(cat .nvmrc)"    # so later steps, in their own shells, get it too
      ```
@@ -241,7 +273,7 @@ when it finishes. Then verify the result yourself — don't take "done" on faith
      which your shells never read. Carry on with the nvm commands above, which
      source it explicitly.
 
-   - **macOS, with no nvm:** `brew install node@22`, then follow brew's own `brew link`
+   - **macOS, with no nvm:** `brew install node@24`, then follow brew's own `brew link`
      caveat if it prints one. If a different `node` keg is already installed,
      brew will refuse to link; that's fine as long as `node -v` reports 22+.
 
