@@ -1,10 +1,10 @@
 # /mixos init
 
 You are installing MixOS on someone's machine and booting it for the first
-time. Assume **macOS**, **Claude running in VSCode**, and that the person may not
-be a developer. The whole system — app, Postgres, PostgREST, and the scheduler
-tick — runs locally in **Docker**; there is no cloud account to create and no
-secret to generate.
+time. The machine is **macOS**, **Linux**, or **Windows with WSL 2**; Claude is
+running in **VSCode**; and the person may not be a developer. The whole system —
+app, Postgres, PostgREST, and the scheduler tick — runs locally in **Docker**;
+there is no cloud account to create and no secret to generate.
 
 You are the installer, not a checklist. Run the commands yourself, explain what
 each one is for in plain language, and pause only where you genuinely need the
@@ -14,17 +14,49 @@ command at once and do not make them choose between setups.
 The one place you ask for permission is **Step 2**. Survey first, ask once,
 then install everything.
 
-## Step 0 — Platform gate
+## Step 0 — Which machine is this?
 
-Run `uname -s`. If it is not `Darwin`, stop and say so plainly:
+```bash
+uname -s; [ -r /proc/sys/kernel/osrelease ] && cat /proc/sys/kernel/osrelease
+```
 
-> This guided installer only covers macOS. MixOS runs fine on Linux and on Windows
-> via WSL2, but the install steps differ enough that guessing them would waste
-> your time. The manual path is in [README.md](../../../../README.md) and
-> [docs/local-docker.md](../../../../docs/local-docker.md) — everything after
-> "install Docker Desktop and Node 22" is identical on every platform.
+| `uname -s` prints | Kernel release | This is | Follow |
+|---|---|---|---|
+| `Darwin` | — | macOS | everything marked **macOS** |
+| `Linux` | contains `microsoft` | Windows, inside WSL 2 | everything marked **WSL** |
+| `Linux` | anything else | Linux | everything marked **Linux** |
+| `MINGW…`, `MSYS…`, `CYGWIN…`, or `uname` is not found | — | Windows outside WSL | stop — see below |
 
-Then stop. Do not attempt a Linux or Windows install.
+Each step below says where the platforms differ. Where it says nothing, the
+command is the same on all three.
+
+### Windows outside WSL
+
+Claude is running on Windows itself — Git Bash or PowerShell — and the local
+stack cannot run there: it is Linux containers driven from a Linux shell, and
+`npm run dev:docker` refuses to start outside one. Do not attempt it. The setup
+it needs takes administrator rights and a restart, which only the person can
+do, so explain and hand it over:
+
+> MixOS runs on Windows through WSL 2, the Linux environment built into
+> Windows. Setting that up takes a restart, so here are a few steps for you —
+> then I take over:
+>
+> 1. Open **PowerShell as Administrator** and run `wsl --install`. Restart when
+>    it asks, then finish the Ubuntu setup that opens: choose a Linux username
+>    and password. Remember the password — you'll type it once more later.
+> 2. Install **Docker Desktop for Windows** from
+>    https://docs.docker.com/desktop/setup/install/windows-install/ and start
+>    it. In **Settings → Resources → WSL integration**, turn on **Ubuntu**, then
+>    click **Apply & restart**.
+> 3. In VS Code, install the **WSL** extension (by Microsoft). Open the Command
+>    Palette (`Ctrl+Shift+P`) and run **WSL: Connect to WSL**.
+> 4. In that new window, clone MixOS again — this time inside Linux. Run
+>    **Git: Clone**, paste the same address, and save it in your Linux home
+>    folder (`/home/<you>`), **not** anywhere under `/mnt/c`.
+> 5. Open the cloned folder, open Claude Code there, and run `/mixos init`.
+
+Then stop.
 
 ## Step 0b — Is MixOS already set up?
 
@@ -59,20 +91,27 @@ re-run.
 
 Run these and record what you find. **Do not install anything in this step**,
 even if something is obviously missing; the whole point is to present one
-complete list in Step 2 instead of six separate prompts.
+complete list in Step 2 instead of six separate prompts. Run only the rows for
+this platform.
 
 | What | How to check | Notes |
 |---|---|---|
-| Homebrew | `command -v brew` | Needed for everything else. |
+| Homebrew — **macOS** | `command -v brew` | Needed for everything else on a Mac. |
 | Node | `node -v` | Needs **22 or newer** — compare the major version, do not require exactly 22. `.nvmrc` says 22, but `engines` says `>=22`, and a machine on Node 24 or 26 is fine. |
+| nvm — **Linux, WSL** | `[ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]` | How Node gets installed there: into the home folder, with no root. |
 | Dependencies | `[ -d node_modules ]` | |
-| Docker Desktop | `[ -d /Applications/Docker.app ]` | Filesystem check. **Never** use `brew ls --cask docker-desktop` — it exits 1 for Docker Desktop installed outside Homebrew, which is common. |
-| Docker daemon | `docker info` | Bare, and read the **exit code**. `docker info --format '{{.ServerVersion}}'` exits 0 with empty output when the daemon is down, so it reports dead as healthy. |
-| VSCode CLI | `code --version` | If missing: VSCode → Command Palette (`Cmd+Shift+P`) → **Shell Command: Install 'code' command in PATH**, then retry. |
+| Docker — **macOS** | `[ -d /Applications/Docker.app ]` | Filesystem check. **Never** use `brew ls --cask docker-desktop` — it exits 1 for Docker Desktop installed outside Homebrew, which is common. |
+| Docker — **Linux** | `docker --version` and `docker compose version` | Docker **Engine** with the Compose v2 plugin. Docker Desktop for Linux works too; if either is already there, use it. |
+| Docker — **WSL** | `docker --version`, and `[ -f "/mnt/c/Program Files/Docker/Docker/Docker Desktop.exe" ]` | Docker Desktop **for Windows** supplies Docker here. Its `docker` command only exists inside WSL while Desktop is running with WSL integration on for this distribution — so `docker` missing with the `.exe` present means "not started", not "not installed". |
+| Docker daemon | `docker info` | Bare, and read the **exit code**. `docker info --format '{{.ServerVersion}}'` exits 0 with empty output when the daemon is down, so it reports dead as healthy. On **Linux**, also read stderr: `permission denied` means the daemon is up but this user may not use it (the `docker` group, below); `Cannot connect` means it is not running. |
+| `docker` group — **Linux** | `id -nG \| tr ' ' '\n' \| grep -qx docker` | Whether this user may use Docker without sudo. |
+| sudo — **Linux, WSL** | `sudo -n true 2>/dev/null` | Exit 0 means you may run sudo commands yourself. Anything else means sudo wants a password your shell cannot type — hand those commands to the person (see Step 3). |
+| Checkout location — **WSL** | `pwd` | Under `/mnt/` means the repository is on the Windows drive. It boots, but every file read is slow and edits do not hot-reload. Recommend cloning again under `~` before going further. |
+| VSCode CLI | `code --version` | If missing on **macOS**: Command Palette (`Cmd+Shift+P`) → **Shell Command: Install 'code' command in PATH**, then retry. On **Linux** it comes with VS Code's package, and in **WSL** with the WSL extension. If it is still missing, skip the extensions step and name the extensions for the person to install from the Extensions view. |
 | Extensions | `code --list-extensions` | Looking for `Anthropic.claude-code` and `esbenp.prettier-vscode`. |
 | GitHub CLI (optional) | `gh --version` | Not needed to boot MixOS. `/mixos deploy` uses it to open pull requests, and falls back to a paste-ready link without it. |
 
-Also check that ports **3000, 54321, 54322, and 54323** are free:
+Also check that ports **3000, 54321, 54322, and 54323** are free. On **macOS**:
 
 ```bash
 for p in 3000 54321 54322 54323; do
@@ -85,6 +124,16 @@ free, so the bare one-liner ends non-zero precisely when every port is
 available — a result that reads like a failed check and is easy to act on
 backwards.
 
+On **Linux** and **WSL**, `lsof` is often not installed; `ss` always is:
+
+```bash
+for p in 3000 54321 54322 54323; do
+  if [ -n "$(ss -Hltn "sport = :$p")" ]; then echo "  ^^ port $p is IN USE"; else echo "port $p free"; fi
+done
+```
+
+`ss -Hltnp "sport = :3000"` names the process holding it, when it is theirs.
+
 If 3000 is taken it is almost always a `next dev` the person forgot about
 (`ps -o command -p <pid>` confirms). Mention it now rather than letting the boot
 fail later with a bind error.
@@ -92,7 +141,7 @@ fail later with a bind error.
 ## Step 2 — Present the list and ask once
 
 Show exactly what you are about to install, in order, with a one-line "what it's
-for" each. Something like:
+for" each. On **macOS**, something like:
 
 > Here's what's missing on your machine. I'll install all of it, in this order:
 >
@@ -101,11 +150,31 @@ for" each. Something like:
 > 3. **Project dependencies** (`npm ci`) — about 90 seconds.
 > 4. **Docker Desktop** — runs MixOS and its database on your machine.
 > 5. **VSCode extensions** — Claude Code and Prettier.
->
+
+On **Linux**:
+
+> 1. **Node 22**, through nvm — runs the build tools and the local database
+>    CLI. It installs into your home folder; no password needed.
+> 2. **Project dependencies** (`npm ci`) — about 90 seconds.
+> 3. **Docker Engine** — runs MixOS and its database. This one needs
+>    administrator rights, so I'll give you one block to paste into the
+>    terminal, and it will ask for your password.
+> 4. **VSCode extensions** — Prettier.
+
+On **WSL**, Docker is installed on the Windows side, by them:
+
+> 1. **Node 22**, through nvm — no password needed.
+> 2. **Project dependencies** (`npm ci`) — about 90 seconds.
+> 3. **Docker Desktop for Windows** — runs MixOS and its database. You install
+>    this one in Windows; I'll tell you exactly what to click.
+> 4. **VSCode extensions** — Prettier.
+
+Then, on every platform:
+
 > Total download is roughly 1 GB now, plus several more GB of database images
 > the first time MixOS boots. Want me to go ahead?
 
-Wait for a yes. Skip anything already present and say so ("Homebrew is already
+Wait for a yes. Skip anything already present and say so ("Node 24 is already
 installed, skipping"). After this point don't ask again unless something fails
 or a tool prompts for a password.
 
@@ -115,7 +184,14 @@ Order matters: the Supabase CLI that manages the local database is a
 **devDependency of this repo**, so Node and `npm ci` must come before anything
 database-related.
 
-1. **Homebrew** (if missing):
+**Commands that need sudo — Linux and WSL.** Every command you run gets a
+fresh, non-interactive shell, so sudo cannot ask for a password there and fails.
+If Step 1's `sudo -n true` succeeded, run them yourself. Otherwise hand them
+over: tell the person to open a terminal (**Terminal → New Terminal**), paste
+the exact block you give them, type their password when asked, and tell you
+when it finishes. Then verify the result yourself — don't take "done" on faith.
+
+1. **Homebrew** — **macOS**, if missing:
 
    ```bash
    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -154,7 +230,18 @@ database-related.
      with the same `NVM_DIR`/`\.` pair, or install Node through brew below and
      stop fighting it.
 
-   - **Otherwise:** `brew install node@22`, then follow brew's own `brew link`
+   - **Linux and WSL, with no nvm:** install nvm first — into their home
+     folder, no sudo:
+
+     ```bash
+     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.8/install.sh | bash
+     ```
+
+     It adds itself to `~/.bashrc` (or `~/.zshrc`) for their own terminals,
+     which your shells never read. Carry on with the nvm commands above, which
+     source it explicitly.
+
+   - **macOS, with no nvm:** `brew install node@22`, then follow brew's own `brew link`
      caveat if it prints one. If a different `node` keg is already installed,
      brew will refuse to link; that's fine as long as `node -v` reports 22+.
 
@@ -175,7 +262,9 @@ database-related.
    than reaching for `npm install`, which would paper over the drift and leave
    this laptop running dependencies nobody else has.
 
-4. **Docker Desktop** (if `/Applications/Docker.app` is missing):
+4. **Docker**
+
+   **macOS** (if `/Applications/Docker.app` is missing):
 
    ```bash
    brew install --cask docker-desktop
@@ -201,6 +290,55 @@ database-related.
    employees or $10M annual revenue need a paid subscription.
    [OrbStack](https://orbstack.dev) is a drop-in alternative if that's a problem.
 
+   **Linux** (if `docker` or `docker compose` is missing). Docker's install
+   script sets up the Engine, the Compose plugin and the system service in one
+   go on Ubuntu, Debian, Fedora, CentOS and RHEL. It needs sudo — see above:
+
+   ```bash
+   curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+   sudo sh /tmp/get-docker.sh
+   sudo usermod -aG docker "$USER"
+   ```
+
+   On any other distribution, point them at
+   https://docs.docker.com/engine/install/ rather than guessing. Docker Engine
+   is free for everyone, so there is no licensing question on Linux.
+
+   **The `usermod` line only takes effect in new login sessions** — not in the
+   VSCode that is already open, and not in your shells, which that VSCode
+   started. Until the person signs out and back in, run every command that
+   touches Docker through the group explicitly:
+
+   ```bash
+   sg docker -c 'docker info'
+   ```
+
+   `sg` asks no password, because the person is now listed in the group. Tell
+   them that signing out and back in (or restarting) makes plain `docker` work
+   everywhere, and that until then you'll keep using `sg`.
+
+   If `docker` exists but `docker info` says **permission denied**, only the
+   `usermod` line is missing. If it says **Cannot connect**, the service is
+   stopped: `sudo systemctl enable --now docker`.
+
+   **WSL** (if `docker` is missing):
+
+   - **`Docker Desktop.exe` is present:** it is installed, just not running or
+     not connected to this distribution. Go on to Step 4.
+   - **It is not:** Docker Desktop for Windows is theirs to install. Tell them,
+     with their distribution's name from `$WSL_DISTRO_NAME`:
+
+     > Install Docker Desktop for Windows: download it from
+     > https://docs.docker.com/desktop/setup/install/windows-install/, or run
+     > `winget install -e --id Docker.DockerDesktop` in Windows PowerShell. Keep
+     > **Use WSL 2 instead of Hyper-V** ticked. When it opens, go to
+     > **Settings → Resources → WSL integration**, turn on **Ubuntu**, and click
+     > **Apply & restart**.
+
+     Give them the same licensing note as on macOS: free for personal use,
+     education, and small companies; organizations above 250 employees or $10M
+     annual revenue need a paid subscription.
+
 5. **VSCode extensions:**
 
    ```bash
@@ -211,13 +349,18 @@ database-related.
    `--install-extension` is a no-op when the extension is already present, so
    running both is safe.
 
-6. **GitHub CLI** — only if they said they want it: `brew install gh`, then
-   `gh auth login` (GitHub.com → HTTPS → authenticate via browser). This is
-   interactive; hand the terminal back to them for it.
+   In **WSL**, `code` installs into the WSL side, which is where the
+   extensions need to be.
 
-## Step 4 — First launch of Docker Desktop
+6. **GitHub CLI** — only if they said they want it. On **macOS**,
+   `brew install gh`; on **Linux** and **WSL**, follow
+   https://github.com/cli/cli/blob/trunk/docs/install_linux.md, which needs
+   sudo — hand it over. Then `gh auth login` (GitHub.com → HTTPS → authenticate
+   via browser). This is interactive; hand the terminal back to them for it.
 
-Docker Desktop's first run **cannot be fully scripted**: it shows a license
+## Step 4 — Get Docker running
+
+**macOS.** Docker Desktop's first run **cannot be fully scripted**: it shows a license
 agreement and asks for the macOS password to install a privileged helper. Launch
 it, then tell them what to click while you wait.
 
@@ -236,7 +379,32 @@ Then say, before you start polling:
 > password when it asks to install a helper. You can skip the sign-in / "create
 > an account" screen entirely; MixOS doesn't need a Docker account. I'll wait.
 
-Poll until the daemon actually answers, with a timeout:
+**WSL.** Start Docker Desktop on the Windows side — WSL can run it directly:
+
+```bash
+"/mnt/c/Program Files/Docker/Docker/Docker Desktop.exe" >/dev/null 2>&1 &
+```
+
+Then say:
+
+> Docker Desktop is starting in Windows. The first time, accept the service
+> agreement; you can skip signing in. Also check **Settings → Resources → WSL
+> integration** has your Linux distribution turned on. I'll wait.
+
+A `docker` command that never appears in WSL is almost always that switch.
+
+**Linux.** The Engine is a system service, and the install script already
+started it:
+
+```bash
+systemctl is-active docker
+```
+
+If that prints anything but `active`, the person starts it (sudo — hand it
+over): `sudo systemctl enable --now docker`. Poll as below, through
+`sg docker -c '…'` if they have not signed in again since the `usermod`.
+
+On every platform, poll until the daemon actually answers, with a timeout:
 
 ```bash
 deadline=$(( $(date +%s) + 180 ))
@@ -259,15 +427,31 @@ docker info --format '{{.MemTotal}}'   # bytes
 ```
 
 Guard the result (this templated form prints nothing when the daemon is down, so
-only trust it after the poll succeeded). Below `4294967296` (4 GB), tell them to
-raise it in Docker Desktop → Settings → Resources; the Postgres, Kong,
-PostgREST, and Studio containers plus a Next.js build are tight under 4 GB.
+only trust it after the poll succeeded). Below `4294967296` (4 GB) the Postgres,
+Kong, PostgREST, and Studio containers plus a Next.js build are tight. Where to
+raise it depends on the platform: on **macOS**, Docker Desktop → Settings →
+Resources; in **WSL**, `memory=` under `[wsl2]` in `%UserProfile%\.wslconfig`,
+then `wsl --shutdown` in PowerShell; on **Linux**, it is the machine's own
+memory, so there is nothing to raise — just say so.
 
 ## Step 5 — Boot MixOS
 
 ```bash
 npm run dev:docker -- --detach
 ```
+
+On **Linux**, if the person has not signed in again since being added to the
+`docker` group, run it through the group — and, if Node came from nvm in this
+session, with nvm sourced first. `sg` starts a new shell, so pass PATH through:
+
+```bash
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"; [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+sg docker -c "PATH='$PATH' npm run dev:docker -- --detach"
+```
+
+On Linux and in WSL the script also tells the app container who owns the
+checkout, and it writes files as them rather than as root — nothing to do, but
+it is why the preflight prints `files written as uid …`.
 
 Set expectations *before* you run it, because this is the step that looks broken:
 
@@ -441,9 +625,11 @@ token, every app API key and every unlock cookie simultaneously.
 
 - **Every command you run gets a fresh, non-interactive shell.** Nothing you
   `export`, `source`, or `cd` survives into the next one. That is why the nvm
-  branch in Step 3.2 sources `nvm.sh` inline, and why the `brew shellenv` line
+  branch in Step 3.2 sources `nvm.sh` inline, why the `brew shellenv` line
   in Step 3.1 has to be repeated in each later command until it is written to
-  `~/.zprofile`.
+  `~/.zprofile`, and why on Linux every Docker command goes through
+  `sg docker -c` until the person signs in again. It is also why sudo cannot
+  prompt you for a password — those commands are the person's to run.
 - **Everything above is idempotent.** If a step fails, fix the cause and re-run
   from that step. Nothing here destroys data except `npm run docker:reset`,
   which you should not run during setup — and which refuses to run at all

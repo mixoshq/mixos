@@ -9,6 +9,16 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-10-05
+
+- **Local Docker on Linux and Windows.** `npm run dev:docker` and `/mixos init`
+  now run on Linux (Docker Engine) and on Windows through WSL 2 (Docker Desktop
+  with its WSL integration), not only on macOS. On Linux and in WSL the dev
+  container writes the checkout as you rather than as root. The cron sidecar
+  now reaches the app over the compose network, so a second instance's cron no
+  longer calls the first instance's app.
+
+
 ## 2026-09-23
 
 - **Listing screenshots.** An app or theme can ship a gallery for its catalogue
