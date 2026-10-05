@@ -128,7 +128,7 @@ services:
       # be right for it to pass. A liveness-only check would go green on a
       # container that cannot reach its database at all.
       #
-      # `node -e` because neither image installs curl and Node 22 has fetch.
+      # `node -e` because neither image installs curl and Node has fetch.
       test:
         - CMD
         - node
