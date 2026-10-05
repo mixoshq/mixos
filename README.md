@@ -86,6 +86,19 @@ skill actually does? The same steps by hand are under
 
 ## Prerequisites
 
+| What | Version | Notes |
+|---|---|---|
+| Operating system | macOS, Linux, or Windows with WSL 2 | On Windows the stack runs inside WSL. Git Bash and PowerShell can't run it. |
+| [Node.js](https://nodejs.org) | **24**, pinned in `.nvmrc`. 22 is the minimum | Node 22 reaches end of life on 30 April 2027. Every shell that runs MixOS commands needs it, not only your terminal (see below). |
+| npm | Ships with Node | The lockfile is npm's: install with `npm ci`, not pnpm or yarn. |
+| Git | Any recent version | |
+| Docker | Docker Desktop (macOS, Windows), or Docker Engine with the Compose v2 plugin (Linux) | Give Docker about 4 GiB of memory, and keep several GB of disk free for images. |
+| Free ports | 3000, 54321, 54322, 54323 | The app, the Supabase API, Postgres, and Supabase Studio. |
+| [VS Code](https://code.visualstudio.com/) | Current | With the Claude Code and Prettier extensions. Claude Code needs a Claude account; only the guided `/mixos` path uses it. |
+| [GitHub CLI](https://cli.github.com) | Optional | Lets `/mixos deploy` open pull requests for you. Without it you get a link to paste. |
+
+`/mixos init` checks all of this and installs what's missing. In detail:
+
 - [Visual Studio Code](https://code.visualstudio.com/) — the editor MixOS is built
   to be worked on in. After installing, add these two extensions (Extensions
   view → search by ID, or run the `code` commands below):
@@ -125,10 +138,20 @@ skill actually does? The same steps by hand are under
   need a paid subscription — [OrbStack](https://orbstack.dev) is a drop-in
   alternative if that applies to you.
 
-- [Node.js](https://nodejs.org) 22+ — the version is pinned in `.nvmrc`, so
-  `nvm use` selects it for you. Node runs the boot script and the Supabase CLI
-  on the host even when the app itself runs in a container.
-- npm
+- [Node.js](https://nodejs.org) 24 — the version pinned in `.nvmrc`, so
+  `nvm use` selects it for you; 22 or newer works. Node runs the boot script and
+  the Supabase CLI on the host even when the app itself runs in a container.
+
+  **Every shell has to find it, not only your terminal.** Git hooks, editors and
+  Claude Code often start shells that never read `~/.zprofile`, so on a Mac
+  where Homebrew is set up there (`brew shellenv`), they can find an older Node
+  first — typically one a nodejs.org installer left in `/usr/local/bin`.
+  `npm run dev`, `build`, `typecheck` and `dev:docker` check before they start.
+  When the Node is too old, they say which newer one is installed but hidden,
+  and how to put it first (`node scripts/check-node.mjs` runs the same check on
+  its own).
+- npm — ships with Node. The lockfile is npm's, so install with `npm ci`, not
+  pnpm or yarn.
 
 ## Manual setup
 
@@ -594,7 +617,8 @@ an atomic Postgres update, so the next tick resumes).
 
 Nothing in the platform requires Vercel specifically. It is a standard Next.js
 server: `npm ci && npm run build && npm start` behind the same environment
-variables works on any Node 22+ host. The repo's [`Dockerfile`](Dockerfile) is a
+variables works on any Node 22+ host (24 is what the repo pins and the image
+runs). The repo's [`Dockerfile`](Dockerfile) is a
 real production build of the same thing — a multi-stage image running Next.js
 standalone output as `node server.js`, with a `/api/health/live` healthcheck.
 `npm run docker:prod` runs it locally against the Docker Postgres, which is how
