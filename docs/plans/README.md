@@ -49,6 +49,7 @@ Current platform plans:
 | [`20260921_2323-welcome-tour.md`](20260921_2323-welcome-tour.md) | First-run welcome tour: brand takeover, three screens, the lockup-to-menu-bar reveal, and a guide-step framework |
 | [`20260922_2234-extension-screenshots.md`](20260922_2234-extension-screenshots.md) | `screenshots/` and a manifest `screenshots` array for apps and themes: build-time verification and measurement, resolved public URLs in the registries |
 | [`20260922_2320-extension-dev-instances.md`](20260922_2320-extension-dev-instances.md) | Extensions move to their own repositories, developed inside an installed instance; env-driven compose/Supabase identity so instances can run side by side |
+| [`20260923_0041-app-packages.md`](20260923_0041-app-packages.md) | A `packages` manifest field against a platform allowlist, and a closed app import graph enforced by the generator: no per-app `package.json`/`node_modules`, no JS-family source, no relative escapes into `src/` |
 | [`20260923_0230-app-activation.md`](20260923_0230-app-activation.md) | `apps.is_active` wired up end to end: admin Activate/Deactivate, install-time activation, and the Install / Enable vocabulary |
 
 ## File naming
