@@ -33,6 +33,11 @@ if ! printf '%s\n' "$staged" | grep -qE '^(apps/|connectors/|themes/)'; then
   exit 0
 fi
 
+# A hook runs in whatever shell the git client started, which is often not a
+# login shell and so may find an older Node than your terminal does. Say so
+# plainly here rather than failing inside tsx — see scripts/check-node.mjs.
+node scripts/check-node.mjs
+
 # Stamps what changed and `git add`s the manifests it wrote. Exits 0 even on
 # failure, by design — see the header of scripts/stamp-updated.ts.
 npx tsx scripts/stamp-updated.ts
