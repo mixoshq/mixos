@@ -419,10 +419,11 @@ PGSSLMODE=disable
 Copy the remaining secrets from `.env.docker` so sessions and stored connector
 credentials stay valid across both ways of running. Then `npm run dev`.
 
-One caveat about the scheduler. The `cron` sidecar aims at
-`host.docker.internal:3000`, not at a compose service name, so if you got here
-via `stop app-dev` it survives and its ticks land on your host server — but
-only if you copied `CRON_SECRET` across, or every tick 401s. If you got here via
+One caveat about the scheduler. The `cron` sidecar calls the app by its
+`mixos-app` network alias, and when that does not resolve — `app-dev` is
+stopped — it falls back to `host.docker.internal:3000`. So if you got here via
+`stop app-dev` it survives and its ticks land on your host server — but only if
+you copied `CRON_SECRET` across, or every tick 401s. If you got here via
 Ctrl-C, cron stopped along with the app container and nothing is ticking at all.
 Either way, don't infer from a passing tick that the scheduler is exercised the
 way it is in production; force one by hand with

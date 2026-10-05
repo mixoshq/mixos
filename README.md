@@ -52,21 +52,21 @@ Then open it in VSCode and run **`/mixos init`** in Claude Code:
 ```
 
 That skill is the setup. It surveys what your machine is missing, asks once
-before changing anything, installs Homebrew / Node / Docker Desktop / the VSCode
-extensions, boots the whole stack in Docker, applies every migration, seeds an
-admin, and hands you a login for
+before changing anything, installs Node / Docker / the VSCode extensions (and
+Homebrew on a Mac), boots the whole stack in Docker, applies every migration,
+seeds an admin, and hands you a login for
 [http://localhost:3000](http://localhost:3000). Budget 5–15 minutes on a first
 run — most of it is Docker pulling images.
 
 From there, `/mixos help` explains how apps, connectors, and themes relate and
 recommends what to build first.
 
-The guided installer covers **macOS**. MixOS itself runs fine on Linux and on
-Windows via WSL2 — only the install commands differ, and everything after
-"Docker Desktop and Node 22 are present" is identical everywhere. Not using
-Claude Code, or want to know what the skill actually does? The same steps by
-hand are under [Prerequisites](#prerequisites) and
-[Manual setup](#manual-setup).
+The guided installer covers **macOS**, **Linux**, and **Windows via WSL 2**. On
+Windows, the stack runs inside WSL: clone the repository there, under your Linux
+home directory — run `/mixos init` anywhere else on Windows and it walks you
+through setting WSL up first. Not using Claude Code, or want to know what the
+skill actually does? The same steps by hand are under
+[Prerequisites](#prerequisites) and [Manual setup](#manual-setup).
 
 ## Contents
 
@@ -105,9 +105,14 @@ hand are under [Prerequisites](#prerequisites) and
   Command Palette if it isn't available. `/mixos init` installs both extensions for
   you automatically.)
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) — runs the
-  local database and, in the default workflow, the app itself. On macOS install
-  the **cask**, not the CLI-only formula:
+- Docker — runs the local database and, in the default workflow, the app
+  itself. [Docker Desktop](https://www.docker.com/products/docker-desktop/) on
+  macOS and Windows; on Windows, turn on its WSL integration for the
+  distribution this repository lives in. On Linux, Docker Engine with the
+  Compose plugin — `curl -fsSL https://get.docker.com | sudo sh`, then
+  `sudo usermod -aG docker "$USER"` and sign out and back in (other
+  distributions: https://docs.docker.com/engine/install/). On macOS install the
+  **cask**, not the CLI-only formula:
 
   ```bash
   brew install --cask docker-desktop
@@ -130,9 +135,10 @@ hand are under [Prerequisites](#prerequisites) and
 This is what [`/mixos init`](#quick-start) does on your behalf. Follow it if you
 aren't using Claude Code, or if you'd rather drive the steps yourself.
 
-1. Install Docker Desktop and start it once. The first launch shows a license
-   agreement and asks for your password to install a privileged helper — that
-   part can't be scripted.
+1. Install Docker and start it once. On macOS and Windows that is Docker
+   Desktop, whose first launch shows a license agreement — and on macOS asks
+   for your password to install a privileged helper — which can't be scripted.
+   On Linux, Docker Engine is a system service the install already started.
 
 2. Clone and install:
 
