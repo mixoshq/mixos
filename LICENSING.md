@@ -10,16 +10,17 @@ MPL-2.0's copyleft attaches to a **file**, not to a whole program. That maps
 onto a boundary this codebase already enforces at build time — between the
 platform in `src/`, and the apps, connectors and themes that extend it.
 
-GPL was the obvious candidate, given how closely MixOS resembles WordPress
-structurally. It was rejected for two reasons specific to this project:
+GPL was the obvious candidate for a platform built around a plugin ecosystem.
+It was rejected for two reasons specific to this project:
 
 1. **Copyleft triggers on distribution, and nobody redistributes a web app.**
    A company running MixOS on its own servers is not distributing it. GPL would
    have imposed the friction of copyleft while delivering almost none of its
    reciprocity.
-2. **The plugin coupling here is far tighter than WordPress's.** Apps are
-   imported directly into the build (`@apps/<slug>/api/.../route`), share the
-   process, and share generated types. Under GPL that is a strong
+2. **The coupling between the platform and its extensions is unusually
+   tight.** Apps are imported directly into the build
+   (`@apps/<slug>/api/.../route`), share the process, and share generated
+   types. Under GPL that is a strong
    derivative-work argument — which would have meant a company's internal
    business logic inheriting the licence. AGPL would have been worse still:
    §13 obliges offering source to network users, and MixOS deliberately serves
@@ -79,15 +80,18 @@ judged more valuable than the restriction.
 ## Trademark
 
 The MixOS name, wordmark and logo are **not** licensed by the MPL. A software
-licence grants copyright and patent rights, never trademark rights. Ask before
-shipping something that presents itself as MixOS.
+licence grants copyright and patent rights, never trademark rights. See
+[`TRADEMARK.md`](TRADEMARK.md) for what forks, extensions and hosting services
+can and can't be called.
 
 ## Contributing
 
 Contributions are accepted under MPL-2.0 — MPL §2 grants the licence from each
 Contributor directly, so no separate CLA is required. Sign off your commits
 (`git commit -s`) to certify the [Developer Certificate of
-Origin](https://developercertificate.org/).
+Origin](https://developercertificate.org/). See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the details, including the notice
+every new platform file must carry.
 
 ## Dependencies
 

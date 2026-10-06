@@ -59,6 +59,14 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import {
+  PLATFORM_LABEL,
+  checkoutOwner,
+  composeInstallHint,
+  dockerInstallHint,
+  hostPlatform,
+  windowsDockerDesktop,
+} from "./host-platform";
 import { resolveInstance } from "./instance";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -67,6 +75,19 @@ const ROOT = path.resolve(__dirname, "..");
 // process below — `docker compose`, the Supabase CLI — reads its identity from
 // there. See scripts/instance.ts.
 const INSTANCE = resolveInstance();
+
+/** macOS, Linux, or Windows via WSL 2 — see scripts/host-platform.ts. */
+const PLATFORM = hostPlatform();
+
+// On Linux and in WSL the dev container must write the checkout as the person
+// who owns it, not as root — see checkoutOwner(). Exported here, before any
+// child process starts, because compose reads it from the environment when it
+// renders docker-compose.yml.
+const OWNER = checkoutOwner(PLATFORM);
+if (OWNER) {
+  process.env.MIXOS_UID = String(OWNER.uid);
+  process.env.MIXOS_GID = String(OWNER.gid);
+}
 
 /**
  * Compose project name.
@@ -220,7 +241,7 @@ function stream(
           new SetupError(
             `\`${cmd}\` is not on your PATH.`,
             cmd === "docker"
-              ? "Install Docker Desktop: brew install --cask docker-desktop"
+              ? dockerInstallHint(PLATFORM)
               : `Install ${cmd} and re-run.`,
           ),
         );
@@ -505,26 +526,53 @@ function portInUse(port: number): Promise<boolean> {
   });
 }
 
-/** Best-effort "who has this port", for an error message worth reading. */
+/**
+ * Best-effort "who has this port", for an error message worth reading.
+ *
+ * Docker is asked first, because it is the one answer that works the same on
+ * every platform. On Linux a published port is held by `docker-proxy`, a root
+ * process that `lsof` and `ss` will not name to an ordinary user — so without
+ * this, re-running the boot over a stack that is already up would report its
+ * own app container as "an unknown process" and refuse to continue.
+ */
 function portHolder(port: number): string | null {
+  const container = capture("docker", [
+    "ps",
+    "--filter",
+    `publish=${port}`,
+    "--format",
+    "{{.Names}}",
+  ]);
+  const name = container.status === 0 ? container.stdout.trim().split("\n")[0] : "";
+  if (name) return `container ${name}`;
+
   const r = capture("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]);
-  if (r.status !== 0) return null;
-  const line = r.stdout.split("\n")[1];
-  if (!line) return null;
-  const [command, pid] = line.trim().split(/\s+/);
-  if (!command) return null;
-  return pid ? `${command} (pid ${pid})` : command;
+  if (r.status === 0) {
+    const line = r.stdout.split("\n")[1];
+    const [command, pid] = line ? line.trim().split(/\s+/) : [];
+    if (command) return pid ? `${command} (pid ${pid})` : command;
+  }
+
+  // Linux distributions do not all ship lsof; every one ships ss (iproute2).
+  const ss = capture("ss", ["-Hltnp", `sport = :${port}`]);
+  if (ss.status === 0) {
+    const m = /users:\(\("([^"]+)",pid=(\d+)/.exec(ss.stdout);
+    if (m) return `${m[1]} (pid ${m[2]})`;
+  }
+  return null;
 }
 
 /**
- * Docker Desktop publishes container ports through its own backend process, so
- * a port held by one of our own containers looks like `com.docke...` to lsof.
- * That case is fine — compose recreates the container — while a host `npm run
- * dev` on 3000 is not.
+ * Whether a port belongs to a container rather than to a host process.
+ *
+ * That case is fine — compose recreates its own containers — while a host
+ * `npm run dev` on 3000 is not. Docker's own answer says "container …"; the
+ * process names are what each platform's publisher looks like to lsof:
+ * Docker Desktop's backend on macOS, `docker-proxy` on Linux.
  */
 function looksLikeDocker(holder: string | null): boolean {
   if (!holder) return false;
-  return /^(com\.docke|docker|vpnkit|containerd)/i.test(holder);
+  return /^(container |com\.docke|docker|vpnkit|containerd)/i.test(holder);
 }
 
 function isDockerDaemonUp(): boolean {
@@ -538,8 +586,27 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Poll until `docker info` answers, or give up with `onTimeout`. */
+async function waitForDaemon(onTimeout: string): Promise<void> {
+  const deadline = Date.now() + DOCKER_BOOT_TIMEOUT_MS;
+  let waited = 0;
+  while (!isDockerDaemonUp()) {
+    if (Date.now() >= deadline) {
+      throw new SetupError(
+        `The Docker daemon did not come up within ${DOCKER_BOOT_TIMEOUT_MS / 1000}s.`,
+        onTimeout,
+      );
+    }
+    await sleep(DOCKER_POLL_INTERVAL_MS);
+    waited += DOCKER_POLL_INTERVAL_MS;
+    if (waited % 20_000 === 0)
+      info(`still waiting for Docker... (${waited / 1000}s)`);
+  }
+  info(c.green("Docker daemon is up."));
+}
+
 /**
- * Launch Docker Desktop and wait for the daemon to answer.
+ * Launch Docker Desktop on macOS and wait for the daemon to answer.
  *
  * `open -ga Docker` is used rather than `docker desktop start` because the
  * `desktop` CLI plugin only grew start/stop/status recently — on Docker Desktop
@@ -572,21 +639,86 @@ async function launchDockerDesktop(): Promise<void> {
       "prompts and this will continue on its own.",
   );
 
-  const deadline = Date.now() + DOCKER_BOOT_TIMEOUT_MS;
-  let waited = 0;
-  while (!isDockerDaemonUp()) {
-    if (Date.now() >= deadline) {
-      throw new SetupError(
-        `The Docker daemon did not come up within ${DOCKER_BOOT_TIMEOUT_MS / 1000}s.`,
-        "Open Docker Desktop and check for an error or an unanswered prompt, then re-run this command.",
-      );
-    }
-    await sleep(DOCKER_POLL_INTERVAL_MS);
-    waited += DOCKER_POLL_INTERVAL_MS;
-    if (waited % 20_000 === 0)
-      info(`still waiting for Docker... (${waited / 1000}s)`);
+  await waitForDaemon(
+    "Open Docker Desktop and check for an error or an unanswered prompt, then re-run this command.",
+  );
+}
+
+/**
+ * Launch Docker Desktop for Windows from inside WSL and wait for the daemon.
+ *
+ * WSL can run a Windows executable directly, so this is the same move as
+ * `open -ga Docker` on a Mac. Detached and unreferenced: Docker Desktop
+ * outlives this script, and must not be killed when it exits.
+ */
+async function launchWindowsDockerDesktop(): Promise<void> {
+  const exe = windowsDockerDesktop();
+  if (!exe) {
+    throw new SetupError(
+      "Docker is not reachable from WSL, and Docker Desktop for Windows is not installed in the usual place.",
+      dockerInstallHint("wsl"),
+    );
   }
-  info(c.green("Docker daemon is up."));
+
+  info("Docker is not responding — starting Docker Desktop for Windows...");
+  try {
+    spawn(exe, [], { detached: true, stdio: "ignore" }).unref();
+  } catch {
+    throw new SetupError(
+      "Could not launch Docker Desktop from WSL.",
+      "Start Docker Desktop from the Windows Start menu, then re-run this command.",
+    );
+  }
+
+  info(
+    "If this is Docker Desktop's first launch, accept the service agreement in its window. " +
+      "If it never connects, check Settings -> Resources -> WSL integration is on for this distribution.",
+  );
+
+  await waitForDaemon(
+    "Open Docker Desktop and check that it is running and that Settings -> Resources -> " +
+      "WSL integration is on for this distribution, then re-run this command.",
+  );
+}
+
+/**
+ * What to say when Docker Engine on Linux is not answering.
+ *
+ * Not started from here: Docker Engine is a system service, and starting it
+ * takes root — not something a dev script should reach for on its own. The two
+ * common causes need different fixes, and `docker info` says which it is.
+ */
+function linuxDockerProblem(): SetupError {
+  const probe = capture("docker", ["info"]);
+  if (/permission denied/i.test(probe.stderr)) {
+    return new SetupError(
+      "Your user cannot reach the Docker daemon.",
+      'Add yourself to the docker group: sudo usermod -aG docker "$USER" — then sign out and back in.\n' +
+        "  Group changes only reach new sessions. Until then, run this through the group explicitly:\n" +
+        "  sg docker -c 'npm run dev:docker'",
+    );
+  }
+  return new SetupError(
+    "The Docker daemon is not running.",
+    "Start it: sudo systemctl start docker  (and `sudo systemctl enable docker` to start it at boot).\n" +
+      "  If you use Docker Desktop for Linux instead, open it and wait for it to finish starting.",
+  );
+}
+
+/** Start Docker the way this platform does it, and wait for the daemon. */
+async function startDocker(): Promise<void> {
+  if (PLATFORM === "macos") return launchDockerDesktop();
+  if (PLATFORM === "wsl") return launchWindowsDockerDesktop();
+  throw linuxDockerProblem();
+}
+
+/** The fix to print when `--check` finds the daemon down, which must not start it. */
+function dockerStartHint(): string {
+  if (PLATFORM === "linux") return linuxDockerProblem().next;
+  if (PLATFORM === "wsl") {
+    return "Start Docker Desktop for Windows (a normal `npm run dev:docker` starts it for you and waits).";
+  }
+  return "Start Docker Desktop (a normal `npm run dev:docker` starts it for you and waits).";
 }
 
 type PreflightOutcome = {
@@ -601,15 +733,33 @@ async function preflight(opts: {
   const pf = new Preflight(opts.checkOnly);
 
   // ── platform ──
-  if (process.platform !== "darwin") {
+  if (PLATFORM === "windows") {
+    pf.fail(
+      "Windows needs WSL 2",
+      "The local stack runs Linux containers driven from a Linux shell. Git Bash and PowerShell cannot run it.",
+      "Install WSL 2 (`wsl --install` in an administrator PowerShell, then restart), install Docker Desktop " +
+        "with its WSL integration on, and clone this repository again INSIDE WSL — under your Linux home " +
+        "directory, not /mnt/c. Run this from there. docs/local-docker.md has the steps.",
+    );
+  } else if (PLATFORM === "other") {
     pf.fail(
       `Unsupported platform: ${process.platform}`,
-      "The guided Docker path is macOS-only.",
-      "Follow the manual setup in README.md (hosted Supabase + host Node), or adapt " +
-        "docker-compose.yml yourself — see docs/local-docker.md.",
+      "The Docker path is built for macOS, Linux, and Windows via WSL 2.",
+      "Follow the manual setup in README.md (hosted Supabase + host Node).",
     );
   } else {
-    pf.ok("macOS");
+    pf.ok(PLATFORM_LABEL[PLATFORM], OWNER ? `files written as uid ${OWNER.uid}` : undefined);
+  }
+
+  // A checkout on the Windows drive works, but badly: every file read crosses
+  // from Linux to Windows, and file-change events do not cross at all — so the
+  // dev server stops hot-reloading. Advisory, because it does still boot.
+  if (PLATFORM === "wsl" && ROOT.startsWith("/mnt/")) {
+    pf.warn(
+      "This checkout is on the Windows drive",
+      `${ROOT} is slow from WSL, and edits made here will not hot-reload. Clone the repository again ` +
+        "under your Linux home directory (cd ~ && git clone …) and run it from there.",
+    );
   }
 
   // ── repo files (another dev may have a partial checkout, or a stale branch) ──
@@ -651,15 +801,26 @@ async function preflight(opts: {
     );
 
   // ── docker CLI + compose plugin ──
-  const dockerVersion = capture("docker", ["--version"]);
+  let dockerVersion = capture("docker", ["--version"]);
+  // In WSL the `docker` command is Docker Desktop's, linked into the
+  // distribution only while Desktop runs — so a stopped Desktop looks exactly
+  // like Docker not being installed. Start it before deciding which it is.
+  if (
+    dockerVersion.status !== 0 &&
+    PLATFORM === "wsl" &&
+    !opts.checkOnly &&
+    windowsDockerDesktop()
+  ) {
+    await launchWindowsDockerDesktop();
+    dockerVersion = capture("docker", ["--version"]);
+  }
   if (dockerVersion.status === 0) {
     pf.ok("docker CLI", dockerVersion.stdout.trim());
   } else {
     pf.fail(
       "docker is not on your PATH",
       dockerVersion.stderr.trim() || "command not found",
-      "Install Docker Desktop: brew install --cask docker-desktop  (the --cask flag matters — " +
-        "`brew install docker` is the CLI-only formula with no daemon).",
+      dockerInstallHint(PLATFORM),
     );
   }
 
@@ -673,7 +834,7 @@ async function preflight(opts: {
     pf.fail(
       "The `docker compose` plugin is unavailable",
       composeVersion.stderr.trim() || "docker compose version failed",
-      "Update Docker Desktop — Compose v2 ships with it. The standalone `docker-compose` v1 binary is not used here.",
+      composeInstallHint(PLATFORM),
     );
   }
 
@@ -686,10 +847,10 @@ async function preflight(opts: {
     pf.fail(
       "Docker daemon is not responding",
       "`docker info` failed.",
-      "Start Docker Desktop (a normal `npm run dev:docker` starts it for you and waits).",
+      dockerStartHint(),
     );
   } else {
-    await launchDockerDesktop();
+    await startDocker();
     daemonUp = true;
     pf.ok("Docker daemon");
   }
@@ -701,10 +862,15 @@ async function preflight(opts: {
     if (Number.isFinite(bytes) && bytes > 0) {
       const gib = (bytes / 1024 ** 3).toFixed(1);
       if (bytes < MIN_DOCKER_MEMORY_BYTES) {
+        const raise =
+          PLATFORM === "linux"
+            ? "Docker Engine uses the machine's own memory, so this machine is short of it."
+            : PLATFORM === "wsl"
+              ? "WSL 2 sets Docker's share: raise `memory=` under [wsl2] in %UserProfile%\\.wslconfig, then `wsl --shutdown`."
+              : "Raise it in Docker Desktop -> Settings -> Resources if the stack is unstable.";
         pf.warn(
-          `Docker Desktop has only ${gib} GiB allocated`,
-          "Postgres, PostgREST, Kong, Studio and the app together want ~4 GiB. " +
-            "Raise it in Docker Desktop -> Settings -> Resources if the stack is unstable.",
+          `Docker has only ${gib} GiB available`,
+          `Postgres, PostgREST, Kong, Studio and the app together want ~4 GiB. ${raise}`,
         );
       } else {
         pf.ok("Docker memory", `${gib} GiB`);
@@ -1007,6 +1173,18 @@ async function composeUp(
 ): Promise<number> {
   const profile = prod ? "prod" : "dev";
   const otherService = prod ? "app-dev" : "app";
+
+  // The dev profile mounts the .next and node_modules volumes INSIDE the
+  // checkout, and Docker creates a missing mountpoint itself — as root. On
+  // Linux and in WSL that left a root-owned .next in the person's repository,
+  // which a host `npm run dev` or `npm run build` then could not write to, and
+  // which the container cannot reach to fix because the volume sits on top of
+  // it. Creating both first, as the person, keeps them theirs.
+  if (!prod && OWNER) {
+    for (const dir of [".next", "node_modules"]) {
+      fs.mkdirSync(path.join(ROOT, dir), { recursive: true });
+    }
+  }
 
   spawnSync(
     "docker",
