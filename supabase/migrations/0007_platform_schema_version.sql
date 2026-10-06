@@ -12,10 +12,9 @@
 -- on whichever request touched X first. The failure surfaces as scattered 500s
 -- in unrelated features rather than as "the database is behind".
 --
--- This is the oldest fix there is. WordPress has carried a `db_version` option
--- since 2003 and compares it against the constant baked into the code on every
--- admin request (wp-admin/admin.php), refusing to run until the two agree.
--- Same idea, one row:
+-- This is the oldest fix there is: record the schema version the database has,
+-- compare it against the version baked into the code, and refuse to serve until
+-- the two agree. One row:
 --
 --   * `platform_settings.platform_schema_version` is what the DATABASE has.
 --     Its value is the number of the highest migration applied from this
@@ -72,11 +71,8 @@ on conflict (key) do update
 --      across a network download and a child process; holding a database
 --      transaction open for that is its own problem.
 --
--- So: a row, with an expiry. This is again what WordPress settled on
--- (WP_Upgrader::create_lock, an INSERT IGNORE on the options table with a
--- release timeout), and for the same reason — the lock has to outlive a
--- connection and has to self-heal when the holder dies mid-operation without
--- releasing.
+-- So: a row, with an expiry. The lock has to outlive a connection, and it has to
+-- self-heal when the holder dies mid-operation without releasing.
 --
 -- `holder` is a per-acquisition token, not an identity. It exists so that a
 -- process whose lock has already expired and been taken by someone else cannot

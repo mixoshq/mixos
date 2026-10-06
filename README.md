@@ -52,21 +52,21 @@ Then open it in VSCode and run **`/mixos init`** in Claude Code:
 ```
 
 That skill is the setup. It surveys what your machine is missing, asks once
-before changing anything, installs Homebrew / Node / Docker Desktop / the VSCode
-extensions, boots the whole stack in Docker, applies every migration, seeds an
-admin, and hands you a login for
+before changing anything, installs Node / Docker / the VSCode extensions (and
+Homebrew on a Mac), boots the whole stack in Docker, applies every migration,
+seeds an admin, and hands you a login for
 [http://localhost:3000](http://localhost:3000). Budget 5–15 minutes on a first
 run — most of it is Docker pulling images.
 
 From there, `/mixos help` explains how apps, connectors, and themes relate and
 recommends what to build first.
 
-The guided installer covers **macOS**. MixOS itself runs fine on Linux and on
-Windows via WSL2 — only the install commands differ, and everything after
-"Docker Desktop and Node 22 are present" is identical everywhere. Not using
-Claude Code, or want to know what the skill actually does? The same steps by
-hand are under [Prerequisites](#prerequisites) and
-[Manual setup](#manual-setup).
+The guided installer covers **macOS**, **Linux**, and **Windows via WSL 2**. On
+Windows, the stack runs inside WSL: clone the repository there, under your Linux
+home directory — run `/mixos init` anywhere else on Windows and it walks you
+through setting WSL up first. Not using Claude Code, or want to know what the
+skill actually does? The same steps by hand are under
+[Prerequisites](#prerequisites) and [Manual setup](#manual-setup).
 
 ## Contents
 
@@ -85,6 +85,19 @@ hand are under [Prerequisites](#prerequisites) and
 - [Licence](#licence)
 
 ## Prerequisites
+
+| What | Version | Notes |
+|---|---|---|
+| Operating system | macOS, Linux, or Windows with WSL 2 | On Windows the stack runs inside WSL. Git Bash and PowerShell can't run it. |
+| [Node.js](https://nodejs.org) | **24**, pinned in `.nvmrc`. 22 is the minimum | Node 22 reaches end of life on 30 April 2027. Every shell that runs MixOS commands needs it, not only your terminal (see below). |
+| npm | Ships with Node | The lockfile is npm's: install with `npm ci`, not pnpm or yarn. |
+| Git | Any recent version | |
+| Docker | Docker Desktop (macOS, Windows), or Docker Engine with the Compose v2 plugin (Linux) | Give Docker about 4 GiB of memory, and keep several GB of disk free for images. |
+| Free ports | 3000, 54321, 54322, 54323 | The app, the Supabase API, Postgres, and Supabase Studio. |
+| [VS Code](https://code.visualstudio.com/) | Current | With the Claude Code and Prettier extensions. Claude Code needs a Claude account; only the guided `/mixos` path uses it. |
+| [GitHub CLI](https://cli.github.com) | Optional | Lets `/mixos deploy` open pull requests for you. Without it you get a link to paste. |
+
+`/mixos init` checks all of this and installs what's missing. In detail:
 
 - [Visual Studio Code](https://code.visualstudio.com/) — the editor MixOS is built
   to be worked on in. After installing, add these two extensions (Extensions
@@ -105,9 +118,14 @@ hand are under [Prerequisites](#prerequisites) and
   Command Palette if it isn't available. `/mixos init` installs both extensions for
   you automatically.)
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) — runs the
-  local database and, in the default workflow, the app itself. On macOS install
-  the **cask**, not the CLI-only formula:
+- Docker — runs the local database and, in the default workflow, the app
+  itself. [Docker Desktop](https://www.docker.com/products/docker-desktop/) on
+  macOS and Windows; on Windows, turn on its WSL integration for the
+  distribution this repository lives in. On Linux, Docker Engine with the
+  Compose plugin — `curl -fsSL https://get.docker.com | sudo sh`, then
+  `sudo usermod -aG docker "$USER"` and sign out and back in (other
+  distributions: https://docs.docker.com/engine/install/). On macOS install the
+  **cask**, not the CLI-only formula:
 
   ```bash
   brew install --cask docker-desktop
@@ -120,19 +138,30 @@ hand are under [Prerequisites](#prerequisites) and
   need a paid subscription — [OrbStack](https://orbstack.dev) is a drop-in
   alternative if that applies to you.
 
-- [Node.js](https://nodejs.org) 22+ — the version is pinned in `.nvmrc`, so
-  `nvm use` selects it for you. Node runs the boot script and the Supabase CLI
-  on the host even when the app itself runs in a container.
-- npm
+- [Node.js](https://nodejs.org) 24 — the version pinned in `.nvmrc`, so
+  `nvm use` selects it for you; 22 or newer works. Node runs the boot script and
+  the Supabase CLI on the host even when the app itself runs in a container.
+
+  **Every shell has to find it, not only your terminal.** Git hooks, editors and
+  Claude Code often start shells that never read `~/.zprofile`, so on a Mac
+  where Homebrew is set up there (`brew shellenv`), they can find an older Node
+  first — typically one a nodejs.org installer left in `/usr/local/bin`.
+  `npm run dev`, `build`, `typecheck` and `dev:docker` check before they start.
+  When the Node is too old, they say which newer one is installed but hidden,
+  and how to put it first (`node scripts/check-node.mjs` runs the same check on
+  its own).
+- npm — ships with Node. The lockfile is npm's, so install with `npm ci`, not
+  pnpm or yarn.
 
 ## Manual setup
 
 This is what [`/mixos init`](#quick-start) does on your behalf. Follow it if you
 aren't using Claude Code, or if you'd rather drive the steps yourself.
 
-1. Install Docker Desktop and start it once. The first launch shows a license
-   agreement and asks for your password to install a privileged helper — that
-   part can't be scripted.
+1. Install Docker and start it once. On macOS and Windows that is Docker
+   Desktop, whose first launch shows a license agreement — and on macOS asks
+   for your password to install a privileged helper — which can't be scripted.
+   On Linux, Docker Engine is a system service the install already started.
 
 2. Clone and install:
 
@@ -588,7 +617,8 @@ an atomic Postgres update, so the next tick resumes).
 
 Nothing in the platform requires Vercel specifically. It is a standard Next.js
 server: `npm ci && npm run build && npm start` behind the same environment
-variables works on any Node 22+ host. The repo's [`Dockerfile`](Dockerfile) is a
+variables works on any Node 22+ host (24 is what the repo pins and the image
+runs). The repo's [`Dockerfile`](Dockerfile) is a
 real production build of the same thing — a multi-stage image running Next.js
 standalone output as `node server.js`, with a `/api/health/live` healthcheck.
 `npm run docker:prod` runs it locally against the Docker Postgres, which is how
@@ -622,5 +652,7 @@ and may be licensed however you like, including proprietary — importing
 platform code does not change that. The scaffolding templates are public domain
 (CC0) so a copied template never carries obligations into your work.
 
-See [`LICENSING.md`](LICENSING.md) for the boundary in detail, why MPL was
-chosen over GPL and AGPL, and the trademark and contribution terms.
+See [`LICENSING.md`](LICENSING.md) for the boundary in detail and why MPL was
+chosen over GPL and AGPL. Contributions are made under the Developer
+Certificate of Origin — see [`CONTRIBUTING.md`](CONTRIBUTING.md). The MixOS name
+and logo are covered separately by [`TRADEMARK.md`](TRADEMARK.md).

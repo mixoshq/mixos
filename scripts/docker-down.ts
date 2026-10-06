@@ -24,6 +24,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { dockerInstallHint, hostPlatform } from "./host-platform";
 import { resolveInstance } from "./instance";
 import readline from "node:readline/promises";
 
@@ -67,7 +68,9 @@ function stream(cmd: string, args: string[]): Promise<number> {
         reject(
           new TeardownError(
             `\`${cmd}\` is not on your PATH.`,
-            "Install Docker Desktop (brew install --cask docker-desktop) or run `npm ci`.",
+            cmd === "docker"
+              ? dockerInstallHint(hostPlatform())
+              : "Run `npm ci` in the repo root.",
           ),
         );
         return;

@@ -25,10 +25,9 @@
  * process, and holding a database transaction open for that is its own problem.
  *
  * So the lock is a row with an expiry, per
- * `supabase/migrations/0007_platform_schema_version.sql`. The same shape
- * WordPress arrived at (`WP_Upgrader::create_lock`) for the same reasons: it has
- * to outlive a connection, and it has to self-heal when the holder dies
- * mid-operation without releasing.
+ * `supabase/migrations/0007_platform_schema_version.sql`. A row because it has
+ * to outlive a connection, and an expiry because it has to self-heal when the
+ * holder dies mid-operation without releasing.
  *
  * ── THE EXPIRY IS A CEILING, NOT A DEADLINE ─────────────────────────────────
  *
