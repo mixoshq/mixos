@@ -7,15 +7,16 @@
 # shows up after a build: missing runtime files, server components that read
 # from disk, instrumentation that never registers.
 #
-# Node 22 to match .nvmrc / package.json engines. bookworm-slim (glibc), NOT
-# alpine: Next 16 builds with Turbopack, which needs the @next/swc native
-# binding, and package-lock.json only carries @next/swc-linux-arm64-gnu /
-# -x64-gnu. A musl base would resolve nothing and fail the build.
+# Node 24 to match the pin in .nvmrc (package.json `engines` is the floor,
+# >=22, not the target). bookworm-slim (glibc), NOT alpine: Next 16 builds with
+# Turbopack, which needs the @next/swc native binding, and package-lock.json
+# only carries @next/swc-linux-arm64-gnu / -x64-gnu. A musl base would resolve
+# nothing and fail the build.
 
 # ---------------------------------------------------------------------------
 # deps — dependency install, cached on the lockfile alone
 # ---------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS deps
+FROM node:24-bookworm-slim AS deps
 WORKDIR /app
 
 # Only the manifests, so editing source doesn't invalidate the npm layer.
@@ -32,7 +33,7 @@ RUN npm ci --no-audit --no-fund
 # ---------------------------------------------------------------------------
 # builder — next build
 # ---------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -87,7 +88,7 @@ RUN set -eu; \
 # ---------------------------------------------------------------------------
 # runner — the shipped image
 # ---------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS runner
+FROM node:24-bookworm-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
@@ -152,7 +153,7 @@ COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
 
-# The node:22 base already ships an unprivileged `node` user (uid 1000); reusing
+# The node base image already ships an unprivileged `node` user (uid 1000); reusing
 # it beats minting another one. Nothing in this image is written at runtime.
 USER node
 
@@ -160,7 +161,7 @@ EXPOSE 3000
 
 # `node -e` rather than curl/wget: bookworm-slim ships neither reliably, and
 # installing one just for a health probe adds an apt layer and a root step for
-# no benefit. Node 22 has global fetch.
+# no benefit. Node has had a global fetch since 18.
 #
 # /live, not /ready: this is the container's own restart signal, and a Postgres
 # blip should not restart the app process. The compose healthcheck uses /ready,

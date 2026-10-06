@@ -310,7 +310,7 @@ export type ActionCallback = (...args: unknown[]) => void | Promise<void>;
 export type FilterCallback = (value: unknown, ...args: unknown[]) => unknown | Promise<unknown>;
 
 // ============================================================
-// HookRegistrar — interface given to apps (WordPress-style)
+// HookRegistrar — interface given to apps (actions and filters)
 // ============================================================
 
 export interface HookRegistrar {
