@@ -43,6 +43,7 @@ import {
   resolveInstall,
   type InstallResult,
 } from "./install";
+import { installDisabledMessage, installEnabled } from "./policy";
 import {
   KIND_SEGMENT,
   type Extension,
@@ -89,6 +90,17 @@ export async function searchRepositoryAction(input: {
   page?: number;
 }): Promise<SearchOutcome> {
   await adminActor();
+
+  // Every action checks the kind's install flag itself, as it checks admin:
+  // with the browse page gone, a direct call is the only way here.
+  if (!installEnabled(input.kind)) {
+    return {
+      ok: false,
+      message: installDisabledMessage(input.kind),
+      origin: "the repository",
+      unreachable: false,
+    };
+  }
 
   let origin = "the repository";
   try {
@@ -148,6 +160,10 @@ export async function resolveInstallAction(input: {
 }): Promise<ResolveOutcome> {
   await adminActor();
 
+  if (!installEnabled(input.kind)) {
+    return { ok: false, message: installDisabledMessage(input.kind), code: "disabled", listing: null };
+  }
+
   const listing = await fetchExtension(input.kind, input.slug).catch(() => null);
 
   try {
@@ -192,7 +208,8 @@ export type RegisterOutcome =
  * Audited either way. A refused registration is at least as interesting as a
  * successful one: `repository.register.rejected` with `reason: "checksum"` is
  * the row that says someone was served bytes that did not match what the
- * catalogue published.
+ * catalogue published, and `reason: "disabled"` is a call that reached a kind
+ * this instance does not install — which no page leads to.
  */
 export async function registerExtensionAction(input: {
   kind: ExtensionKind;

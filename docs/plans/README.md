@@ -54,6 +54,7 @@ Current platform plans:
 | [`20261004_2301-login-extensions.md`](20261004_2301-login-extensions.md) | Sign-in extension points: identity providers declared by connectors, veto-only gates, bounded filters and observers for apps, and a hook system able to carry them |
 | [`20261005_2215-brand-filters.md`](20261005_2215-brand-filters.md) | Brand name, menu-bar logo and login logo as bounded core filters; a declared `hooks.ts` entrypoint; theme `branding` claims that win over apps |
 | [`20261005_2209-widget-context-menu.md`](20261005_2209-widget-context-menu.md) | Right-click a dashboard widget for Configure widget and Edit Dashboard, through one shared `ContextMenu` primitive |
+| [`20261006_0415-install-flags.md`](20261006_0415-install-flags.md) | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES`: with one off, that kind's catalogue browse page, button and install actions are gone |
 
 ## File naming
 
