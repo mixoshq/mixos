@@ -42,6 +42,23 @@ just pulled.
   `.webp`, or the build fails. Both bundled themes already comply.
 - **`npm test`** runs the unit tests (`*.test.ts` under `src/` and `scripts/`)
   with Node's built-in runner, and CI runs it after typecheck.
+- **`raw-response` is the only app escape, and it is required.** A route with
+  `raw: true` registers only when `app.json` declares
+  `escapes: [{ "rule": "raw-response", "reason": "…" }]`, and an admin sees the
+  declaration and its reason in the app's details. `process-env`, `raw-fetch`,
+  `raw-html` and `output-validate-dev-only` are gone; a manifest naming one
+  fails the build.
+- **App containment is enforced by the build, not just lint.** The registry
+  generator reads every app's source on every build and every Registry install,
+  and skips an app that references `process`, raw network access (`fetch`,
+  `WebSocket`, the `http`/`net` modules, HTTP client packages), an HTML sink
+  (`dangerouslySetInnerHTML`, `innerHTML`, …), `eval` or `new Function`. Each
+  finding names the file and line.
+- **`Markdown` for text you did not write.** `@/components/ui/markdown` renders
+  GitHub-flavoured Markdown with raw HTML dropped and `javascript:` links
+  blanked, styled from the theme's tokens.
+- **Route output is validated on every response.** The
+  `output: { schema, validate: "dev-only" }` form is removed; pass the schema.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
 
