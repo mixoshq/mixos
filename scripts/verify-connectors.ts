@@ -1028,6 +1028,18 @@ async function main() {
     okA.ok && okHex.ok && okA.eventKey === okHex.eventKey,
   );
 
+  const respelled = verifyWebhookSignature({
+    policy: policy(),
+    secret: SECRET,
+    rawBody: bodyText,
+    headers: hdrs({ "x-signature": `x=${macOf(bodyText).toString("base64")}` }),
+  });
+  check(
+    "a re-spelled signature is the same delivery",
+    respelled.ok && okHex.ok && respelled.eventKey === okHex.eventKey,
+    "otherwise a captured delivery replays under a new key",
+  );
+
   // ══ Failure envelope ═════════════════════════════════════════════════════
   suite = "envelope";
 
@@ -1297,8 +1309,34 @@ async function main() {
       await sql`delete from public.connector_webhook_events where connector_name = '__probe__'`;
       check(
         "the prune sweep runs without throwing",
-        typeof (await pruneWebhookEvents()) === "number",
+        typeof (await pruneWebhookEvents(["__probe__"])) === "number",
       );
+
+      // A timestamped policy's marker goes after a day. Without a timestamp the
+      // marker is the only thing refusing a replay, so it is kept for 90 days.
+      const timed = `old-timed-${evKey}`;
+      const untimed = `old-untimed-${evKey}`;
+      const expired = `expired-untimed-${evKey}`;
+      await sql`
+        insert into public.connector_webhook_events (event_key, connector_name, received_at)
+        values (${timed}, '__probe__', now() - interval '2 days'),
+               (${untimed}, '__probe_untimed__', now() - interval '2 days'),
+               (${expired}, '__probe_untimed__', now() - interval '91 days')
+      `;
+      await pruneWebhookEvents(["__probe__"]);
+      const left = await sql<{ event_key: string }[]>`
+        select event_key from public.connector_webhook_events
+         where event_key in (${timed}, ${untimed}, ${expired})
+      `;
+      check(
+        "the sweep drops a timestamped marker after a day and an untimed one after 90",
+        left.length === 1 && left[0].event_key === untimed,
+        `left: ${left.map((r) => r.event_key).join(", ") || "none"}`,
+      );
+      await sql`
+        delete from public.connector_webhook_events
+         where connector_name in ('__probe__', '__probe_untimed__')
+      `;
 
       // 4. Credentials an admin typed must survive a token write-back.
       await sql`delete from public.connector_configs where connector_name = ${probeName}`;
