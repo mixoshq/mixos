@@ -12,6 +12,8 @@ import { getAppGrantCounts, getAppTableCounts } from "@/lib/apps/admin-actions";
 import { getAppActiveMap } from "@/lib/apps/access";
 import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
 import AppRegistryList from "@/components/admin/app-registry-list";
+import BrandConflicts from "@/components/admin/brand-conflicts";
+import { getActiveTheme } from "@/lib/themes/active";
 
 export default async function AppsAdminPage() {
   const session = await requireReadOnlySession();
@@ -24,6 +26,7 @@ export default async function AppsAdminPage() {
   // getAppTableCounts.
   const tableCountsBySlug = await getAppTableCounts();
   const activeBySlug = await getAppActiveMap();
+  const { theme } = await getActiveTheme();
 
   // Precompute the missing-connector map once per page load. Shown here as a
   // warning only — it is not a gate on this page any more. An app that needs an
@@ -80,6 +83,11 @@ export default async function AppsAdminPage() {
           </a>
         </div>
       </div>
+      <BrandConflicts
+        apps={appRegistry}
+        activeBySlug={activeBySlug}
+        themeBranding={theme.branding}
+      />
       <AppRegistryList
         apps={appRegistry}
         missingConnectorsBySlug={missingConnectorsBySlug}

@@ -22,8 +22,17 @@ import AppsDropdown from "@/components/apps/apps-dropdown";
 import { useDashboardEdit } from "@/components/dashboard/edit-mode-context";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { fitLogo, MENU_BAR_LOGO_BOX } from "@/lib/branding/fit";
+import type { BrandLogo } from "@/lib/branding/types";
 
-export default function Header({ logo }: { logo?: string | null }) {
+export default function Header({
+  logo,
+  name,
+}: {
+  logo: BrandLogo | null;
+  name: string;
+}) {
+  const mark = logo ? fitLogo(logo, MENU_BAR_LOGO_BOX) : null;
   const { data: session, status } = useSession();
   const user = session?.user;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -95,24 +104,43 @@ export default function Header({ logo }: { logo?: string | null }) {
       data-tour="menu-bar"
       className="mix-menubar flex h-10 shrink-0 items-center justify-between border-b border-border bg-brand px-4">
       <div className="flex min-w-0 flex-1 items-center gap-4">
-        {/* The bar is only h-10, so the mark and wordmark run leading-none to fit. */}
+        {/*
+          The bar is only h-10, so the mark and wordmark run leading-none to
+          fit. The name is filterable and may be up to 40 characters, so it
+          truncates rather than pushing the Dashboard link along.
+        */}
         <Link
           href="/"
           data-tour="menu-bar-logo"
-          className="flex shrink-0 items-center gap-2 leading-none"
+          className="flex min-w-0 max-w-[50%] shrink-0 items-center gap-2 leading-none"
         >
-          {logo && (
+          {mark && (
             <Image
-              src={logo}
+              src={mark.src}
               // Decorative: the wordmark beside it already names the product.
               alt=""
-              width={24}
-              height={23}
+              width={mark.width}
+              height={mark.height}
               priority
+              // Allowed to shrink, keeping its proportions (h-auto): this link
+              // is capped at half the bar, and a wide horizontal lockup that
+              // could not shrink would spill over the Dashboard link on a
+              // phone. At full width it renders at exactly its fitted size.
+              className="h-auto min-w-0 shrink"
             />
           )}
-          <span className="font-heading text-lg font-bold leading-none text-brand-foreground">
-            MixOS
+          {/*
+            `truncate` clips, and under leading-none a descender hangs below
+            the box — so 3px of padding gives it room, and the negative margin
+            keeps the bar's layout where it was. The sign-in wordmark carries
+            the same padding scaled by 24/18, which is what keeps the welcome
+            tour's flight between the two landing on the same pixel.
+          */}
+          <span
+            title={name}
+            className="-my-[3px] truncate py-[3px] font-heading text-lg font-bold leading-none text-brand-foreground"
+          >
+            {name}
           </span>
         </Link>
 
