@@ -31,6 +31,14 @@ export function getAppOrigin(): string {
       : process.env.VERCEL_URL;
   if (vercel) return normalize(vercel);
 
+  // 3. The same idea on the other hosts with a one-click deploy (docs/hosting/):
+  //    each sets its service's own public URL in the environment. Render's
+  //    carries a scheme; Railway's is a bare hostname, and exists only once the
+  //    service has a domain. A custom domain on either needs NEXTAUTH_URL —
+  //    these name the platform's default domain.
+  const platform = process.env.RENDER_EXTERNAL_URL ?? process.env.RAILWAY_PUBLIC_DOMAIN;
+  if (platform) return normalize(platform);
+
   throw new Error(
     "Cannot resolve the application origin. Set NEXTAUTH_URL to the full " +
       "public URL of this deployment (e.g. https://mos.example.com).",

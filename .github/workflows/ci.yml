@@ -90,9 +90,9 @@ jobs:
       # a theme.css that violates the token contract.
       #
       # No database or secrets are provided on purpose. The Postgres pool is a
-      # lazy proxy (src/lib/db/client.ts) and the Supabase client is created
-      # per-request, so nothing touches PG*/SUPABASE_* env vars until a request
-      # is served. If this step ever starts failing on a missing env var, that
+      # lazy proxy (src/lib/db/client.ts) and the query builder holds nothing
+      # but a reference to it, so nothing touches DATABASE_URL/PG* env vars until
+      # a request is served. If this step ever starts failing on a missing env var, that
       # means something began connecting at module scope — fix that, don't add
       # the secret here.
       - name: Build

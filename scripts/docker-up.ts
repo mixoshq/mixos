@@ -312,14 +312,12 @@ function supabaseBin(): string {
 const STATUS_KEYS = {
   apiUrl: "API_URL",
   dbUrl: "DB_URL",
-  serviceRoleKey: "SERVICE_ROLE_KEY",
   studioUrl: "STUDIO_URL",
 } as const;
 
 type SupabaseStatus = {
   apiUrl: string;
   dbUrl: string;
-  serviceRoleKey: string;
   studioUrl: string;
 };
 
@@ -350,13 +348,16 @@ function probeSupabaseRunning(): boolean {
 }
 
 /**
- * Read the stack's real addresses and credentials.
+ * Read the stack's real addresses.
  *
- * Hardcoding these would be shorter and wrong: the local keys and their format
- * have changed between CLI versions, and a stale copy fails as an opaque 401
- * from PostgREST rather than as "your key is out of date". So we read, and we
- * refuse to continue if any key is absent — writing an empty value into
- * .env.docker.local would push the same 401 several minutes downstream.
+ * Hardcoding these would be shorter and wrong: the ports follow the instance
+ * (scripts/instance.ts) and the CLI's own defaults, and a stale copy fails as a
+ * connection error several minutes downstream rather than as "this address is
+ * out of date". So we read, and we refuse to continue if any key is absent.
+ *
+ * Only the database URL reaches the app. MixOS no longer talks to the Supabase
+ * API, so the service-role key this used to read is not needed; the API and
+ * Studio addresses are read for the banner.
  */
 function readSupabaseStatus(): SupabaseStatus {
   const r = capture(supabaseBin(), ["status", "-o", "json"]);
@@ -391,22 +392,7 @@ function readSupabaseStatus(): SupabaseStatus {
 
   const apiUrl = read(STATUS_KEYS.apiUrl);
   const dbUrl = read(STATUS_KEYS.dbUrl);
-  const serviceRoleKey = read(STATUS_KEYS.serviceRoleKey);
   const studioUrl = read(STATUS_KEYS.studioUrl);
-
-  // SERVICE_ROLE_KEY gets its own message because there is one specific,
-  // non-obvious cause: the CLI only emits the key set (ANON_KEY, SERVICE_ROLE_KEY,
-  // JWT_SECRET, ...) when auth is enabled AND the gotrue container is running.
-  // `[auth] enabled = false` in supabase/config.toml silently removes them from
-  // status output even though PostgREST still accepts the key perfectly well.
-  if (!serviceRoleKey) {
-    throw new SetupError(
-      "`supabase status -o json` did not include SERVICE_ROLE_KEY.",
-      "supabase/config.toml needs `[auth] enabled = true` — the CLI only emits the " +
-        "key set when the auth container is running, even though MixOS never calls " +
-        "Supabase Auth. Set it, then run `npm run docker:down && npm run dev:docker`.",
-    );
-  }
 
   const missing: string[] = [];
   if (!apiUrl) missing.push(STATUS_KEYS.apiUrl);
@@ -423,7 +409,6 @@ function readSupabaseStatus(): SupabaseStatus {
   return {
     apiUrl: apiUrl!,
     dbUrl: dbUrl!,
-    serviceRoleKey,
     studioUrl: studioUrl!,
   };
 }
@@ -992,16 +977,15 @@ async function startSupabase(): Promise<void> {
  * Write the generated half of the container environment.
  *
  * Everything in here is derived, which is why it is a separate file from the
- * committed `.env.docker`: regenerating it every boot means a Supabase CLI
- * upgrade that changes the local keys is picked up silently instead of failing
- * as a 401 nobody can explain.
+ * committed `.env.docker`: regenerating it every boot means a change of port —
+ * a new instance, a CLI upgrade — is picked up silently instead of failing as a
+ * connection error nobody can explain.
  */
 function writeEnvDockerLocal(status: SupabaseStatus): {
   path: string;
   containerDbUrl: string;
 } {
   const file = path.join(ROOT, ".env.docker.local");
-  const containerApiUrl = toContainerAddress(status.apiUrl);
   const containerDbUrl = toContainerAddress(status.dbUrl);
 
   const body = [
@@ -1017,8 +1001,6 @@ function writeEnvDockerLocal(status: SupabaseStatus): {
     "# Host tooling (npm run dev, psql, scripts/*.ts) wants 127.0.0.1 instead —",
     "# see the banner printed at the end of `npm run dev:docker`.",
     "",
-    `SUPABASE_URL=${containerApiUrl}`,
-    `SUPABASE_SERVICE_ROLE_KEY=${status.serviceRoleKey}`,
     `DATABASE_URL=${containerDbUrl}`,
     "",
   ].join("\n");
@@ -1059,8 +1041,6 @@ function hostToolingEnv(
     ...process.env,
     ...envDocker,
     DATABASE_URL: status.dbUrl,
-    SUPABASE_URL: status.apiUrl,
-    SUPABASE_SERVICE_ROLE_KEY: status.serviceRoleKey,
     // Set explicitly as well as via .env.docker. The local Postgres speaks
     // plaintext, and src/lib/db/pg-options.ts defaults an unset PGSSLMODE to
     // ssl: "require" — so without this every single query fails, which looks
@@ -1129,7 +1109,6 @@ function printBanner(opts: {
     `  ${c.dim("Running `npm run dev` on the host instead? .env.local wants:")}`,
   );
   console.log(`  ${c.dim(`  DATABASE_URL=${status.dbUrl}`)}`);
-  console.log(`  ${c.dim(`  SUPABASE_URL=${status.apiUrl}`)}`);
   console.log(`  ${c.dim("  PGSSLMODE=disable")}`);
   console.log("");
   // The last line has to match the mode the reader is actually in. Telling

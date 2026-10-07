@@ -17,6 +17,7 @@ import { randomBytes } from "node:crypto";
 import {
   PLATFORM_KEYS,
   missingPlatformKeys,
+  platformKey,
   type PlatformKeyName,
 } from "../src/lib/env/keys";
 import { loadEnv } from "./load-env";
@@ -47,8 +48,14 @@ function main() {
 
   const wanted = onlyMissing
     ? names.filter((n) => {
-        const v = process.env[PLATFORM_KEYS[n].env];
-        return !v || v.length !== KEY_BYTES * 2;
+        // The same validation the app applies, so a base64 key a hosting
+        // platform generated counts as present.
+        try {
+          platformKey(n);
+          return false;
+        } catch {
+          return true;
+        }
       })
     : names;
 

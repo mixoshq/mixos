@@ -16,10 +16,12 @@ export function tablePrefix(appSlug: string): string {
 }
 
 export function createScopedClient(appSlug: string) {
-  const supabase = createServiceClient();
+  const db = createServiceClient();
   const prefix = tablePrefix(appSlug);
   return {
-    table: (name: string) => supabase.from(`${prefix}${name}`),
+    // The builder refuses any name that is not a plain identifier, so `name`
+    // cannot carry a quote, a dot or a schema out of the prefix.
+    table: (name: string) => db.from(`${prefix}${name}`),
   };
 }
 
@@ -70,8 +72,8 @@ export function createReadOnlyScopedClient(appSlug: string): ReadOnlyScopedClien
 
         return (...args: unknown[]) => {
           const result = (value as (...a: unknown[]) => unknown).apply(target, args);
-          // PostgREST builders are not uniform: filter methods mutate and
-          // return `this`, while `.select()` hands back a NEW builder object.
+          // The builders are not uniform: filter methods mutate and return
+          // `this`, while the table's `.select()` hands back a NEW builder.
           // Re-wrap either kind so the trap survives every hop of the chain —
           // returning the raw result on the first `.select()` would drop it.
           // `.then()` and friends return promises, which must pass through

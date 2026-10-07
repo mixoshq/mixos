@@ -328,7 +328,7 @@ export interface AppEscape {
  *
  * This exists so that `process.env` can be banned outright in app code. An app
  * that reads the raw environment can read `CONNECTOR_ENCRYPTION_KEY` and
- * `SUPABASE_SERVICE_ROLE_KEY`; an app that reads `context.env` can only see
+ * `DATABASE_URL`; an app that reads `context.env` can only see
  * what it declared here. `password`-typed values are encrypted at rest on the
  * same AES-256-GCM path connector credentials use.
  */

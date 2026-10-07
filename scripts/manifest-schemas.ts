@@ -173,7 +173,7 @@ const escapeSchema = z.strictObject({
  *
  * This is what makes banning `process.env` in app code possible. An app reading
  * the raw environment can read `CONNECTOR_ENCRYPTION_KEY` and
- * `SUPABASE_SERVICE_ROLE_KEY`; an app reading `context.env` sees only what it
+ * `DATABASE_URL`; an app reading `context.env` sees only what it
  * declared here. `password` is the signal for the encrypt-at-rest path — the
  * same one connector credentials use.
  */

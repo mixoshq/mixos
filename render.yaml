@@ -1,0 +1,95 @@
+# MixOS on Render: the app from this repository's Dockerfile, a Render Postgres,
+# and the 5-minute scheduler tick. One Blueprint, every secret generated.
+# Walkthrough, costs and the free-tier variant: docs/hosting/render.md.
+#
+# Render asks for the two `sync: false` values — the first admin's email and
+# password — when the Blueprint is created, and generates the rest. Everything
+# generated is 32 random bytes in base64, which the platform key check accepts
+# (src/lib/env/keys.ts).
+
+services:
+  - type: web
+    name: mixos
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Paid on purpose. A free instance runs no preDeployCommand — so nothing
+    # would apply the schema — and cannot receive private network traffic, so
+    # the cron job below could not reach it. docs/hosting/render.md has a free
+    # variant that migrates at startup instead.
+    plan: 0.5c-512mb
+    # The release step: the platform schema, app migrations, then the first
+    # admin if it does not exist yet. Runs in this image, before each deploy
+    # takes traffic. See scripts/release.ts.
+    preDeployCommand: node ops/release.cjs
+    # 503 until the database is reachable and on the schema this build expects,
+    # so a deploy whose migrations failed never goes live.
+    healthCheckPath: /api/health/ready
+    envVars:
+      # The internal connection string: the private network, no TLS — Render
+      # does not use it there, and pg-options.ts would otherwise require it.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mixos-db
+          property: connectionString
+      - key: PGSSLMODE
+        value: disable
+      # NEXTAUTH_URL is left unset: the app falls back to RENDER_EXTERNAL_URL,
+      # which Render sets (src/lib/env/origin.ts). Set it when you add a custom
+      # domain.
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: CONNECTOR_ENCRYPTION_KEY
+        generateValue: true
+      - key: USER_OAUTH_ENCRYPTION_KEY
+        generateValue: true
+      - key: APP_SETTINGS_ENCRYPTION_KEY
+        generateValue: true
+      - key: MCP_TOKEN_KEY
+        generateValue: true
+      - key: APP_API_KEY_SECRET
+        generateValue: true
+      - key: APP_UNLOCK_SECRET
+        generateValue: true
+      - key: CRON_SECRET
+        generateValue: true
+      # Asked for once, at creation. Created on the first deploy if no account
+      # has this email, and never changed after — safe to leave set.
+      - key: INITIAL_ADMIN_EMAIL
+        sync: false
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false
+
+  # The scheduler tick, as Vercel Cron delivers it: GET /api/cron with the
+  # bearer token. Over the private network — port 10000 always reaches the web
+  # service's HTTP server there — so the tick does not depend on the public URL.
+  - type: cron
+    name: mixos-cron
+    runtime: image
+    image:
+      url: docker.io/curlimages/curl:8.21.0
+    schedule: "*/5 * * * *"
+    plan: 0.5c-512mb
+    dockerCommand: >-
+      sh -c 'curl -fsS -o /dev/null -w "%{http_code}\n" --max-time 290
+      -H "Authorization: Bearer $CRON_SECRET" "http://$MIXOS_HOST:10000/api/cron"'
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: mixos
+          envVarKey: CRON_SECRET
+      - key: MIXOS_HOST
+        fromService:
+          type: web
+          name: mixos
+          property: host
+
+databases:
+  - name: mixos-db
+    plan: 0.1c-256mb
+    postgresMajorVersion: "17"
+    databaseName: mixos
+    user: mixos
+    # Reachable from the private network only. Add your own address here, from
+    # the dashboard, when you need psql from outside.
+    ipAllowList: []

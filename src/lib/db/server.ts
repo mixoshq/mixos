@@ -4,25 +4,46 @@
 
 // Canonical server-side data entry point.
 //
-// Two clients, deliberately:
+// Two ways in, one connection pool:
 //
-//   createServiceClient()  — the Supabase JS client. Use this for essentially
-//                            everything: it is the documented app-facing API
-//                            (`ctx.db.table(...)`) and the platform's own
+//   createServiceClient()  — the query builder (src/lib/db/query.ts). Use this
+//                            for essentially everything: it is the API apps
+//                            see as `ctx.db.table(...)` and the platform's own
 //                            reads and writes.
 //
 //   sql                    — the raw postgres.js pool, re-exported from
-//                            ./client. Use ONLY where PostgREST genuinely
-//                            cannot express the query: aggregate reporting
+//                            ./client. Use ONLY where the builder cannot
+//                            express the query: aggregate reporting
 //                            (src/lib/analytics/queries.ts), the scheduler's
 //                            atomic claim (src/lib/apps/scheduler.ts), the
 //                            rate limiter's atomic token bucket
-//                            (src/lib/rate-limit.ts), and telemetry rollups.
-//                            Apps must never reach for it
-//                            (see apps/AGENTS.md invariant 18).
+//                            (src/lib/rate-limit.ts), telemetry rollups, and
+//                            calls to the schema's own functions. Apps must
+//                            never reach for it (see apps/AGENTS.md invariant 18).
 //
-// Both talk to the same Supabase Postgres database; they differ only in
-// transport (PostgREST over HTTPS vs. a pooled TCP connection).
-export { createServiceClient } from "./supabase";
-export type { SupabaseClient } from "./supabase";
-export { sql } from "./client";
+// Both run on the pool in ./client, configured from DATABASE_URL by
+// ./pg-options. That is the only database setting there is: any Postgres 13 or
+// later works, Supabase included.
+//
+// The client has full access to every table in `public`. It must never be
+// constructed in code that reaches the browser — it lives behind server
+// components, server actions and route handlers, and the ESLint rules in
+// eslint.config.mjs keep app code from importing it at all.
+import { sql } from "./client";
+import { DbClient } from "./query";
+
+let shared: DbClient | undefined;
+
+/**
+ * The platform's full-access query client. One shared instance: it holds
+ * nothing but a reference to the pool, and the pool itself connects lazily, so
+ * importing this costs nothing until a query runs — `next build` included.
+ */
+export function createServiceClient(): DbClient {
+  shared ??= new DbClient(sql);
+  return shared;
+}
+
+export { sql };
+export { DbClient, DbError } from "./query";
+export type { DbResponse, FilterQuery, Row, TableQuery } from "./query";

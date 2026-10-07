@@ -227,19 +227,22 @@ npm run supabase -- db reset
 
 ## Which Supabase services run, and why the rest are off
 
-MixOS uses a deliberately narrow slice of Supabase. From
+MixOS uses one piece of the Supabase stack: Postgres. From
 [src/lib/db/server.ts](../src/lib/db/server.ts) there are exactly two data
-paths: `createServiceClient()` (supabase-js with the service role key, i.e.
-PostgREST over HTTP) and `sql` (a raw `postgres.js` pool). Everything else in
-the Supabase stack would boot for nothing, so `supabase/config.toml` turns it
-off.
+paths — `createServiceClient()` (the query builder in
+[src/lib/db/query.ts](../src/lib/db/query.ts)) and `sql` (a raw `postgres.js`
+pool) — and both are the same TCP connection to Postgres, configured from
+`DATABASE_URL`. The CLI is how this repository gets a local Postgres that
+matches hosted Supabase's version and extensions; a deployment needs none of the
+rest (see [docs/hosting](hosting/README.md)). Everything that would boot for
+nothing, `supabase/config.toml` turns off.
 
 | Service | State | Why |
 |---|---|---|
 | Postgres | **on** | Both data paths end here. |
-| PostgREST + Kong | **on** | `createServiceClient()` is HTTP to `/rest/v1`. Keeping the real Kong means local PostgREST version and behaviour match production. |
+| PostgREST + Kong | **on, unused** | MixOS no longer calls the Supabase API. They are part of the CLI's core stack, and Studio goes through them. |
 | Studio + pg-meta | **on** | Browsing local data at :54323. Pure convenience; harmless to disable. |
-| GoTrue (`[auth]`) | **on, unused** | MixOS has no Supabase Auth — NextAuth owns authentication, and `grep` for `supabase.auth` across `src/`, `scripts/`, `apps/`, and `connectors/` returns nothing. It runs anyway because the CLI only emits `SERVICE_ROLE_KEY` from `supabase status -o json` when auth is enabled; with it off, the boot script has no key to write and every PostgREST call 401s. One container is cheaper than minting and rotating a JWT ourselves. |
+| GoTrue (`[auth]`) | **on, unused** | MixOS has no Supabase Auth — NextAuth owns authentication. It ran because the boot script read `SERVICE_ROLE_KEY` from `supabase status -o json`, which the CLI emits only while auth is enabled. Nothing reads that key now; see the note in `supabase/config.toml` before turning it off. |
 | Storage | **off** | No `supabase.storage` / `.storage.from(` anywhere in the codebase. |
 | Realtime | **off** | No `.channel(` subscriptions anywhere; the UI polls. |
 | Edge Functions (`[edge_runtime]`) | **off** | There is no `supabase/functions/` directory. All server code is Next.js route handlers. |
@@ -248,17 +251,11 @@ off.
 
 Two `config.toml` details worth knowing before you edit that file:
 
-- **`[api] auto_expose_new_tables = true` is load-bearing.** Current Supabase CLI
-  versions no longer grant new `public` tables to `anon` / `authenticated` /
-  `service_role` automatically, and
-  `supabase/migrations/0001_initial.sql` contains no table-level `GRANT`s — it
-  was written when auto-expose was the default. Without the flag, every
-  `createServiceClient()` call comes back `42501 permission denied for table`
-  as an HTTP 403 while the raw `sql` pool keeps working, which is a maddening
-  half-broken state. Turning it on does **not** widen the `anon` surface: RLS is
-  enabled with zero policies, so `anon` still reads an empty set. The durable
-  fix is explicit grants in a migration; the flag is a bridge, and the CLI
-  documents its own removal date.
+- **`[api] auto_expose_new_tables = true` no longer matters to MixOS.** It grants
+  new `public` tables to `anon` / `authenticated` / `service_role`, which the
+  PostgREST path needed. MixOS connects as the tables' owner and needs no
+  grants. Turning it on does **not** widen the `anon` surface either way: RLS
+  is enabled with zero policies, so `anon` reads an empty set.
 - **The section is `[local_smtp]`, not `[inbucket]`.** `[inbucket]` still parses
   but prints a deprecation warning.
 
@@ -271,7 +268,7 @@ Compose loads two files into every service, in this order:
 | File | Committed? | Contents |
 |---|---|---|
 | `.env.docker` | **yes** | `AUTH_SECRET`, `CONNECTOR_ENCRYPTION_KEY`, `APP_UNLOCK_SECRET`, `CRON_SECRET`, `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD`, `NEXTAUTH_URL=http://localhost:3000`, `PGSSLMODE=disable` |
-| `.env.docker.local` | no — generated, gitignored | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` |
+| `.env.docker.local` | no — generated, gitignored | `DATABASE_URL` |
 
 **`.env.docker` is committed on purpose.** Every value in it is fixed and
 public, which is the whole point: nobody generates a secret by hand, and a fixed
@@ -281,12 +278,12 @@ they must never appear in a Vercel environment variable. Because `.gitignore`
 ignores `.env*` wholesale, this file needs an explicit `!.env.docker` negation
 to stay tracked.
 
-**`.env.docker.local` is generated, never hand-written.** The Supabase CLI's
-local keys and URLs are read fresh from `supabase status -o json` on every boot.
-A hardcoded key that goes stale — after a CLI upgrade, or a `supabase stop` /
-`start` cycle — surfaces as a bare 401 from PostgREST, which reads like an
-application bug rather than a config problem. The generated container-facing
-values are rewritten to `host.docker.internal` per the two-address split above.
+**`.env.docker.local` is generated, never hand-written.** The database URL is
+read fresh from `supabase status -o json` on every boot, because its port
+follows the instance and the CLI's defaults; a hardcoded copy that goes stale
+fails as a connection error that reads like an application bug rather than a
+config problem. The container-facing value is rewritten to
+`host.docker.internal` per the two-address split above.
 
 **`PGSSLMODE=disable` is mandatory.**
 [src/lib/db/pg-options.ts](../src/lib/db/pg-options.ts) defaults `ssl` to
@@ -410,8 +407,6 @@ Point a host `.env.local` at the containerized backend:
 
 ```bash
 # .env.local — host-facing addresses, note 127.0.0.1 not host.docker.internal
-SUPABASE_URL=http://127.0.0.1:54321
-SUPABASE_SERVICE_ROLE_KEY=<SERVICE_ROLE_KEY from `npx supabase status -o json`>
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
 PGSSLMODE=disable
 ```
@@ -433,16 +428,9 @@ way it is in production; force one by hand with
 
 ## Troubleshooting
 
-**`401` / `Invalid API key` from PostgREST, but raw SQL queries work.**
-`.env.docker.local` is stale — most often after a `supabase stop` / `start`
-cycle or a CLI upgrade. The two data paths authenticate differently
-(`createServiceClient()` presents a JWT to Kong; `sql` opens a TCP connection
-with a password), so they fail independently. Delete `.env.docker.local` and
-re-run `npm run dev:docker`, which regenerates it from `supabase status`.
-
-**`42501 permission denied for table ...` as an HTTP 403, again only on the
-PostgREST path.** `auto_expose_new_tables` is missing from `[api]` in
-`supabase/config.toml`. See the config notes above.
+**Connection refused, or the wrong database, after changing instances.**
+`.env.docker.local` is stale. Delete it and re-run `npm run dev:docker`, which
+regenerates it from `supabase status`.
 
 **TLS / `self-signed certificate` errors on every query.** `PGSSLMODE=disable`
 is missing. The local Postgres speaks plaintext;
