@@ -8,6 +8,7 @@ import { appRegistry } from "@/generated/app-registry";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { docsUrl } from "@/lib/docs";
 import { requireAdmin } from "@/lib/apps/access";
+import { installEnabled } from "@/lib/repository/policy";
 import { getAppGrantCounts, getAppTableCounts } from "@/lib/apps/admin-actions";
 import { getAppActiveMap } from "@/lib/apps/access";
 import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
@@ -62,15 +63,20 @@ export default async function AppsAdminPage() {
           competing with the action most visits to this page want. They open on
           mixos.org in a new tab: the in-app copy at /apps/guide still exists but
           is no longer linked, so the site is the one place the guide is current.
+
+          Browse is absent when installing this kind is turned off
+          (lib/repository/policy.ts); the page it leads to is a 404 then anyway.
         */}
         <div className="flex shrink-0 items-center gap-2">
-          <Link
-            href="/admin/apps/browse"
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted"
-          >
-            <Store className="h-4 w-4" aria-hidden />
-            Browse Apps
-          </Link>
+          {installEnabled("app") && (
+            <Link
+              href="/admin/apps/browse"
+              className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted"
+            >
+              <Store className="h-4 w-4" aria-hidden />
+              Browse Apps
+            </Link>
+          )}
           <a
             href={docsUrl("extending/apps")}
             target="_blank"
