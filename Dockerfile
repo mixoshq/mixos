@@ -1,11 +1,17 @@
-# Production-parity image for the local Docker stack.
+# The production image: what self-hosting runs (deploy/docker-compose.yml, and
+# the Render and Railway templates — see docs/hosting/), and what the local
+# `npm run docker:prod` profile builds to reproduce production.
 #
-# This is NOT what Vercel builds — Vercel builds from source with its own
-# pipeline. This image exists so `npm run docker:prod` reproduces the runtime
+# It is NOT what Vercel builds — Vercel builds from source with its own
+# pipeline. Locally it exists so `npm run docker:prod` reproduces the runtime
 # shape of production (compiled output, NODE_ENV=production, no dev server, no
 # devDependencies on disk) closely enough to catch the class of bug that only
 # shows up after a build: missing runtime files, server components that read
 # from disk, instrumentation that never registers.
+#
+# The image also carries the release step — database migrations and the first
+# admin — as ops/release.cjs, so the same image that serves traffic can prepare
+# its database first. See the `ops` notes in the builder and runner stages.
 #
 # Node 24 to match the pin in .nvmrc (package.json `engines` is the floor,
 # >=22, not the target). bookworm-slim (glibc), NOT alpine: Next 16 builds with
@@ -85,6 +91,14 @@ RUN set -eu; \
       exit 1; \
     fi
 
+# The release step (scripts/release.ts), bundled with its dependencies into
+# ops/*.cjs. The runner stage carries compiled output and no tsx, so a script
+# has to arrive already compiled to run there — and it has to run there,
+# because Render and Railway run a pre-deploy command in the service's own
+# image and cannot select another build stage. After `npm run build`, whose
+# prebuild hook generated the app registry the bundle reads.
+RUN npm run build:ops
+
 # ---------------------------------------------------------------------------
 # runner — the shipped image
 # ---------------------------------------------------------------------------
@@ -152,6 +166,12 @@ COPY --from=builder --chown=node:node /app/.next/standalone ./
 # There is no CDN in front of this container, so server.js has to.
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
+
+# The release step and the platform schema it applies: `node ops/release.cjs`.
+# It resolves everything from the image root (/app) — the platform migrations
+# here, the app migrations under apps/ from the standalone copy above.
+COPY --from=builder --chown=node:node /app/ops ./ops
+COPY --from=builder --chown=node:node /app/supabase/migrations ./supabase/migrations
 
 # The node base image already ships an unprivileged `node` user (uid 1000); reusing
 # it beats minting another one. Nothing in this image is written at runtime.

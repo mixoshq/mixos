@@ -4,7 +4,7 @@
 
 "use server";
 
-import { createServiceClient } from "@/lib/db/server";
+import { createServiceClient, sql } from "@/lib/db/server";
 import { appRegistry } from "@/generated/app-registry";
 import { revalidatePath } from "next/cache";
 import { requireReadOnlySession } from "@/lib/auth/session";
@@ -51,7 +51,7 @@ export async function getAppGrantCounts(): Promise<Record<string, number>> {
 /**
  * How many tables each app's scoped database actually holds, keyed by slug.
  *
- * One RPC for the whole registry, for the same reason as getAppGrantCounts:
+ * One query for the whole registry, for the same reason as getAppGrantCounts:
  * the list renders every app at once. Apps with no tables are absent — callers
  * read a missing key as 0.
  *
@@ -64,9 +64,9 @@ export async function getAppTableCounts(): Promise<Record<string, number>> {
   const session = await requireReadOnlySession();
   await requireAdmin(session);
 
-  const supa = createServiceClient();
-  const { data, error } = await supa.rpc("get_app_schema", { prefix: "_app_" });
-  if (error) throw new Error(error.message);
+  const rows = await sql<{ table_name: string }[]>`
+    select table_name from public.get_app_schema(${"_app_"})
+  `;
 
   const prefixes = appRegistry
     .filter((a) => a.database)
@@ -76,11 +76,10 @@ export async function getAppTableCounts(): Promise<Record<string, number>> {
     }))
     .sort((a, b) => b.prefix.length - a.prefix.length);
 
-  // The RPC filters with SQL LIKE, where `_` is a single-character wildcard —
-  // so `_app_%` is a looser net than it looks. Re-checking with startsWith here
-  // is an exact match, and the set collapses the one-row-per-column result to
-  // one entry per table.
-  const rows = (data ?? []) as { table_name: string }[];
+  // The function filters with SQL LIKE, where `_` is a single-character
+  // wildcard — so `_app_%` is a looser net than it looks. Re-checking with
+  // startsWith here is an exact match, and the set collapses the
+  // one-row-per-column result to one entry per table.
   const counts: Record<string, number> = {};
   for (const table of new Set(rows.map((r) => r.table_name))) {
     const hit = prefixes.find((p) => table.startsWith(p.prefix));
@@ -174,21 +173,19 @@ export async function getAppSchema(slug: string): Promise<AppSchemaTable[]> {
   const session = await requireReadOnlySession();
   await requireAdmin(session);
 
-  const supa = createServiceClient();
   const prefix = `_app_${slug.replace(/-/g, "_")}_`;
-  const { data, error } = await supa.rpc("get_app_schema", { prefix });
-  if (error) throw new Error(error.message);
-
-  const rows = (data ?? []) as {
-    table_name: string;
-    column_name: string;
-    data_type: string;
-    is_nullable: boolean;
-    column_default: string | null;
-    is_primary_key: boolean;
-    foreign_table: string | null;
-    foreign_column: string | null;
-  }[];
+  const rows = await sql<
+    {
+      table_name: string;
+      column_name: string;
+      data_type: string;
+      is_nullable: boolean;
+      column_default: string | null;
+      is_primary_key: boolean;
+      foreign_table: string | null;
+      foreign_column: string | null;
+    }[]
+  >`select * from public.get_app_schema(${prefix})`;
 
   const byTable = new Map<string, AppSchemaTable>();
   for (const r of rows) {

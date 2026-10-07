@@ -2,8 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import bcrypt from "bcryptjs";
+// `npm run seed-admin` — create the INITIAL_ADMIN_EMAIL account, or reset its
+// password and re-grant admin when it already exists. See scripts/admin-seed.ts
+// for why a deploy uses a gentler mode than this.
+
 import { createPgClient } from "../src/lib/db/pg-options";
+import { seedAdmin } from "./admin-seed";
 import { loadEnv } from "./load-env";
 
 loadEnv();
@@ -21,30 +25,12 @@ async function main() {
 
   const sql = createPgClient({ max: 1 });
   try {
-    const existing = await sql<{ id: string }[]>`
-      SELECT id FROM public.users WHERE email = ${email} LIMIT 1
-    `;
-
-    const passwordHash = await bcrypt.hash(password, 12);
-    const displayName = email.split("@")[0];
-
-    if (existing.length > 0) {
-      await sql`
-        UPDATE public.users
-        SET password_hash = ${passwordHash},
-            is_admin = true,
-            updated_at = now()
-        WHERE id = ${existing[0].id}
-      `;
-      console.log(`Updated ${email} (is_admin=true, password reset).`);
-      return;
-    }
-
-    await sql`
-      INSERT INTO public.users (email, display_name, password_hash, is_admin)
-      VALUES (${email}, ${displayName}, ${passwordHash}, true)
-    `;
-    console.log(`Created admin user ${email}.`);
+    const outcome = await seedAdmin(sql, { email, password, mode: "reset" });
+    console.log(
+      outcome === "created"
+        ? `Created admin user ${email}.`
+        : `Updated ${email} (is_admin=true, password reset).`,
+    );
   } finally {
     await sql.end();
   }
