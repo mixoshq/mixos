@@ -8,6 +8,7 @@ import { pathToFileURL } from "url";
 import type {
   AppManifest,
   AppAuthor,
+  AppBranding,
   AppEnvField,
   AppEscape,
   McpToolDefinition,
@@ -40,6 +41,9 @@ import type {
   ThemeManifest,
 } from "../src/lib/themes/types";
 import { compileTheme, ThemeError } from "./theme-css";
+import { FatalManifestError } from "./manifest-errors";
+import { readImageSize } from "./image-size";
+import { resolveThemeLogo, validateAppBranding } from "./brand-checks";
 import type { Screenshot, ScreenshotKind } from "../src/lib/screenshots";
 import {
   SCREENSHOT_EXTENSIONS,
@@ -48,21 +52,8 @@ import {
   SCREENSHOT_MIN_WIDTH,
   screenshotUrl,
 } from "../src/lib/screenshots";
+import { BRAND_HOOKS } from "../src/lib/branding/types";
 import * as ts from "typescript";
-
-/**
- * Thrown when an app's manifest contains an invalid visibility declaration.
- * Distinct from generic load errors because we want misconfigured visibility
- * to *abort the entire generator run* instead of being silently swallowed
- * by the per-app `Skipping ...` warning path. A public/password mis-declaration
- * is a security-relevant config issue and must not ship.
- */
-class FatalManifestError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "FatalManifestError";
-  }
-}
 
 /**
  * Manifests store `lastUpdated` as an ISO 8601 string (legible in a diff);
@@ -97,6 +88,7 @@ const OUTPUT_DIR = path.resolve(__dirname, "../src/generated");
 const APP_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "app-registry.ts");
 const APP_CLIENTS_FILE = path.resolve(OUTPUT_DIR, "app-clients.ts");
 const APP_PAGE_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-page-loaders.ts");
+const APP_HOOK_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-hook-loaders.ts");
 const CONNECTOR_REGISTRY_FILE = path.resolve(
   OUTPUT_DIR,
   "connector-registry.ts",
@@ -123,6 +115,10 @@ const PUBLIC_CONNECTORS_DIR = path.resolve(
 // theme assets and connector icons are: a listing is read by someone deciding
 // whether to install, which is necessarily before they have a session.
 const PUBLIC_SCREENSHOTS_DIR = path.resolve(__dirname, "../public/screenshots");
+// Marks an app ships for the brand hooks, copied out of apps/<slug>/branding/.
+// Proxy-exempt for the reason theme assets are: the sign-in page renders them
+// before anyone has a session. Only declared files are copied.
+const PUBLIC_BRANDING_DIR = path.resolve(__dirname, "../public/branding");
 
 function scanPages(dir: string, slug: string, prefix: string, out: string[]) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -171,6 +167,7 @@ const CORE_HOOK_NAMES = new Set<string>([
   "user-login",
   "user-sync",
   "user-display-name",
+  ...BRAND_HOOKS,
 ]);
 
 // Mirror resolveHookName(): an app's own custom hook is qualified with its
@@ -790,6 +787,25 @@ function validateHookWiring(manifests: AppManifest[]): void {
   }
 }
 
+// ── brand hooks ──────────────────────────────────────────────────────────────
+
+/** Copy an app's declared marks to public/branding/apps/<slug>/. */
+function copyBrandLogos(
+  branding: AppBranding | null,
+  slug: string,
+  appDir: string,
+): void {
+  if (!branding || branding.logos.length === 0) return;
+  const dest = path.join(PUBLIC_BRANDING_DIR, "apps", slug);
+  fs.mkdirSync(dest, { recursive: true });
+  for (const logo of branding.logos) {
+    fs.copyFileSync(
+      path.join(appDir, logo.file),
+      path.join(dest, path.basename(logo.file)),
+    );
+  }
+}
+
 function validateEscapes(
   raw: { rule: string; reason: string }[] | undefined,
   slug: string,
@@ -1368,6 +1384,18 @@ async function scanThemes(): Promise<{
     const fonts = validateThemeFonts(r.fonts ?? [], slug, dir, rawCss);
     const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
     const screenshots = validateScreenshots(r.screenshots, "themes", slug, dir);
+    const logo = assets.logo
+      ? resolveThemeLogo(slug, dir, assets.logo, "assets.logo")
+      : null;
+    const branding = {
+      name: r.branding?.name ?? null,
+      menuBarLogo: r.branding?.menuBarLogo
+        ? resolveThemeLogo(slug, dir, r.branding.menuBarLogo, "branding.menuBarLogo")
+        : null,
+      loginLogo: r.branding?.loginLogo
+        ? resolveThemeLogo(slug, dir, r.branding.loginLogo, "branding.loginLogo")
+        : null,
+    };
 
     copyDir(path.join(dir, "assets"), path.join(PUBLIC_THEMES_DIR, slug));
     copyScreenshots(screenshots, "themes", slug, dir);
@@ -1388,6 +1416,8 @@ async function scanThemes(): Promise<{
       surfaces: compiled.surfaces,
       escapes: r.escapes ?? [],
       assetBase: `/themes/${slug}`,
+      logo,
+      branding,
       swatches: compiled.swatches,
       typefaces: compiled.typefaces,
       lastUpdated: parseLastUpdated(r.lastUpdated),
@@ -1536,6 +1566,7 @@ async function scanApps(): Promise<AppManifest[]> {
         ]),
         emits: r.emits ?? [],
         listensTo: r.listensTo ?? [],
+        branding: validateAppBranding(r.branding, entry.name, appDir),
         escapes: validateEscapes(r.escapes, entry.name),
         env: validateEnv(r.env, entry.name),
         egress: r.egress ?? [],
@@ -1552,6 +1583,7 @@ async function scanApps(): Promise<AppManifest[]> {
       };
 
       copyScreenshots(manifest.screenshots, "apps", entry.name, appDir);
+      copyBrandLogos(manifest.branding, entry.name, appDir);
 
       manifests.push(manifest);
       console.log(`  App: ${manifest.name} (/${manifest.slug})`);
@@ -1754,108 +1786,6 @@ function validateRegistryContract(
 /** Smallest edge a connector icon may have, and it must be square. */
 const CONNECTOR_ICON_MIN = 512;
 
-/**
- * Read an image's pixel dimensions from its header.
- *
- * Deliberately not an image library. The only fact needed here is width and
- * height, both of which sit in the first few dozen bytes of a PNG or WebP, and
- * `sharp` is present in this tree only as a transitive dependency of Next —
- * importing it in the build would be depending on someone else's dependency.
- *
- * Returns null for a format whose header isn't parsed here, which the caller
- * treats as "cannot measure", not as "passes".
- */
-function readImageSize(buf: Buffer): { width: number; height: number } | null {
-  // PNG: 8-byte signature, then IHDR carrying two big-endian uint32s.
-  if (buf.length >= 24 && buf.readUInt32BE(0) === 0x89504e47) {
-    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
-  }
-
-  // WebP: RIFF container, and three sub-formats that each store size differently.
-  if (
-    buf.length >= 30 &&
-    buf.toString("ascii", 0, 4) === "RIFF" &&
-    buf.toString("ascii", 8, 12) === "WEBP"
-  ) {
-    const chunk = buf.toString("ascii", 12, 16);
-    if (chunk === "VP8 ") {
-      // Lossy: 14-bit dimensions after the 3-byte start code.
-      return {
-        width: buf.readUInt16LE(26) & 0x3fff,
-        height: buf.readUInt16LE(28) & 0x3fff,
-      };
-    }
-    if (chunk === "VP8L") {
-      // Lossless: 14 bits each, packed across a 32-bit little-endian read.
-      const bits = buf.readUInt32LE(21);
-      return {
-        width: (bits & 0x3fff) + 1,
-        height: ((bits >> 14) & 0x3fff) + 1,
-      };
-    }
-    if (chunk === "VP8X") {
-      // Extended: 24-bit canvas size, stored minus one.
-      const u24 = (o: number) =>
-        buf[o] | (buf[o + 1] << 8) | (buf[o + 2] << 16);
-      return { width: u24(24) + 1, height: u24(27) + 1 };
-    }
-  }
-
-  // JPEG: unlike PNG and WebP there is no fixed offset. Dimensions live in a
-  // Start-Of-Frame marker, which sits after a variable run of other segments
-  // (JFIF/Exif headers, quantisation tables, comments), so the only way to
-  // find it is to walk the segment chain.
-  //
-  // Worth the extra code rather than letting `.jpg` return null: a caller
-  // reads null as "cannot measure", so a screenshot format the build cannot
-  // measure is one the minimum-width rule silently stops covering — and JPEG
-  // is the format a screenshot is most likely to arrive in.
-  if (buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8) {
-    let o = 2;
-    while (o + 9 < buf.length) {
-      // Segments are 0xFF followed by a marker; 0xFF is also the padding byte,
-      // so skip any run of them before reading the marker itself.
-      if (buf[o] !== 0xff) {
-        o++;
-        continue;
-      }
-      let marker = buf[o + 1];
-      while (marker === 0xff && o + 2 < buf.length) {
-        o++;
-        marker = buf[o + 1];
-      }
-
-      // Standalone markers carrying no payload: RSTn, SOI, TEM. Nothing to skip.
-      if ((marker >= 0xd0 && marker <= 0xd9) || marker === 0x01) {
-        o += 2;
-        continue;
-      }
-
-      const len = buf.readUInt16BE(o + 2);
-      // SOF0–SOF15, excluding DHT (0xC4), JPG (0xC8) and DAC (0xCC), which
-      // share the 0xCn range but are not frame headers.
-      if (
-        marker >= 0xc0 &&
-        marker <= 0xcf &&
-        marker !== 0xc4 &&
-        marker !== 0xc8 &&
-        marker !== 0xcc
-      ) {
-        // Payload: 1 byte precision, then height and width as big-endian uint16.
-        return {
-          height: buf.readUInt16BE(o + 5),
-          width: buf.readUInt16BE(o + 7),
-        };
-      }
-
-      // A malformed length would otherwise spin here forever.
-      if (len < 2) return null;
-      o += 2 + len;
-    }
-  }
-
-  return null;
-}
 
 /**
  * Prove a declared icon exists and is the shape the registry grid assumes.
@@ -2200,6 +2130,23 @@ ${pageImports.join("\n")}
 };
 `;
   fs.writeFileSync(APP_PAGE_LOADERS_FILE, pageLoadersOutput, "utf-8");
+
+  // Server-only, like the page loaders: an entrypoint registers server-side
+  // hooks and is never something a client bundle should pull in.
+  const hookImports = apps
+    .filter((app) => fs.existsSync(path.join(APPS_DIR, app.slug, "hooks.ts")))
+    .map((app) => `  "${app.slug}": () => import("@apps/${app.slug}/hooks"),`);
+  const hookLoadersOutput = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+//
+// SERVER ONLY. Each app's declared hook entrypoint, apps/<slug>/hooks.ts.
+// Its single consumer is src/lib/hooks/loader.ts.
+import type { HookRegistrar } from "@/lib/hooks/types";
+
+export const hookLoaders: Record<string, () => Promise<{ default: (hooks: HookRegistrar) => void }>> = {
+${hookImports.join("\n")}
+};
+`;
+  fs.writeFileSync(APP_HOOK_LOADERS_FILE, hookLoadersOutput, "utf-8");
 
   // ── Typed client surface ──────────────────────────────────────────────────
   //
