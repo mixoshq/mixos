@@ -9,6 +9,42 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-10-07
+
+- **Runs on any Postgres.** The platform no longer uses supabase-js or
+  PostgREST: a query builder (`src/lib/db/query.ts`) runs every query over
+  `DATABASE_URL`. `context.db` keeps its method names and `{ data, error }`
+  results, but joins, `or()`, `filter()` and `rpc()` are gone, so an app that
+  used one no longer compiles; `docs/apps/database.md` lists the full surface.
+  `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are no longer read, so delete
+  them from your deployments.
+- **Hosting guides** in `docs/hosting/`: your own server with Docker Compose
+  (`deploy/`, which Coolify and Dokploy can also deploy), a Render Blueprint
+  (`render.yaml`), Railway (`railway.json`), and Vercel with Neon, Supabase or
+  any Postgres.
+- **`npm run db:migrate`** applies the platform schema to any Postgres. It
+  shares the Supabase CLI's migration ledger, so it and `db:push` can be mixed.
+  **`npm run release`** runs everything a deploy needs, and the Docker image
+  carries the same step as `node ops/release.cjs`.
+- Platform keys may now be base64 as well as hex, so hosting platforms can
+  generate them.
+- **`INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES`** (default `true`).
+  Set one to `false` and that kind's Browse page and button disappear, and its
+  install actions refuse. The instance runs only what it was deployed with.
+  See `docs/hosting/README.md`.
+- **Brand hooks.** An app can change the install's name and marks
+  (`brand-name`, `menu-bar-logo`, `login-logo`) from a new
+  `apps/<slug>/hooks.ts` entrypoint, declared in `app.json` under `branding`;
+  the build fails if the two disagree. A theme claims a slot outright with its
+  own `branding` block. See `docs/apps/hooks.md#brand-hooks`.
+- **Theme logos are measured.** An SVG `assets.logo` needs a `viewBox` (or an
+  absolute `width` and `height`), and anything else must be `.png`, `.jpg` or
+  `.webp`, or the build fails. Both bundled themes already comply.
+- **`npm test`** runs the unit tests (`*.test.ts` under `src/` and `scripts/`)
+  with Node's built-in runner, and CI runs it after typecheck.
+- **Fix:** per-user connector scope status was never saved (migration 0008).
+  Run `npm run db:local` to apply it.
+
 ## 2026-10-05
 
 - **Local Docker on Linux and Windows.** `npm run dev:docker` and `/mixos init`
