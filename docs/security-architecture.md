@@ -1692,6 +1692,42 @@ records the reason. A rejection is the more interesting row —
 `reason: "checksum"` says someone was served bytes that did not match what the
 catalogue published.
 
+### Turning it off
+
+`INSTALL_APPS`, `INSTALL_CONNECTORS` and `INSTALL_THEMES` decide, per kind,
+whether this path exists at all ([`src/lib/repository/policy.ts`](../src/lib/repository/policy.ts)).
+All three default to `true`. Set to `false`, a kind's catalogue is gone, not
+merely hidden:
+
+| Layer | With the kind turned off |
+| --- | --- |
+| The admin page | No Browse button |
+| `/admin/<kind>/browse` | A 404, after the admin gate |
+| `searchRepositoryAction`, `resolveInstallAction` | Refused, before the repository is contacted |
+| `registerExtensionAction` → `installExtension()` | Refused before the platform lock is taken, and audited as `<kind>.register.rejected` with `reason: "disabled"` — a row no page can produce |
+| `checkInstallable()` | Reports the kind as not installable |
+
+Every layer checks for itself, for the reason the admin gate does (§9): the
+actions are directly invocable, so a check on the page alone would leave them
+open. The flag is read per request, so changing it takes a restart, not a
+rebuild.
+
+**The parser fails closed.** Unset or empty is on; `true`/`1`/`yes`/`on` and
+`false`/`0`/`no`/`off` mean what they say, in any case; **anything else is off**,
+with a warning in the log and in the release step's report. Whoever sets the
+variable is restricting something, and `INSTALL_APPS=flase` must not leave
+installs quietly open. A `kind` that is not one of the three is refused outright
+rather than looked up as a flag that does not exist.
+
+What the flags do **not** do: remove or deactivate anything already installed,
+or affect activating, configuring and applying what is there. Nor do they stop
+someone with write access to the repository adding code and deploying it. That
+is the change-control path, and it belongs to code review. The flags close the
+in-product path, the one an admin account can reach.
+
+A built deployment — the Docker image, Vercel — cannot install in any case (see
+below), so on those the flags decide only whether the catalogue can be browsed.
+
 ### What it deliberately will not do
 
 - **Overwrite.** An existing directory is refused rather than replaced. Upgrading
