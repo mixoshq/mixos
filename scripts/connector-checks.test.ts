@@ -1,0 +1,177 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+import { after, test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { validateConnectorMethods, validateConnectorTelemetry } from "./connector-checks";
+import { RawConnectorManifestSchema } from "./manifest-schemas";
+import { ReadOnlyError, readOnlyConnectors } from "../src/lib/apps/read-only";
+import type {
+  BaseConnector,
+  ConnectorTelemetryDefinition,
+} from "../src/lib/connectors/types";
+
+// ── fixtures ────────────────────────────────────────────────────────────────
+
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "mixos-connector-checks-"));
+after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+let n = 0;
+
+/** A connector directory whose index.ts is `source`. */
+function connectorDir(source: string): string {
+  const dir = path.join(root, `connector-${n++}`);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "index.ts"), source);
+  return dir;
+}
+
+const declared = (...methods: string[]): ConnectorTelemetryDefinition[] =>
+  methods.map((method) => ({ method }));
+
+// ── telemetry → registry ────────────────────────────────────────────────────
+
+test("mutates is carried into the registry with the rest of the entry", () => {
+  assert.deepEqual(
+    validateConnectorTelemetry(
+      [
+        { method: "listItems", description: "Listed items" },
+        { method: "createItem", description: "Created an item", mutates: true },
+        { method: "getItem", mutates: false },
+      ],
+      "acme",
+    ),
+    [
+      { method: "listItems", description: "Listed items" },
+      { method: "createItem", description: "Created an item", mutates: true },
+      { method: "getItem" },
+    ],
+  );
+});
+
+test("a method declared twice fails the build", () => {
+  assert.throws(
+    () => validateConnectorTelemetry([{ method: "a" }, { method: "a" }], "acme"),
+    /duplicate telemetry method "a"/,
+  );
+});
+
+/**
+ * From the manifest an author writes, through the build step that dropped
+ * `mutates`, to a tool calling the write. The template declares `createItem`
+ * with `"mutates": true`.
+ */
+test("a mutating method throws from an MCP tool context", async () => {
+  const manifest = RawConnectorManifestSchema.parse(
+    JSON.parse(
+      fs.readFileSync(
+        path.join(__dirname, "../connectors/_template/connector.json"),
+        "utf-8",
+      ),
+    ),
+  );
+  const telemetry = validateConnectorTelemetry(manifest.telemetry, manifest.name);
+
+  const sent: string[] = [];
+  const template = {
+    name: "_template",
+    configured: true,
+    initialize() {},
+    async listItems() {
+      sent.push("GET /items");
+      return [];
+    },
+    async createItem() {
+      sent.push("POST /items");
+      return null;
+    },
+  };
+
+  // What the MCP broker builds for a tool: the app's connectors, narrowed
+  // against the generated registry.
+  const ctx = {
+    connectors: readOnlyConnectors({ _template: template as BaseConnector }, [
+      { name: "_template", telemetry },
+    ]),
+  };
+  const tool = async (c: typeof ctx) => {
+    const t = c.connectors._template as unknown as typeof template;
+    await t.listItems();
+    return t.createItem();
+  };
+
+  await assert.rejects(tool(ctx), (err: unknown) => {
+    assert.ok(err instanceof ReadOnlyError);
+    assert.match(err.message, /"_template\.createItem" changes data upstream/);
+    return true;
+  });
+  assert.deepEqual(sent, ["GET /items"]);
+});
+
+// ── completeness of the declaration ─────────────────────────────────────────
+
+test("a public method left out of telemetry fails the build", () => {
+  const dir = connectorDir(`
+    export default class Acme extends HttpConnector {
+      readonly name = "acme";
+      async testConnection() { return { ok: true as const }; }
+      async listItems() { return this.request("/items"); }
+      async createItem() { return this.request("/items", { method: "POST" }); }
+    }
+  `);
+  assert.throws(
+    () => validateConnectorMethods("acme", dir, declared("listItems")),
+    (err: Error) => /: createItem\./.test(err.message),
+  );
+  assert.doesNotThrow(() =>
+    validateConnectorMethods("acme", dir, declared("listItems", "createItem")),
+  );
+});
+
+test("a method written as an arrow-function property must be declared too", () => {
+  const dir = connectorDir(`
+    export default class Acme extends HttpConnector {
+      readonly name = "acme";
+      readonly region = "eu";
+      async testConnection() { return { ok: true as const }; }
+      listItems = async () => this.request("/items");
+      createItem = async () => this.request("/items", { method: "POST" });
+      deleteItem = (async function (this: Acme) {
+        return this.request("/items/1", { method: "DELETE" });
+      }) as () => Promise<unknown>;
+      sendMessage = this.createItem.bind(this);
+      "archiveItem" = () => this.request("/items/1/archive", { method: "POST" });
+      private retry = () => this.request("/retry");
+      protected backoff = () => 1;
+      static create = () => new Acme();
+    }
+  `);
+  assert.throws(
+    () => validateConnectorMethods("acme", dir, declared("listItems")),
+    (err: Error) =>
+      /: createItem, deleteItem, sendMessage, archiveItem\./.test(err.message),
+  );
+  assert.doesNotThrow(() =>
+    validateConnectorMethods(
+      "acme",
+      dir,
+      declared("listItems", "createItem", "deleteItem", "sendMessage", "archiveItem"),
+    ),
+  );
+});
+
+test("helper classes beside the connector are not its methods", () => {
+  const dir = connectorDir(`
+    class Cursor { next = () => null; advance() {} }
+    export default class Acme extends HttpConnector {
+      readonly name = "acme";
+      async testConnection() { return { ok: true as const }; }
+      initialize(c: Record<string, string>) { super.initialize(c); }
+    }
+  `);
+  assert.doesNotThrow(() => validateConnectorMethods("acme", dir, []));
+});
