@@ -1266,7 +1266,8 @@ one of these.
 | `/login`, `/api/auth` | the sign-in flow itself |
 | `/api/health` | none — see below |
 | `/manifest.webmanifest` | none; static |
-| `/p`, `/api/p` | the dispatcher's `password` / `key` / `public` tiers (§1) |
+| `/p` | the public page route (`src/lib/apps/public-page.ts`): the page's own `pageVisibility`, the app being active, and the unlock cookie for a `password` page |
+| `/api/p` | the dispatcher's `password` / `key` / `public` tiers (§1) |
 | `/api/mcp` | OAuth 2.1 bearer token (§17) |
 | `/api/oauth`, `/.well-known`, `/api/well-known` | the OAuth endpoints' own validation (§17) |
 | `/api/webhooks` | HMAC signature over the raw body (§19) |
