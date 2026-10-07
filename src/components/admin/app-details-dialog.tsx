@@ -517,6 +517,31 @@ export default function AppDetailsDialog({
           )}
 
           {/*
+            Declared in app.json because it reaches past the app: the name and
+            mark on the menu bar and the sign-in page belong to the install.
+            Shown on Overview, where an admin looks before activating.
+          */}
+          {app.branding && (
+            <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">
+              <p className="font-medium">
+                Changes the install&apos;s branding
+              </p>
+              <p className="mt-0.5">{app.branding.reason}</p>
+              <p className="mt-1 text-xs">
+                Filters{" "}
+                {app.branding.hooks.map((h, i) => (
+                  <span key={h}>
+                    {i > 0 && ", "}
+                    <Mono>{h}</Mono>
+                  </span>
+                ))}
+                . A slot the active theme claims in its own{" "}
+                <Mono>branding</Mono> stays the theme&apos;s.
+              </p>
+            </div>
+          )}
+
+          {/*
             Two panels, one question each: what the app is BUILT FROM, and what
             it is WIRED TO. Splitting them is what keeps either column short
             enough to take in at a glance — and it fills a panel this wide with

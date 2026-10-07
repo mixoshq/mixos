@@ -7,6 +7,7 @@
 import { useActionState, useState } from "react";
 import { cn } from "@/lib/utils";
 import LoginLockup from "@/components/login-lockup";
+import type { BrandLogo } from "@/lib/branding/types";
 import CredentialsFields from "./credentials-fields";
 import { signInWithCredentials, type CredentialsSignInState } from "./actions";
 
@@ -27,7 +28,13 @@ const INITIAL: CredentialsSignInState = { error: null, attempt: 0, email: "" };
  * shake too. It is adjusted during render (React's prop-derived-state
  * pattern) rather than in an effect, and cleared by the animation's own end.
  */
-export default function LoginCard({ logo }: { logo: string | null }) {
+export default function LoginCard({
+  logo,
+  name,
+}: {
+  logo: BrandLogo | null;
+  name: string;
+}) {
   const [state, formAction, pending] = useActionState(
     signInWithCredentials,
     INITIAL,
@@ -58,7 +65,7 @@ export default function LoginCard({ logo }: { logo: string | null }) {
           )}
         />
         <div className="relative">
-          <LoginLockup logo={logo} />
+          <LoginLockup logo={logo} name={name} />
           <form
             action={formAction}
             className={cn("mt-8 transition-opacity duration-300", faded)}

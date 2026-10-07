@@ -17,6 +17,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "keys:generate": "tsx scripts/generate-keys.ts",
     "keys:check": "tsx scripts/generate-keys.ts --check",
     "verify:connectors": "tsx scripts/verify-connectors.ts",

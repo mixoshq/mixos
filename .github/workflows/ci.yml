@@ -78,6 +78,13 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Node's built-in runner through tsx: no test framework to install.
+      # Nothing here needs a database or the generated registry — code that
+      # does is split from the rules it applies, and the rules are what is
+      # tested (see src/lib/branding/bounded.ts, scripts/brand-checks.ts).
+      - name: Unit tests
+        run: npm test
+
       # `prebuild` regenerates src/generated/app-registry.ts, so this also
       # catches a malformed app.json / connector.json / theme.json manifest, and
       # a theme.css that violates the token contract.
