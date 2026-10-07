@@ -14,7 +14,7 @@ create table if not exists public.connector_scope_status (
   -- Null means the tenant-wide grant an admin connected. A `userScoped`
   -- connector holds a grant per person, so one row set per user; keying on
   -- connector_name alone would report one user's refusal as everybody's.
-  user_id        uuid references auth.users(id) on delete cascade,
+  user_id        uuid references public.users(id) on delete cascade,
   scope          text not null,
   -- granted: requested, and in the grant.
   -- refused: requested, and NOT in the grant.

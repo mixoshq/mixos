@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { createServiceClient } from "@/lib/db/supabase";
+import { createServiceClient } from "@/lib/db/server";
 import { platformKey } from "@/lib/env/keys";
 
 /**

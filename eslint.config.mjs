@@ -17,6 +17,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // The bundled release step (`npm run build:ops`): generated, gitignored,
+    // and linted at its source in scripts/.
+    "ops/**",
   ]),
   // ── Security: prevent apps from bypassing the edge gateway ──
   // App widgets and pages must NOT import DB or connector modules directly.
@@ -73,7 +76,7 @@ const eslintConfig = defineConfig([
               // reachable.
               importNames: ["createScopedClient", "createReadOnlyScopedClient"],
               message:
-                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a service-role client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
+                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
             },
           ],
         },
@@ -136,7 +139,7 @@ const eslintConfig = defineConfig([
               // reachable.
               importNames: ["createScopedClient", "createReadOnlyScopedClient"],
               message:
-                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a service-role client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
+                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
             },
           ],
         },
@@ -147,8 +150,8 @@ const eslintConfig = defineConfig([
   // These run behind the gateway and may import connectors (type-only), but must
   // NOT touch the RAW DB client — that bypasses per-app scoping and could read
   // another app's tables. RLS is enabled on every table but grants nothing to
-  // anyone: the platform connects with the service role, which bypasses it
-  // outright, so table-name scoping is the only isolation there is. Read your
+  // anyone: the platform connects as the tables' owner, which RLS does not
+  // apply to, so table-name scoping is the only isolation there is. Read your
   // own data via `context.db`
   // (scoped) and other apps' data via `context.services` (the App Services
   // broker). The broker/context builders themselves stay platform-internal.
@@ -187,7 +190,7 @@ const eslintConfig = defineConfig([
               // reachable.
               importNames: ["createScopedClient", "createReadOnlyScopedClient"],
               message:
-                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a service-role client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
+                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
             },
           ],
         },
@@ -276,8 +279,8 @@ const eslintConfig = defineConfig([
   // ── Containment: an app reaches the environment and the network by declaration ──
   //
   // `process.env` in app code can read CONNECTOR_ENCRYPTION_KEY and
-  // SUPABASE_SERVICE_ROLE_KEY — the keys that decrypt every third-party
-  // credential and bypass RLS on every table. `context.env` can read only what
+  // DATABASE_URL — the key that decrypts every third-party credential and the
+  // connection string that owns every table. `context.env` can read only what
   // the manifest declared and an admin filled in.
   //
   // A raw `fetch` is the SSRF hole docs/security-architecture.md §13 flagged as

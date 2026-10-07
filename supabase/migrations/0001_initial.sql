@@ -17,20 +17,24 @@
 --     The do-block at the bottom covers every table in `public` by sweeping the
 --     catalog, so a new table cannot miss the rule by not being listed.
 --
--- Applied with the Supabase CLI:  npm run db:push
+-- Applied with `npm run db:migrate` against any Postgres, or with the Supabase
+-- CLI (`npm run db:push`, `npm run db:local`). Both record it in the same
+-- ledger, so either can take over from the other.
 --
 -- ── Authorization model ────────────────────────────────────────────────────
--- The application connects with the SERVICE ROLE key and enforces every
--- authorization decision in application code (src/lib/apps/access.ts,
--- src/lib/connectors/config.ts, src/lib/mcp/). There are no per-user database
--- roles and no policies that grant anything.
+-- The application connects as the role that owns these tables (DATABASE_URL)
+-- and enforces every authorization decision in application code
+-- (src/lib/apps/access.ts, src/lib/connectors/config.ts, src/lib/mcp/). There
+-- are no per-user database roles and no policies that grant anything.
 --
 -- RLS is nevertheless ENABLED on every table below, with ZERO policies. On
--- Supabase this is load-bearing, not decorative: PostgREST publishes the
--- `public` schema to the `anon` and `authenticated` roles, so a table with RLS
--- switched off is world-readable to anyone holding the (publishable) anon key.
--- Enabled + no policies = deny-all for those roles. The service role bypasses
--- RLS entirely, so the application is unaffected.
+-- Supabase this is load-bearing, not decorative: every Supabase project runs
+-- PostgREST, which publishes the `public` schema to the `anon` and
+-- `authenticated` roles, so a table with RLS switched off is world-readable to
+-- anyone holding the (publishable) anon key — whether or not MixOS itself uses
+-- that API. Enabled + no policies = deny-all for those roles. RLS does not
+-- apply to a table's owner, so the application is unaffected; that is also why
+-- migrations must run as the role the application connects as.
 --
 -- The practical rule: any table added here gets RLS automatically — the sweep at
 -- the bottom of this file enables it on every table in `public` that lacks it.
@@ -576,7 +580,7 @@ $$;
 
 -- ── RPC: app schema introspection ───────────────────────────────────────────
 -- Backs the admin "app database" viewer (src/lib/apps/admin-actions.ts), which
--- lists the tables and columns an app owns. Called via supabase.rpc().
+-- lists the tables and columns an app owns.
 --
 -- SECURITY: PostgREST publishes functions in the `public` schema to `anon` and
 -- `authenticated` by default, and this one enumerates schema metadata. EXECUTE
@@ -607,8 +611,26 @@ as $$
   order by c.table_name, c.ordinal_position
 $$;
 
-revoke all on function public.get_app_schema(text) from public, anon, authenticated;
-grant execute on function public.get_app_schema(text) to service_role;
+-- `anon`, `authenticated` and `service_role` are Supabase's API roles. They
+-- exist only where Supabase (or a hand-run PostgREST) created them, so the
+-- grants below are made only where the roles are. On a plain Postgres there is
+-- no API to publish the function through, and the owner — the role MixOS
+-- connects as — keeps EXECUTE either way.
+revoke all on function public.get_app_schema(text) from public;
+do $$
+declare
+  api_role text;
+begin
+  foreach api_role in array array['anon', 'authenticated'] loop
+    if exists (select 1 from pg_roles where rolname = api_role) then
+      execute format('revoke all on function public.get_app_schema(text) from %I', api_role);
+    end if;
+  end loop;
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function public.get_app_schema(text) to service_role;
+  end if;
+end
+$$;
 
 -- The schema version this file brings the database to.
 --

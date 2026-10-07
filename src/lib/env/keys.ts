@@ -22,12 +22,33 @@
  * survives. A missing key fails closed with a message naming the variable and
  * the command that generates it.
  *
- * FORMAT. All six are 32 random bytes, hex-encoded (64 characters). Uniform on
- * purpose: one generator command, one validation path, one thing to remember.
+ * FORMAT. All six are 32 random bytes. Uniform on purpose: one generator
+ * command, one validation path, one thing to remember. Two spellings of those
+ * bytes are accepted:
+ *
+ *   - hex, 64 characters — what `npm run keys:generate` prints;
+ *   - base64, 44 characters (or 43 unpadded, or base64url) — what hosting
+ *     platforms' secret generators produce. Render's `generateValue` and
+ *     Coolify's SERVICE_REALBASE64_32_* are exactly 32 random bytes in base64,
+ *     so a one-click deploy can generate every key without a person pasting
+ *     anything.
+ *
+ * The two cannot be confused: a 64-character string is only ever read as hex.
  */
 
 const KEY_BYTES = 32;
-const HEX_RE = /^[0-9a-fA-F]+$/;
+const HEX_KEY = /^[0-9a-fA-F]{64}$/;
+const BASE64_KEY = /^[A-Za-z0-9+/]{43}=?$|^[A-Za-z0-9_-]{43}=?$/;
+
+/** The key's 32 bytes, or null when `raw` is neither spelling of 32 bytes. */
+function decodeKey(raw: string): Buffer | null {
+  if (HEX_KEY.test(raw)) return Buffer.from(raw, "hex");
+  if (BASE64_KEY.test(raw)) {
+    const bytes = Buffer.from(raw, /[-_]/.test(raw) ? "base64url" : "base64");
+    return bytes.length === KEY_BYTES ? bytes : null;
+  }
+  return null;
+}
 
 export interface PlatformKeySpec {
   /** Environment variable holding the key. */
@@ -104,15 +125,16 @@ export function platformKey(name: PlatformKeyName): Buffer {
     );
   }
 
-  if (raw.length !== KEY_BYTES * 2 || !HEX_RE.test(raw)) {
+  const key = decodeKey(raw);
+  if (!key) {
     throw new Error(
-      `${spec.env} must be ${KEY_BYTES} bytes hex-encoded (${KEY_BYTES * 2} hex characters); ` +
-        `got ${raw.length} character(s). ` +
+      `${spec.env} must be ${KEY_BYTES} random bytes, as ${KEY_BYTES * 2} hex characters or ` +
+        `as base64; got ${raw.length} character(s). ` +
         `Generate one with: node -e "console.log(require('crypto').randomBytes(${KEY_BYTES}).toString('hex'))"`,
     );
   }
 
-  return Buffer.from(raw, "hex");
+  return key;
 }
 
 /**

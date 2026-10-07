@@ -21,7 +21,7 @@
  * (§3.1) and do not need the session torn down.
  */
 
-import { createServiceClient } from "@/lib/db/server";
+import { sql } from "@/lib/db/server";
 
 /**
  * Invalidate every session issued to this user before now.
@@ -32,17 +32,16 @@ import { createServiceClient } from "@/lib/db/server";
  * importantly, monotonic — a revocation can never fail to move the number.
  */
 export async function revokeUserSessions(userId: string): Promise<number> {
-  const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .rpc("bump_session_version", { p_user_id: userId })
-    .single();
-
-  if (error) {
+  try {
+    const [row] = await sql<{ version: number | null }[]>`
+      select public.bump_session_version(${userId}::uuid) as version
+    `;
+    return Number(row?.version ?? 0);
+  } catch (error) {
     // Loud and rethrown, unlike the audit log. Revocation is a GATE: an admin
     // told to believe a session was killed when it was not is worse than an
     // error message.
     console.error(`[auth] failed to revoke sessions for ${userId}:`, error);
     throw new Error("Could not revoke sessions for this user.");
   }
-  return Number(data ?? 0);
 }
