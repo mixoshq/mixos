@@ -243,8 +243,11 @@ export const GET = defineRoute({
 ```
 
 Output validation and the payload cap are both skipped, and the timeout only
-covers producing the Response, not consuming its body. Declare the
-`raw-response` escape in `app.json` so the exception is on the record.
+covers producing the Response, not consuming its body. So the exception has to
+be on the record: `app.json` must declare
+`"escapes": [{ "rule": "raw-response", "reason": "…" }]`, or the build leaves the
+whole app out of the registry. An admin sees the declaration, and your reason,
+in the app's details. Auth, roles, CSRF and the rate limit apply as usual.
 
 **A raw route parses its own body.** Its `input` schema covers the query string
 and path params only — the pipeline deliberately does not read the body, because
