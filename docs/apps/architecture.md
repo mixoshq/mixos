@@ -21,7 +21,7 @@ apps/my-app/
     hello/
       route.ts      # API handler at /api/apps/my-app/hello
   migrations/
-    001_init.sql    # Database migrations (optional)
+    001_init.sql    # Database migrations (optional; needs "database": true)
 ```
 
 **Templates:** any app directory whose name starts with an underscore (e.g. `apps/_template/`) is treated as a template and skipped by the registry. Use this for starter scaffolds you want to keep in the repo without exposing to users.
@@ -103,7 +103,8 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
 | `appUrl` |  | Where the app lives for someone who wants to read about it — a homepage, a docs site, a repository directory. Absolute `https://` only: these render as links on pages served over https, and an author never sees the downgrade because their own dev server is http. | `"appUrl": "https://example.com/my-app"` |
 | `appSupportUrl` |  | Where a user takes a problem with this app — an issue tracker, a support page. Same `https://` rule. Kept separate from `appUrl` because "read about it" and "something is broken" are different destinations, and collapsing them sends bug reports to a marketing page. | `"appSupportUrl": "https://example.com/my-app/issues"` |
 | `connectors` |  | Array of connector names this app requires. These must match registered connectors in the Connector Registry. The platform will initialize and inject them into the app context. | `"connectors": ["monday", "slack"]` |
-| `database` |  | Set to `true` to enable a scoped database for this app. The app gets its own isolated tables prefixed with the app slug. Migrations go in the `migrations/` directory. | `"database": true` |
+| `database` |  | Set to `true` to give the app a database: a schema of its own, `app_<slug>`, reached as `context.db`. Migrations go in the `migrations/` directory, and only an app with `database` may have one. Every migration statement is checked before it runs; see [Database](./database.md#what-a-migration-may-contain). | `"database": true` |
+| `updatedAt` |  | Timestamp columns the platform keeps current, `[{ table, column? }]`: on every update of a row, its trigger sets the column to `now()`. `column` defaults to `updated_at` and must be a `timestamptz` or `timestamp` column the app's migrations create, which the build checks. Requires `database`. An app migration may not create triggers, so this is how it gets one. See [Database](./database.md#keeping-updated_at-current). | `"updatedAt": [{ "table": "orders" }]` |
 | `notifications` |  | Set to `true` to enable Web Push. The app gets `context.notifications.send(...)` in its API routes and can opt users in with the SDK helper. See [Notifications](./notifications.md). | `"notifications": true` |
 | `schedules` |  | Array of scheduled jobs. Each `name` maps to a handler at `jobs/<name>.ts` and sets **exactly one** cadence: `everyMinutes` (interval, min 5, multiple of 5) **or** a 5-field `cron` expression with an optional IANA `timezone` (default UTC). The platform runs them on a 5-minute scheduler. See [Scheduled Jobs](./scheduled-jobs.md). | `"schedules": [{ "name": "refresh-cache", "everyMinutes": 60 }, { "name": "digest", "cron": "0 8 * * 1" }]` |
 | `global` |  | Set to `true` to make the app implicitly granted to every user. It appears as **Granted** on every user's **App Access** tab in Users and cannot be revoked per-user. No `user_app_grants` rows are written. It is installed for every user on their first sign-in (before the welcome tour is finished); after that they can uninstall it like any other app. | `"global": true` |

@@ -96,7 +96,9 @@ RUN set -eu; \
 # has to arrive already compiled to run there — and it has to run there,
 # because Render and Railway run a pre-deploy command in the service's own
 # image and cannot select another build stage. After `npm run build`, whose
-# prebuild hook generated the app registry the bundle reads.
+# prebuild hook generated the app registry the bundle reads. It also puts
+# libpg-query.wasm beside the bundle: the parser that checks app migrations
+# loads it from there.
 RUN npm run build:ops
 
 # ---------------------------------------------------------------------------

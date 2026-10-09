@@ -3,25 +3,25 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { createServiceClient } from "@/lib/db/server";
+import { appSchemaName } from "./app-identifiers";
 
 /**
- * Per-app database handle. Every table name an app asks for is rewritten to
- * `_app_<slug>_<name>`, which is the entire basis of app data isolation: an app
- * cannot name another app's table, and cannot name a platform table either.
- * The prefix is applied here and nowhere else — see docs/apps/database.md and
- * the matching rewrite in scripts/migrate.ts.
+ * Per-app database handle: the query builder, pinned to the app's own schema,
+ * `app_<slug>` (./app-identifiers.ts). `context.db.table("orders")` is
+ * `app_<slug>.orders`, the table the app's migration created as `orders`. An app
+ * cannot name another app's table, or a platform table, through it.
+ *
+ * It connects as the platform's role, like every other query, and reaches the
+ * app's tables because that role is a member of the app's. What app SQL could
+ * leave behind for that role to run is bounded when the migration is checked
+ * (scripts/app-sql-policy.ts). See docs/apps/database.md.
  */
-export function tablePrefix(appSlug: string): string {
-  return `_app_${appSlug.replace(/-/g, "_")}_`;
-}
-
 export function createScopedClient(appSlug: string) {
-  const db = createServiceClient();
-  const prefix = tablePrefix(appSlug);
+  const db = createServiceClient().schema(appSchemaName(appSlug));
   return {
     // The builder refuses any name that is not a plain identifier, so `name`
-    // cannot carry a quote, a dot or a schema out of the prefix.
-    table: (name: string) => db.from(`${prefix}${name}`),
+    // cannot carry a quote, a dot or another schema out of this one.
+    table: (name: string) => db.from(name),
   };
 }
 
