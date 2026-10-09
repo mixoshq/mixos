@@ -4,7 +4,7 @@
 
 import { sql } from "@/lib/db/client";
 import { decrypt, encrypt } from "./encryption";
-import { ConnectorError } from "./errors";
+import { ConnectorError, isConnectorError } from "./errors";
 import { TOKEN_KEYS, refreshWithToken, tokensToCredentials } from "./oauth";
 import type { TokenSet } from "./oauth";
 import type { ConnectorAuthPolicy } from "./types";
@@ -185,6 +185,64 @@ export async function refreshUserTokens(opts: {
     });
     return tokensToCredentials(tokens);
   });
+}
+
+/**
+ * A stored grant, made usable: handed back as it is while its access token is
+ * live, renewed through `refresh` once it has expired, or null when there is
+ * nothing usable — never connected, or a grant the provider will no longer
+ * renew.
+ *
+ * Takes the stored tokens and the refresh as arguments so the rule can be
+ * tested without a database; `getValidUserTokens` supplies both.
+ */
+export async function freshUserGrant(
+  stored: Record<string, string> | null,
+  refresh: () => Promise<Record<string, string>>,
+  opts: { skewMs: number; now?: number },
+): Promise<Record<string, string> | null> {
+  if (!stored) return null;
+
+  const expiresAt = Number(stored[TOKEN_KEYS.expiresAt] ?? 0);
+  if (stored[TOKEN_KEYS.access] && expiresAt - opts.skewMs > (opts.now ?? Date.now())) {
+    return stored;
+  }
+
+  try {
+    return await refresh();
+  } catch (err) {
+    if (!isConnectorError(err)) throw err;
+    // The provider will not renew it — revoked, expired, or a grant that never
+    // came with a refresh token. That is "not connected", and the person
+    // connects again, exactly as someone who never had.
+    if (err.category === "auth_failed") return null;
+    // Anything else is the token endpoint having a bad moment, not a dead
+    // grant. Hand over what is stored: the connector refreshes again on first
+    // use, and if that fails too the caller gets a retryable error rather than
+    // a prompt to reconnect an account that is fine.
+    return stored;
+  }
+}
+
+/**
+ * This person's grant for one user-scoped connector, refreshed first if its
+ * access token has expired, or null when they hold no usable grant. Called
+ * before a request runs, so `configured` describes the grant as it is rather
+ * than as it was when it was last written.
+ */
+export async function getValidUserTokens(opts: {
+  userId: string;
+  connectorName: string;
+  /** Renews the grant under its lock — `refreshUserTokens`, bound to the caller. */
+  refresh: () => Promise<Record<string, string>>;
+  /** Treat a token expiring within this window as already expired. */
+  skewMs: number;
+}): Promise<Record<string, string> | null> {
+  return freshUserGrant(
+    await getUserTokens(opts.userId, opts.connectorName),
+    opts.refresh,
+    { skewMs: opts.skewMs },
+  );
 }
 
 /** Which user-scoped connectors this person has actually connected. */
