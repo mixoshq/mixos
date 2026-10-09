@@ -51,9 +51,17 @@ const DEFAULTS = {
 /**
  * Treat a token expiring within this window as already expired. A token that
  * dies mid-flight is indistinguishable from a rejected one and costs a wasted
- * round trip to discover.
+ * round trip to discover. Exported so the user-scoped grant check before a
+ * request (./user-grant.ts) draws the line in the same place.
  */
-const TOKEN_SKEW_MS = 60_000;
+export const TOKEN_SKEW_MS = 60_000;
+
+/**
+ * Renews a three-legged grant under its lock and returns the stored tokens
+ * afterwards — the shape `refreshConnectorTokens` and `refreshUserTokens`
+ * share.
+ */
+export type GrantRefresher = () => Promise<Record<string, string>>;
 
 /** Verbs that are safe to replay. Anything else needs an explicit opt-in. */
 const IDEMPOTENT_VERBS = new Set(["GET", "HEAD", "OPTIONS", "PUT", "DELETE"]);
@@ -126,6 +134,34 @@ export abstract class HttpConnector implements BaseConnector {
   abstract testConnection(): Promise<ConnectorTestResult>;
 
   protected credentials: Record<string, string> = {};
+
+  /**
+   * Whose grant a refresh renews. Null is the tenant's, in connector_configs.
+   *
+   * A user-scoped connector's tenant row holds the client id and secret and
+   * never a grant — each person's lives in user_connector_oauth — so a refresh
+   * of the tenant row found no refresh token, and a token that expired
+   * mid-request failed as `auth_failed` while `configured` still said true.
+   * The platform binds the caller's own grant instead; see `bindUserGrant`.
+   */
+  #userGrant: GrantRefresher | null = null;
+
+  /**
+   * Point this instance's token refresh at one person's grant.
+   *
+   * Platform-only: `initializeWithUserGrant` (./user-grant.ts) calls it before
+   * `initialize()`. It binds once, so nothing that holds the instance later can
+   * re-point it at somebody else's grant.
+   */
+  static bindUserGrant(connector: BaseConnector, refresh: GrantRefresher): void {
+    // A connector that does not extend this class never refreshes through it,
+    // so there is nothing to point anywhere.
+    if (!(connector instanceof HttpConnector)) return;
+    if (connector.#userGrant) {
+      throw new Error(`connector "${connector.name}" already has a grant bound.`);
+    }
+    connector.#userGrant = refresh;
+  }
 
   /**
    * Subclasses that need extra setup override this and call
@@ -713,11 +749,14 @@ export abstract class HttpConnector implements BaseConnector {
   }
 
   /**
-   * Refresh and persist the tenant grant. Imported lazily so the database layer
-   * stays out of the module graph for every connector that never uses the
-   * authorization-code flow. Overridden in the verification harness.
+   * Refresh and persist the grant: the caller's own when one is bound (a
+   * user-scoped connector), otherwise the tenant's. Imported lazily so the
+   * database layer stays out of the module graph for every connector that
+   * never uses the authorization-code flow. Overridden in the verification
+   * harness.
    */
   protected async refreshStoredTokens(): Promise<Record<string, string>> {
+    if (this.#userGrant) return this.#userGrant();
     const { refreshConnectorTokens } = await import("./config");
     return refreshConnectorTokens({
       connectorName: this.name,

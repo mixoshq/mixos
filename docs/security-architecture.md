@@ -440,9 +440,10 @@ Constraints, all build-enforced:
 - **A user-scoped connector cannot be used by a scheduled job.** A job runs with
   no user, so there is no grant to resolve — the connector would be silently
   absent at 3am and present in a page request.
-- **Absent, not broken.** No user in context, or a user who has never connected,
-  omits the connector rather than handing over an unusable one. That is the same
-  shape an app already handles for a connector an admin has not configured.
+- **Absent, not broken.** No user in context, a user who has never connected, or
+  a grant the provider will no longer renew omits the connector rather than
+  handing over an unusable one. That is the same shape an app already handles
+  for a connector an admin has not configured.
 
 **What this model costs.** Once a connector answers differently per user, every
 place a response is cached, logged, or shared becomes a place it can reach the

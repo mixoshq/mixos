@@ -24,6 +24,7 @@ import type { AddressInfo } from "node:net";
 // redirect URI is built from the configured origin, so give both a value when
 // the environment has none. Never overrides a real one.
 process.env.CONNECTOR_ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
+process.env.USER_OAUTH_ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
 process.env.NEXTAUTH_URL ??= "https://mixos.test";
 import { HttpConnector } from "../src/lib/connectors/http-connector";
 import { ConnectorError } from "../src/lib/connectors/errors";
@@ -780,6 +781,47 @@ async function main() {
     withGrant.configured === true,
   );
 
+  // ── a user-scoped grant renews against its owner ─────────────────────────
+  // The platform binds the caller's own grant before initialize(). Unbound,
+  // the base class would refresh the tenant row — which for a user-scoped
+  // connector never holds a refresh token.
+  reset();
+  const mine = new Probe();
+  mine.authOverride = authCode();
+  mine.httpOverride = { baseUrl: base };
+  let ownRefreshes = 0;
+  HttpConnector.bindUserGrant(mine, async () => {
+    ownRefreshes++;
+    const t = await refreshWithToken({
+      policy: mine.authOverride,
+      connectorName: mine.name,
+      subject: mine.name,
+      clientId: "cid",
+      clientSecret: "sec",
+      refreshToken: "refresh-9",
+    });
+    return tokensToCredentials(t);
+  });
+  await mine.initialize({
+    clientId: "cid",
+    clientSecret: "sec",
+    ...live,
+    [TOKEN_KEYS.expiresAt]: "0",
+  });
+  const ownToken = await mine.call<{ token: string }>("/data");
+  check(
+    "an expired user-scoped token is renewed through the user's own grant",
+    ownRefreshes === 1 && (ownToken?.token ?? "").startsWith("granted-"),
+    `token=${ownToken?.token} refreshes=${ownRefreshes}`,
+  );
+  let reboundRefused = false;
+  try {
+    HttpConnector.bindUserGrant(mine, async () => ({}));
+  } catch {
+    reboundRefused = true;
+  }
+  check("a bound grant cannot be re-pointed", reboundRefused);
+
   // A refresh token the provider has revoked. This is the state an admin has
   // to fix by reconnecting, so it must surface as auth_failed and must not be
   // retried into a second refresh.
@@ -1357,6 +1399,80 @@ async function main() {
           merged.clientSecret === "sec" &&
           merged[TOKEN_KEYS.access] === "a",
       );
+
+      // 5. A user-scoped grant, end to end against the user's own row: an
+      //    expired token is renewed before the connector is handed over, and a
+      //    grant the provider will no longer renew means no connector at all.
+      const { initializeWithUserGrant } =
+        await import("../src/lib/connectors/user-grant");
+      const { saveUserTokens, getUserTokens } =
+        await import("../src/lib/connectors/user-config");
+      const email = `verify-${randomBytes(6).toString("hex")}@mixos.test`;
+      const [person] = await sql<{ id: string }[]>`
+        insert into public.users (email, display_name)
+        values (${email}, 'Verify probe') returning id
+      `;
+      const grantPolicy = authCode();
+      const userManifest = {
+        name: "__verify_user_probe__",
+        displayName: "Verify probe",
+        auth: grantPolicy,
+      };
+      const handOver = async () => {
+        const p = new Probe();
+        p.authOverride = grantPolicy;
+        p.httpOverride = { baseUrl: base };
+        const connected = await initializeWithUserGrant(p, {
+          userId: person.id,
+          manifest: userManifest,
+          tenantCredentials: { clientId: "cid", clientSecret: "sec" },
+        });
+        return { p, connected };
+      };
+      try {
+        check(
+          "someone who never connected is handed no connector",
+          (await handOver()).connected === false,
+        );
+
+        reset();
+        await saveUserTokens(person.id, userManifest.name, {
+          accessToken: "granted-stale",
+          refreshToken: "refresh-9",
+          expiresAt: Date.now() - 1_000,
+        });
+        const renewed = await handOver();
+        const stored = await getUserTokens(person.id, userManifest.name);
+        check(
+          "an expired user grant is renewed before the request, on that user's row",
+          renewed.connected &&
+            renewed.p.configured &&
+            hits["grant:refresh_token"] === 1 &&
+            (stored?.[TOKEN_KEYS.access] ?? "granted-stale") !== "granted-stale",
+          `stored=${stored?.[TOKEN_KEYS.access]}`,
+        );
+        check(
+          "the connector calls with the renewed token",
+          (await renewed.p.call<{ token: string }>("/data"))?.token ===
+            stored?.[TOKEN_KEYS.access],
+        );
+
+        reset();
+        await saveUserTokens(person.id, userManifest.name, {
+          accessToken: "granted-stale",
+          refreshToken: "refresh-revoked",
+          expiresAt: Date.now() - 1_000,
+        });
+        tokenMode = "reject400";
+        check(
+          "a grant the provider will no longer renew is handed no connector",
+          (await handOver()).connected === false,
+        );
+        reset();
+      } finally {
+        // Cascades to the user's grant.
+        await sql`delete from public.users where id = ${person.id}`;
+      }
     } finally {
       await sql`delete from public.connector_configs where connector_name = ${probeName}`;
       await sql.end({ timeout: 5 });
