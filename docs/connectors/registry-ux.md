@@ -176,6 +176,12 @@ worse than no tick, because it looks like the same thing.
 | Authorize | a refresh or access token stored |
 | Verify | `connector_configs.last_verified_at` set by a real call |
 
+A connector that declares no `credentialFields` has no Save step: there is
+nothing to save. A `userScoped` connector has no deployment-wide grant, so its
+Authorize step connects the admin's own account, and Verify makes its call with
+that grant. The tile reads **Configured** once the client id and secret are
+saved, since everyone else connects their own account at `/account/connections`.
+
 The first is inferred rather than self-reported: you cannot hold a Client ID for
 an app you never created. Only a **successful** verify writes its timestamp — a
 failure leaves "it worked on Tuesday" standing, which is still true and more

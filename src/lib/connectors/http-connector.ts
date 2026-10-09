@@ -120,7 +120,13 @@ export abstract class HttpConnector implements BaseConnector {
    * instantiated. Two copies of it drifted once already — see that file.
    */
   get configured(): boolean {
-    return connectorConfigState(this.auth, this.credentials) === "ready";
+    return (
+      connectorConfigState(
+        this.auth,
+        this.credentials,
+        this.manifest?.credentialFields,
+      ) === "ready"
+    );
   }
 
   /**
