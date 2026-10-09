@@ -11,7 +11,8 @@ without the watermark advancing once.
 That shape is now the platform's, and the cursor never leaves the run:
 
 ```jsonc
-// app.json
+// app.json — a sync needs "database": true, where its watermark is kept
+"database": true,
 "sync": [{
   "name": "calls",
   "schedule": { "everyMinutes": 60 },
