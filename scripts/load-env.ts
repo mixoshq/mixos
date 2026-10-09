@@ -27,16 +27,29 @@
 // set up for hosted Supabase. Merging it unconditionally would leak
 // PGSSLMODE=disable into the hosted path, and src/lib/db/pg-options.ts is
 // explicit that a silent TLS downgrade against a hosted database is a footgun
-// rather than a convenience. So the fallback applies only when BOTH hold:
+// rather than a convenience. So the fallback applies only when ALL hold:
 //
-//   * no .env.local          — nobody has configured the hosted path, and
+//   * no .env.local          — nobody has configured the hosted path,
 //   * .env.docker.local exists — the Docker stack has actually been booted
-//                                (that file is generated, never committed).
+//                                (that file is generated, never committed), and
+//   * no connection string   — neither the shell nor .env has set DATABASE_URL
+//     is set yet               or POSTGRES_URL.
+//
+// The third is because the fallback is how a script finds the local stack's
+// database, and its other values (PGSSLMODE=disable, the committed admin login)
+// belong to that database only: `DATABASE_URL=… npm run seed-admin` must not
+// get them for whatever DATABASE_URL names. Discrete PG* fields don't count,
+// because a URL wins over them (src/lib/db/pg-options.ts), so the fallback's own
+// DATABASE_URL would be the database those values are used with.
 //
 // When .env.local exists it wins outright and nothing here changes.
+//
+// scripts/release.ts does not use this at all: the release step reads only the
+// environment it is started with.
 
 import fs from "fs";
 import path from "path";
+import { connectionUrl } from "../src/lib/db/pg-options";
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -45,8 +58,12 @@ const ROOT = path.resolve(__dirname, "..");
  * set. Shell-provided values therefore always win, which is what lets
  * docker-up.ts inject a fully-formed environment into these same scripts.
  */
-function loadEnvFile(file: string, transform?: (v: string) => string): void {
-  const full = path.join(ROOT, file);
+function loadEnvFile(
+  root: string,
+  file: string,
+  transform?: (v: string) => string,
+): void {
+  const full = path.join(root, file);
   if (!fs.existsSync(full)) return;
   for (const line of fs.readFileSync(full, "utf-8").split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -77,15 +94,18 @@ function toHostAddress(value: string): string {
   return value.replaceAll("host.docker.internal", "127.0.0.1");
 }
 
-/** Populate process.env for a standalone script. Safe to call more than once. */
-export function loadEnv(): void {
-  loadEnvFile(".env.local");
-  loadEnvFile(".env");
+/**
+ * Populate process.env for a standalone script, from the checkout at `root`
+ * (this one, unless a test says otherwise). Safe to call more than once.
+ */
+export function loadEnv(root: string = ROOT): void {
+  loadEnvFile(root, ".env.local");
+  loadEnvFile(root, ".env");
 
-  const hostedPathConfigured = fs.existsSync(path.join(ROOT, ".env.local"));
-  const dockerStackBooted = fs.existsSync(path.join(ROOT, ".env.docker.local"));
-  if (hostedPathConfigured || !dockerStackBooted) return;
+  const hostedPathConfigured = fs.existsSync(path.join(root, ".env.local"));
+  const dockerStackBooted = fs.existsSync(path.join(root, ".env.docker.local"));
+  if (hostedPathConfigured || !dockerStackBooted || connectionUrl()) return;
 
-  loadEnvFile(".env.docker", toHostAddress);
-  loadEnvFile(".env.docker.local", toHostAddress);
+  loadEnvFile(root, ".env.docker", toHostAddress);
+  loadEnvFile(root, ".env.docker.local", toHostAddress);
 }
