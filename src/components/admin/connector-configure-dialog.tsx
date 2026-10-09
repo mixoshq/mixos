@@ -1442,6 +1442,34 @@ export default function ConnectorConfigureDialog({
               </Button>
             </div>
           )}
+
+          {/*
+            Reference material, below the checklist rather than inside a step:
+            a scope table under "Create a Google Cloud OAuth app" reads as part
+            of that step and gets done or skipped accordingly. A link here has
+            no sentence around it, so its "?" says when to open it.
+          */}
+          {setup?.docs && setup.docs.length > 0 && (
+            <section className="mt-5 border-t border-border pt-3">
+              <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Reference
+              </h3>
+              <ul className="mt-2 space-y-1.5">
+                {setup.docs.map((doc) => (
+                  <li key={doc.url} className="text-sm">
+                    <DocLink link={doc} />{" "}
+                    <InfoTooltip tip={doc.why} className="align-text-bottom">
+                      <HelpCircle
+                        aria-label={`When to open ${doc.label}`}
+                        role="img"
+                        className="h-4 w-4 text-muted-foreground hover:text-foreground"
+                      />
+                    </InfoTooltip>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </section>
       </div>
     </Dialog>
