@@ -142,6 +142,10 @@ answer would report one user's refusal as everybody's.
 | ✗ **Refused** | requested, and **not** in the grant |
 | ? **Unknown** | this API documents it; this connector never asks for it |
 
+A provider may leave `scope` out of its token response when it granted exactly
+what was requested (RFC 6749 §5.1). That is recorded as a grant of every
+requested scope, not as a grant of none.
+
 **Refused is the one that earns the feature.** It happens when someone unticks a
 permission on the consent screen, when a workspace policy narrows the grant, or
 — the routine one — when a connector update adds a scope to the manifest and
