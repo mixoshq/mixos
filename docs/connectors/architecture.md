@@ -238,8 +238,10 @@ The rules:
   grant to resolve; the connector would be absent at 3am and present in a page
   request. Build-enforced.
 - **Absent, not broken.** `context.connectors.<name>` simply does not contain a
-  user-scoped connector the caller has not connected. An app checks for presence
-  exactly as it already must for one an admin has not configured.
+  user-scoped connector the caller has not connected, or whose grant the
+  provider will no longer renew. An expired access token is renewed before the
+  request runs, so one that is present has a grant it can use. An app checks for
+  presence exactly as it already must for one an admin has not configured.
 - **Cache keys must include the user.** The platform cannot enforce this,
   because an app chooses its own cache keys — see
   [Credentials](credentials.md#caching-a-user-scoped-response). A shared key
