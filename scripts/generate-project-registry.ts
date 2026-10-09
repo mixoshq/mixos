@@ -48,6 +48,7 @@ import { formatFindings, scanAppContainment } from "./app-containment";
 import {
   validateConnectorMethods,
   validateConnectorTelemetry,
+  validateRegistryContract,
 } from "./connector-checks";
 import type { Screenshot, ScreenshotKind } from "../src/lib/screenshots";
 import {
@@ -1665,67 +1666,6 @@ interface ConnectorManifestOut {
   auth?: ConnectorAuthPolicy;
   http?: ConnectorHttpPolicy;
   webhook?: ConnectorWebhookPolicy;
-}
-
-/**
- * The Connector Registry contract: what a connector must declare for its admin
- * experience to exist at all.
- *
- * These are not stylistic preferences. Each one is a specific hole in the
- * registry when it is absent:
- *
- *   · no `icon`         — an unidentifiable tile in a grid of tiles
- *   · no `setup`        — a Configure wizard whose first step is blank, so the
- *                         admin is asked for a Client ID with no idea where to
- *                         get one
- *   · no `scopesUrl`    — a permissions list that can never be populated, and
- *                         no way to answer "what can this reach"
- *
- * Reported together rather than one per run: an author adding a connector
- * should learn everything that is missing in one build, not discover it three
- * builds in a row.
- *
- * See docs/connectors/registry-ux.md.
- */
-function validateRegistryContract(
-  name: string,
-  raw: {
-    icon?: string;
-    auth?: { scopesUrl?: string };
-    setup?: { title?: string; steps?: unknown[] };
-  },
-): void {
-  const missing: string[] = [];
-
-  if (!raw.icon) {
-    missing.push(
-      '"icon" — a square PNG/WebP/SVG of at least 512x512 in this connector\'s assets/',
-    );
-  }
-  if (!raw.auth?.scopesUrl) {
-    missing.push(
-      '"auth.scopesUrl" — the provider\'s scope reference page, which the registry parses to list permissions in plain English',
-    );
-  }
-  if (!raw.setup?.title) {
-    missing.push(
-      '"setup.title" — the label for the provider-side step, e.g. "Create a Google Cloud OAuth app"',
-    );
-  }
-  if (!raw.setup?.steps || raw.setup.steps.length === 0) {
-    missing.push(
-      '"setup.steps" — at least one step covering what the admin does in the provider\'s own console',
-    );
-  }
-
-  if (missing.length > 0) {
-    throw new Error(
-      `connector.json is missing what the Connector Registry needs:\n` +
-        missing.map((m) => `    - ${m}`).join("\n") +
-        `\n  Every connector ships a configuration experience; these are the parts ` +
-        `the platform cannot invent. See docs/connectors/registry-ux.md.`,
-    );
-  }
 }
 
 /** Smallest edge a connector icon may have, and it must be square. */
