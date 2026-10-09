@@ -146,6 +146,18 @@ export async function recordConnectorVerified(
   connectorName: string,
   detail: string | null,
 ): Promise<void> {
+  // A connector that asks for no credentials has nothing for an admin to save,
+  // so its first successful test is when its row comes into being. Without
+  // one, the verification below would update nothing and never be recorded.
+  await sql`
+    insert into public.connector_configs (connector_name, encrypted_credentials)
+    values (
+      ${connectorName},
+      ${encrypt(JSON.stringify({}), platformKey("connectorEncryption"))}
+    )
+    on conflict (connector_name) do nothing
+  `;
+
   const supabase = createServiceClient();
   await supabase
     .from("connector_configs")

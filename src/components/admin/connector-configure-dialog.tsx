@@ -622,7 +622,7 @@ export default function ConnectorConfigureDialog({
     });
   }
 
-  steps.push({
+  const credentialsStep: Step = {
     id: "credentials",
     title: `Save your ${credentialNames}`,
     done: credentialsSaved,
@@ -689,21 +689,39 @@ export default function ConnectorConfigureDialog({
         {credentialsSaved ? "Update credentials" : "Save credentials"}
       </Button>
     ),
-  });
+  };
+  // A connector that declares no credential fields — a public API — has
+  // nothing to save, so the wizard goes from the provider's steps to Verify.
+  const hasCredentials = connector.credentialFields.length > 0;
+  if (hasCredentials) steps.push(credentialsStep);
 
   if (isOAuth) {
     steps.push({
       id: "authorize",
-      title: "Authorize access",
+      title: connector.userScoped ? "Connect your account" : "Authorize access",
       done: authorized,
       mustComplete: true,
       body: (
         <>
-          <p className="text-sm text-muted-foreground">
-            You will be sent to the provider to sign in and approve. The token
-            comes back encrypted and refreshes itself; there is one credential
-            set for the whole deployment, not one per person.
-          </p>
+          {/*
+            A user-scoped connector has no deployment-wide grant: each person
+            connects their own. The admin connects theirs here, which proves
+            the app registration works and gives Verify a grant to test with.
+          */}
+          {connector.userScoped ? (
+            <p className="text-sm text-muted-foreground">
+              Each person signs in with their own account, from My
+              Connections. Connect yours here to prove the app registration
+              works; Verify then tests with your account. The token comes back
+              encrypted and refreshes itself.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              You will be sent to the provider to sign in and approve. The
+              token comes back encrypted and refreshes itself; there is one
+              credential set for the whole deployment, not one per person.
+            </p>
+          )}
           {setup?.notes?.authorize && (
             <StepNote>{setup.notes.authorize}</StepNote>
           )}
@@ -1095,9 +1113,10 @@ export default function ConnectorConfigureDialog({
               */}
               {catalogue.length > 0 && !connector.access.grantedKnown && (
                 <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground">
-                  Nobody has connected this yet, so there is no grant to check
-                  against. Every scope reads as unknown until someone does —
-                  which is not the same as having been refused.
+                  {connector.userScoped
+                    ? "Each person holds their own grant, and these verdicts are for yours. You have not connected your own account yet, so every scope reads as unknown until you do"
+                    : "Nobody has connected this yet, so there is no grant to check against. Every scope reads as unknown until someone does"}{" "}
+                  — which is not the same as having been refused.
                 </p>
               )}
 
@@ -1408,9 +1427,11 @@ export default function ConnectorConfigureDialog({
               controls. */}
           {allDone && (
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => jumpTo("credentials")}>
-                Update credentials
-              </Button>
+              {hasCredentials && (
+                <Button size="sm" onClick={() => jumpTo("credentials")}>
+                  Update credentials
+                </Button>
+              )}
               {isOAuth && (
                 <Button size="sm" onClick={() => jumpTo("authorize")}>
                   Reconnect

@@ -269,7 +269,9 @@ async function loadTenantConnectors(
           console.error(`[${logTag}] ${connName}.initialize() threw:`, err);
           continue;
         }
-      } else {
+      } else if (declared?.credentialFields.length !== 0) {
+        // A connector declaring no credential fields needs none, so having no
+        // row is its normal state rather than something to warn about.
         console.warn(
           `[${logTag}] no decrypted credentials for "${connName}" — connector will report as unconfigured`,
         );
