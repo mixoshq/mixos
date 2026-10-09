@@ -60,9 +60,11 @@ export const TOKEN_SKEW_MS = 60_000;
 /**
  * Renews a three-legged grant under its lock and returns the stored tokens
  * afterwards — the shape `refreshConnectorTokens` and `refreshUserTokens`
- * share.
+ * share. `rejected` is the access token the upstream just refused, if any.
  */
-export type GrantRefresher = () => Promise<Record<string, string>>;
+export type GrantRefresher = (
+  rejected?: string,
+) => Promise<Record<string, string>>;
 
 /** Verbs that are safe to replay. Anything else needs an explicit opt-in. */
 const IDEMPOTENT_VERBS = new Set(["GET", "HEAD", "OPTIONS", "PUT", "DELETE"]);
@@ -698,6 +700,14 @@ export abstract class HttpConnector implements BaseConnector {
    */
   private accessToken: { value: string; expiresAt: number } | null = null;
 
+  /**
+   * The granted access token the upstream refused with a 401, until the
+   * refresh that replaces it. The refresh needs it: under the lock, a stored
+   * token that has not reached its expiry otherwise reads as another
+   * invocation's fresh one, and was handed straight back.
+   */
+  private rejectedToken: string | null = null;
+
   private mintsTokens(): boolean {
     return (
       this.auth.strategy === "oauth2_client_credentials" ||
@@ -717,6 +727,7 @@ export abstract class HttpConnector implements BaseConnector {
   private invalidateToken(): void {
     this.accessToken = null;
     if (this.auth.strategy === "oauth2_authorization_code") {
+      this.rejectedToken = this.credentials[TOKEN_KEYS.access] || null;
       // Zeroing the expiry is what makes the next bearerToken() refresh.
       this.credentials = { ...this.credentials, [TOKEN_KEYS.expiresAt]: "0" };
     }
@@ -772,9 +783,12 @@ export abstract class HttpConnector implements BaseConnector {
     const current = this.credentials[TOKEN_KEYS.access];
     if (current && expiresAt - TOKEN_SKEW_MS > Date.now()) return current;
 
+    const rejected = this.rejectedToken ?? undefined;
+    this.rejectedToken = null;
+
     let refreshed: Record<string, string>;
     try {
-      refreshed = await this.refreshStoredTokens();
+      refreshed = await this.refreshStoredTokens(rejected);
     } catch (err) {
       // Drop the dead token so the 401 replay does not attempt a second
       // refresh — a revoked grant should cost one token call, not two.
@@ -800,15 +814,21 @@ export abstract class HttpConnector implements BaseConnector {
    * database layer stays out of the module graph for every connector that
    * never uses the authorization-code flow. Overridden in the verification
    * harness.
+   *
+   * `rejected` is the token a 401 just refused, so it is renewed even if its
+   * stored expiry has not passed.
    */
-  protected async refreshStoredTokens(): Promise<Record<string, string>> {
-    if (this.#userGrant) return this.#userGrant();
+  protected async refreshStoredTokens(
+    rejected?: string,
+  ): Promise<Record<string, string>> {
+    if (this.#userGrant) return this.#userGrant(rejected);
     const { refreshConnectorTokens } = await import("./config");
     return refreshConnectorTokens({
       connectorName: this.name,
       subject: this.subject,
       policy: this.auth,
       skewMs: TOKEN_SKEW_MS,
+      rejected,
     });
   }
 

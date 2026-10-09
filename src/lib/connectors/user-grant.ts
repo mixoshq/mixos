@@ -40,7 +40,7 @@ export async function initializeWithUserGrant(
   // credentials and nothing else: a token in it is not this person's to use.
   const application = withoutGrant(opts.tenantCredentials ?? {});
 
-  const refresh = () =>
+  const refresh = (rejected?: string) =>
     refreshUserTokens({
       userId,
       connectorName: manifest.name,
@@ -49,6 +49,7 @@ export async function initializeWithUserGrant(
       clientId: application[idKey] ?? "",
       clientSecret: application[secretKey] ?? "",
       skewMs: TOKEN_SKEW_MS,
+      rejected,
     });
 
   const grant = await getValidUserTokens({

@@ -145,6 +145,11 @@ export async function refreshUserTokens(opts: {
   clientSecret: string;
   /** Treat a token expiring within this window as already expired. */
   skewMs: number;
+  /**
+   * The access token the upstream just refused with a 401, when this refresh
+   * follows one. It is renewed even if its stored expiry has not passed.
+   */
+  rejected?: string;
 }): Promise<Record<string, string>> {
   const {
     userId,
@@ -154,12 +159,16 @@ export async function refreshUserTokens(opts: {
     clientId,
     clientSecret,
     skewMs,
+    rejected,
   } = opts;
 
   return mutateUserTokens(userId, connectorName, async (current) => {
     const expiresAt = Number(current[TOKEN_KEYS.expiresAt] ?? 0);
-    if (current[TOKEN_KEYS.access] && expiresAt - skewMs > Date.now()) {
-      // Another request refreshed while we waited for the lock.
+    const stored = current[TOKEN_KEYS.access];
+    // A live token means another request refreshed while we waited for the
+    // lock — unless it is the token the upstream just refused, which has to be
+    // renewed rather than handed back.
+    if (stored && stored !== rejected && expiresAt - skewMs > Date.now()) {
       return null;
     }
 
