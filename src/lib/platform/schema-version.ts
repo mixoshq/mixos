@@ -46,7 +46,8 @@
  */
 
 import { sql } from "@/lib/db/client";
-import { EXPECTED_SCHEMA_VERSION } from "@/generated/build-info";
+import { EXPECTED_APP_MIGRATIONS, EXPECTED_SCHEMA_VERSION } from "@/generated/build-info";
+import { checkAppMigrations, type AppMigrationStatus } from "./app-migrations";
 
 export interface SchemaVersionStatus {
   /** False only when the database is provably behind this image. */
@@ -75,6 +76,7 @@ interface CacheEntry {
 // modules, and a module-local would reset the cache on every edit.
 const globalForSchema = globalThis as unknown as {
   __schemaVersionCache?: CacheEntry;
+  __appMigrationCache?: { at: number; status: AppMigrationStatus };
 };
 
 /**
@@ -168,5 +170,20 @@ export async function schemaVersionStatus(): Promise<SchemaVersionStatus> {
 
   const status = await checkSchemaVersion();
   globalForSchema.__schemaVersionCache = { at: Date.now(), status };
+  return status;
+}
+
+/**
+ * The other half of "the schema this image expects": every app migration the
+ * build carries, against the ledger the release step keeps. See
+ * `./app-migrations.ts`. Cached for `CACHE_MS`, and called by the readiness
+ * probe after `schemaVersionStatus()`.
+ */
+export async function appMigrationStatus(): Promise<AppMigrationStatus> {
+  const cached = globalForSchema.__appMigrationCache;
+  if (cached && Date.now() - cached.at < CACHE_MS) return cached.status;
+
+  const status = await checkAppMigrations(sql, EXPECTED_APP_MIGRATIONS);
+  globalForSchema.__appMigrationCache = { at: Date.now(), status };
   return status;
 }
