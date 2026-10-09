@@ -216,3 +216,63 @@ test("helper classes beside the connector are not its methods", () => {
   `);
   assert.doesNotThrow(() => validateConnectorMethods("acme", dir, []));
 });
+
+// ── every declared method exists ────────────────────────────────────────────
+
+test("a declared method the class does not have fails the build", () => {
+  const dir = connectorDir(`
+    export default class Acme extends HttpConnector {
+      readonly name = "acme";
+      async testConnection() { return { ok: true as const }; }
+      async listItems() { return this.request("/items"); }
+    }
+  `);
+  // A typo, or a method since renamed: never counted, and no read a tool can call.
+  assert.throws(
+    () => validateConnectorMethods("acme", dir, declared("listItems", "listThings")),
+    (err: Error) => /does not have: listThings\./.test(err.message),
+  );
+});
+
+test("a declared method that is private, protected or static does not count", () => {
+  const dir = connectorDir(`
+    export default class Acme extends HttpConnector {
+      readonly name = "acme";
+      async testConnection() { return { ok: true as const }; }
+      private async listItems() { return this.request("/items"); }
+      protected sync = () => null;
+      static create() { return new Acme(); }
+    }
+  `);
+  assert.throws(
+    () => validateConnectorMethods("acme", dir, declared("listItems", "sync", "create")),
+    (err: Error) => /does not have: listItems, sync, create\./.test(err.message),
+  );
+});
+
+test("methods inherited from HttpConnector or a base class in the file exist", () => {
+  const dir = connectorDir(`
+    class Base extends HttpConnector {
+      async ping() { return this.request("/ping"); }
+    }
+    export default class Acme extends Base {
+      readonly name = "acme";
+      async testConnection() { return { ok: true as const }; }
+    }
+  `);
+  assert.doesNotThrow(() =>
+    validateConnectorMethods("acme", dir, declared("ping", "initialize", "testConnection")),
+  );
+});
+
+test("a base class this file cannot see is not reported as missing methods", () => {
+  // What it inherits is unknown here, so a declared method cannot be proved absent.
+  const dir = connectorDir(`
+    import { SharedBase } from "./shared";
+    export default class Acme extends SharedBase {
+      readonly name = "acme";
+      async testConnection() { return { ok: true as const }; }
+    }
+  `);
+  assert.doesNotThrow(() => validateConnectorMethods("acme", dir, declared("listShared")));
+});
