@@ -19,6 +19,52 @@ const CONTAINMENT = {
   code: "Apps must not run a string as code.",
 };
 
+const PALETTE_MESSAGE =
+  "Raw palette colours dodge the contrast guarantee. Use semantic tokens: text-foreground, text-muted-foreground, text-success, text-warning, text-destructive, bg-card, bg-muted, bg-primary. See docs/apps/ux.md#color--contrast.";
+const OPAQUE_FILL_MESSAGE =
+  "An opaque bg-white / bg-black is a theme surface in disguise. Use bg-card, bg-background, or bg-muted. Alpha over a known ground (bg-white/10, bg-black/70) is fine and is not flagged.";
+const DARK_VARIANT_MESSAGE =
+  "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (mixos / mixos-dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.";
+
+/**
+ * The colour fence, as `no-restricted-syntax` selectors. Why each one exists
+ * is written at the design-system block below.
+ *
+ * A constant because more than one block sets `no-restricted-syntax` for app
+ * `.tsx` files, and flat config REPLACES a rule's options rather than merging
+ * them: a later block that sets the rule must restate these, or it switches
+ * them off for every file it matches.
+ */
+const COLOUR_FENCE = [
+  {
+    selector:
+      "Literal[value=/(?:^|[\\s\"'`:])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
+    message: PALETTE_MESSAGE,
+  },
+  {
+    selector:
+      "TemplateElement[value.raw=/(?:^|[\\s\"'`:])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
+    message: PALETTE_MESSAGE,
+  },
+  {
+    selector: "Literal[value=/(?:^|[\\s\"'`:])bg-(?:white|black)(?![\\w\\/-])/]",
+    message: OPAQUE_FILL_MESSAGE,
+  },
+  {
+    selector:
+      "TemplateElement[value.raw=/(?:^|[\\s\"'`:])bg-(?:white|black)(?![\\w\\/-])/]",
+    message: OPAQUE_FILL_MESSAGE,
+  },
+  {
+    selector: "Literal[value=/(?:^|[\\s\"'`:])dark:/]",
+    message: DARK_VARIANT_MESSAGE,
+  },
+  {
+    selector: "TemplateElement[value.raw=/(?:^|[\\s\"'`:])dark:/]",
+    message: DARK_VARIANT_MESSAGE,
+  },
+];
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -249,43 +295,7 @@ const eslintConfig = defineConfig([
   {
     files: ["apps/**/*.{ts,tsx}", "src/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector:
-            "Literal[value=/(?:^|[\\s\"'`:])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
-          message:
-            "Raw palette colours dodge the contrast guarantee. Use semantic tokens: text-foreground, text-muted-foreground, text-success, text-warning, text-destructive, bg-card, bg-muted, bg-primary. See docs/apps/ux.md#color--contrast.",
-        },
-        {
-          selector:
-            "TemplateElement[value.raw=/(?:^|[\\s\"'`:])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
-          message:
-            "Raw palette colours dodge the contrast guarantee. Use semantic tokens: text-foreground, text-muted-foreground, text-success, text-warning, text-destructive, bg-card, bg-muted, bg-primary. See docs/apps/ux.md#color--contrast.",
-        },
-        {
-          selector:
-            "Literal[value=/(?:^|[\\s\"'`:])bg-(?:white|black)(?![\\w\\/-])/]",
-          message:
-            "An opaque bg-white / bg-black is a theme surface in disguise. Use bg-card, bg-background, or bg-muted. Alpha over a known ground (bg-white/10, bg-black/70) is fine and is not flagged.",
-        },
-        {
-          selector:
-            "TemplateElement[value.raw=/(?:^|[\\s\"'`:])bg-(?:white|black)(?![\\w\\/-])/]",
-          message:
-            "An opaque bg-white / bg-black is a theme surface in disguise. Use bg-card, bg-background, or bg-muted. Alpha over a known ground (bg-white/10, bg-black/70) is fine and is not flagged.",
-        },
-        {
-          selector: "Literal[value=/(?:^|[\\s\"'`:])dark:/]",
-          message:
-            "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (mixos / mixos-dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.",
-        },
-        {
-          selector: "TemplateElement[value.raw=/(?:^|[\\s\"'`:])dark:/]",
-          message:
-            "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (mixos / mixos-dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.",
-        },
-      ],
+      "no-restricted-syntax": ["error", ...COLOUR_FENCE],
     },
   },
   // ── Containment: an app reaches the environment and the network by declaration ──
@@ -365,11 +375,18 @@ const eslintConfig = defineConfig([
   // The 86 hand-rolled `rounded-xl border border-border bg-card` shells that
   // drifted across 16 apps are the other half: `Card`/`SectionCard` export
   // CARD_SHELL, and a literal copy of it is now an error rather than the 87th.
+  //
+  // RESTATES the colour fence. This block sets no-restricted-syntax for
+  // apps/**/*.tsx, and flat config replaces a rule's options rather than
+  // merging them, so on its own it switched the palette, opaque-fill and
+  // `dark:` checks off for every widget and page — the files they were written
+  // for — while app .ts files and src/ kept them.
   {
     files: ["apps/**/*.tsx"],
     rules: {
       "no-restricted-syntax": [
         "error",
+        ...COLOUR_FENCE,
         {
           selector: "JSXOpeningElement[name.name='button']",
           message:
