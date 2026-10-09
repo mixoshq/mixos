@@ -49,7 +49,9 @@ const query = useAppQuery<Result>(appSlug, "GET /items", { scope });
 You cannot reach the data branch without a `skeleton` and an `empty` — the types
 require both — and `empty` takes a `cause`, so a generic grey box is not
 expressible. Loading, refetching and error are handled for you, including keeping
-the previous data on screen during a user-triggered refetch.
+the previous data on screen during a user-triggered refetch. A failed connector
+call renders as that connector's state — "Not connected" with no Retry when an
+administrator has to act — rather than as a generic error.
 
 `useAppQuery` models the four states as a discriminated union rather than three
 booleans, because `loading && error` and `!loading && !data && !error` are states
