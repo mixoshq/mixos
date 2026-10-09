@@ -129,6 +129,58 @@ test("both bundled themes compile with their own manifests", () => {
   }
 });
 
+// ── tokens live in one top-level :root ──────────────────────────────────────
+
+test("a token set on a surface fails the build", () => {
+  // #f8fafc on #fde047 is 1.26:1, on every button, and this used to build.
+  fails(
+    () => compile({ css: `.mix-button { --primary: #fde047; }`, surfaces: [".mix-button"] }),
+    /"\.mix-button" sets --primary/,
+    /set in :root and nowhere else/,
+  );
+});
+
+test("a dark palette under prefers-color-scheme fails, and names the sibling theme", () => {
+  // Every value here would pass the gate, which is what let it through: the
+  // nested block was read as more of the top-level one.
+  fails(
+    () =>
+      compile({
+        css: `@media (prefers-color-scheme: dark) {\n  :root { --brand: #020617; }\n}`,
+      }),
+    /":root" inside @media \(prefers-color-scheme: dark\)/,
+    /themes\/fixture-dark\/theme\.css/,
+  );
+});
+
+test("a :root inside @supports fails the build", () => {
+  fails(
+    () => compile({ css: `@supports (display: grid) { :root { --radius: 1rem; } }` }),
+    /":root" inside @supports \(display: grid\)/,
+  );
+});
+
+test("a custom property inside @font-face fails the build", () => {
+  fails(
+    () =>
+      compile({
+        css: `@font-face { font-family: "X"; src: url("x.woff2"); --primary: #000; }`,
+        fonts: ["x.woff2"],
+        files: ["x.woff2"],
+      }),
+    /@font-face sets --primary/,
+  );
+});
+
+test("a surface rule inside @media with ordinary properties still builds", () => {
+  assert.doesNotThrow(() =>
+    compile({
+      css: `@media (min-width: 640px) { .mix-card { border-width: 2px; } }`,
+      surfaces: [".mix-card"],
+    }),
+  );
+});
+
 // ── fonts are declared in both directions ───────────────────────────────────
 
 const fontFace = (file: string) =>

@@ -17,7 +17,8 @@
  *     the theme breaks in a way nobody attributes to the refactor.
  *  3. **Verified contrast.** Every pair in the token contract is measured. A
  *     palette that fails AA cannot ship unless the theme names the exact pair
- *     and says why.
+ *     and says why. That only holds if the values measured are the values
+ *     rendered, so tokens are set in one top-level `:root` and nowhere else.
  *
  * Parsing uses postcss, already present via @tailwindcss/postcss — no new
  * dependency. The same pass that validates also rewrites `:root` to
@@ -156,6 +157,19 @@ const URL_REF = /url\(\s*['"]?([^'")]+)['"]?\s*\)/g;
 /** A `url()` reference as a path inside `assets/`, the way theme.json spells one. */
 function assetPath(ref: string): string {
   return ref.trim().replace(/^\.?\//, "");
+}
+
+/**
+ * The one place a token may be set: a `:root` rule at the top level of the
+ * file. Nested in `@media` or `@supports`, the same selector is a second
+ * palette that applies only some of the time.
+ */
+function isTokenBlock(node: postcss.Container | undefined): boolean {
+  return (
+    node?.type === "rule" &&
+    node.parent?.type === "root" &&
+    norm((node as Rule).selector) === TOKEN_SELECTOR
+  );
 }
 
 /**
@@ -316,6 +330,13 @@ function checkContrast(
   return used;
 }
 
+/** Where a declaration sits, for an error message: a selector or an at-rule. */
+function describeParent(node: postcss.Container | undefined): string {
+  if (node?.type === "rule") return `"${norm((node as Rule).selector)}"`;
+  if (node?.type === "atrule") return `@${(node as AtRule).name}`;
+  return "the top level";
+}
+
 export function compileTheme(args: {
   slug: string;
   dir: string;
@@ -400,6 +421,26 @@ export function compileTheme(args: {
           );
         }
 
+        // A :root inside @media or @supports is a palette that applies only
+        // some of the time. It used to be read like the top-level block, each
+        // value overwriting the last, so a prefers-color-scheme dark palette
+        // built cleanly with only its final value of each token measured.
+        if (!isTokenBlock(rule)) {
+          const at = rule.parent?.type === "atrule" ? (rule.parent as AtRule) : null;
+          const where = at ? `@${at.name} ${at.params}`.trim() : "another rule";
+          throw new ThemeError(
+            `themes/${slug}/theme.css: ":root" inside ${where} sets tokens a second time. A theme ` +
+              `declares one palette, in a top-level :root — a token block that applies only some of ` +
+              `the time is a second palette, and the build cannot measure the one the browser ` +
+              `renders. ` +
+              (at?.params.includes("prefers-color-scheme")
+                ? `A dark look is its own theme: move this block to themes/${slug}-dark/theme.css, ` +
+                  `as its :root. See docs/themes/architecture.md.`
+                : `Styling that varies by viewport or feature belongs in a .mix-* surface rule, which ` +
+                  `may sit inside @media or @supports.`),
+          );
+        }
+
         rule.walkDecls((decl) => {
           if (!decl.prop.startsWith("--")) {
             throw new ThemeError(
@@ -427,6 +468,21 @@ export function compileTheme(args: {
 
       surfacesStyled.add(assertSurfaceSelector(sel, slug));
     }
+  });
+
+  // ── tokens live in :root and nowhere else ─────────────────────────────────
+  // Only :root's declarations used to be inspected; a surface rule had its
+  // selector checked and its body ignored. So `.mix-button { --primary: … }`
+  // built cleanly and repainted every button in a colour the contrast gate
+  // never saw.
+  root.walkDecls((decl: Declaration) => {
+    if (!decl.prop.startsWith("--") || isTokenBlock(decl.parent)) return;
+    throw new ThemeError(
+      `themes/${slug}/theme.css: ${describeParent(decl.parent)} sets ${decl.prop}. Custom ` +
+        `properties are set in :root and nowhere else: anywhere else, one either overrides the ` +
+        `palette where the contrast gate never measured it, or is a value nothing reads. Set the ` +
+        `token in :root, or style the surface with ordinary properties.`,
+    );
   });
 
   // ── completeness ──────────────────────────────────────────────────────────
