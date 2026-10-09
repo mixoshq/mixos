@@ -416,7 +416,7 @@ proxy timeout with no way to resume. Slice it and let the client drive:
   guard from that one module, and have both sides import them.
 - One short request per `(entity, slice)`, run sequentially by the client, with
   real progress rather than a guessed bar.
-- Thread `request.signal` into the connector, so a caller navigating away stops
+- Thread `context.signal` into the connector, so a caller navigating away stops
   the pull instead of leaving it running unattended.
 - Go **oldest-first**, and stamp the watermark only on the slice that reaches the
   present — an old slice landing must not make a stale entity look freshly synced.
