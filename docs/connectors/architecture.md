@@ -56,7 +56,7 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 | `setup.notes` |  | `{ credentials?, authorize?, verify? }` — a provider-specific warning attached to the registry's own step, so it appears at the control it concerns. | `"notes": { "authorize": "Sign in as the shared mailbox, not as yourself." }` |
 | `setup.docs` |  | Array of `{ label, url, why }` reference links — scope tables, API docs. Shown below the checklist, not as a step. **`why` is required**: it answers "when would I open this?" behind a "?", which a bare link cannot. | `{ "label": "Gmail API scopes", "url": "https://…", "why": "Open it to confirm gmail.readonly cannot send or delete." }` |
 | `authors` |  | Array of `{ name, email }` objects identifying the connector's authors. Shown in the Connector Registry admin page. Optional but recommended so others know who to contact. | `"authors": [{ "name": "Jane Doe", "email": "jane@example.com" }]` |
-| `credentialFields` | ✅ | Array of credential fields the admin must provide. Each field appears as an input in the configuration form. |  |
+| `credentialFields` |  | Array of credential fields the admin must provide. Each field appears as an input in the configuration form. Omit it only for a connector that needs no credentials (`auth.strategy` `none`, a public API): it is ready as soon as it is installed, and the registry has no Save step for it. Any other strategy without it fails the build. |  |
 | `credentialFields[].key` | ✅ | Property name used to access this credential in the connector's `initialize()` method. | `"key": "apiKey"` |
 | `credentialFields[].label` | ✅ | Label shown in the admin configuration form. | `"label": "API Key"` |
 | `credentialFields[].type` | ✅ | Either `text` for visible input or `password` for masked input. Use `password` for API keys, tokens, and secrets. | `"type": "password"` |
@@ -185,8 +185,9 @@ exactly the off-by-one nobody should have to reason about.
 Cross-field rules the schema enforces: an `apiKey` in a header or query must
 name it; `basic` needs exactly two `credentialKeys`; the OAuth strategies need
 a `tokenUrl` (and `authorizeUrl` for the three-legged flow); each pagination
-style requires its own parameters; and every credential key referenced by `auth`
-or `webhook` must exist in `credentialFields`.
+style requires its own parameters; every credential key referenced by `auth`
+or `webhook` must exist in `credentialFields`; and any strategy but `none` needs
+at least one credential field.
 
 > **Tool-written:** `lastUpdated` lives in `connector.json` as an ISO 8601 date-time (e.g. `"2026-08-24T03:21:40.694Z"`) and is stamped automatically: `.githooks/pre-commit` runs [`scripts/stamp-updated.ts`](../../scripts/stamp-updated.ts), which rewrites the date on every connector with a file in the commit and re-stages the manifest. It records when the connector last changed, so a dependency bump or a formatting pass inside it moves the date too. A commit that touches only `lastUpdated` never re-stamps. Don't edit it by hand; an invalid value fails the build. A connector with no date yet shows **"Not yet committed"**.
 
@@ -247,5 +248,8 @@ The rules:
   [Credentials](credentials.md#caching-a-user-scoped-response). A shared key
   over a per-user response serves one person's data to another.
 
-People manage their own grants at `/account/connections`.
+People manage their own grants at `/account/connections`. In the Connector
+Registry, an admin saves the client id and secret, which is the deployment's
+whole part, and then connects their own account, which is what Test Connection
+runs with.
 

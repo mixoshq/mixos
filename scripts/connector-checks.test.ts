@@ -112,6 +112,47 @@ test("a mutating method throws from an MCP tool context", async () => {
   assert.deepEqual(sent, ["GET /items"]);
 });
 
+// ── the manifest schema ─────────────────────────────────────────────────────
+
+/** The parts of the template's manifest these tests rewrite. */
+interface TemplateManifest {
+  setup: { docs?: unknown[] };
+  credentialFields?: unknown[];
+  auth: { scopesUrl?: string } & Record<string, unknown>;
+}
+
+/** The API-key template's manifest, with `edit` applied. */
+function templateManifest(edit: (m: TemplateManifest) => void = () => {}) {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "../connectors/_template/connector.json"), "utf-8"),
+  ) as TemplateManifest;
+  edit(manifest);
+  return RawConnectorManifestSchema.safeParse(manifest);
+}
+
+/** Each schema issue as "path: message". */
+function issuesOf(r: ReturnType<typeof templateManifest>): string[] {
+  return r.success ? [] : r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+}
+
+test("only a connector that authenticates with nothing may declare no credential fields", () => {
+  const publicApi = templateManifest((m) => {
+    delete m.credentialFields;
+    m.auth = { strategy: "none", scopesUrl: m.auth.scopesUrl };
+  });
+  assert.deepEqual(issuesOf(publicApi), []);
+
+  // An API key with no field to enter it in could never be configured.
+  const noField = templateManifest((m) => {
+    m.credentialFields = [];
+    m.auth = { strategy: "apiKey", scopesUrl: m.auth.scopesUrl };
+  });
+  assert.ok(
+    issuesOf(noField).some((i) => /^credentialFields: auth\.strategy "apiKey" needs a credential/.test(i)),
+    issuesOf(noField).join("; "),
+  );
+});
+
 // ── completeness of the declaration ─────────────────────────────────────────
 
 test("a public method left out of telemetry fails the build", () => {

@@ -62,7 +62,7 @@ Declares the connector's metadata and what credentials it needs. These fields ap
 | `name` | ✅ | Unique identifier for the connector. Used in app.json and internally. | `"name": "my-service"` |
 | `displayName` | ✅ | Human-readable name shown in the Connector Registry. | `"displayName": "My Service"` |
 | `description` |  | Brief description of what this connector integrates with. | `"description": "Connector for the My Service API"` |
-| `credentialFields` | ✅ | Array of credential fields the admin must provide. |  |
+| `credentialFields` |  | Array of credential fields the admin must provide. Omit it only for a connector that needs no credentials (`auth.strategy` `none`), which is ready as soon as it is installed. |  |
 | `credentialFields[].key` | ✅ | Property name used to access this credential in the connector's initialize method. | `"key": "apiKey"` |
 | `credentialFields[].label` | ✅ | Label shown in the admin configuration form. | `"label": "API Key"` |
 | `credentialFields[].type` | ✅ | Either `text` for visible input or `password` for masked input. | `"type": "password"` |
@@ -143,7 +143,7 @@ Connector credentials are managed entirely through the admin UI:
 - An admin configures credentials in **Administration → Connector Registry**
 - Credentials are encrypted at rest in the database
 - When an app context is built, credentials are decrypted and passed to `initialize()`
-- If a connector has no saved credentials, it will still be available in `context.connectors` but `configured` will be `false`
+- If a connector has no saved credentials, it will still be available in `context.connectors` but `configured` will be `false` — unless it declares no credential fields at all, in which case there is nothing to save and it is ready
 
 ## User-Scoped (Per-User) Connectors
 
