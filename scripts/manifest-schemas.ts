@@ -980,6 +980,23 @@ const connectorDocLinkSchema = z.strictObject({
     .refine((u) => u.startsWith("https://"), "must be an https:// URL"),
 });
 
+/**
+ * A `setup.docs` entry: reference material shown below the checklist, not a
+ * step. `why` is required because a link inside a step is explained by the
+ * sentence around it, and this one has nothing around it — "Gmail API scopes"
+ * does not tell an admin whether they need it now, later or never. If its
+ * author cannot say when someone would open it, the link should not ship.
+ */
+const connectorReferenceLinkSchema = connectorDocLinkSchema.extend({
+  why: z
+    .string()
+    .min(1)
+    .max(
+      300,
+      "a tooltip, not an essay — say when someone would open this link",
+    ),
+});
+
 const connectorSetupStepSchema = z
   .strictObject({
     /**
@@ -1092,7 +1109,7 @@ const connectorSetupSchema = z.strictObject({
   steps: z.array(connectorSetupStepSchema).min(1),
   notes: connectorSetupNotesSchema.optional(),
   /** Reference material — scope tables, API docs. Not steps to carry out. */
-  docs: z.array(connectorDocLinkSchema).optional(),
+  docs: z.array(connectorReferenceLinkSchema).optional(),
 });
 
 /**
