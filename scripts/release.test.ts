@@ -10,6 +10,11 @@
  * .env.docker.local, .env.local) shows what the release step does with them,
  * without touching this checkout's own.
  *
+ * The bundle carries an app registry, as the image's carries the build's: here
+ * one fixture app with a database, standing in for src/generated/app-registry.ts.
+ * Its name ends in this run's suffix, because the role the release step creates
+ * for it belongs to the whole server.
+ *
  * The first group needs only Node: a stand-in Postgres that records how the
  * client opened the connection, then hangs up. The second needs a server it may
  * create and drop databases on, and is skipped otherwise:
@@ -27,25 +32,30 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { buildSync } from "esbuild";
+import { build } from "esbuild";
 import postgres, { type Sql } from "postgres";
+import { appRoleName, appSchemaName } from "../src/lib/apps/app-identifiers";
 import { checkAppMigrations } from "../src/lib/platform/app-migrations";
 
 const REPO = path.resolve(__dirname, "..");
 
-// The bundle includes the generated app registry, which `npm run typecheck`,
-// `npm run build` and `npm run registry` write. CI runs typecheck first.
-const skipBundle = fs.existsSync(path.join(REPO, "src", "generated", "app-registry.ts"))
-  ? false
-  : "run `npm run registry` first: the release step bundles the generated app registry";
-
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "mixos-release-"));
 const BUNDLE = path.join(scratch, "release.cjs");
+const REGISTRY = path.join(scratch, "app-registry.ts");
+// The SQL parser that checks app migrations loads this from beside the bundle.
+const PARSER_WASM = require.resolve("libpg-query/wasm/libpg-query.wasm");
 after(() => fs.rmSync(scratch, { recursive: true, force: true }));
 
-before(() => {
-  if (skipBundle) return;
-  buildSync({
+const FIXTURE = `fixture-${randomBytes(3).toString("hex")}`;
+
+before(async () => {
+  fs.writeFileSync(
+    REGISTRY,
+    `export const appRegistry = ${JSON.stringify([
+      { slug: FIXTURE, name: "Fixture", description: "", icon: "box", database: true, updatedAt: [], sync: [] },
+    ])};\n`,
+  );
+  await build({
     absWorkingDir: REPO,
     entryPoints: [path.join(REPO, "scripts", "release.ts")],
     bundle: true,
@@ -55,6 +65,14 @@ before(() => {
     outfile: BUNDLE,
     external: ["@apps/*"],
     logLevel: "silent",
+    plugins: [
+      {
+        name: "fixture-app-registry",
+        setup(b) {
+          b.onResolve({ filter: /generated\/app-registry$/ }, () => ({ path: REGISTRY }));
+        },
+      },
+    ],
   });
 });
 
@@ -73,6 +91,7 @@ function checkout(files: Record<string, string>, migrations?: string): string {
   const root = path.join(scratch, `checkout-${checkouts++}`);
   fs.mkdirSync(path.join(root, "ops"), { recursive: true });
   fs.copyFileSync(BUNDLE, path.join(root, "ops", "release.cjs"));
+  fs.copyFileSync(PARSER_WASM, path.join(root, "ops", "libpg-query.wasm"));
   const target = path.join(root, "supabase", "migrations");
   if (migrations) fs.cpSync(migrations, target, { recursive: true });
   else fs.mkdirSync(target, { recursive: true });
@@ -132,7 +151,7 @@ async function standInPostgres() {
   };
 }
 
-describe("what the release step reads", { skip: skipBundle }, () => {
+describe("what the release step reads", () => {
   for (const [layout, files] of [
     ["a booted local Docker stack", DOCKER_STACK],
     ["a host .env.local for the local database", { ".env.local": "PGSSLMODE=disable\n" }],
@@ -171,8 +190,7 @@ describe("what the release step reads", { skip: skipBundle }, () => {
 // ── Against a real Postgres ─────────────────────────────────────────────────
 
 const serverUrl = process.env.MIXOS_TEST_DATABASE_URL;
-const skipDb =
-  skipBundle || (serverUrl ? false : "set MIXOS_TEST_DATABASE_URL to run against a real Postgres");
+const skipDb = serverUrl ? false : "set MIXOS_TEST_DATABASE_URL to run against a real Postgres";
 
 describe("the release step against a real database", { skip: skipDb }, () => {
   const name = `mixos_release_${randomBytes(4).toString("hex")}`;
@@ -190,13 +208,17 @@ describe("the release step against a real database", { skip: skipDb }, () => {
     sql = postgres(url, { max: 1, onnotice: () => {} });
 
     // A checkout of the development kind, with one app whose migration is not
-    // idempotent and holds its transaction open for a moment, so two runners
-    // that do not take turns are sure to collide on it.
+    // idempotent and holds its transaction open for a moment (counting a
+    // million rows into a scratch table), so two runners that do not take
+    // turns are sure to collide on it.
     root = checkout(
       {
         ...DOCKER_STACK,
-        "apps/fixture-app/migrations/001_items.sql":
-          "create table items (id int primary key);\nselect pg_sleep(1);\ninsert into items (id) values (1);\n",
+        [`apps/${FIXTURE}/migrations/001_items.sql`]:
+          "create table items (id int primary key);\n" +
+          "create table pad (n int);\n" +
+          "insert into pad (n) with recursive s(n) as (select 1 union all select n + 1 from s where n < 1000000) select n from s;\n" +
+          "insert into items (id) values (1);\n",
       },
       path.join(REPO, "supabase", "migrations"),
     );
@@ -205,11 +227,14 @@ describe("the release step against a real database", { skip: skipDb }, () => {
   after(async () => {
     await sql?.end();
     await admin?.unsafe(`drop database if exists ${name} with (force)`);
+    // The app's role belongs to the server and outlives the database.
+    await admin?.unsafe(`drop role if exists ${appRoleName(FIXTURE)}`);
     await admin?.end();
   });
 
-  const ITEMS = { slug: "fixture-app", file: "001_items.sql" };
-  const BROKEN = { slug: "fixture-app", file: "002_broken.sql" };
+  const ITEMS = { slug: FIXTURE, file: "001_items.sql" };
+  const BROKEN = { slug: FIXTURE, file: "002_broken.sql" };
+  const REFUSED = { slug: FIXTURE, file: "002_escalate.sql" };
 
   test("before any release step, readiness counts every app migration as pending", async () => {
     const status = await checkAppMigrations(sql, [ITEMS]);
@@ -228,9 +253,9 @@ describe("the release step against a real database", { skip: skipDb }, () => {
     for (const run of runs) assert.equal(run.code, 0, run.output);
 
     const [ledger] = await sql`
-      select count(*)::int as n from public._migrations where app_slug = 'fixture-app'
+      select count(*)::int as n from public._migrations where app_slug = ${FIXTURE}
     `;
-    const [items] = await sql`select count(*)::int as n from public._app_fixture_app_items`;
+    const [items] = await sql.unsafe(`select count(*)::int as n from "${appSchemaName(FIXTURE)}".items`);
     const [owners] = await sql`
       select count(*)::int as n from public.users where email = 'owner@example.com'
     `;
@@ -240,7 +265,7 @@ describe("the release step against a real database", { skip: skipDb }, () => {
 
   test("an app migration that fails leaves readiness refusing the build", async () => {
     fs.writeFileSync(
-      path.join(root, "apps", "fixture-app", "migrations", BROKEN.file),
+      path.join(root, "apps", FIXTURE, "migrations", BROKEN.file),
       "alter table items add column total numeric not a type;\n",
     );
     try {
@@ -250,7 +275,38 @@ describe("the release step against a real database", { skip: skipDb }, () => {
       assert.equal(status.ok, false);
       assert.deepEqual(status.pending, [BROKEN]);
     } finally {
-      fs.rmSync(path.join(root, "apps", "fixture-app", "migrations", BROKEN.file));
+      fs.rmSync(path.join(root, "apps", FIXTURE, "migrations", BROKEN.file));
+    }
+  });
+
+  test("an app migration that reaches outside its schema is refused, naming the line", async () => {
+    await sql`
+      insert into public.users (email, display_name, is_admin, password_hash)
+      values ('victim@example.com', 'Victim', false, 'HASH')
+      on conflict (email) do nothing
+    `;
+    fs.writeFileSync(
+      path.join(root, "apps", FIXTURE, "migrations", REFUSED.file),
+      "alter table items add column note text;\nupdate public.users set is_admin = true;\n",
+    );
+    try {
+      const run = await release(root, { DATABASE_URL: url, PGSSLMODE: "disable" });
+      assert.equal(run.code, 1, run.output);
+      assert.match(
+        run.output,
+        new RegExp(`apps/${FIXTURE}/migrations/002_escalate\\.sql:2: "public\\.users" is outside this app's schema`),
+      );
+      const [victim] = await sql`select is_admin from public.users where email = 'victim@example.com'`;
+      assert.equal(victim.is_admin, false);
+      // Refused before anything ran: not even the harmless first statement.
+      const [{ columns }] = await sql`
+        select count(*)::int as columns from information_schema.columns
+        where table_schema = ${appSchemaName(FIXTURE)} and table_name = 'items' and column_name = 'note'
+      `;
+      assert.equal(columns, 0);
+      assert.deepEqual((await checkAppMigrations(sql, [ITEMS, REFUSED])).pending, [REFUSED]);
+    } finally {
+      fs.rmSync(path.join(root, "apps", FIXTURE, "migrations", REFUSED.file));
     }
   });
 

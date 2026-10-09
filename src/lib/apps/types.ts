@@ -79,6 +79,14 @@ export function publicGateFor(
   return "none";
 }
 
+/** A column listed under `updatedAt` in app.json. */
+export interface UpdatedAtColumn {
+  /** A table the app's migrations create. */
+  table: string;
+  /** A `timestamptz` or `timestamp` column of that table. */
+  column: string;
+}
+
 export interface AppManifest {
   /** Derived from the app's folder name — not set in app.json */
   slug: string;
@@ -106,7 +114,19 @@ export interface AppManifest {
    * code must handle the entry being missing.
    */
   optionalConnectors: string[];
+  /**
+   * When true, the app has a schema of its own, `app_<slug>`, reached as
+   * `context.db`, and may ship `migrations/`. An app without it may not.
+   */
   database: boolean;
+  /**
+   * Timestamp columns the platform keeps current: each is set to now() on every
+   * update of its row, by the platform's own trigger. App migrations may not
+   * create triggers, so this is how an app gets an `updated_at` that maintains
+   * itself. Requires `database`. Defaults to `[]`; a declaration without a
+   * `column` names `updated_at`.
+   */
+  updatedAt: UpdatedAtColumn[];
   /** When true, the app can send Web Push via `context.notifications`. */
   notifications: boolean;
   hasPages: boolean;

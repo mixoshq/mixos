@@ -48,6 +48,7 @@ change, exactly as changing `AppManifest` is.
   That row is how a running instance knows whether the database has caught up with the code. The build derives what it *expects* from the highest-numbered file in `supabase/migrations/`; `/api/health/ready` compares the two and returns 503 while the database is behind, so an orchestrator holds a new revision out of service rather than routing to an image that will fail on the first request touching a column that isn't there yet. A migration that changes the schema without bumping the row is invisible to that check — Danger fails the PR if you forget.
 
   The comparison is `<`, not `≠`: a database *ahead* of the image is the normal ordering (migrate, then deploy), and only the reverse is refused.
+- **What app migrations may contain.** `scripts/app-sql-policy.ts` is an allowlist: every statement in an app's migrations, every node of it, has to be something it names, and every function an expression calls has to be in `ALLOWED_FUNCTIONS`. Widening it widens what any installed app can leave in the database to run as the platform's role, so a change there gets the review a change to the platform schema gets. See `docs/security-architecture.md` §3.2.
 - **ESLint rules.** The `eslint.config.mjs` enforces security boundaries — apps cannot import the database client or connector modules directly. If you modify these rules, understand why they exist (see `docs/secure-edge-gateway-architecture.md`).
 - **Guide documentation.** If you add a new manifest field, hook, or developer-facing feature, update the relevant guide page (`src/components/apps/guide-tabs.tsx` or `src/components/connectors/connector-guide-tabs.tsx`) — or, for a theme-system change, the matching file under `docs/themes/`.
 
@@ -67,4 +68,5 @@ change, exactly as changing `AppManifest` is.
 | Schema gate | `src/lib/platform/schema-version.ts`, `src/lib/platform/app-migrations.ts`, `src/app/api/health/ready/route.ts` |
 | Instance-wide locks | `src/lib/platform/lock.ts` |
 | Database migrations | `supabase/migrations/` |
+| App migrations | `scripts/app-migrations.ts` (applies them, per app schema and role), `scripts/app-sql-policy.ts` (what they may contain), `src/lib/apps/app-identifiers.ts` (schema and role names) |
 | Security architecture | `docs/secure-edge-gateway-architecture.md` |

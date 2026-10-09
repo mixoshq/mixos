@@ -2,7 +2,7 @@
 
 ## Overview
 
-Apps can opt into a scoped database by setting `"database": true` in `app.json`. This gives the app its own isolated set of tables in the shared Postgres database. All tables are automatically prefixed with `_app_<app_slug>_` to prevent naming collisions between apps.
+Apps can opt into a database by setting `"database": true` in `app.json`. The app gets a schema of its own in the shared Postgres database, `app_<slug>`, and reaches it as `context.db`. Its tables live there and nowhere else: another app's tables are in another schema, and the platform's are in `public`.
 
 ```json
 // app.json
@@ -12,14 +12,22 @@ Apps can opt into a scoped database by setting `"database": true` in `app.json`.
 }
 ```
 
-## Table Naming
+Only an app with `"database": true` may ship `migrations/`. A `migrations/` folder without it fails the build.
 
-When you create tables in your migrations, use the bare table name. The platform automatically adds the `_app_<app_slug>_` prefix. For example, if your app folder is `sales-tracker`:
+## Where Your Tables Live
 
-| You write | Actual table name |
+Write bare table names, in migrations and in `context.db.table(...)`. They are names in your app's schema, and nothing rewrites them. If your app folder is `sales-tracker`:
+
+| You write | The table |
 | --- | --- |
-| `orders` | `_app_sales_tracker_orders` |
-| `line_items` | `_app_sales_tracker_line_items` |
+| `orders` | `app_sales_tracker.orders` |
+| `line_items` | `app_sales_tracker.line_items` |
+
+The schema's name is the slug with `-` written as `_` and `_` written as `__`, so `my-app` and `my_app` get different schemas. A slug is lowercase letters and digits, in words joined by single hyphens or underscores; the build refuses any other folder name.
+
+The schema belongs to a role of its own, `mixos_app_<slug>`, which cannot log in. Your migrations run as that role, so they can create and change only what is in your schema.
+
+**One MixOS database per Postgres server.** Roles belong to the whole server, not to one database, so two MixOS databases on the same server would share each app's role. The release step refuses an app role that another database on the server already uses. Give each MixOS install a Postgres server of its own.
 
 ## Creating Migrations
 
@@ -29,13 +37,13 @@ Migrations are SQL files in your app's `migrations/` directory. They run in alph
 apps/my-app/
   migrations/
     001_create_orders.sql
-    002_add_status_column.sql
+    002_add_updated_at.sql
     003_create_line_items.sql
 ```
 
 ## Writing a Migration
 
-Each migration file contains raw SQL. Write your table names without the prefix — it will be added automatically.
+Each migration file contains SQL, run as written. Use bare table names.
 
 ```sql
 -- migrations/001_create_orders.sql
@@ -52,9 +60,52 @@ create index idx_orders_status on orders(status);
 ```
 
 ```sql
--- migrations/002_add_status_column.sql
-alter table orders add column if not exists updated_at timestamptz;
+-- migrations/002_add_updated_at.sql
+alter table orders add column if not exists updated_at timestamptz not null default now();
 ```
+
+Seed rows go in a migration too, and `on conflict` works as it does anywhere else:
+
+```sql
+insert into settings (id, value) values (1, 'default') on conflict (id) do nothing;
+```
+
+## What a Migration May Contain
+
+Every statement is parsed and checked before any of it runs: by the build, so a problem shows up on your next `npm run dev` or `npm run build`, and again by the release step, which is what applies the SQL. A refused statement is reported with its file, line and reason, and nothing in that release is applied.
+
+A migration may:
+
+- create, alter, rename, comment on and drop tables, indexes, views, sequences and enum types in your schema
+- add, change and remove rows in your tables: `INSERT` (with `ON CONFLICT`), `UPDATE`, `DELETE`, `TRUNCATE`
+- use the ordinary constraints: primary keys, unique, foreign keys between your own tables, checks, defaults, identity and generated columns
+
+It may not:
+
+- name anything outside your schema: another app's tables, `public.users` or any platform table, `information_schema`, or a `pg_` catalog
+- create triggers, rules, functions, procedures, `DO` blocks or row-level security policies
+- grant or revoke privileges, create or change roles, or change who owns something
+- change session settings: `SET`, `RESET`, `SET ROLE`, `SET SESSION AUTHORIZATION`
+- create extensions, schemas, domains, materialized views, partitioned, inherited or temporary tables
+- use `BEGIN`, `COMMIT` or `CONCURRENTLY`: each file already runs in a transaction of its own
+- be a bare `SELECT`
+
+An expression anywhere in a migration — a default, a check, a generated column, an index, a view, a statement that fills a table — can call only these built-in functions: `now`, `gen_random_uuid`, `lower`, `upper`, `length`, `char_length`, `btrim`, `ltrim` and `rtrim` (and `TRIM(...)`), `abs`, `round`, `date_trunc`, `date_part` (and `EXTRACT(...)`), `timezone` (`AT TIME ZONE`), `jsonb_build_object`, `jsonb_build_array`, and the aggregates `count`, `sum`, `avg`, `min` and `max`. `CURRENT_TIMESTAMP`, `CURRENT_DATE` and the other clock keywords are allowed, so are operators (`SIMILAR TO` among them) and casts, and a default, check or index may not contain a subquery.
+
+Why so strict: a default, a check, an index or a view runs later, whenever the platform reads or writes your table, and the platform's database role can read every table. Your migration runs as your app's role, but what it leaves behind would run as the platform's. So nothing an app creates may run code or reach past its own schema. The list is [`scripts/app-sql-policy.ts`](../../scripts/app-sql-policy.ts), and a change to it is a platform change.
+
+## Keeping `updated_at` Current
+
+A migration can't create a trigger, so the platform provides the one apps need. List the column in `app.json`:
+
+```json
+{
+  "database": true,
+  "updatedAt": [{ "table": "orders" }, { "table": "notes", "column": "edited_at" }]
+}
+```
+
+On every `UPDATE` of a row, the platform's trigger sets the column to `now()`. `column` defaults to `updated_at`, and has to be a `timestamptz` or `timestamp` column your migrations create; the build checks that they do. The release step installs the trigger after your migrations run, and takes it off a column you stop listing. It fires on updates only, so give the column a default (`default now()`) for new rows.
 
 ## Running Migrations
 
@@ -64,7 +115,7 @@ Run the migration script to apply pending migrations for all apps:
 npm run migrate:apps
 ```
 
-The script scans each app's `migrations/` directory, checks which files have already been applied, and runs new ones in order. Applied migrations are tracked in the `_migrations` table so they never run twice.
+The script takes every app in the registry with `"database": true`, creates its role and schema if they do not exist, checks every file it has not applied yet, and then runs them in order, each in its own transaction, as the app's role. Applied migrations are tracked in the `_migrations` table so they never run twice. A folder the registry did not accept never has its SQL run.
 
 This runner handles **app** migrations only. The platform's own schema lives in
 `supabase/migrations/`, and what applies it depends on which database you are
@@ -90,13 +141,13 @@ runner records itself in. Apply it before running this one.
 
 ## Querying Your Tables
 
-Use `context.db` to query your app's tables. The scoped client automatically applies the table prefix, so you always use the bare table name.
+Use `context.db` to query your app's tables. It is pinned to your app's schema, so you always use the bare table name.
 
 ```ts
 // In a page or server-side code
 const db = context.db;
 
-// Insert a row — "orders" becomes "_app_my_app_orders" automatically
+// Insert a row into your schema's orders table
 const { data, error } = await db.table("orders").insert({
   user_id: context.user.id,
   total: 99.99,
@@ -263,6 +314,6 @@ create table if not exists customer_health_snapshot (
 
 Conventions for both: always store `fetched_at` so a reader can compute age and decide for itself whether the data is usable; document the JSONB shape in the migration, since it's the only schema that column will ever have; and carry a period field whenever the upstream is coarser than "now", so the UI can say which period it's showing instead of implying it's current.
 
-Note that `_app_<slug>_` prefixing plus `context.db` is what isolates these tables. RLS is enabled on every table, but it grants nothing to anyone — the application connects as the role that owns the tables, which RLS does not apply to, so it is a lock on a hosted database's public API (Supabase serves one for every project) rather than an isolation boundary between apps. Table-name scoping is the isolation. A cache in the scoped DB is still tenant-isolated by construction in a way a module-level JavaScript cache is not.
+Note that your schema, and `context.db` being pinned to it, is what isolates these tables. RLS is enabled on every table, but it grants nothing to anyone — the platform reaches your tables as a member of your app's role, which RLS treats as their owner, so it is a lock against any other way in (Supabase serves a public API for every project) rather than the boundary between apps. The schema is the boundary. A cache in the scoped DB is still tenant-isolated by construction in a way a module-level JavaScript cache is not.
 
 How to *fill* and *serve* these tables — watermarks, TTLs, stale-while-revalidate, invalidation — is [Data Freshness](data-freshness.md).
