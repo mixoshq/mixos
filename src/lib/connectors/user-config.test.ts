@@ -2,12 +2,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import { decrypt, encrypt } from "./encryption";
 import { ConnectorError } from "./errors";
 import type { ConnectorErrorCategory } from "./errors";
 import { TOKEN_KEYS } from "./oauth";
-import { freshUserGrant } from "./user-config";
+import type { ConnectorAuthPolicy } from "./types";
+import { freshUserGrant, refreshUserTokens } from "./user-config";
+import { platformKey } from "@/lib/env/keys";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -92,4 +96,68 @@ test("someone who never connected has no grant, and nothing is refreshed", async
 test("a failure that is not the provider's is not swallowed", async () => {
   const { refresh } = refresher(new Error("decryption failed"));
   await assert.rejects(freshUserGrant(grant(-1_000), refresh, opts), /decryption failed/);
+});
+
+// ── renewing after a 401 ────────────────────────────────────────────────────
+
+process.env.USER_OAUTH_ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
+const userKey = () => platformKey("userOauthEncryption");
+
+/** The person's user_connector_oauth row, read and written under its lock. */
+let row: Record<string, string> | null = null;
+
+// The pool is a lazy proxy that reads `globalThis.__pg` first
+// (src/lib/db/client.ts), so a fake there stands in for Postgres.
+(globalThis as { __pg?: unknown }).__pg = {
+  async begin(fn: (tx: unknown) => unknown) {
+    return fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const text = strings.join("?");
+      if (text.includes("pg_advisory_xact_lock")) return [];
+      if (text.includes("select encrypted_credentials")) {
+        return row ? [{ encrypted_credentials: encrypt(JSON.stringify(row), userKey()) }] : [];
+      }
+      if (text.includes("insert into public.user_connector_oauth")) {
+        row = JSON.parse(decrypt(values[2] as string, userKey()));
+        return [];
+      }
+      throw new Error(`unexpected query: ${text}`);
+    });
+  },
+};
+
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+
+const MAIL: ConnectorAuthPolicy = {
+  strategy: "oauth2_authorization_code",
+  authorizeUrl: "https://provider.test/authorize",
+  tokenUrl: "https://provider.test/token",
+};
+
+test("a user token the upstream refused is renewed, though its stored expiry has not passed", async () => {
+  let tokenCalls = 0;
+  globalThis.fetch = async () => {
+    tokenCalls++;
+    return Response.json({ access_token: "at-new", expires_in: 3600 });
+  };
+  row = {
+    [TOKEN_KEYS.access]: "at-live",
+    [TOKEN_KEYS.refresh]: "rt",
+    [TOKEN_KEYS.expiresAt]: String(Date.now() + 3_600_000),
+  };
+  const out = await refreshUserTokens({
+    userId: "user-1",
+    connectorName: "mail",
+    subject: "Mail",
+    policy: MAIL,
+    clientId: "cid",
+    clientSecret: "secret",
+    skewMs: 60_000,
+    rejected: "at-live",
+  });
+  assert.equal(tokenCalls, 1);
+  assert.equal(out[TOKEN_KEYS.access], "at-new");
+  assert.equal(row?.[TOKEN_KEYS.access], "at-new", "the new token is saved to the person's row");
 });
