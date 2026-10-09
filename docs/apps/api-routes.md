@@ -227,7 +227,9 @@ budget: { connectorCalls: 20, ms: 8_000 }
   loops per-record over a full book trips it.
 - **`ms`** caps how long the caller waits. Default **30 000**. Note this bounds
   *latency*, not spend: the handler keeps running after the 504. Work that must
-  actually stop needs an `AbortSignal` threaded into the connector.
+  actually stop takes `context.signal`, which aborts when the budget runs out or
+  the caller goes away. Pass it to the connector methods that accept one, and
+  to `context.http.fetch`.
 
 ## `raw: true`
 
