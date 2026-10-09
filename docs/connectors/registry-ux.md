@@ -26,7 +26,7 @@ consecutive builds is how an author gives up.
 | `icon` | Otherwise the grid is a wall of identical plug glyphs |
 | `setup.title` | Names the provider-side step: "Create a Google Cloud OAuth app" |
 | `setup.steps[]` | What the admin does in someone else's console |
-| `auth.scopesUrl` | The page the Access list is read from — see [Scopes](scopes.md) |
+| `auth.scopesUrl` | The page the Access list is read from — see [Scopes](scopes.md). Not needed by a connector that authenticates with nothing (`auth.strategy` `none`): a public API has no permissions to list |
 
 An `oauth2_authorization_code` connector additionally must set
 `showRedirectUri` on **exactly one** step. It is the only value in the whole

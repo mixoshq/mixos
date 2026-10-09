@@ -870,6 +870,8 @@ export default function ConnectorConfigureDialog({
 
   /** The provider's scope reference page, cited under the capability list. */
   const scopesUrl = connector.auth?.scopesUrl;
+  /** A public API: no credential, so no permissions and no scope page. */
+  const authenticates = (connector.auth?.strategy ?? "none") !== "none";
   const dependentsText = describeDependents(connector.dependents);
   const hasDependents =
     connector.dependents.required.length > 0 ||
@@ -1158,9 +1160,9 @@ export default function ConnectorConfigureDialog({
 
               {catalogue.length === 0 ? (
                 <p className="mt-1 text-sm text-muted-foreground">
-                  This connector declares no scopes. A developer adds them by
-                  running the scopes refresh against the provider&apos;s own
-                  documentation.
+                  {authenticates
+                    ? "This connector declares no scopes. A developer adds them by running the scopes refresh against the provider's own documentation."
+                    : "This connector reaches a public API and authenticates with nothing, so there are no permissions to grant or check."}
                 </p>
               ) : (
                 /* Striped rather than spaced: fourteen two-line rows read as one
@@ -1243,7 +1245,7 @@ export default function ConnectorConfigureDialog({
                 </p>
               )}
 
-              {!isOAuth && (
+              {!isOAuth && authenticates && (
                 <p className="mt-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">
                   This connector authenticates with an API key. What that key is
                   permitted to do was decided in the provider&apos;s own console

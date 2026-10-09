@@ -7,7 +7,11 @@ import assert from "node:assert/strict";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { validateConnectorMethods, validateConnectorTelemetry } from "./connector-checks";
+import {
+  validateConnectorMethods,
+  validateConnectorTelemetry,
+  validateRegistryContract,
+} from "./connector-checks";
 import { RawConnectorManifestSchema } from "./manifest-schemas";
 import { ReadOnlyError, readOnlyConnectors } from "../src/lib/apps/read-only";
 import type {
@@ -306,4 +310,42 @@ test("a base class this file cannot see is not reported as missing methods", () 
     }
   `);
   assert.doesNotThrow(() => validateConnectorMethods("acme", dir, declared("listShared")));
+});
+
+// ── what the registry needs ─────────────────────────────────────────────────
+
+const shipped = {
+  icon: "assets/icon.svg",
+  setup: { title: "Create an API key", steps: [{ text: "Open API keys." }] },
+};
+
+test("a connector that authenticates with nothing needs no scope page", () => {
+  // A public API grants no permissions, so there is no page to read them from.
+  assert.doesNotThrow(() => validateRegistryContract("weather", shipped));
+  assert.doesNotThrow(() =>
+    validateRegistryContract("weather", { ...shipped, auth: { strategy: "none" } }),
+  );
+});
+
+test("a connector that authenticates still needs its scope page", () => {
+  assert.throws(
+    () => validateRegistryContract("acme", { ...shipped, auth: { strategy: "apiKey" } }),
+    /"auth\.scopesUrl"/,
+  );
+  assert.doesNotThrow(() =>
+    validateRegistryContract("acme", {
+      ...shipped,
+      auth: { strategy: "apiKey", scopesUrl: "https://docs.example.com/scopes" },
+    }),
+  );
+});
+
+test("everything the registry is missing is named at once", () => {
+  assert.throws(
+    () => validateRegistryContract("acme", { auth: { strategy: "oauth2_authorization_code" } }),
+    (err: Error) =>
+      ['"icon"', '"auth.scopesUrl"', '"setup.title"', '"setup.steps"'].every((field) =>
+        err.message.includes(field),
+      ),
+  );
 });
