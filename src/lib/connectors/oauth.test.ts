@@ -4,7 +4,14 @@
 
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
-import { TOKEN_KEYS, exchangeAuthorizationCode, grantedScope, tokensToCredentials } from "./oauth";
+import {
+  TOKEN_KEYS,
+  exchangeAuthorizationCode,
+  grantedScope,
+  oauthReturnUrl,
+  safeReturnPath,
+  tokensToCredentials,
+} from "./oauth";
 import { classifyGrant } from "./scope-status";
 import type { ConnectorAuthPolicy } from "./types";
 
@@ -87,4 +94,35 @@ test("a null scope is read as omitted", () => {
 
 test("nothing requested and nothing returned leaves the scope unset", () => {
   assert.equal(grantedScope(undefined, { ...POLICY, scopes: [] }), undefined);
+});
+
+// ── the trip back ───────────────────────────────────────────────────────────
+
+test("the trip back names the connector once, so the registry dialog reopens", () => {
+  // The registry's Connect link returns to a path that already names the
+  // connector. Appending a second "?…" made `connector` read
+  // "gmail?connector=gmail", which matched no connector.
+  const url = oauthReturnUrl("/admin/connectors?connector=gmail", "https://mixos.test", "gmail", "connected");
+  assert.equal(url.origin, "https://mixos.test");
+  assert.equal(url.pathname, "/admin/connectors");
+  assert.deepEqual(url.searchParams.getAll("connector"), ["gmail"]);
+  assert.equal(url.searchParams.get("oauth"), "connected");
+
+  assert.equal(
+    oauthReturnUrl("/account/connections", "https://mixos.test", "mail", "denied").href,
+    "https://mixos.test/account/connections?connector=mail&oauth=denied",
+  );
+});
+
+test("a return path that would resolve to another host is refused", () => {
+  // A URL parser drops tabs and newlines, so "/\t/evil.example" is read as
+  // "//evil.example": another host, though it starts with a single slash.
+  for (const path of ["/\t/evil.example", "/\n/evil.example", "/\r/evil.example"]) {
+    assert.equal(safeReturnPath(path), "/admin/connectors", JSON.stringify(path));
+    assert.equal(
+      oauthReturnUrl(path, "https://mixos.test", "gmail", "connected").origin,
+      "https://mixos.test",
+      JSON.stringify(path),
+    );
+  }
 });

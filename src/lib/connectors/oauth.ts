@@ -158,7 +158,35 @@ export function safeReturnPath(input: string | null | undefined): string {
   if (!input.startsWith("/")) return fallback;
   if (input.startsWith("//")) return fallback;
   if (input.includes("\\")) return fallback;
+  // A URL parser drops tabs and newlines before it reads a path, so
+  // "/\t/evil.example" arrives as "//evil.example": another host. No path this
+  // flow produces contains a control character, so none is accepted.
+  if (/[\u0000-\u001f\u007f]/.test(input)) return fallback;
   return input;
+}
+
+/**
+ * Where the round trip lands: the path it started from, with the connector
+ * and the outcome set on that path's own query string.
+ *
+ * Set, not appended. The registry's return path already names its connector
+ * (`/admin/connectors?connector=gmail`), and appending a second `?…` made the
+ * rest one value, `connector=gmail?connector=gmail`, which named no connector,
+ * so the configure dialog did not reopen after Connect.
+ */
+export function oauthReturnUrl(
+  returnTo: string,
+  origin: string,
+  connector: string,
+  outcome: string,
+): URL {
+  const base = new URL(origin);
+  let url = new URL(safeReturnPath(returnTo), base);
+  // Whatever the path held, the trip ends on this deployment.
+  if (url.origin !== base.origin) url = new URL(safeReturnPath(null), base);
+  url.searchParams.set("connector", connector);
+  url.searchParams.set("oauth", outcome);
+  return url;
 }
 
 // ── Authorize URL ───────────────────────────────────────────────────────────

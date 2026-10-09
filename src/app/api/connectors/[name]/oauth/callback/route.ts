@@ -17,6 +17,7 @@ import { isConnectorError } from "@/lib/connectors/errors";
 import {
   OAUTH_STATE_COOKIE,
   exchangeAuthorizationCode,
+  oauthReturnUrl,
   openFlowState,
   stateMatches,
 } from "@/lib/connectors/oauth";
@@ -44,10 +45,7 @@ export async function GET(
 
   const finish = (status: string) => {
     const response = NextResponse.redirect(
-      new URL(
-        `${returnTo}?connector=${encodeURIComponent(name)}&oauth=${status}`,
-        request.nextUrl.origin,
-      ),
+      oauthReturnUrl(returnTo, request.nextUrl.origin, name, status),
     );
     // One-shot: the flow cookie never outlives the round trip it authorises.
     response.cookies.delete({
