@@ -331,7 +331,7 @@ export async function requestToken(req: TokenRequest): Promise<TokenSet> {
   };
 }
 
-export function exchangeAuthorizationCode(opts: {
+export async function exchangeAuthorizationCode(opts: {
   policy: ConnectorAuthPolicy;
   connectorName: string;
   subject: string;
@@ -341,7 +341,7 @@ export function exchangeAuthorizationCode(opts: {
   codeVerifier: string;
   timeoutMs?: number;
 }): Promise<TokenSet> {
-  return requestToken({
+  const tokens = await requestToken({
     policy: opts.policy,
     clientId: opts.clientId,
     clientSecret: opts.clientSecret,
@@ -355,6 +355,27 @@ export function exchangeAuthorizationCode(opts: {
       code_verifier: opts.codeVerifier,
     },
   });
+  return { ...tokens, scope: grantedScope(tokens.scope, opts.policy) };
+}
+
+/**
+ * The scope a code exchange granted, as a space-delimited string.
+ *
+ * RFC 6749 §5.1 makes `scope` OPTIONAL in a token response "if identical to
+ * the scope requested by the client", so a provider that omits it is saying
+ * "granted as requested" — not "granted nothing". Read the second way, every
+ * requested scope was recorded as Refused on a connector holding all of them.
+ *
+ * Only the code exchange reads it this way. A refresh that omits `scope` keeps
+ * the grant it renewed, and the stored `oauth_scope` is left as it was.
+ */
+export function grantedScope(
+  responseScope: string | null | undefined,
+  policy: ConnectorAuthPolicy,
+): string | undefined {
+  if (responseScope != null) return responseScope;
+  const requested = requestedScopes(policy);
+  return requested.length > 0 ? requested.join(" ") : undefined;
 }
 
 export function refreshWithToken(opts: {
