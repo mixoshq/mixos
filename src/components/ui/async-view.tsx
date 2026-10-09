@@ -6,6 +6,7 @@
 
 import type { ReactNode } from "react";
 import { EmptyState, ErrorState, type EmptyCause } from "@/components/ui/app-states";
+import ConnectorErrorState from "@/components/connectors/connector-error-state";
 import type { AppQuery } from "@/lib/apps/use-app-query";
 
 /**
@@ -24,7 +25,9 @@ import type { AppQuery } from "@/lib/apps/use-app-query";
  *   - **Refetching** keeps the previous data on screen rather than flashing an
  *     anonymous skeleton at someone who just clicked a filter.
  *   - **Error** renders a calm message with a retry wired to `refetch`, never a
- *     raw error string.
+ *     raw error string. A failed connector call renders as that connector's
+ *     state instead: "Not connected" with no Retry when an administrator has
+ *     to act, since retrying cannot help.
  *   - **Empty** is detected for you from an array or a `{ items }` payload, and
  *     rendered with the cause you declared.
  *
@@ -96,6 +99,11 @@ export function AsyncView<T>({
   if (state.status === "loading") return <>{skeleton}</>;
 
   if (state.status === "error") {
+    if (state.error.envelope) {
+      return (
+        <ConnectorErrorState envelope={state.error.envelope} onRetry={refetch} />
+      );
+    }
     return (
       <ErrorState
         message={state.error.message}

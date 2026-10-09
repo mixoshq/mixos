@@ -103,8 +103,8 @@ await this.request("/charges", { method: "POST", body }, { idempotent: true });
 
 Every failure below `request()` arrives as a `ConnectorError` carrying a
 category. Do not catch it to add detail — it already has the right message for
-both a user and an admin. Let it propagate, and let the app route convert it.
-See [Failure handling](failure-handling.md).
+both a user and an admin. Let it propagate: the app route's pipeline turns it
+into the envelope a widget renders. See [Failure handling](failure-handling.md).
 
 **Never** catch an error and re-throw with the upstream's response body. Those
 bodies routinely carry account and tenant detail, which is why `request()`
