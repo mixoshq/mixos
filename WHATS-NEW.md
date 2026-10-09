@@ -59,6 +59,21 @@ just pulled.
   blanked, styled from the theme's tokens.
 - **Route output is validated on every response.** The
   `output: { schema, validate: "dev-only" }` form is removed; pass the schema.
+- **Theme checks the build used to skip now fail it:** a custom property
+  outside the top-level `:root` (in a `.mix-*` rule, or a `:root` inside
+  `@media` or `@supports`), a colour token the build cannot evaluate or that is
+  translucent, a `var()` naming a token `:root` never sets, and an `@font-face`
+  missing from `fonts[]`. Only `--border` may be translucent; the build
+  composites it over `--background`. Both bundled themes already comply.
+- **The colour fence covers app widgets and pages again.** Raw palette classes,
+  an opaque `bg-white` / `bg-black` and `dark:` variants are lint errors in
+  `apps/**/*.tsx`, where a later config block had been switching them off.
+- **The contrast lint rule checks every installed theme**, not only `mixos`,
+  and names each theme an element fails under.
+- **`npm run lint` generates the registry first**, so the contrast rule has
+  theme tokens to read in CI, where it had been inactive.
+- **The theme picker shows `assets.preview`** above the theme's swatch row,
+  cropped to 16:9 from its top-left corner.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
 
