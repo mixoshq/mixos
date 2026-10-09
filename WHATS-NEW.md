@@ -59,6 +59,19 @@ just pulled.
   blanked, styled from the theme's tokens.
 - **Route output is validated on every response.** The
   `output: { schema, validate: "dev-only" }` form is removed; pass the schema.
+- **More manifest rules fail the build.** A `sync` needs `"database": true`
+  and a `budgetMs` of at most 200000, because the scheduler stops a run at 240
+  seconds. Role keys must be unique. A `widgets.ts` that disagrees with
+  `app.json` now fails the build, where it used to leave the app out.
+- **`ctx.signal` for route handlers.** It aborts when the caller disconnects or
+  the route's `budget.ms` runs out. Pass it to connector calls and
+  `context.http.fetch` so the work stops, not just the wait.
+- **`signed-in` pages.** A page whose `pageVisibility` accepts `signed-in` opens
+  for any signed-in user, without the app's grant.
+- **Required widget fields.** The config modal won't save while a field marked
+  `required` is empty, and says which field.
+- **Untagged releases install.** A release published from the mixos.org website
+  has no git tag, and installs pinned to its commit like any other.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
 
