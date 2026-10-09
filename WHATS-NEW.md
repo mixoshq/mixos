@@ -42,8 +42,18 @@ just pulled.
   `.webp`, or the build fails. Both bundled themes already comply.
 - **`npm test`** runs the unit tests (`*.test.ts` under `src/` and `scripts/`)
   with Node's built-in runner, and CI runs it after typecheck.
+- **The release step reads only its own environment.** `npm run release` no
+  longer fills gaps from `.env.local` or `.env.docker`, and stops if nothing
+  names a database. On Vercel, pass `DATABASE_URL` (and `INITIAL_ADMIN_*` on the
+  first deploy) on the command line.
+- **Readiness waits for app migrations.** `/api/health/ready` answers 503 until
+  every app migration in the build is applied, and release steps that run at
+  the same time take turns.
+- **`keys:generate` and `keys:check` cover `AUTH_SECRET` and `CRON_SECRET`.**
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
+- **Fix:** in a second instance, `docker:down` and `docker:reset` stop only that
+  instance.
 
 ## 2026-10-05
 
