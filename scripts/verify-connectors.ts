@@ -143,6 +143,31 @@ const server = http.createServer((req, res) => {
           meta: { next: page < 2 ? String(page + 1) : null },
         });
       }
+      // link-header pagination: three pages of two, the next one named in
+      // `Link`, and none after the last.
+      case "/linked": {
+        const page = Number(url.searchParams.get("page") ?? "1");
+        const self = `http://${req.headers.host}/linked`;
+        return json(
+          200,
+          [{ i: (page - 1) * 2 }, { i: (page - 1) * 2 + 1 }],
+          page < 3
+            ? { link: `<${self}?page=${page + 1}>; rel="next", <${self}?page=3>; rel="last"` }
+            : {},
+        );
+      }
+      // The same server under another origin: a Link the walk must not follow.
+      case "/linked-away": {
+        const port = (req.headers.host ?? "").split(":")[1];
+        return json(200, [{ i: 0 }], {
+          link: `<http://localhost:${port}/linked?page=2>; rel="next"`,
+        });
+      }
+      // A Link back to the page just read.
+      case "/linked-loop":
+        return json(200, [{ i: 0 }], {
+          link: `<http://${req.headers.host}/linked-loop>; rel="next"`,
+        });
       // auth
       case "/token": {
         if (tokenMode === "reject400")
@@ -428,6 +453,52 @@ async function main() {
     "maxPages caps a runaway cursor",
     cappedItems.length === 4,
     `${cappedItems.length} items across 2 pages`,
+  );
+
+  reset();
+  const linked = await mk(
+    { strategy: "none" },
+    { pagination: { style: "link-header", pageSize: 2 } },
+  );
+  const linkedItems: { i: number }[] = [];
+  for await (const item of linked.pages<{ i: number }>("/linked"))
+    linkedItems.push(item);
+  check(
+    "link-header pagination follows rel=next to the last page",
+    linkedItems.map((x) => x.i).join(",") === "0,1,2,3,4,5",
+    linkedItems.map((x) => x.i).join(","),
+  );
+  check(
+    "link-header pagination requests each page once",
+    hits["GET /linked"] === 3,
+    `${hits["GET /linked"]} request(s)`,
+  );
+
+  reset();
+  const away = await mk(
+    { strategy: "apiKey", credentialKeys: ["apiKey"] },
+    { pagination: { style: "link-header" } },
+  );
+  const awayErr = await expectError(async () => {
+    for await (const item of away.pages("/linked-away")) void item;
+  });
+  check(
+    "a Link to another origin is refused, never sent the credential",
+    awayErr.category === "unexpected_response" &&
+      (hits["GET /linked"] ?? 0) === 0,
+    awayErr.category,
+  );
+
+  reset();
+  const loop = await mk(
+    { strategy: "none" },
+    { pagination: { style: "link-header" } },
+  );
+  for await (const item of loop.pages("/linked-loop")) void item;
+  check(
+    "a Link back to a page already read ends the walk",
+    hits["GET /linked-loop"] === 1,
+    `${hits["GET /linked-loop"]} request(s)`,
   );
 
   check("testConnection returns ok", (await c.testConnection()).ok === true);
