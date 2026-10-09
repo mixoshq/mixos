@@ -221,7 +221,8 @@ export interface InstallResult {
   slug: string;
   name: string;
   version: string;
-  gitTag: string;
+  /** Null for a release published without a tag. */
+  gitTag: string | null;
   commitSha: string;
   /** The hash that was verified. Recorded in the audit row. */
   contentHash: string;
@@ -791,7 +792,7 @@ async function runInstall(
     slug,
     name: manifest.name,
     version: manifest.version,
-    gitTag: manifest.gitTag,
+    gitTag: manifest.gitTag ?? null,
     commitSha: manifest.commitSha,
     contentHash,
     installPath: rel,
