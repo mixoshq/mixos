@@ -862,6 +862,51 @@ async function main() {
     `${g.refreshes} refresh(es)`,
   );
 
+  // ── a token refused before its stored expiry ─────────────────────────────
+  // The real refresh re-reads the grant under a lock and hands back a stored
+  // token that has not expired, taking it for another invocation's fresh one.
+  // This probe keeps that rule, so the replay after a 401 succeeds only if the
+  // base class says which token was refused.
+  class LockedGrantProbe extends Probe {
+    stored: Record<string, string> = {};
+    refreshes = 0;
+    protected async refreshStoredTokens(
+      rejected?: string,
+    ): Promise<Record<string, string>> {
+      const expiresAt = Number(this.stored[TOKEN_KEYS.expiresAt] ?? 0);
+      const token = this.stored[TOKEN_KEYS.access];
+      if (token && token !== rejected && expiresAt - 60_000 > Date.now()) {
+        return this.stored;
+      }
+      this.refreshes++;
+      const t = await refreshWithToken({
+        policy: this.authOverride,
+        connectorName: this.name,
+        subject: this.name,
+        clientId: "cid",
+        clientSecret: "sec",
+        refreshToken: this.stored[TOKEN_KEYS.refresh] ?? "",
+      });
+      this.stored = { ...this.stored, ...tokensToCredentials(t) };
+      return this.stored;
+    }
+  }
+  reset();
+  apiMode = "expire-once";
+  const locked = new LockedGrantProbe();
+  locked.authOverride = authCode();
+  locked.httpOverride = { baseUrl: base };
+  locked.stored = { ...live, [TOKEN_KEYS.access]: "granted-1" };
+  await locked.initialize({ clientId: "cid", clientSecret: "sec", ...locked.stored });
+  const relocked = await locked
+    .call<{ token: string }>("/data")
+    .catch((err: ConnectorError) => ({ token: `threw ${err.category}` }));
+  check(
+    "a token refused before its stored expiry is renewed, not read back",
+    relocked?.token === "granted-2" && locked.refreshes === 1,
+    `token=${relocked?.token} refreshes=${locked.refreshes}`,
+  );
+
   // ── configured reflects the grant, not just the client credentials ───────
   const noGrant = new GrantedProbe();
   noGrant.authOverride = authCode();
@@ -1564,10 +1609,67 @@ async function main() {
           "a grant the provider will no longer renew is handed no connector",
           (await handOver()).connected === false,
         );
+
+        // A live user token the upstream refuses is renewed on that row.
+        reset();
+        apiMode = "expire-once";
+        await saveUserTokens(person.id, userManifest.name, {
+          accessToken: "granted-1",
+          refreshToken: "refresh-9",
+          expiresAt: Date.now() + 3_600_000,
+        });
+        const refusedUser = await handOver();
+        const afterUser = await refusedUser.p
+          .call<{ token: string }>("/data")
+          .catch((err: ConnectorError) => ({ token: `threw ${err.category}` }));
+        check(
+          "a user token refused before its stored expiry is renewed on that user's row",
+          afterUser?.token === "granted-2" &&
+            hits["grant:refresh_token"] === 1 &&
+            (await getUserTokens(person.id, userManifest.name))?.[
+              TOKEN_KEYS.access
+            ] === afterUser?.token,
+          `token=${afterUser?.token}`,
+        );
         reset();
       } finally {
         // Cascades to the user's grant.
         await sql`delete from public.users where id = ${person.id}`;
+      }
+
+      // 6. The tenant grant, the same way: a live token the upstream refuses
+      //    is renewed under the lock and saved, not read back.
+      const tenantName = "verify-probe";
+      await sql`delete from public.connector_configs where connector_name = ${tenantName}`;
+      try {
+        const seeded = await mutateConnectorCredentials(tenantName, () => ({
+          clientId: "cid",
+          clientSecret: "sec",
+          [TOKEN_KEYS.access]: "granted-1",
+          [TOKEN_KEYS.refresh]: "refresh-9",
+          [TOKEN_KEYS.expiresAt]: String(Date.now() + 3_600_000),
+        }));
+        reset();
+        apiMode = "expire-once";
+        const tenant = new Probe();
+        tenant.authOverride = authCode();
+        tenant.httpOverride = { baseUrl: base };
+        await tenant.initialize(seeded);
+        const afterTenant = await tenant
+          .call<{ token: string }>("/data")
+          .catch((err: ConnectorError) => ({ token: `threw ${err.category}` }));
+        const savedTenant = await mutateConnectorCredentials(tenantName, () => null);
+        check(
+          "a tenant token refused before its stored expiry is renewed under the lock",
+          afterTenant?.token === "granted-2" &&
+            hits["grant:refresh_token"] === 1 &&
+            savedTenant[TOKEN_KEYS.access] === afterTenant?.token &&
+            savedTenant.clientSecret === "sec",
+          `token=${afterTenant?.token}`,
+        );
+        reset();
+      } finally {
+        await sql`delete from public.connector_configs where connector_name = ${tenantName}`;
       }
     } finally {
       await sql`delete from public.connector_configs where connector_name = ${probeName}`;

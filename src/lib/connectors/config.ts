@@ -301,8 +301,13 @@ export async function refreshConnectorTokens(opts: {
   policy: ConnectorAuthPolicy;
   /** Treat a token expiring within this window as already expired. */
   skewMs: number;
+  /**
+   * The access token the upstream just refused with a 401, when this refresh
+   * follows one. It is renewed even if its stored expiry has not passed.
+   */
+  rejected?: string;
 }): Promise<Record<string, string>> {
-  const { connectorName, subject, policy, skewMs } = opts;
+  const { connectorName, subject, policy, skewMs, rejected } = opts;
   const [idKey, secretKey] = policy.credentialKeys ?? [
     "clientId",
     "clientSecret",
@@ -310,8 +315,12 @@ export async function refreshConnectorTokens(opts: {
 
   return mutateConnectorCredentials(connectorName, async (current) => {
     const expiresAt = Number(current[TOKEN_KEYS.expiresAt] ?? 0);
-    if (current[TOKEN_KEYS.access] && expiresAt - skewMs > Date.now()) {
-      // Another invocation refreshed while we waited for the lock.
+    const stored = current[TOKEN_KEYS.access];
+    // A live token means another invocation refreshed while we waited for the
+    // lock — unless it is the token the upstream just refused, revoked or
+    // rotated before its expiry. Handing that one back made the retry after a
+    // 401 fail the same way.
+    if (stored && stored !== rejected && expiresAt - skewMs > Date.now()) {
       return null;
     }
 
