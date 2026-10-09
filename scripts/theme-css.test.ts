@@ -181,6 +181,105 @@ test("a surface rule inside @media with ordinary properties still builds", () =>
   );
 });
 
+// ── every value is evaluated ────────────────────────────────────────────────
+
+test("a var() naming an undeclared token fails, instead of skipping its pairs", () => {
+  fails(
+    () => compile({ tokens: { primary: "var(--brand-cyan)" } }),
+    /--primary resolves to var\(--brand-cyan\), but :root never sets --brand-cyan/,
+  );
+});
+
+test("the chain a missing token is reached through is named", () => {
+  fails(
+    () => compile({ tokens: { primary: "var(--ring)", ring: "var(--brand-cyan)" } }),
+    /--primary resolves through --ring to var\(--brand-cyan\)/,
+  );
+});
+
+test("a var() loop fails the build", () => {
+  fails(
+    () => compile({ tokens: { primary: "var(--ring)", ring: "var(--primary)" } }),
+    /--primary never resolves: --primary → --ring → --primary is a loop/,
+  );
+});
+
+test("a var() chain ending in a literal resolves, and is measured", () => {
+  const compiled = compile({
+    tokens: { "brand-cyan": "#0369a1", primary: "var(--brand-cyan)" },
+  });
+  assert.equal(compiled.tokens.primary, "#0369a1");
+  assert.ok(compiled.report.some((l) => /primary\/background\s+5\.93:1/.test(l)));
+});
+
+test("an ungated colour token in oklch() or color-mix() fails the build", () => {
+  fails(() => compile({ tokens: { muted: "oklch(0.97 0 0)" } }), /--muted is "oklch/);
+  fails(
+    () => compile({ tokens: { border: "color-mix(in srgb, #000 10%, #fff)" } }),
+    /--border is "color-mix/,
+    /cannot evaluate/,
+  );
+  fails(
+    () => compile({ tokens: { "brand-violet": "oklch(0.55 0.25 290)" } }),
+    /--brand-violet is "oklch/,
+  );
+});
+
+// ── alpha is not ignored ────────────────────────────────────────────────────
+
+test("a translucent token fails instead of being measured as opaque", () => {
+  // Opaque, this is 4.76:1 and passes. At half alpha over white it is #b2bac5,
+  // which is 1.96:1 — the build used to drop the alpha and report the 4.76.
+  fails(
+    () => compile({ tokens: { "muted-foreground": "rgb(100 116 139 / 0.5)" } }),
+    /--muted-foreground is "rgb\(100 116 139 \/ 0\.5\)", which is translucent/,
+    /Over this theme's --background that is #b2bac5/,
+  );
+  fails(
+    () => compile({ tokens: { muted: "#f1f5f980" } }),
+    /--muted is "#f1f5f980", which is translucent/,
+  );
+  fails(() => compile({ tokens: { card: "hsla(0, 0%, 100%, 50%)" } }), /which is translucent/);
+});
+
+test("a translucent --border builds, composited over --background", () => {
+  // Over this theme's ground, not over white: half black on #f8fafc is
+  // #7c7d7e, where on white it would be #808080.
+  const compiled = compile({ tokens: { background: "#f8fafc", border: "rgb(0 0 0 / 0.5)" } });
+  assert.equal(compiled.tokens.border, "#7c7d7e");
+  assert.equal(compile({ tokens: { border: "#0f172a1a" } }).tokens.border, "#e7e7e9");
+});
+
+test("the exception is the --border token, not a translucent value", () => {
+  // --input is gated, so taking --border's value through var() does not take
+  // the exception with it.
+  fails(
+    () => compile({ tokens: { border: "rgb(0 0 0 / 0.1)", input: "var(--border)" } }),
+    /--input is "rgb\(0 0 0 \/ 0\.1\)", which is translucent/,
+  );
+  // And the ground a translucent --border is composited over stays opaque.
+  fails(
+    () =>
+      compile({ tokens: { background: "rgb(255 255 255 / 0.5)", border: "rgb(0 0 0 / 0.1)" } }),
+    /--background is "rgb\(255 255 255 \/ 0\.5\)", which is translucent/,
+  );
+});
+
+test("an explicit full alpha is opaque, and every colour is emitted as hex", () => {
+  const compiled = compile({
+    tokens: {
+      background: "rgba(255, 255, 255, 1)",
+      card: "hsl(0 0% 100% / 100%)",
+      border: "#e2e8f0ff",
+    },
+  });
+  assert.equal(compiled.tokens.background, "#ffffff");
+  assert.equal(compiled.tokens.card, "#ffffff");
+  assert.equal(compiled.tokens.border, "#e2e8f0");
+  // Not a colour, so left as written.
+  assert.equal(compiled.tokens.radius, "0.5rem");
+});
+
 // ── fonts are declared in both directions ───────────────────────────────────
 
 const fontFace = (file: string) =>
