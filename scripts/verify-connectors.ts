@@ -62,7 +62,13 @@ import type {
 let hits: Record<string, number> = {};
 let seen: Record<string, { auth?: string; body?: string; url?: string }> = {};
 let tokenMode:
-  "ok" | "reject400" | "throttle" | "shortlived" | "nojson" | "notoken" = "ok";
+  | "ok"
+  | "reject400"
+  | "throttle"
+  | "shortlived"
+  | "nojson"
+  | "notoken"
+  | "noscope" = "ok";
 let apiMode: "ok" | "expire-once" | "always401" = "ok";
 
 const bump = (k: string) => (hits[k] = (hits[k] ?? 0) + 1);
@@ -198,7 +204,9 @@ const server = http.createServer((req, res) => {
             refresh_token: `refresh-${grant === "refresh_token" ? seq + 1 : 1}`,
             token_type: "Bearer",
             expires_in: ttl,
-            scope: "read:things",
+            // RFC 6749 §5.1 lets a provider omit scope when it granted what
+            // was asked for.
+            ...(tokenMode === "noscope" ? {} : { scope: "read:things" }),
           });
         }
 
@@ -763,6 +771,23 @@ async function main() {
   check(
     "granted tokens map onto reserved credential keys",
     tokensToCredentials(granted)[TOKEN_KEYS.refresh] === "refresh-1",
+  );
+
+  reset();
+  tokenMode = "noscope";
+  const unscoped = await exchangeAuthorizationCode({
+    policy: authCode(),
+    connectorName: "acme",
+    subject: "Acme",
+    clientId: "cid",
+    clientSecret: "sec",
+    code: "the-code",
+    codeVerifier: flow.codeVerifier,
+  });
+  check(
+    "a token response that omits scope granted what was requested",
+    unscoped.scope === "read:things",
+    `scope=${unscoped.scope}`,
   );
 
   // ── a connector holding a grant ──────────────────────────────────────────
