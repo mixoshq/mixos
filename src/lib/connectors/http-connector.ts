@@ -11,6 +11,7 @@ import {
   isBodyless,
   isRateLimitExhausted,
   isSuccess,
+  nextPageLink,
   parseRetryAfter,
 } from "./status-map";
 import { TOKEN_KEYS, requestToken, requestedScopes } from "./oauth";
@@ -223,6 +224,19 @@ export abstract class HttpConnector implements BaseConnector {
     init: RequestInit = {},
     opts: RequestOptions<T> = {},
   ): Promise<T | null> {
+    return (await this.send<T>(path, init, opts)).body;
+  }
+
+  /**
+   * `request()`, keeping the headers of the response that answered. Only
+   * `paginate()` needs them: a `link-header` API says where the next page is
+   * in a header rather than in the body.
+   */
+  private async send<T>(
+    path: string,
+    init: RequestInit,
+    opts: RequestOptions<T>,
+  ): Promise<{ body: T | null; headers: Headers }> {
     if (!this.configured) {
       throw new ConnectorError({
         category: "unconfigured",
@@ -326,7 +340,7 @@ export abstract class HttpConnector implements BaseConnector {
     init: RequestInit,
     opts: RequestOptions<T>,
     ctx: { verb: string; attempt: number; timeoutMs: number },
-  ): Promise<T | null> {
+  ): Promise<{ body: T | null; headers: Headers }> {
     const signals: AbortSignal[] = [AbortSignal.timeout(ctx.timeoutMs)];
     if (init.signal) signals.push(init.signal);
 
@@ -384,11 +398,14 @@ export abstract class HttpConnector implements BaseConnector {
       });
     }
 
-    if (opts.responseType === "raw") return res as unknown as T;
+    // The body in the form the caller asked for, with the headers it came with.
+    const answer = (body: T | null) => ({ body, headers: res.headers });
+
+    if (opts.responseType === "raw") return answer(res as unknown as T);
 
     // 204 / 205 / 304 carry no body. Calling .json() here is the single most
     // common defect in hand-written API clients.
-    if (isBodyless(res.status)) return null;
+    if (isBodyless(res.status)) return answer(null);
 
     const maxBytes = this.http.maxResponseBytes ?? DEFAULTS.maxResponseBytes;
     const declared = Number(res.headers.get("content-length") ?? "");
@@ -415,8 +432,8 @@ export abstract class HttpConnector implements BaseConnector {
       });
     }
 
-    if (opts.responseType === "text") return text as unknown as T;
-    if (text.trim() === "") return null;
+    if (opts.responseType === "text") return answer(text as unknown as T);
+    if (text.trim() === "") return answer(null);
 
     let parsed: unknown;
     try {
@@ -435,10 +452,10 @@ export abstract class HttpConnector implements BaseConnector {
       });
     }
 
-    if (!opts.schema) return parsed as T;
+    if (!opts.schema) return answer(parsed as T);
 
     const validated = opts.schema.safeParse(parsed);
-    if (validated.success) return validated.data;
+    if (validated.success) return answer(validated.data);
 
     // Only the failing field *paths* are reported — never the values. A drifted
     // response is still a real response, and its contents are exactly the
@@ -497,6 +514,10 @@ export abstract class HttpConnector implements BaseConnector {
 
     let cursor: string | null = null;
     let nextUrl: string | null = null;
+    // link-header only: the origin the walk started on, and every URL it has
+    // requested or been sent to, so a Link pointing back cannot loop.
+    let origin: string | null = null;
+    const visited = new Set<string>();
 
     for (let page = 0; page < maxPages; page++) {
       if (policy.style === "cursor" && cursor && policy.cursorParam) {
@@ -507,11 +528,13 @@ export abstract class HttpConnector implements BaseConnector {
         query[policy.pageParam] = page + 1;
       }
 
+      // A next-page URL from a Link header is complete, query and all.
       const target = nextUrl ?? path;
-      const body = await this.request<unknown>(
+      const pageQuery = nextUrl ? undefined : query;
+      const { body, headers } = await this.send<unknown>(
         target,
         { method: "GET" },
-        { ...opts, query: nextUrl ? undefined : query, responseType: "json" },
+        { ...opts, query: pageQuery, responseType: "json" },
       );
       if (body == null) return;
 
@@ -547,11 +570,28 @@ export abstract class HttpConnector implements BaseConnector {
         cursor = typeof next === "string" && next.length > 0 ? next : null;
         if (!cursor) return;
       } else if (policy.style === "link-header") {
-        // The Link header is only readable from the raw response, so this style
-        // re-issues the call with responseType "raw" one level up. Until that
-        // lands, a short page terminates the walk.
-        if (items.length < pageSize) return;
-        nextUrl = null;
+        // The server says whether another page exists, in `Link: <…>;
+        // rel="next"`, and its absence is the end. Page size proves nothing
+        // either way here: a short page that still links onward is followed.
+        const requested = this.resolveUrl(target, pageQuery);
+        origin ??= new URL(requested).origin;
+        visited.add(requested);
+        const next = nextPageLink(headers.get("link"), requested);
+        if (!next || visited.has(next)) return;
+        // The next request carries this connector's credentials, so the walk
+        // stays on the origin it started on. A Link elsewhere is refused, not
+        // followed.
+        if (new URL(next).origin !== origin) {
+          throw new ConnectorError({
+            category: "unexpected_response",
+            connectorName: this.name,
+            subject: this.subject,
+            adminHint:
+              "The upstream's pagination Link header pointed at a different host. This connector only follows pages on the host the listing started on.",
+          });
+        }
+        visited.add(next);
+        nextUrl = next;
       } else if (items.length < pageSize) {
         return;
       }
