@@ -75,7 +75,7 @@ Universal translation table. Apply it row by row against the inventory:
 | Roles / permission flags | `roles: [{ key, label }]` + `defaultRole` in `app.json`; `context.user.hasRole([...])` | The platform stores the role; **your handler enforces the policy**. `hasRole` ignores `isAdmin` — write `context.user.isAdmin \|\| context.user.hasRole([...])` if admins bypass. |
 | REST/GraphQL endpoint, form POST | `api/<path>/route.ts` exporting `defineRoute({ auth, roles, input, output, budget, handler })` | Handler returns **plain data**, never a `NextResponse`. Throw `AppError.notFound()/.forbidden()/.unavailable()`. |
 | Public/unauthenticated endpoint | `auth: ["public"]` (or `["password"]`) on the route | Derived into `/api/p/<slug>/...`. Do not also list it in `apiVisibility`. `context.user` becomes nullable and the compiler makes you handle it. |
-| ORM models + migrations | `"database": true`, `migrations/*.sql`, `context.db` | Write **bare** table names; the platform prefixes `_app_<slug>_`. |
+| ORM models + migrations | `"database": true`, `migrations/*.sql`, `context.db` | Write **bare** table names; they live in the app's own schema. Triggers and functions do not translate: an `updated_at` trigger becomes an `updatedAt` entry in `app.json`, and other logic moves into routes or jobs. |
 | Cron job, queue worker, scheduler | `schedules: [{ name, everyMinutes \| cron }]` + `jobs/<name>.ts` | One cadence per job. `everyMinutes` ≥ 5 and a multiple of 5. Handler gets a **user-less** `SystemAppContext`. |
 | Incremental pull from an upstream (watermarks, "sync since") | `sync: [{ name, schedule, source, window, budgetMs }]` + `sync/<name>.ts` via `defineSync` | Prefer this over a hand-rolled job. The platform owns the watermark, budget, window halving, and empty-result guard — and the provider cursor never leaves the run. |
 | API client with credentials (Stripe, Salesforce, an internal API with a token) | A **connector** under `connectors/` | Tenant-scoped, admin-configured. See [1.4](#14-outbound-integrations--reuse-flag-delegate). |
@@ -126,7 +126,7 @@ Translate the schema into `migrations/*.sql` with bare table names. **Moving pro
 
 Two things to fix while translating rather than after:
 
-- **Drop tenancy and auth columns** — `org_id`, `user_password_hash`, `session_token`, `api_key`. Foreign keys to a users table become the platform user id.
+- **Drop tenancy and auth columns** — `org_id`, `user_password_hash`, `session_token`, `api_key`. Foreign keys to a users table become the platform user id, in a plain `uuid` column: an app's foreign keys can point only at its own tables.
 - **Keep the types honest.** A legacy `varchar` holding a JSON blob, an integer holding an enum, a string holding money — translate to the type the data actually is, and note the change in the plan. This is the one moment where fixing it is nearly free.
 
 ### 1.8 What does not come over — say this out loud

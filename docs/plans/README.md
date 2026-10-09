@@ -56,6 +56,7 @@ Current platform plans:
 | [`20261005_2209-widget-context-menu.md`](20261005_2209-widget-context-menu.md) | Right-click a dashboard widget for Configure widget and Edit Dashboard, through one shared `ContextMenu` primitive |
 | [`20261005_2320-any-postgres-hosting.md`](20261005_2320-any-postgres-hosting.md) | Any Postgres: a query builder in place of supabase-js/PostgREST, a portable migration runner sharing the Supabase CLI's ledger, and hosting on Docker Compose, Render, Railway and Vercel |
 | [`20261006_0415-install-flags.md`](20261006_0415-install-flags.md) | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES`: with one off, that kind's catalogue browse page, button and install actions are gone |
+| [`20261007_0158-contain-app-migrations.md`](20261007_0158-contain-app-migrations.md) | A schema and a role per app, app migrations checked by Postgres's parser against an allowlist and applied as the app's role, and a platform `updatedAt` trigger in place of app triggers |
 
 ## File naming
 
