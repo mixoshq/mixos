@@ -131,6 +131,11 @@ for await (const item of this.paginate<Item>("/items", { itemSchema: Item })) { 
 Bounded by `maxPages` (default 50) so a cursor that never terminates cannot
 spin forever.
 
+`link-header` follows the response's `Link: <…>; rel="next"` until a page has
+none, whatever its size. It only follows a link on the origin the walk started
+on, since the next request carries this connector's credentials; a link to
+anywhere else fails as `unexpected_response`.
+
 ## Best practices
 
 - Keep `name` identical to the folder name and the manifest `name`.
