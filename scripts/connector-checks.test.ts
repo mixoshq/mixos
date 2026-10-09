@@ -60,6 +60,37 @@ test("a method declared twice fails the build", () => {
   );
 });
 
+// ── setup guidance ─────────────────────────────────────────────────────────
+
+test("both templates satisfy the schema they are copied to meet", () => {
+  for (const dir of ["_template", "_template-oauth"]) {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(__dirname, `../connectors/${dir}/connector.json`), "utf-8"),
+    );
+    const parsed = RawConnectorManifestSchema.safeParse(manifest);
+    assert.ok(parsed.success, `${dir}: ${JSON.stringify(parsed.error?.issues)}`);
+  }
+});
+
+test("a setup.docs link must say when to open it", () => {
+  assert.deepEqual(issuesOf(templateManifest()), []);
+  const bare = templateManifest((m) => {
+    m.setup.docs = [{ label: "API reference", url: "https://docs.example.com/" }];
+  });
+  assert.ok(issuesOf(bare).some((i) => /^setup\.docs\.0\.why:/.test(i)), issuesOf(bare).join("; "));
+  const withWhy = templateManifest((m) => {
+    m.setup.docs = [
+      { label: "API reference", url: "https://docs.example.com/", why: "Open it to look up a field name." },
+    ];
+  });
+  assert.deepEqual(issuesOf(withWhy), []);
+  // Still strict: a key the schema does not know is refused.
+  const extra = templateManifest((m) => {
+    m.setup.docs = [{ label: "A", url: "https://docs.example.com/", why: "When.", note: "x" }];
+  });
+  assert.ok(issuesOf(extra).length > 0);
+});
+
 /**
  * From the manifest an author writes, through the build step that dropped
  * `mutates`, to a tool calling the write. The template declares `createItem`
