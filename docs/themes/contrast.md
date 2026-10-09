@@ -30,7 +30,7 @@ Roughly 24 pairs. The full list is [`CONTRAST_PAIRS` in `src/lib/themes/tokens.t
 
 A colour token must be a hex, `rgb()` or `hsl()` literal, or a `var()` chain ending in one. `color-mix()` and `oklch()` are rejected **in token values**.
 
-This is not a judgement about the CSS. It is that a value the build cannot evaluate is a token the contrast gate silently stops covering — and the build would still print success. Rejecting is the honest failure mode. Use whatever you like in a `.mix-*` surface rule, where nothing is being verified.
+This is not a judgement about the CSS. It is that a value the build cannot evaluate is a token the contrast gate silently stops covering — and the build would still print success. Rejecting is the honest failure mode. Use whatever you like in a `.mix-*` surface rule's ordinary properties, where nothing is being verified. A custom property there fails the build, because tokens are set in `:root` and nowhere else.
 
 ## When a brand colour fails
 
