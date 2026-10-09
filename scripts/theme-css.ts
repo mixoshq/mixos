@@ -151,6 +151,13 @@ function norm(selector: string): string {
   return selector.replace(/\s+/g, " ").trim();
 }
 
+const URL_REF = /url\(\s*['"]?([^'")]+)['"]?\s*\)/g;
+
+/** A `url()` reference as a path inside `assets/`, the way theme.json spells one. */
+function assetPath(ref: string): string {
+  return ref.trim().replace(/^\.?\//, "");
+}
+
 /**
  * Every class named anywhere in the selector must be an allowlisted surface,
  * and the selector may not reach for an id or a bare element. Pseudo-classes,
@@ -210,7 +217,7 @@ function assertSurfaceSelector(selector: string, slug: string): string {
  * allowed because it is self-contained.
  */
 function assertLocalUrls(decl: Declaration, slug: string, dir: string): void {
-  for (const m of decl.value.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)) {
+  for (const m of decl.value.matchAll(URL_REF)) {
     const ref = m[1].trim();
     if (ref.startsWith("data:")) continue;
     if (/^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("//")) {
@@ -220,7 +227,7 @@ function assertLocalUrls(decl: Declaration, slug: string, dir: string): void {
           `image or icon with the theme instead.`,
       );
     }
-    const cleaned = ref.replace(/^\.?\//, "");
+    const cleaned = assetPath(ref);
     const onDisk = path.join(dir, "assets", cleaned);
     if (!fs.existsSync(onDisk)) {
       throw new ThemeError(
@@ -232,14 +239,11 @@ function assertLocalUrls(decl: Declaration, slug: string, dir: string): void {
 }
 
 function rewriteUrls(value: string, slug: string): string {
-  return value.replace(
-    /url\(\s*['"]?([^'")]+)['"]?\s*\)/g,
-    (whole, ref: string) => {
-      const r = ref.trim();
-      if (r.startsWith("data:")) return whole;
-      return `url("/themes/${slug}/${r.replace(/^\.?\//, "")}")`;
-    },
-  );
+  return value.replace(URL_REF, (whole, ref: string) => {
+    const r = ref.trim();
+    if (r.startsWith("data:")) return whole;
+    return `url("/themes/${slug}/${assetPath(r)}")`;
+  });
 }
 
 /** Resolve a block's declarations to concrete values, following `var()` chains. */
@@ -317,8 +321,10 @@ export function compileTheme(args: {
   dir: string;
   escapes: ThemeEscape[];
   declaredSurfaces: string[];
+  /** `fonts[].file` from theme.json, cross-checked against every `@font-face`. */
+  declaredFonts: string[];
 }): CompiledTheme {
-  const { slug, dir, escapes, declaredSurfaces } = args;
+  const { slug, dir, escapes, declaredSurfaces, declaredFonts } = args;
   const file = path.join(dir, "theme.css");
 
   if (!fs.existsSync(file)) {
@@ -465,6 +471,37 @@ export function compileTheme(args: {
         `\nThe manifest is how a reviewer sees a theme's reach without reading its CSS; it has to be ` +
         `accurate to be worth anything.`,
     );
+  }
+
+  // ── …and about the fonts it ships, in both directions ─────────────────────
+  // Read from each @font-face's `src`, not by searching the file for the name,
+  // which a comment satisfies. `data:` sources carry no file to declare.
+  const loaded = new Set<string>();
+  root.walkAtRules("font-face", (at: AtRule) => {
+    at.walkDecls("src", (decl: Declaration) => {
+      for (const m of decl.value.matchAll(URL_REF)) {
+        if (!m[1].trim().startsWith("data:")) loaded.add(assetPath(m[1]));
+      }
+    });
+  });
+  const manifestFonts = new Set(declaredFonts.map(assetPath));
+  for (const file of manifestFonts) {
+    if (!loaded.has(file)) {
+      throw new ThemeError(
+        `themes/${slug}/theme.json: fonts[] declares "${file}", but no @font-face in ` +
+          `theme.css loads it. A font file shipped to every user and never used is pure weight.`,
+      );
+    }
+  }
+  for (const file of loaded) {
+    if (!manifestFonts.has(file)) {
+      throw new ThemeError(
+        `themes/${slug}/theme.css: an @font-face loads "${file}", which fonts[] in theme.json ` +
+          `does not declare. The manifest is how a reviewer sees what a theme ships; a font ` +
+          `missing from it is a dependency hidden from review. Add an entry with its family, ` +
+          `file, weight and style.`,
+      );
+    }
   }
 
   // ── rewrite ───────────────────────────────────────────────────────────────
