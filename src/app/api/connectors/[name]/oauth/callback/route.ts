@@ -19,6 +19,7 @@ import {
   exchangeAuthorizationCode,
   oauthReturnUrl,
   openFlowState,
+  splitScopes,
   stateMatches,
 } from "@/lib/connectors/oauth";
 
@@ -127,7 +128,7 @@ export async function GET(
       await recordScopeStatus({
         connectorName: name,
         scopes: policy.scopes ?? [],
-        granted: (tokens.scope ?? "").split(/\s+/).filter(Boolean),
+        granted: splitScopes(tokens.scope),
         userId: userScoped ? session.user.id : null,
       });
     } catch (err) {
