@@ -570,7 +570,7 @@ a missing key fails closed naming the variable, because a fallback would mean
 nobody sets the others and the single point of failure quietly survives.
 
 ```
-npm run keys:generate     # all six, paste-ready, with rotation notes
+npm run keys:generate     # all six, plus AUTH_SECRET and CRON_SECRET, paste-ready, with rotation notes
 npm run keys:check        # exits non-zero naming anything missing or malformed
 ```
 
