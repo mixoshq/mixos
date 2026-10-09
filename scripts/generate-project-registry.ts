@@ -41,6 +41,7 @@ import type {
   ThemeManifest,
 } from "../src/lib/themes/types";
 import { compileTheme, ThemeError } from "./theme-css";
+import { applyWidgetConfigs } from "./widget-configs";
 import { FatalManifestError } from "./manifest-errors";
 import { readImageSize } from "./image-size";
 import { resolveThemeLogo, validateAppBranding } from "./brand-checks";
@@ -256,7 +257,7 @@ function scanHooks(appDir: string, slug: string): HookScan {
  *
  * The one thing JSON cannot express is a config field built from a helper, so
  * that — and only that — moved to an optional `widgets.ts`. See
- * loadWidgetConfigs() below.
+ * applyWidgetConfigs() in ./widget-configs.ts.
  */
 async function loadAppManifest(
   appDir: string,
@@ -270,104 +271,6 @@ async function loadAppManifest(
 
   await applyWidgetConfigs(appDir, manifest);
   return manifest;
-}
-
-/**
- * Merge `widgets.ts` config fields into the manifest's widget entries.
- *
- * A widget's `config` is the one part of a manifest that repeats: four widgets
- * wanting a title, a selection and a display mode is the same four field
- * objects written out four times. Helpers in @/lib/apps/widget-config-presets
- * collapse that, and they also derive the widget's config TYPE — neither of
- * which JSON can do.
- *
- * So `widgets.ts` is optional, and narrow: it supplies config arrays and
- * nothing else. Identity, permissions, egress, roles and every other field a
- * reviewer cares about stay in `app.json`, as text.
- *
- *     // apps/my-app/widgets.ts
- *     export default {
- *       "widgets/favorites.tsx": favoritesConfigFields,
- *     };
- *
- * Keyed by `component`, which is a path and therefore already unique within an
- * app — `name` is prose and free to collide.
- *
- * ## Drift is refused, not reconciled
- *
- * Splitting one manifest across two files invents a way for them to disagree.
- * Both directions throw rather than shrug: a key naming no widget is a typo or
- * a rename that missed a file, and a widget declaring `config` in BOTH places
- * has two sources of truth and no rule for picking one. Neither is a state
- * anyone means to be in, and a generator that quietly picks a winner is how
- * someone edits the file that is being ignored.
- *
- * Worth knowing where that throw lands: the caller catches it, warns, and skips
- * the app — the same handling a malformed `app.json` gets. So the build still
- * succeeds and the app is absent from the registry rather than wrong in it.
- * That is this generator's existing severity for a broken manifest, not a
- * judgement about drift specifically.
- */
-async function applyWidgetConfigs(
-  appDir: string,
-  manifest: Record<string, unknown>,
-): Promise<void> {
-  const tsPath = path.join(appDir, "widgets.ts");
-  if (!fs.existsSync(tsPath)) return;
-
-  const slug = path.basename(appDir);
-
-  // tsx's ESM loader handles transpilation. Append a cache-busting query so
-  // repeated generator runs during `next dev` pick up edits.
-  const href = `${pathToFileURL(tsPath).href}?t=${Date.now()}`;
-  const mod = (await import(href)) as { default?: unknown };
-  const byComponent = mod.default;
-
-  if (!byComponent || typeof byComponent !== "object" || Array.isArray(byComponent)) {
-    throw new Error(
-      `apps/${slug}/widgets.ts must default-export an object keyed by each ` +
-        `widget's "component" path, e.g. { "widgets/foo.tsx": fooConfigFields }.`,
-    );
-  }
-
-  const widgets = Array.isArray(manifest.widgets)
-    ? (manifest.widgets as Record<string, unknown>[])
-    : [];
-  const declared = new Set(
-    widgets.map((w) => String(w.component ?? "")).filter(Boolean),
-  );
-
-  for (const [component, fields] of Object.entries(
-    byComponent as Record<string, unknown>,
-  )) {
-    if (!declared.has(component)) {
-      throw new Error(
-        `apps/${slug}/widgets.ts has config for "${component}", which no widget ` +
-          `in app.json declares. Known components: ${[...declared].join(", ") || "(none)"}.`,
-      );
-    }
-    if (!Array.isArray(fields)) {
-      throw new Error(
-        `apps/${slug}/widgets.ts: "${component}" must map to an array of config fields.`,
-      );
-    }
-  }
-
-  for (const widget of widgets) {
-    const component = String(widget.component ?? "");
-    const fields = (byComponent as Record<string, unknown>)[component];
-    if (fields === undefined) continue;
-    if (widget.config !== undefined) {
-      throw new Error(
-        `apps/${slug}: widget "${component}" declares config in BOTH app.json and ` +
-          `widgets.ts. Keep it in one — app.json for plain fields, widgets.ts for ` +
-          `fields built from presets.`,
-      );
-    }
-    // Plain data by the time it lands here; the registry is serialised with
-    // JSON.stringify, so anything else would not survive the write.
-    widget.config = fields;
-  }
 }
 
 /**
@@ -1479,6 +1382,9 @@ async function scanApps(): Promise<AppManifest[]> {
     try {
       raw = await loadAppManifest(appDir);
     } catch (err) {
+      // A widgets.ts that disagrees with app.json is a manifest error like any
+      // other, and aborts the run rather than dropping the app.
+      if (err instanceof FatalManifestError) throw err;
       console.warn(
         `  Skipping ${entry.name}/ — failed to load manifest: ${err}`,
       );
