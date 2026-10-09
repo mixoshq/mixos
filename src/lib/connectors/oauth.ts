@@ -406,6 +406,18 @@ export function grantedScope(
   return requested.length > 0 ? requested.join(" ") : undefined;
 }
 
+/**
+ * A granted-scope string as a list.
+ *
+ * RFC 6749 separates scopes with spaces, but GitHub and Slack answer with
+ * commas (`repo,gist`). Read whole, that one string matched none of the
+ * requested scopes, and every one of them showed Refused. A comma separates
+ * as whitespace does; no provider's scope name contains one.
+ */
+export function splitScopes(raw: string | null | undefined): string[] {
+  return (raw ?? "").split(/[\s,]+/).filter(Boolean);
+}
+
 export function refreshWithToken(opts: {
   policy: ConnectorAuthPolicy;
   connectorName: string;
