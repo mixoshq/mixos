@@ -2338,8 +2338,9 @@ export function getTheme(slug: string): ThemeManifest {
   fs.writeFileSync(THEME_REGISTRY_FILE, themeOutput, "utf-8");
 
   // Read by eslint-rules/no-low-contrast-token-pairs.mjs, which cannot import
-  // TypeScript and must not re-parse CSS. It lints against the fallback theme:
-  // which theme is *active* is a runtime database value the build cannot know.
+  // TypeScript and must not re-parse CSS. It lints against every installed
+  // theme: which one is *active* is a runtime database value the build cannot
+  // know, so an element has to clear the floor under each of them.
   fs.writeFileSync(
     THEME_TOKENS_FILE,
     JSON.stringify({ fallback: fallbackTheme, tokens: themeTokens }, null, 2),

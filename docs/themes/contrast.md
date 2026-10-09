@@ -24,7 +24,7 @@ Roughly 24 pairs. The full list is [`CONTRAST_PAIRS` in `src/lib/themes/tokens.t
 
 **`--border`.** WCAG 1.4.11 covers non-text contrast for components that convey information or state. A hairline between two table rows is decoration. Gating it at 3:1 would force every divider in the product to a mid-slate that no design system actually ships, which is how a well-meant rule ends up disabled.
 
-**`muted-foreground` on `muted`.** Two legal tokens can still make an illegal element — that pair is 4.34:1 in most palettes. Whether it *occurs* is a property of the markup, not of the theme, so it is caught per-element by [`eslint-rules/no-low-contrast-token-pairs.mjs`](../../eslint-rules/no-low-contrast-token-pairs.mjs), which reads your theme's tokens and re-derives. The two checks are complementary: the build verifies the palette, the lint rule verifies the combinations.
+**`muted-foreground` on `muted`.** Two legal tokens can still make an illegal element — that pair is 4.34:1 in most palettes. Whether it *occurs* is a property of the markup, not of the theme, so it is caught per-element by [`eslint-rules/no-low-contrast-token-pairs.mjs`](../../eslint-rules/no-low-contrast-token-pairs.mjs), which reads every installed theme's tokens, yours included, and re-derives under each. The two checks are complementary: the build verifies the palette, the lint rule verifies the combinations.
 
 ## Why token values must be literals
 
