@@ -1308,27 +1308,22 @@ function validateThemeAssets(
 }
 
 /**
- * A declared font must exist AND be referenced by an @font-face in theme.css.
- * A manifest font nobody @font-faces is a file shipped to every user for
- * nothing; an @font-face with no manifest entry hides a dependency from review.
+ * A declared font must exist. Whether theme.css loads it — and whether every
+ * font theme.css loads is declared — is checked by compileTheme, which has the
+ * parsed @font-face rules: a manifest font nobody @font-faces is a file shipped
+ * to every user for nothing; an @font-face with no manifest entry hides a
+ * dependency from review.
  */
 function validateThemeFonts(
   fonts: ThemeFontFace[],
   slug: string,
   dir: string,
-  css: string,
 ): ThemeFontFace[] {
   for (const font of fonts) {
     if (!fs.existsSync(path.join(dir, "assets", font.file))) {
       throw new ThemeError(
         `themes/${slug}/theme.json: fonts[] names "${font.file}", which does not exist. ` +
           `Expected it at themes/${slug}/assets/${font.file}.`,
-      );
-    }
-    if (!css.includes(font.file)) {
-      throw new ThemeError(
-        `themes/${slug}/theme.json: fonts[] declares "${font.file}", but no @font-face in ` +
-          `theme.css loads it. A font file shipped to every user and never used is pure weight.`,
       );
     }
   }
@@ -1390,10 +1385,10 @@ async function scanThemes(): Promise<{
       dir,
       escapes: r.escapes ?? [],
       declaredSurfaces: r.surfaces ?? [],
+      declaredFonts: (r.fonts ?? []).map((f) => f.file),
     });
 
-    const rawCss = fs.readFileSync(path.join(dir, "theme.css"), "utf-8");
-    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir, rawCss);
+    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir);
     const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
     const screenshots = validateScreenshots(r.screenshots, "themes", slug, dir);
     const logo = assets.logo
