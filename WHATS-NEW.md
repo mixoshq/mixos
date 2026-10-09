@@ -69,6 +69,24 @@ just pulled.
   removes only your own subscription.
 - **Webhook replay** is keyed on the verified signature. For a connector that
   signs no timestamp, replay records are kept for 90 days.
+- **A failed connector call reaches the widget.** A route that lets a
+  `ConnectorError` propagate now answers with the connector's envelope and
+  status (503, or 429 with `Retry-After`) instead of a 500, and `AsyncView`
+  renders it as "Not connected" or as an error with Retry.
+- **User-scoped grants renew themselves.** An expired token is renewed before
+  the request, against the person's own grant. One the provider won't renew
+  leaves the connector out of `context.connectors`, so the connect prompt shows.
+- **Three `connector.json` mistakes now fail the build:** a `setup.docs` link
+  without `why`, a `telemetry` entry naming a method the class doesn't publicly
+  have, and an `auth.strategy` other than `none` with no `credentialFields`.
+- **Fix:** the configure dialog reopens after Connect, and the OAuth return URL
+  refuses a path that would land on another host.
+- **Fix:** a granted scope list sent comma-separated (GitHub, Slack) no longer
+  reads as one scope that left every requested scope Refused.
+- **Fix:** a token the provider refuses before its stored expiry is renewed and
+  the call retried, instead of replayed with the same token.
+- **Fix:** a connector that authenticates with nothing no longer needs
+  `auth.scopesUrl`.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
 
