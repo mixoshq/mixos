@@ -30,6 +30,10 @@ Roughly 24 pairs. The full list is [`CONTRAST_PAIRS` in `src/lib/themes/tokens.t
 
 A colour token must be a hex, `rgb()` or `hsl()` literal, or a `var()` chain ending in one. `color-mix()` and `oklch()` are rejected **in token values**.
 
+That holds for every colour token, gated or not. `--border`, `--muted` and the `--brand-*` literals are parsed too, because the lint rule measures them per element. A `var()` that names a token `:root` never sets fails the build. So does a translucent value, such as `rgb(… / 0.5)` or an 8-digit hex, because its colour depends on whatever is behind it. Set the opaque colour it should render as; the error names what it comes to over `--background`.
+
+The one exception is `--border`. It is ungated, and a translucent hairline that takes on the surface it divides is a common idiom, so it may carry alpha. Wherever the build evaluates it, including the token table the lint rule reads, it composites it over `--background` first.
+
 This is not a judgement about the CSS. It is that a value the build cannot evaluate is a token the contrast gate silently stops covering — and the build would still print success. Rejecting is the honest failure mode. Use whatever you like in a `.mix-*` surface rule's ordinary properties, where nothing is being verified. A custom property there fails the build, because tokens are set in `:root` and nowhere else.
 
 ## When a brand colour fails

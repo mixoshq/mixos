@@ -46,7 +46,7 @@ Report the measured table to the user before writing the theme. A brand owner wi
 - Folder name is the slug (lowercase, digits, hyphens). No leading underscore on a shipped theme.
 - Tokens only in one top-level `:root` — not in a `.mix-*` rule, and not in a `:root` inside `@media` or `@supports`. The token set is closed; unknown names fail the build.
 - Every required token present. Dark mode is all-or-nothing.
-- Colour values must be hex / `rgb()` / `hsl()` literals or a `var()` chain ending in one. No `color-mix()` or `oklch()` in token values.
+- Colour values must be opaque hex / `rgb()` / `hsl()` literals or a `var()` chain ending in one, for every colour token, gated or not. No `color-mix()` or `oklch()` in token values, and no alpha except on `--border`, which the build composites over `--background`.
 - Beyond tokens, only the ten `.mix-*` surfaces. `surfaces` in `theme.json` must match `theme.css` in both directions.
 - No `@import`, no `url()` to another host. Ship fonts and images under `assets/`.
 - Never declare a token listed in `FORBIDDEN_TOKENS` (empty today).
