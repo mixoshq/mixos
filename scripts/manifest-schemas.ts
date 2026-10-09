@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import { assertValidCron } from "../src/lib/apps/cron";
+import { JOB_TIMEOUT_MS, MAX_SYNC_BUDGET_MS } from "../src/lib/apps/job-limits";
 import {
   SCREENSHOT_DIR,
   SCREENSHOT_MAX_COUNT,
@@ -129,6 +130,25 @@ const scheduleSchema = cadenceSchema.extend({ name: z.string().min(1) });
 const roleSchema = z.strictObject({
   key: z.string().min(1),
   label: z.string().min(1),
+});
+
+/**
+ * A role key is what a grant stores and what `roles` on a route names, so two
+ * roles sharing one would be a single role with two labels — and the admin
+ * dropdown would offer both.
+ */
+const rolesSchema = z.array(roleSchema).superRefine((roles, ctx) => {
+  const seen = new Set<string>();
+  roles.forEach((role, i) => {
+    if (seen.has(role.key)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `duplicate role key "${role.key}" — role keys must be unique within the app`,
+        path: [i, "key"],
+      });
+    }
+    seen.add(role.key);
+  });
 });
 
 /**
@@ -372,9 +392,19 @@ const syncDefinitionSchema = z.strictObject({
   // sibling fields from inside a nested object.
   source: z.string().min(1),
   window: syncWindowSchema,
-  // The scheduler ticks every 5 minutes, so a budget beyond one tick can never
-  // be honoured — it would simply be truncated at runtime with no signal.
-  budgetMs: z.number().int().min(1_000).max(300_000),
+  // The scheduler abandons a run at JOB_TIMEOUT_MS, so a budget has to end
+  // early enough for the page in flight and the state write to finish before
+  // then. See MAX_SYNC_BUDGET_MS.
+  budgetMs: z
+    .number()
+    .int()
+    .min(1_000)
+    .max(
+      MAX_SYNC_BUDGET_MS,
+      `budgetMs may be at most ${MAX_SYNC_BUDGET_MS}: the scheduler stops a run at ` +
+        `${JOB_TIMEOUT_MS}ms, and the budget has to leave room for the last page ` +
+        `and the state write before then`,
+    ),
 });
 
 /**
@@ -732,7 +762,7 @@ export const RawAppManifestSchema = z
     // key resolves to a real file on disk (which a schema can't check).
     pageVisibility: z.record(z.string(), acceptedAuths).optional(),
     apiVisibility: z.record(z.string(), acceptedAuths).optional(),
-    roles: z.array(roleSchema).optional(),
+    roles: rolesSchema.optional(),
     defaultRole: z.string().min(1).optional(),
     telemetry: z.array(appTelemetryEventSchema).optional(),
     // App Services. Each `provides[].name` is verified on disk by the generator
@@ -772,6 +802,17 @@ export const RawAppManifestSchema = z
           path: ["pageVisibility", key],
         });
       }
+    }
+
+    // A sync keeps its watermark in the app's scoped database, which exists
+    // only with `database: true`. Without it every run fails on its first line.
+    if ((m.sync?.length ?? 0) > 0 && m.database !== true) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          'a sync keeps its watermark in the app\'s scoped database — set "database": true',
+        path: ["sync"],
+      });
     }
   });
 
