@@ -97,6 +97,8 @@ const STATUS_BY_SERVICE_CODE: Record<ServiceErrorCode, number> = {
   NOT_EXPOSED: 502,
   NOT_DECLARED: 502,
   FORBIDDEN: 502,
+  // A dependency switched off, as UNAVAILABLE is for a route's own.
+  PROVIDER_INACTIVE: 503,
   NO_USER: 502,
   // The one service failure that is genuinely about *this* caller's user rather
   // than about the wiring between two apps.

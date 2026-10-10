@@ -3,7 +3,13 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import fs from "fs";
-import { danger, fail, warn, message } from "danger";
+import path from "path";
+import { danger, fail, warn, message, schedule } from "danger";
+import {
+  duplicatesAdded,
+  nextMigrationNumber,
+  platformMigrations,
+} from "./scripts/platform-migration-files";
 
 const ALLOWED_DIRS = ["apps/", "connectors/", "themes/"];
 const OS_CHANGE_LABEL = "os-change";
@@ -103,9 +109,10 @@ if (newScopeLabels.length > 0) {
  * laptop it was typed on and wrong everywhere else.
  *
  * `npm run verify:repository-url` is the same check in CI, and
- * `src/lib/repository/client.ts` ignores the variable outright in a release
- * build. This one exists because a review comment on the diff is the cheapest
- * place to catch it — before it is a commit anyone has to revert.
+ * `src/lib/repository/client.ts` ignores the variable on a built deployment
+ * unless it names that machine. This one exists because a review comment on the
+ * diff is the cheapest place to catch it — before it is a commit anyone has to
+ * revert.
  */
 const REPOSITORY_URL_FILES = [
   ".env.docker",
@@ -201,4 +208,91 @@ if (migrationsMissingBump.length > 0) {
       "```\n\n" +
       `See \`supabase/migrations/0007_platform_schema_version.sql\` and OS-UPDATES.md.`
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  A new migration must not reuse a number                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `fail`. The ledger records a platform migration by its number, so of two
+ * files with one number a database applies the first and skips the other as
+ * already applied, without a word. Two branches that each took the next number
+ * merge without a conflict, because the files have different names, so the PR
+ * is the place to catch it. The runner and the registry generator refuse it
+ * too (scripts/platform-migration-files.ts).
+ *
+ * The checkout is this PR merged into its base, so for a PR into main it holds
+ * main's migrations beside this PR's. A stacked PR's base is another branch,
+ * so main's are listed through the API as well. Only numbers this PR's new
+ * files use are held to it: a repeat its base already has is not its doing.
+ */
+const MIGRATIONS_DIR = "supabase/migrations";
+const MAIN_BRANCH = "main";
+
+const addedMigrations = platformMigrations(
+  danger.git.created_files.filter((f) => path.posix.dirname(f) === MIGRATIONS_DIR)
+).map((m) => m.file);
+
+/** Main's migrations, when the checkout does not already hold them. */
+async function migrationsOnMain(): Promise<string[]> {
+  if (danger.github.pr.base.ref === MAIN_BRANCH) return [];
+  try {
+    const { data } = await danger.github.api.repos.getContent({
+      owner: danger.github.thisPR.owner,
+      repo: danger.github.thisPR.repo,
+      path: MIGRATIONS_DIR,
+      ref: MAIN_BRANCH,
+    });
+    return Array.isArray(data) ? data.map((entry) => entry.path) : [];
+  } catch (err) {
+    warn(
+      `Could not list \`${MIGRATIONS_DIR}\` on \`${MAIN_BRANCH}\` ` +
+        `(${err instanceof Error ? err.message : String(err)}), so this PR's new ` +
+        `migrations were checked against \`${danger.github.pr.base.ref}\` only.`
+    );
+    return [];
+  }
+}
+
+if (addedMigrations.length > 0) {
+  schedule(async () => {
+    const onBase = fs.existsSync(MIGRATIONS_DIR)
+      ? fs.readdirSync(MIGRATIONS_DIR).map((f) => `${MIGRATIONS_DIR}/${f}`)
+      : [];
+    const existing = [...onBase, ...(await migrationsOnMain())].filter(
+      (f) => !danger.git.deleted_files.includes(f)
+    );
+    const duplicates = duplicatesAdded(addedMigrations, existing);
+    if (duplicates.length === 0) return;
+
+    const next = nextMigrationNumber([...existing, ...addedMigrations]);
+    const isOurs = (f: string) => addedMigrations.includes(f);
+    // Of a number only this PR's files share, one can keep it.
+    const toMove = duplicates.reduce((n, d) => {
+      const ours = d.files.filter(isOurs).length;
+      return n + (ours === d.files.length ? ours - 1 : ours);
+    }, 0);
+    const list = duplicates
+      .map(
+        (d) =>
+          `- \`${d.version}\`: ` +
+          d.files.map((f) => `\`${f}\`${isOurs(f) ? " (this PR)" : ""}`).join(", ")
+      )
+      .join("\n");
+
+    fail(
+      `## A new migration reuses a number\n\n` +
+        `${list}\n\n` +
+        `The ledger records a platform migration by its number, so a database would apply ` +
+        `one file per number and skip the rest as already applied, without a word. Git sees ` +
+        `no conflict between two new files; the build and the release step refuse them too.\n\n` +
+        (toMove === 1
+          ? `Renumber this PR's file to \`${next}\`, the next free number, and set ` +
+            `\`platform_schema_version\` to \`'${Number(next)}'\` in it.`
+          : `Renumber this PR's files from \`${next}\`, the next free number, and set ` +
+            `\`platform_schema_version\` in each to its new number.`) +
+        ` See OS-UPDATES.md.`
+    );
+  });
 }

@@ -13,6 +13,7 @@ import type {
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { hasAppGrant } from "./access";
+import { checkAppGate } from "./app-gate";
 import { readOnlyConnectors, refusalMessage } from "./read-only";
 import { createReadOnlyScopedClient } from "./scoped-db";
 import { recordServiceCall } from "./telemetry";
@@ -25,10 +26,11 @@ import { safeErrorMessage } from "@/lib/safe-error";
  * built here and injected by `buildAppContext` / `buildSystemAppContext` when
  * the app declares `consumes`. The broker enforces every boundary the platform
  * can't get from the DB (there is no RLS): two-sided consent (default deny),
- * re-authorizing the user in the *provider's* own terms, provider-scoped
- * execution, error isolation, a timeout, and a payload cap. Provider handlers
- * are leaves — the `ServiceContext` intentionally carries no `services` client,
- * so a handler cannot chain to another provider (no cycles, no impersonation).
+ * an active provider (the app gate, whatever the audience), re-authorizing the
+ * user in the *provider's* own terms, provider-scoped execution, error
+ * isolation, a timeout, and a payload cap. Provider handlers are leaves — the
+ * `ServiceContext` intentionally carries no `services` client, so a handler
+ * cannot chain to another provider (no cycles, no impersonation).
  * A request from an MCP tool runs the provider read-only, because the tool is.
  *
  * Keep this the ONLY cross-app data path: an ESLint rule blocks apps from
@@ -44,6 +46,7 @@ export type ServiceErrorCode =
   | "NOT_EXPOSED" // provider doesn't provide this service
   | "NOT_DECLARED" // consumer didn't declare the dependency
   | "FORBIDDEN" // provider's consumers allowlist excludes the caller
+  | "PROVIDER_INACTIVE" // an admin has switched the provider app off
   | "NO_USER" // audience "user" but no acting user (job/public context)
   | "FORBIDDEN_USER" // user lacks access to the provider app
   | "NO_HANDLER" // handler file missing / no default export
@@ -131,6 +134,18 @@ async function runServiceRequest(
     throw new ServiceRequestError(
       "FORBIDDEN",
       `"${providerSlug}:${serviceName}" is not available to "${callerSlug}".`,
+    );
+  }
+
+  // The app gate, for every audience, before the provider's context is built
+  // or its handler imported. An `audience: "app"` service consults no grant,
+  // so this is what keeps a switched-off provider from answering a job or a
+  // public route. After the consent checks, so only a consumer the provider
+  // allows learns that it is off.
+  if (!(await checkAppGate(providerSlug)).open) {
+    throw new ServiceRequestError(
+      "PROVIDER_INACTIVE",
+      `"${providerSlug}" is not active.`,
     );
   }
 
