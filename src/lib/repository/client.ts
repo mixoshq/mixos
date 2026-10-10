@@ -39,6 +39,7 @@
  * where the boundary between them stops being reviewable.
  */
 
+import { isBuiltDeployment } from "../platform/build";
 import {
   ExtensionSchema,
   InstallManifestSchema,
@@ -54,13 +55,17 @@ import {
 /**
  * The repository this instance browses.
  *
- * Overridable so a deployment can point at a staging catalogue, an internal
- * mirror, or — while the public API is still unbuilt — a local fixture server.
+ * `MIXOS_REPOSITORY_URL` overrides it so the platform can be developed against
+ * a staging catalogue, a local copy of the site or a fixture server. A built
+ * deployment honours the override only for a catalogue on its own machine — see
+ * `repositoryBaseUrl`.
  */
 export const DEFAULT_REPOSITORY_URL = "https://mixos.org";
 
 /**
- * Hosts this instance will talk to over plaintext http.
+ * Hosts where the traffic never leaves this machine. Two rules turn on them:
+ * plaintext http is accepted only here, and a built deployment honours
+ * `MIXOS_REPOSITORY_URL` only when it names one of them.
  *
  * ── WHY HTTPS IS OTHERWISE REQUIRED ─────────────────────────────────────────
  *
@@ -100,7 +105,7 @@ export const DEFAULT_REPOSITORY_URL = "https://mixos.org";
  * authorization server already follows (docs/security-architecture.md §17):
  * https everywhere, http on loopback.
  */
-const PLAINTEXT_ALLOWED_HOSTS = new Set([
+const LOCAL_HOSTS = new Set([
   "localhost",
   "127.0.0.1",
   // WHATWG `URL` keeps the brackets on an IPv6 literal, so this is the form
@@ -108,21 +113,6 @@ const PLAINTEXT_ALLOWED_HOSTS = new Set([
   "[::1]",
   "host.docker.internal",
 ]);
-
-/**
- * Is this a build cut from a release tag?
- *
- * `MIXOS_RELEASE` carries the tag (`v1.2.0`) and is stamped by the
- * tag-triggered build, nothing else. It is deliberately NOT `NODE_ENV` —
- * `npm run docker:prod` runs the production-parity profile with
- * NODE_ENV=production, and that profile exists precisely so a developer can
- * exercise a production shape locally, including against a local catalogue.
- * Keying the lock on NODE_ENV would take that away to catch a case NODE_ENV
- * does not actually identify.
- */
-export function isReleaseBuild(): boolean {
-  return (process.env.MIXOS_RELEASE || "").trim() !== "";
-}
 
 /** Warn once per process, not once per request. */
 let overrideWarned = false;
@@ -134,54 +124,64 @@ export function repositoryBaseUrl(): string {
   // through to `new URL("")` and fail the page with "not a valid URL" when the
   // author plainly meant "use the default".
   const configured = (process.env.MIXOS_REPOSITORY_URL || "").trim();
+  if (!configured) return DEFAULT_REPOSITORY_URL;
+
+  let url: URL | null = null;
+  try {
+    url = new URL(configured);
+  } catch {
+    // Reported below, unless a built deployment ignores the value anyway.
+  }
 
   /*
-    A RELEASED BUILD ALWAYS SEARCHES mixos.org.
+    A BUILT DEPLOYMENT SEARCHES mixos.org, OR A CATALOGUE ON ITS OWN MACHINE.
 
     The override exists so the platform and the catalogue can be developed
-    against each other locally. That is a development affordance, and in a
-    shipped release it is a way for the wrong catalogue — someone's laptop, a
-    stale staging mirror, a value that leaked into a committed env file — to
-    become the source of the checksums every install on that deployment
-    verifies against. The checksum is the whole control; whoever chooses the
-    catalogue chooses what "verified" means.
+    against each other. That is a development affordance, and on a deployment
+    it is a way for the wrong catalogue — someone's laptop, a stale staging
+    mirror, a value that leaked into a committed env file — to become the source
+    of the checksums every install on that deployment verifies against. The
+    checksum is the whole control; whoever chooses the catalogue chooses what
+    "verified" means.
 
-    IGNORED, NOT REFUSED. A release that failed to boot because of a stray
+    Every built deployment: the Docker image on any host, and Vercel
+    (`isBuiltDeployment`). A catalogue on the deployment's own machine is still
+    honoured, which is what lets `npm run docker:prod` browse a local copy of the
+    site at http://host.docker.internal:4321.
+
+    IGNORED, NOT REFUSED. A deployment that failed to boot because of a stray
     environment variable would be a worse outcome than one that quietly used the
     right catalogue, and there is no case where refusing to start is the safer
     branch: the correct value is known, so it is used and the mistake is logged.
 
-    This is the last of four layers, and the only one that survives a
-    misconfiguration applied AFTER the release is cut — see
-    docs/security-architecture.md §31.
+    This is the last of four layers, and the only one that holds against a value
+    set in a deployment's own environment — see docs/security-architecture.md
+    §31.
   */
-  if (configured && isReleaseBuild() && configured !== DEFAULT_REPOSITORY_URL) {
+  const local = url !== null && LOCAL_HOSTS.has(url.hostname);
+  if (isBuiltDeployment() && !local && url?.origin !== DEFAULT_REPOSITORY_URL) {
     if (!overrideWarned) {
       overrideWarned = true;
       console.warn(
-        `[repository] Ignoring MIXOS_REPOSITORY_URL=${configured}: this is release ` +
-          `${process.env.MIXOS_RELEASE}, and a released build always searches ` +
-          `${DEFAULT_REPOSITORY_URL}. Unset the variable to silence this.`,
+        `[repository] Ignoring MIXOS_REPOSITORY_URL (${url ? url.origin : "not a valid URL"}): ` +
+          `a built deployment searches ${DEFAULT_REPOSITORY_URL}, or a catalogue on its ` +
+          `own machine (${[...LOCAL_HOSTS].join(", ")}). Unset the variable to silence this.`,
       );
     }
     return DEFAULT_REPOSITORY_URL;
   }
 
-  const raw = configured || DEFAULT_REPOSITORY_URL;
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
+  if (!url) {
     throw new RepositoryError(
-      `MIXOS_REPOSITORY_URL is not a valid URL: ${raw}`,
+      `MIXOS_REPOSITORY_URL is not a valid URL: ${configured}`,
       "config",
     );
   }
-  if (url.protocol !== "https:" && !PLAINTEXT_ALLOWED_HOSTS.has(url.hostname)) {
+  if (url.protocol !== "https:" && !local) {
     throw new RepositoryError(
       `MIXOS_REPOSITORY_URL must use https on ${url.hostname}. Plaintext is ` +
         `accepted only where the traffic cannot leave this machine: ` +
-        `${[...PLAINTEXT_ALLOWED_HOSTS].join(", ")}.`,
+        `${[...LOCAL_HOSTS].join(", ")}.`,
       "config",
     );
   }

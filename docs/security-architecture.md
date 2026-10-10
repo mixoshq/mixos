@@ -1401,7 +1401,8 @@ no database touch. `/api/health/ready` returns `{ status: "ok" }`, or a 503 with
 schema versions, not a count of migrations. The server log names the versions
 and files, and a caught error goes to `console.error` and never into the
 response body. Neither leaks version, commit, environment, or stack. Neither is
-rate-limited. Both answer during the maintenance response.
+rate-limited. Both answer during the maintenance response. The MixOS version
+and commit appear on the admin pages, to admins, and nowhere else.
 
 ---
 
@@ -1896,6 +1897,13 @@ them.
 
 ### The order of operations is the control
 
+Two refusals come first and need no lock: the kind's install flag (see
+**Turning it off**), then `checkInstallable()`, which refuses a built deployment
+(see **What it deliberately will not do**), a folder that is not writable and a
+missing generator. A registration refused there neither waits behind another
+admin's nor holds one up. Then the register lock is taken (below), the target
+directory must not exist, and:
+
 ```
 1. GET /api/v1/<kind>/<slug>/install     the commit, the URL, the hash
 2. Refuse a yanked release unless the admin was shown why and insisted
@@ -1903,12 +1911,13 @@ them.
 4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
 5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
 6. Pre-flight the manifest: it exists, it parses, it is for this slug
-7. Write to `.installing-<slug>` beside the target, never to the target
-8. Rename into place — the first moment the tree is live
+7. Check the lock, then write to `.installing-<slug>` beside the target,
+   never to the target
+8. Check the lock, then rename into place — the first moment the tree is live
 9. Run scripts/generate-project-registry.ts — the authoritative validation,
    containment scan included (§24)
-10. If it was rejected, remove the directory and regenerate, so a failed
-    registration leaves the instance exactly as it was
+10. If it was rejected, check the lock, then remove the directory and
+    regenerate, so a failed registration leaves the instance exactly as it was
 ```
 
 **Nothing untrusted touches the filesystem before step 5.** That is why the tar
@@ -1917,6 +1926,43 @@ extract-then-verify pipeline has a window where a tampered tree is on disk, and
 then depends on its cleanup being correct for that not to matter. It also means
 the path rules are ours rather than differing between GNU tar and bsdtar, which
 is what this project runs on in Docker and in development respectively.
+
+### The register lock is a lease, renewed and fenced
+
+Two registrations at once would run two generators over the same
+`src/generated/*.ts` files, and one's rollback could land on top of the other's
+success. So steps 1 to 10 run under one instance-wide lock, `repository.register`
+([`src/lib/platform/lock.ts`](../src/lib/platform/lock.ts)): a row in
+`_platform_locks` rather than a Postgres advisory lock, because a session
+advisory lock does not survive a transaction pooler. An admin who registers
+while it is held is told another registration is running and offered **Try
+again**, and the attempt is audited as `<kind>.register.rejected` with
+`reason: "locked"`.
+
+The row is a lease. Anyone may take it once it has gone 15 minutes without
+renewal, so a crashed registration cannot wedge the feature. But a registration
+can also be paused for longer than that, by a laptop going to sleep
+mid-download, and carry on when it wakes, by which time another may hold the
+lock. Three rules cover that:
+
+- **The holder renews the lease every minute** while it works, so a slow but
+  live registration never loses it, the generator run in step 9 included. That
+  makes its own time limits the lock's: the repository and GitHub requests time
+  out, and a generator run is ended after 120 seconds, the processes it started
+  included.
+- **The lock is checked before the disk changes.** Steps 7, 8 and 10 begin with
+  `assertHeld()`, `update _platform_locks set acquired_at = now() where name =
+  $1 and holder = $2 returning 1`, which renews the lease only while the row
+  still holds this acquisition's random token. Step 9 runs straight after step
+  8's check.
+- **A holder that has lost the lock stops without touching the disk**, cleanup
+  included: by then the staging directory, or the registry it would regenerate,
+  may be the new holder's. The admin is told what was left on disk, and the
+  audit row records `reason: "lock-lost"`. A check that cannot reach the
+  database stops it the same way, as `"lock-unconfirmed"`.
+
+The release is scoped to the same token, so a holder that lost the lock cannot
+delete the new holder's row on its way out.
 
 ### Why a host allowlist and not resolve-and-recheck
 
@@ -2014,7 +2060,8 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   happens to the data and grants the installed one already has.
 - **Run from a built artifact.** `checkInstallable()` refuses up front when
   `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
-  `output: "standalone"` tree, which its server `chdir`s to before listening.
+  `output: "standalone"` tree, which its server `chdir`s to before listening
+  (`isBuiltDeployment()`, `src/lib/platform/build.ts`).
 
   This check has to be a marker rather than a capability probe, because the
   capability probe passes and the capability is absent.
@@ -2041,7 +2088,7 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   execs a source file, and an archive that can set the mode of a file it places
   in the checkout can set the setuid bit.
 
-### A released build always searches mixos.org
+### A built deployment searches mixos.org
 
 `MIXOS_REPOSITORY_URL` decides where an instance gets the checksums it verifies
 every download against. **Whoever chooses the catalogue chooses what "verified"
@@ -2050,24 +2097,15 @@ project, and the one most likely to be set to something local and left there.
 
 It legitimately points at a laptop: `http://localhost:4321` for a host checkout
 of the mixos.org site, `http://host.docker.internal:4321` from inside the Docker
-stack. Both are right there and catastrophic in a release, so the value is
-gated on the way out by four layers:
+stack. Both are right there and wrong on a deployment, so the value is gated on
+the way out by four layers:
 
 | Layer | Where | Catches |
 | --- | --- | --- |
 | Pre-commit review | `dangerfile.ts` (`fail`) | A PR that pins it in a committed file |
-| CI | `npm run verify:repository-url`, blocking in `ci.yml` | The same, on every push — before a tag exists |
-| Runtime lock | `repositoryBaseUrl()` | A release built or deployed with it set anyway |
+| CI | `npm run verify:repository-url`, blocking in `ci.yml` | The same, on every push |
+| Runtime lock | `repositoryBaseUrl()` | A built deployment with it set anyway, in a committed file or in its own environment |
 | Default | `DEFAULT_REPOSITORY_URL` | Everything else |
-
-**The runtime lock is inert until a production build sets `MIXOS_RELEASE`.**
-The `Dockerfile` declares the `ARG` for the image path, but this repository
-deploys on Vercel, where nothing sets the variable today — so the first three
-layers are what actually hold, and a deployed instance would still honour an
-override applied to its own environment. The step that closes it is
-[`docs/plans/20260921_0842-release-versioning.md`](plans/20260921_0842-release-versioning.md):
-`next.config.ts` derives `MIXOS_RELEASE` from `package.json` when
-`VERCEL_ENV` is `production`.
 
 Only the scanned files matter, and the list is explicit rather than a glob:
 `.env.docker`, `docker-compose.yml` and the two Dockerfiles. `.env.local` is
@@ -2076,23 +2114,24 @@ travel. A **commented** example is not flagged — both env files carry one show
 the localhost form on purpose, and a check whose fix is "delete the
 documentation" is a check people learn to bypass.
 
-**The runtime lock keys on `MIXOS_RELEASE`, not `NODE_ENV`.** That variable
-carries the tag (`v1.2.0`) and is stamped by the tag-triggered build, nothing
-else. `npm run docker:prod` runs the production-parity profile with
-`NODE_ENV=production`, and that profile exists precisely so a developer can
-exercise a production shape locally — including against a local catalogue.
-Keying on `NODE_ENV` would take that away to catch a case it does not actually
-identify.
+**The runtime lock covers every built deployment**, by the marker
+`checkInstallable()` refuses on (`isBuiltDeployment()`,
+`src/lib/platform/build.ts`): `VERCEL` set, or a standalone `server.js` at the
+working directory, which is the Docker image on every host. There it ignores the
+override unless the value names the deployment's own machine, one of the four
+hosts in [the transport rule](#the-transport-carrying-the-checksum). That
+exception is what lets `npm run docker:prod`, the production image run locally,
+browse a local copy of the site. Keying the lock on `NODE_ENV` would take that
+profile away to catch a case `NODE_ENV` does not identify.
 
-When a release does carry an override, it is **ignored and logged, not
-refused**. A release that fails to boot over a stray environment variable is a
-worse outcome than one that quietly uses the right catalogue, and there is no
-branch here where refusing to start is safer: the correct value is known.
+An ignored override is **logged, not refused**. A deployment that fails to boot
+over a stray environment variable is a worse outcome than one that quietly uses
+the right catalogue, and there is no branch here where refusing to start is
+safer: the correct value is known.
 
-The one thing none of this constrains is a deployment's own environment after
-the fact — an operator who sets the variable on a released instance gets the
-warning and mixos.org. That is the intended end state: **all installs search
-mixos.org, and the override is a development affordance.**
+A source checkout honours the override, because developing the platform against
+another catalogue is what it is for. That is the intended end state: **every
+deployment searches mixos.org, and the override is a development affordance.**
 
 ### The transport carrying the checksum
 
