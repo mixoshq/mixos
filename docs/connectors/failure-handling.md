@@ -12,7 +12,7 @@ never on a raw status number.
 
 | Category | Means | Retried |
 | --- | --- | --- |
-| `unconfigured` | No credentials saved. An admin must act. | no |
+| `unconfigured` | No credentials saved, or an admin disabled the connector. An admin must act. | no |
 | `auth_failed` | The credential was rejected, expired, or revoked. | no¹ |
 | `forbidden` | Credential is valid but lacks the scope. | no |
 | `rate_limited` | Throttled. `retryAfterMs` is set when the upstream said so. | yes |
