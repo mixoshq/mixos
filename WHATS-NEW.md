@@ -92,6 +92,14 @@ just pulled.
   first deploy creates the admin. Migrations have to work with the deployment
   still serving: add in one release, remove in a later one. See
   `docs/hosting/vercel.md`.
+- **`scripts/smoke-test-app.ts` tests real routes.** It looked for routes
+  with a pattern no `defineRoute` route matches, so it sent no requests, and
+  it skipped apps without connectors. It now reads routes from the generated
+  registry and tests every app, or the slugs you name, with GET and HEAD
+  only. Sign in with `SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`;
+  `--base-url` points it at another server. Activate and grant an app first:
+  one that isn't is reported, not worked around. It exits 1 when a route
+  fails or can't be reached, and its last line is a JSON verdict.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's
