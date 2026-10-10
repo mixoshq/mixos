@@ -5,11 +5,13 @@
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getUserById, hasAppGrant } from "@/lib/apps/access";
+import { checkAppGate } from "@/lib/apps/app-gate";
 import { ReadOnlyError, readOnlyConnectors } from "@/lib/apps/read-only";
 import { createReadOnlyScopedClient } from "@/lib/apps/scoped-db";
 import { createServicesClient } from "@/lib/apps/services";
 import { recordMcpCall } from "@/lib/apps/telemetry";
 import type { McpToolContext } from "@/lib/hooks/types";
+import { APP_UPDATING_MESSAGE } from "@/lib/platform/maintenance-gate";
 import { safeErrorMessage } from "@/lib/safe-error";
 import { loadTool, parseToolName } from "./tools";
 import type { TokenPrincipal } from "./store";
@@ -51,6 +53,7 @@ export type McpErrorCode =
   | "NOT_EXPOSED" // app doesn't declare this tool
   | "NOT_CONSENTED" // user didn't authorize this app for this client
   | "FORBIDDEN_USER" // user no longer has a grant for the app
+  | "APP_UPDATING" // the app's own migrations are behind this build
   | "NO_HANDLER" // handler file missing / malformed
   | "INVALID_INPUT" // arguments failed the tool's Zod schema
   | "TIMEOUT"
@@ -120,6 +123,19 @@ export async function callTool(
       "FORBIDDEN_USER",
       `You don't have access to "${manifest.name}".`,
     );
+  }
+
+  // Gate 3 — the app gate (src/lib/apps/app-gate.ts), before the tool's module
+  // is imported, because importing runs its top-level code. The grant above
+  // already refused an app that is off, so what is left is an app whose own
+  // migrations are behind this build: the tool refuses in the words its app's
+  // routes and pages use, and the model can try again shortly. An app
+  // switched off since the grant was read is refused as above.
+  const gate = await checkAppGate(slug);
+  if (!gate.open) {
+    throw gate.reason === "updating"
+      ? new McpToolError("APP_UPDATING", APP_UPDATING_MESSAGE)
+      : new McpToolError("FORBIDDEN_USER", `You don't have access to "${manifest.name}".`);
   }
 
   const loaded = await loadTool(slug, toolName);

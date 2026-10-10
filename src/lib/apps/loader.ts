@@ -5,12 +5,21 @@
 import type { ComponentType } from "react";
 import { pageLoaders } from "@/generated/app-page-loaders";
 
+function pageKey(slug: string, pathSegments: string[]): string {
+  const pagePath = pathSegments.length > 0 ? pathSegments.join("/") + "/" : "";
+  return `${slug}/pages/${pagePath}Main`;
+}
+
+/** Whether the app has a page at this path, without loading it. */
+export function hasAppPage(slug: string, pathSegments: string[]): boolean {
+  return pageLoaders[pageKey(slug, pathSegments)] !== undefined;
+}
+
 export async function loadAppPage(
   slug: string,
   pathSegments: string[]
 ): Promise<ComponentType | null> {
-  const pagePath = pathSegments.length > 0 ? pathSegments.join("/") + "/" : "";
-  const key = `${slug}/pages/${pagePath}Main`;
+  const key = pageKey(slug, pathSegments);
 
   const loader = pageLoaders[key];
   if (!loader) return null;
