@@ -12,8 +12,9 @@
  *     While it is, the proxy answers everything but the health probes with the
  *     maintenance response (`./maintenance-gate.ts`).
  *   - `appsBehind`: the apps with a migration this build carries that the
- *     database hasn't applied. The proxy doesn't act on it, and readiness
- *     reports it.
+ *     database hasn't applied. Each of them alone answers "This app is being
+ *     updated": the app gate (`src/lib/apps/app-gate.ts`) holds back its code,
+ *     and the proxy answers its pages. Readiness reports it too.
  *
  * "Can't tell" (the database unreachable, a query failing, no answer in time)
  * counts as not behind, as it does in readiness.
@@ -28,18 +29,39 @@
  * server, not one per request.
  */
 
-import { cachedMaintenanceState, maintenanceStateOf, type MaintenanceState } from "./maintenance-gate";
+import {
+  cachedMaintenanceState,
+  maintenanceStateOf,
+  type MaintenanceState,
+  type MaintenanceStateStore,
+} from "./maintenance-gate";
 import { appMigrationStatus, schemaVersionStatus } from "./schema-version";
 
 export type { MaintenanceState };
 
+// On globalThis, as the checks' own caches are (`./schema-version.ts`). The
+// proxy is bundled apart from the routes, each with its own copy of this
+// module, and one kept answer per process means a page the proxy serves and
+// its app's API never disagree about whether the app is being updated. Dev
+// hot-reload keeps it too.
+const globalForMaintenance = globalThis as unknown as {
+  __maintenanceState?: MaintenanceStateStore;
+};
+
 const cached = cachedMaintenanceState(async () => {
   const [schema, apps] = await Promise.all([schemaVersionStatus(), appMigrationStatus()]);
-  // Once per refresh, not per request. The message names both versions and
-  // the release step; the response only says the instance is being updated.
-  if (!schema.ok) console.error(`Serving the maintenance page: ${schema.message}`);
-  return maintenanceStateOf(schema, apps);
-});
+  const state = maintenanceStateOf(schema, apps);
+  // Once per refresh, not per request. The message names both versions, or
+  // each pending app migration file, and the release step; the response only
+  // says the instance, or the app, is being updated. While the whole instance
+  // waits, its line is the one that applies.
+  if (state.platformBehind) {
+    console.error(`Serving the maintenance page: ${schema.message}`);
+  } else if (state.appsBehind.size > 0) {
+    console.error(`Serving "being updated" for ${[...state.appsBehind].join(", ")}: ${apps.message}`);
+  }
+  return state;
+}, { store: (globalForMaintenance.__maintenanceState ??= {}) });
 
 /** Cached for 15 seconds. */
 export function maintenanceState(): Promise<MaintenanceState> {
