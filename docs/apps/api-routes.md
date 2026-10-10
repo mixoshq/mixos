@@ -386,8 +386,8 @@ routes. For that, use [App Services](./app-services.md).
 ## Server components
 
 A server page does **not** import `lib/server`, a connector, or the database.
-All three are lint errors, because reaching them skips the gateway entirely — no
-auth-tier resolution, no role gate, no validation, no budget, no telemetry. A
+The build refuses all three, because reaching them skips the gateway entirely —
+no auth-tier resolution, no role gate, no validation, no budget, no telemetry. A
 page gets its data through its own declared route:
 
 ```tsx
@@ -406,6 +406,12 @@ connector budget, the same telemetry row — minus the network hop and the JSON
 round trip. It deliberately skips the rate limiters: the page render is already
 bounded by the request that triggered it, and charging a user's API budget twice
 for one page view would make a dashboard throttle itself.
+
+The first argument is your app's own slug, written as a string. The build
+refuses any other: a call with another app's slug, or with one built at runtime,
+would run that app's routes as the current user, and `callAppRoute` handed
+anywhere but straight into a call could be given any slug. Another app's data
+comes through [App Services](./app-services.md).
 
 `callAppRoute` **throws** `AppError` rather than returning a Response. A page
 that would rather degrade than fail should catch it and render an

@@ -166,7 +166,7 @@ When a user-scoped connector reports `configured: false`, the user has not conne
 ```ts
 // apps/<slug>/api/<thing>/route.ts
 import type { AppContext } from "@/lib/hooks/types";
-import type SlackConnector from "@/../connectors/slack";
+import type SlackConnector from "@connectors/slack";
 
 export async function GET(_req: Request, { context }: { context: AppContext }) {
   const slack = context.connectors.slack as unknown as

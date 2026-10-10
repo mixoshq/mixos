@@ -48,7 +48,7 @@ change, exactly as changing `AppManifest` is.
   That row is how a running instance knows whether the database has caught up with the code. The build derives what it *expects* from the highest-numbered file in `supabase/migrations/`; `/api/health/ready` compares the two and returns 503 while the database is behind, so an orchestrator holds a new revision out of service rather than routing to an image that will fail on the first request touching a column that isn't there yet. A migration that changes the schema without bumping the row is invisible to that check — Danger fails the PR if you forget.
 
   The comparison is `<`, not `≠`: a database *ahead* of the image is the normal ordering (migrate, then deploy), and only the reverse is refused.
-- **ESLint rules.** The `eslint.config.mjs` enforces security boundaries — apps cannot import the database client or connector modules directly. If you modify these rules, understand why they exist (see `docs/secure-edge-gateway-architecture.md`).
+- **App containment.** `src/lib/apps/import-policy.mjs` is the list of what app code may import, and `scripts/app-containment.ts` holds every app to it, and to the environment, network and HTML bans, on every build and every Registry install. `eslint.config.mjs` carries the same rules as editor feedback. If you modify them, understand why they exist (see `docs/secure-edge-gateway-architecture.md` and `docs/security-architecture.md` §24).
 - **Guide documentation.** If you add a new manifest field, hook, or developer-facing feature, update the relevant guide page (`src/components/apps/guide-tabs.tsx` or `src/components/connectors/connector-guide-tabs.tsx`) — or, for a theme-system change, the matching file under `docs/themes/`.
 
 ## Key files
