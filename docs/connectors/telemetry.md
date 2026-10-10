@@ -56,6 +56,7 @@ declared `method` actually exists on the class at build time.
 ## Limits
 
 - **Declared methods only.** A method not listed in `telemetry` is never counted. Method names must match the public methods on your class.
+- **The list also decides what an MCP tool can call.** A tool reaches a connector only through the methods listed here, and one marked `"mutates": true` throws when a tool calls it — so mark every method that changes anything upstream. See [MCP tools](../apps/mcp.md#read-only-is-enforced-not-requested).
 - **No custom/domain events.** Connector telemetry counts method *calls* — it is auto-instrumented, not a general `track(event, props)` API. If you need arbitrary custom events, emit them from the **app** that calls the connector, using [app telemetry](../apps/telemetry.md).
 - **Best-effort.** Recording never blocks or fails a connector call.
 - **Never sensitive.** Arguments, results, and credentials are never recorded — only the method name and declared metadata.

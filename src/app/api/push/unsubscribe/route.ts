@@ -4,11 +4,15 @@
 
 import { NextResponse } from "next/server";
 import { getReadOnlySession } from "@/lib/auth/session";
-import { deleteSubscriptionByEndpoint } from "@/lib/push/subscriptions";
+import { deleteUserSubscription } from "@/lib/push/subscriptions";
 
 export const dynamic = "force-dynamic";
 
-/** Remove a subscription by endpoint (e.g. on logout or when the user opts out). */
+/**
+ * Remove one of the signed-in user's subscriptions by endpoint (e.g. on logout
+ * or when the user opts out). Another user's subscription is left alone, even
+ * by someone who knows its endpoint.
+ */
 export async function POST(request: Request) {
   const session = await getReadOnlySession();
   if (!session) {
@@ -22,6 +26,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing endpoint" }, { status: 400 });
   }
 
-  await deleteSubscriptionByEndpoint(body.endpoint);
+  await deleteUserSubscription(session.user.id, body.endpoint);
   return NextResponse.json({ ok: true });
 }
