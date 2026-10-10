@@ -40,6 +40,10 @@ just pulled.
   both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
   new app, and the old slug keeps the old data. Migration 0010; run
   `npm run db:local` to apply it.
+- **Registry installs take turns safely.** While another install is running,
+  the dialog says so and offers **Try again**. If an install is paused for more
+  than 15 minutes (a laptop asleep mid-download) and another starts meanwhile,
+  the paused one stops before its next write and says what it left on disk.
 - **Every build knows its version.** The admin pages show it with the commit,
   e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
   into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
