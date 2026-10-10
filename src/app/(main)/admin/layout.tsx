@@ -15,8 +15,11 @@ export default function AdminLayout({
     // are the ones that finish somewhere other than where you are looking —
     // applying a theme repaints the whole page, so the confirmation cannot be
     // an inline notice on the tile you just left.
+    //
+    // `showBuild`: the admin pages are where the MixOS version and commit are
+    // shown, and the only place they are.
     <ToastProvider>
-      <SettingsShell>{children}</SettingsShell>
+      <SettingsShell showBuild>{children}</SettingsShell>
     </ToastProvider>
   );
 }

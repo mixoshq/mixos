@@ -100,7 +100,7 @@ up checking the wrong table.
 | 3    | Rate limit (IP), pre-auth      | 429     | Dispatcher (`src/lib/rate-limit.ts`) |
 | 4    | URL resolves to a route pattern| 404     | Dispatcher (`resolveRoutePath`)      |
 | 5    | This mount serves the route    | 404     | Dispatcher, from the **hoisted contract** — so no app module is imported for a caller the route would refuse |
-| 6    | Route module loads; method exported | 404 / 405 / 500 | Dispatcher (import and dispatch are separated, so a module that throws is not reported as missing) |
+| 6    | App is active, then the route module loads; method exported | 404 / 405 / 500 | Dispatcher. The app gate (`src/lib/apps/app-gate.ts`) runs before the import, so a deactivated app's module-scope code never runs. Import and dispatch are separated, so a module that throws is not reported as missing |
 | 7    | Live declaration matches the registry | 404 | Dispatcher — a gate decided from one source and enforced from another is not a gate |
 | 8    | Auth tier the caller earned    | 401 / 403 / 404 | `src/lib/apps/auth-tier.ts` |
 | 9    | CSRF token, cookie-authenticated mutations only | 403 | `src/lib/apps/csrf.ts` — authenticated mount, identity tiers, mutating methods |
@@ -282,7 +282,12 @@ checked on **every request**, inside `resolveAuthTier`, before any app code runs
 **The app has to be active, and in the running build.** `resolveAuthTier` and
 `hasAppGrant` refuse an app an admin has deactivated, or one the running build
 doesn't carry, before they read a grant (`isAppActive()` in
-[`src/lib/apps/access.ts`](../src/lib/apps/access.ts)). The second half matters
+[`src/lib/apps/access.ts`](../src/lib/apps/access.ts)). The app gate
+([`src/lib/apps/app-gate.ts`](../src/lib/apps/app-gate.ts)) asks the same
+before any of the app's modules is imported, so a deactivated app's code does
+not run at all: not its routes, jobs, syncs, services or `hooks.ts` (§20, §23,
+§25). Deactivating is the incident response: from the next request or tick,
+none of the app's code is started, with no restart. The second half matters
 because the release step keeps an app's row, and the grants, installs and
 widgets that hang off it, when the app leaves the build
 ([`scripts/sync-app-registry.ts`](../scripts/sync-app-registry.ts)): a rollback
@@ -1350,7 +1355,7 @@ operator needs to be able to see what a model has been reading.
 ## 18. The Unauthenticated Surface
 
 `src/proxy.ts` redirects to `/login` when no session cookie is present, except on
-`PUBLIC_ROUTE_PREFIXES`. That list is **fourteen entries**, and each one is a
+`PUBLIC_ROUTE_PREFIXES`. That list is **twelve entries**, and each one is a
 place where "no cookie" is the expected state and the route's own gate is the
 real control. Listing them here because the proxy is the wrong place to look for
 that control, and a reader who assumes a cookie check happened will misread every
@@ -1368,8 +1373,25 @@ one of these.
 | `/api/webhooks` | HMAC signature over the raw body (§19) |
 | `/api/cron` | timing-safe `CRON_SECRET` bearer compare (§20) |
 
-The matcher additionally exempts `themes/`, `favicon.ico` and the `icon*` /
-`apple-icon*` file-convention paths from middleware entirely.
+The matcher additionally exempts `_next/static`, `_next/image`,
+`themes/<id>/`, `connector-assets/`, `screenshots/`, `branding/`,
+`favicon.ico` and the `icon*` / `apple-icon*` file-convention paths from the
+proxy entirely, so neither the cookie check nor the maintenance response below
+applies to them.
+
+**Maintenance response.** Before the public list or the cookie check, the proxy
+asks whether the platform schema is behind this build
+(`src/lib/platform/maintenance.ts`, answer kept for 15 seconds). It can,
+because in Next 16 the proxy always runs on the Node.js runtime. While the
+schema is behind, every path except `/api/health/live` and `/api/health/ready`
+gets a 503 with `Retry-After: 30`: a static page for a page, and
+`{ "error": "This instance is being updated. Try again shortly." }` for
+`/api/*` and `/.well-known/*`. That includes `/api/cron` (the tick waits),
+`/api/webhooks` (senders retry) and `/api/mcp`. The page comes from the proxy
+with no app code and no query, under its own CSP, which allows no script.
+Neither body names a version or says what to run; the server log does both. A
+check that fails, or doesn't answer within 2 seconds, counts as not behind, as
+it does in readiness. App migrations behind don't trigger it.
 
 **Why removing an entry does not harden it.** For `/api/cron` and `/api/webhooks`
 the proxy would answer `307 → /login`, which is a perfectly successful HTTP
@@ -1379,9 +1401,14 @@ event. Nothing throws, nothing retries, and the scheduler simply stops. The
 route's own 401 is what an operator needs to see.
 
 **Health endpoints.** `/api/health/live` returns a static `{ status: "ok" }` with
-no database touch. `/api/health/ready` returns `ok` or `unavailable` with a 503;
-the caught error goes to `console.error` and never into the response body.
-Neither leaks version, commit, environment, or stack. Neither is rate-limited.
+no database touch. `/api/health/ready` returns `{ status: "ok" }`, or a 503 with
+`{ status: "unavailable" }` and, when the database is behind, a `reason`:
+`schema-behind` or `app-migrations-behind`. It carries no number: not the
+schema versions, not a count of migrations. The server log names the versions
+and files, and a caught error goes to `console.error` and never into the
+response body. Neither leaks version, commit, environment, or stack. Neither is
+rate-limited. Both answer during the maintenance response. The MixOS version
+and commit appear on the admin pages, to admins, and nowhere else.
 
 ---
 
@@ -1473,6 +1500,13 @@ sidecar locally.
   RETURNING id` row-locks the match, so two overlapping ticks cannot both run the
   same job. A lease older than `STALE_LEASE_MINUTES` is reclaimable, so a job
   whose process died does not stay claimed forever.
+- **An inactive app's jobs do not run, not even by Run now.** The claim
+  requires the app to be active, for the tick and for an admin's **Run now**
+  alike, so the server refuses Run now on an inactive app, not only the
+  disabled button. The app gate (§3.1) is asked again before a job's or sync's
+  module is imported, so an app switched off after the claim runs nothing
+  either, and its job stays due. Run now, a job's Enable and Disable, and Start
+  and Stop tick are audited (§28).
 - **Apps not in the build** keep their job rows, with each job's enabled switch,
   for when they come back (§3.1). A tick runs only jobs of active apps the
   running build carries.
@@ -1568,8 +1602,14 @@ default-deny:
 | Provider declares this service in `provides` | `NOT_EXPOSED` |
 | Consumer declared this dependency in `consumes` | `NOT_DECLARED` |
 | Provider's `consumers` allowlist admits the caller | `FORBIDDEN` |
+| Provider app is active, whatever the audience | `PROVIDER_INACTIVE` |
 | For `audience: "user"`, an acting user exists | `NO_USER` |
 | That user holds a grant for the **provider** app | `FORBIDDEN_USER` |
+
+The activation check is the app gate (§3.1), asked before the provider's
+context is built or its handler imported. An `audience: "app"` service consults
+no grant, so this is what refuses an inactive provider's service to a job or a
+public route.
 
 The provider's handler runs with the **provider's own scoped context**, and the
 user is re-authorized in the provider's terms rather than inheriting the
@@ -1718,7 +1758,9 @@ server-side and platform-owned.
 
 It is **not** an authorization bypass: it re-runs `resolveAuthTier` against the
 page's own session, the role gate, and input/output validation, and it records
-the same telemetry row.
+the same telemetry row. Like the gateway, it checks that the app is active
+before it imports the route (the app gate, §3.1), so a deactivated app's
+module-scope code does not run; `resolveAuthTier` checks activation again.
 
 It is **bound to the calling app at build time.** Run with another app's slug
 it would execute that app's routes, mutations included, as the current user,
@@ -1819,9 +1861,17 @@ module is not a retention policy.
 Currently recorded: `connector.configure`, `connector.test`,
 `connector.disable`, `connector.enable`, `app.password.set`,
 `app.password.clear`, `app.activate`, `app.deactivate`, `app.missing`,
-`app.returned`, `theme.apply`, `user.grant.add`, `user.grant.revoke`,
-`user.role.set`. `connector.disable` and `connector.enable` name the apps that
-declare the connector, in `details` as `requiredBy` and `optionalFor`.
+`app.returned`, `app.job.run`, `app.job.enable`, `app.job.disable`,
+`scheduler.start`, `scheduler.stop`, `theme.apply`, `user.grant.add`,
+`user.grant.revoke`, `user.role.set`. `connector.disable` and
+`connector.enable` name the apps that declare the connector, in `details` as
+`requiredBy` and `optionalFor`.
+
+**The Scheduled Jobs page's actions.** Run now, Enable and Disable are
+`app.job.*` rows against the app, with the job in `details`. Start and Stop
+tick are `scheduler.start` and `scheduler.stop`, with no target, since they
+switch every job at once. Run now is recorded as the run starts, so a long run
+leaves its row even if the request is cut short, and a refused one leaves none.
 
 **Rows the release step writes.** `app.missing` (an app left the build) and
 `app.returned` (it came back, with whether its files changed and both hashes)
@@ -1909,6 +1959,13 @@ them.
 
 ### The order of operations is the control
 
+Two refusals come first and need no lock: the kind's install flag (see
+**Turning it off**), then `checkInstallable()`, which refuses a built deployment
+(see **What it deliberately will not do**), a folder that is not writable and a
+missing generator. A registration refused there neither waits behind another
+admin's nor holds one up. Then the register lock is taken (below), the target
+directory must not exist, and:
+
 ```
 1. GET /api/v1/<kind>/<slug>/install     the commit, the URL, the hash
 2. Refuse a yanked release unless the admin was shown why and insisted
@@ -1916,12 +1973,13 @@ them.
 4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
 5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
 6. Pre-flight the manifest: it exists, it parses, it is for this slug
-7. Write to `.installing-<slug>` beside the target, never to the target
-8. Rename into place — the first moment the tree is live
+7. Check the lock, then write to `.installing-<slug>` beside the target,
+   never to the target
+8. Check the lock, then rename into place — the first moment the tree is live
 9. Run scripts/generate-project-registry.ts — the authoritative validation,
    containment scan included (§24)
-10. If it was rejected, remove the directory and regenerate, so a failed
-    registration leaves the instance exactly as it was
+10. If it was rejected, check the lock, then remove the directory and
+    regenerate, so a failed registration leaves the instance exactly as it was
 ```
 
 **Nothing untrusted touches the filesystem before step 5.** That is why the tar
@@ -1930,6 +1988,43 @@ extract-then-verify pipeline has a window where a tampered tree is on disk, and
 then depends on its cleanup being correct for that not to matter. It also means
 the path rules are ours rather than differing between GNU tar and bsdtar, which
 is what this project runs on in Docker and in development respectively.
+
+### The register lock is a lease, renewed and fenced
+
+Two registrations at once would run two generators over the same
+`src/generated/*.ts` files, and one's rollback could land on top of the other's
+success. So steps 1 to 10 run under one instance-wide lock, `repository.register`
+([`src/lib/platform/lock.ts`](../src/lib/platform/lock.ts)): a row in
+`_platform_locks` rather than a Postgres advisory lock, because a session
+advisory lock does not survive a transaction pooler. An admin who registers
+while it is held is told another registration is running and offered **Try
+again**, and the attempt is audited as `<kind>.register.rejected` with
+`reason: "locked"`.
+
+The row is a lease. Anyone may take it once it has gone 15 minutes without
+renewal, so a crashed registration cannot wedge the feature. But a registration
+can also be paused for longer than that, by a laptop going to sleep
+mid-download, and carry on when it wakes, by which time another may hold the
+lock. Three rules cover that:
+
+- **The holder renews the lease every minute** while it works, so a slow but
+  live registration never loses it, the generator run in step 9 included. That
+  makes its own time limits the lock's: the repository and GitHub requests time
+  out, and a generator run is ended after 120 seconds, the processes it started
+  included.
+- **The lock is checked before the disk changes.** Steps 7, 8 and 10 begin with
+  `assertHeld()`, `update _platform_locks set acquired_at = now() where name =
+  $1 and holder = $2 returning 1`, which renews the lease only while the row
+  still holds this acquisition's random token. Step 9 runs straight after step
+  8's check.
+- **A holder that has lost the lock stops without touching the disk**, cleanup
+  included: by then the staging directory, or the registry it would regenerate,
+  may be the new holder's. The admin is told what was left on disk, and the
+  audit row records `reason: "lock-lost"`. A check that cannot reach the
+  database stops it the same way, as `"lock-unconfirmed"`.
+
+The release is scoped to the same token, so a holder that lost the lock cannot
+delete the new holder's row on its way out.
 
 ### Why a host allowlist and not resolve-and-recheck
 
@@ -2027,7 +2122,8 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   happens to the data and grants the installed one already has.
 - **Run from a built artifact.** `checkInstallable()` refuses up front when
   `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
-  `output: "standalone"` tree, which its server `chdir`s to before listening.
+  `output: "standalone"` tree, which its server `chdir`s to before listening
+  (`isBuiltDeployment()`, `src/lib/platform/build.ts`).
 
   This check has to be a marker rather than a capability probe, because the
   capability probe passes and the capability is absent.
@@ -2054,7 +2150,7 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   execs a source file, and an archive that can set the mode of a file it places
   in the checkout can set the setuid bit.
 
-### A released build always searches mixos.org
+### A built deployment searches mixos.org
 
 `MIXOS_REPOSITORY_URL` decides where an instance gets the checksums it verifies
 every download against. **Whoever chooses the catalogue chooses what "verified"
@@ -2063,24 +2159,15 @@ project, and the one most likely to be set to something local and left there.
 
 It legitimately points at a laptop: `http://localhost:4321` for a host checkout
 of the mixos.org site, `http://host.docker.internal:4321` from inside the Docker
-stack. Both are right there and catastrophic in a release, so the value is
-gated on the way out by four layers:
+stack. Both are right there and wrong on a deployment, so the value is gated on
+the way out by four layers:
 
 | Layer | Where | Catches |
 | --- | --- | --- |
 | Pre-commit review | `dangerfile.ts` (`fail`) | A PR that pins it in a committed file |
-| CI | `npm run verify:repository-url`, blocking in `ci.yml` | The same, on every push — before a tag exists |
-| Runtime lock | `repositoryBaseUrl()` | A release built or deployed with it set anyway |
+| CI | `npm run verify:repository-url`, blocking in `ci.yml` | The same, on every push |
+| Runtime lock | `repositoryBaseUrl()` | A built deployment with it set anyway, in a committed file or in its own environment |
 | Default | `DEFAULT_REPOSITORY_URL` | Everything else |
-
-**The runtime lock is inert until a production build sets `MIXOS_RELEASE`.**
-The `Dockerfile` declares the `ARG` for the image path, but this repository
-deploys on Vercel, where nothing sets the variable today — so the first three
-layers are what actually hold, and a deployed instance would still honour an
-override applied to its own environment. The step that closes it is
-[`docs/plans/20260921_0842-release-versioning.md`](plans/20260921_0842-release-versioning.md):
-`next.config.ts` derives `MIXOS_RELEASE` from `package.json` when
-`VERCEL_ENV` is `production`.
 
 Only the scanned files matter, and the list is explicit rather than a glob:
 `.env.docker`, `docker-compose.yml` and the two Dockerfiles. `.env.local` is
@@ -2089,23 +2176,24 @@ travel. A **commented** example is not flagged — both env files carry one show
 the localhost form on purpose, and a check whose fix is "delete the
 documentation" is a check people learn to bypass.
 
-**The runtime lock keys on `MIXOS_RELEASE`, not `NODE_ENV`.** That variable
-carries the tag (`v1.2.0`) and is stamped by the tag-triggered build, nothing
-else. `npm run docker:prod` runs the production-parity profile with
-`NODE_ENV=production`, and that profile exists precisely so a developer can
-exercise a production shape locally — including against a local catalogue.
-Keying on `NODE_ENV` would take that away to catch a case it does not actually
-identify.
+**The runtime lock covers every built deployment**, by the marker
+`checkInstallable()` refuses on (`isBuiltDeployment()`,
+`src/lib/platform/build.ts`): `VERCEL` set, or a standalone `server.js` at the
+working directory, which is the Docker image on every host. There it ignores the
+override unless the value names the deployment's own machine, one of the four
+hosts in [the transport rule](#the-transport-carrying-the-checksum). That
+exception is what lets `npm run docker:prod`, the production image run locally,
+browse a local copy of the site. Keying the lock on `NODE_ENV` would take that
+profile away to catch a case `NODE_ENV` does not identify.
 
-When a release does carry an override, it is **ignored and logged, not
-refused**. A release that fails to boot over a stray environment variable is a
-worse outcome than one that quietly uses the right catalogue, and there is no
-branch here where refusing to start is safer: the correct value is known.
+An ignored override is **logged, not refused**. A deployment that fails to boot
+over a stray environment variable is a worse outcome than one that quietly uses
+the right catalogue, and there is no branch here where refusing to start is
+safer: the correct value is known.
 
-The one thing none of this constrains is a deployment's own environment after
-the fact — an operator who sets the variable on a released instance gets the
-warning and mixos.org. That is the intended end state: **all installs search
-mixos.org, and the override is a development affordance.**
+A source checkout honours the override, because developing the platform against
+another catalogue is what it is for. That is the intended end state: **every
+deployment searches mixos.org, and the override is a development affordance.**
 
 ### The transport carrying the checksum
 
