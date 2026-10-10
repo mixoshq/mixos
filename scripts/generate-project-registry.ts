@@ -41,9 +41,11 @@ import type {
   ThemeManifest,
 } from "../src/lib/themes/types";
 import { compileTheme, ThemeError } from "./theme-css";
+import { applyWidgetConfigs } from "./widget-configs";
 import { FatalManifestError } from "./manifest-errors";
 import { readImageSize } from "./image-size";
 import { resolveThemeLogo, validateAppBranding } from "./brand-checks";
+import { listAppMigrations } from "./app-migration-files";
 import {
   checkHookNamespaces,
   formatHookFindings,
@@ -52,6 +54,11 @@ import {
 } from "./hook-checks";
 import { formatFindings, scanAppContainment } from "./app-containment";
 import { isScannedFile } from "../src/lib/apps/import-policy.mjs";
+import {
+  validateConnectorMethods,
+  validateConnectorTelemetry,
+  validateRegistryContract,
+} from "./connector-checks";
 import type { Screenshot, ScreenshotKind } from "../src/lib/screenshots";
 import {
   SCREENSHOT_EXTENSIONS,
@@ -60,6 +67,7 @@ import {
   SCREENSHOT_MIN_WIDTH,
   screenshotUrl,
 } from "../src/lib/screenshots";
+import { BRAND_HOOKS } from "../src/lib/branding/types";
 import * as ts from "typescript";
 
 /**
@@ -229,7 +237,7 @@ function unscannedEntryPoints(appDir: string, manifest: AppManifest): string[] {
  *
  * The one thing JSON cannot express is a config field built from a helper, so
  * that — and only that — moved to an optional `widgets.ts`. See
- * loadWidgetConfigs() below.
+ * applyWidgetConfigs() in ./widget-configs.ts.
  */
 async function loadAppManifest(
   appDir: string,
@@ -243,104 +251,6 @@ async function loadAppManifest(
 
   await applyWidgetConfigs(appDir, manifest);
   return manifest;
-}
-
-/**
- * Merge `widgets.ts` config fields into the manifest's widget entries.
- *
- * A widget's `config` is the one part of a manifest that repeats: four widgets
- * wanting a title, a selection and a display mode is the same four field
- * objects written out four times. Helpers in @/lib/apps/widget-config-presets
- * collapse that, and they also derive the widget's config TYPE — neither of
- * which JSON can do.
- *
- * So `widgets.ts` is optional, and narrow: it supplies config arrays and
- * nothing else. Identity, permissions, egress, roles and every other field a
- * reviewer cares about stay in `app.json`, as text.
- *
- *     // apps/my-app/widgets.ts
- *     export default {
- *       "widgets/favorites.tsx": favoritesConfigFields,
- *     };
- *
- * Keyed by `component`, which is a path and therefore already unique within an
- * app — `name` is prose and free to collide.
- *
- * ## Drift is refused, not reconciled
- *
- * Splitting one manifest across two files invents a way for them to disagree.
- * Both directions throw rather than shrug: a key naming no widget is a typo or
- * a rename that missed a file, and a widget declaring `config` in BOTH places
- * has two sources of truth and no rule for picking one. Neither is a state
- * anyone means to be in, and a generator that quietly picks a winner is how
- * someone edits the file that is being ignored.
- *
- * Worth knowing where that throw lands: the caller catches it, warns, and skips
- * the app — the same handling a malformed `app.json` gets. So the build still
- * succeeds and the app is absent from the registry rather than wrong in it.
- * That is this generator's existing severity for a broken manifest, not a
- * judgement about drift specifically.
- */
-async function applyWidgetConfigs(
-  appDir: string,
-  manifest: Record<string, unknown>,
-): Promise<void> {
-  const tsPath = path.join(appDir, "widgets.ts");
-  if (!fs.existsSync(tsPath)) return;
-
-  const slug = path.basename(appDir);
-
-  // tsx's ESM loader handles transpilation. Append a cache-busting query so
-  // repeated generator runs during `next dev` pick up edits.
-  const href = `${pathToFileURL(tsPath).href}?t=${Date.now()}`;
-  const mod = (await import(href)) as { default?: unknown };
-  const byComponent = mod.default;
-
-  if (!byComponent || typeof byComponent !== "object" || Array.isArray(byComponent)) {
-    throw new Error(
-      `apps/${slug}/widgets.ts must default-export an object keyed by each ` +
-        `widget's "component" path, e.g. { "widgets/foo.tsx": fooConfigFields }.`,
-    );
-  }
-
-  const widgets = Array.isArray(manifest.widgets)
-    ? (manifest.widgets as Record<string, unknown>[])
-    : [];
-  const declared = new Set(
-    widgets.map((w) => String(w.component ?? "")).filter(Boolean),
-  );
-
-  for (const [component, fields] of Object.entries(
-    byComponent as Record<string, unknown>,
-  )) {
-    if (!declared.has(component)) {
-      throw new Error(
-        `apps/${slug}/widgets.ts has config for "${component}", which no widget ` +
-          `in app.json declares. Known components: ${[...declared].join(", ") || "(none)"}.`,
-      );
-    }
-    if (!Array.isArray(fields)) {
-      throw new Error(
-        `apps/${slug}/widgets.ts: "${component}" must map to an array of config fields.`,
-      );
-    }
-  }
-
-  for (const widget of widgets) {
-    const component = String(widget.component ?? "");
-    const fields = (byComponent as Record<string, unknown>)[component];
-    if (fields === undefined) continue;
-    if (widget.config !== undefined) {
-      throw new Error(
-        `apps/${slug}: widget "${component}" declares config in BOTH app.json and ` +
-          `widgets.ts. Keep it in one — app.json for plain fields, widgets.ts for ` +
-          `fields built from presets.`,
-      );
-    }
-    // Plain data by the time it lands here; the registry is serialised with
-    // JSON.stringify, so anything else would not survive the write.
-    widget.config = fields;
-  }
 }
 
 /**
@@ -1061,27 +971,6 @@ function validateServiceWiring(manifests: AppManifest[]): void {
   }
 }
 
-/** As validateAppTelemetry, but for a connector's declared method list. */
-function validateConnectorTelemetry(
-  raw: { method: string; description?: string }[] | undefined,
-  name: string,
-): ConnectorTelemetryDefinition[] {
-  if (!raw || raw.length === 0) return [];
-  const seen = new Set<string>();
-  for (const e of raw) {
-    if (seen.has(e.method)) {
-      throw new Error(
-        `connectors/${name}/connector.json: duplicate telemetry method "${e.method}".`,
-      );
-    }
-    seen.add(e.method);
-  }
-  return raw.map((e) => ({
-    method: e.method,
-    ...(e.description != null ? { description: e.description } : {}),
-  }));
-}
-
 // ── screenshots ──────────────────────────────────────────────────────────────
 
 /**
@@ -1253,27 +1142,22 @@ function validateThemeAssets(
 }
 
 /**
- * A declared font must exist AND be referenced by an @font-face in theme.css.
- * A manifest font nobody @font-faces is a file shipped to every user for
- * nothing; an @font-face with no manifest entry hides a dependency from review.
+ * A declared font must exist. Whether theme.css loads it — and whether every
+ * font theme.css loads is declared — is checked by compileTheme, which has the
+ * parsed @font-face rules: a manifest font nobody @font-faces is a file shipped
+ * to every user for nothing; an @font-face with no manifest entry hides a
+ * dependency from review.
  */
 function validateThemeFonts(
   fonts: ThemeFontFace[],
   slug: string,
   dir: string,
-  css: string,
 ): ThemeFontFace[] {
   for (const font of fonts) {
     if (!fs.existsSync(path.join(dir, "assets", font.file))) {
       throw new ThemeError(
         `themes/${slug}/theme.json: fonts[] names "${font.file}", which does not exist. ` +
           `Expected it at themes/${slug}/assets/${font.file}.`,
-      );
-    }
-    if (!css.includes(font.file)) {
-      throw new ThemeError(
-        `themes/${slug}/theme.json: fonts[] declares "${font.file}", but no @font-face in ` +
-          `theme.css loads it. A font file shipped to every user and never used is pure weight.`,
       );
     }
   }
@@ -1335,10 +1219,10 @@ async function scanThemes(): Promise<{
       dir,
       escapes: r.escapes ?? [],
       declaredSurfaces: r.surfaces ?? [],
+      declaredFonts: (r.fonts ?? []).map((f) => f.file),
     });
 
-    const rawCss = fs.readFileSync(path.join(dir, "theme.css"), "utf-8");
-    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir, rawCss);
+    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir);
     const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
     const screenshots = validateScreenshots(r.screenshots, "themes", slug, dir);
     const logo = assets.logo
@@ -1424,6 +1308,9 @@ async function scanApps(): Promise<AppManifest[]> {
     try {
       raw = await loadAppManifest(appDir);
     } catch (err) {
+      // A widgets.ts that disagrees with app.json is a manifest error like any
+      // other, and aborts the run rather than dropping the app.
+      if (err instanceof FatalManifestError) throw err;
       console.warn(
         `  Skipping ${entry.name}/ — failed to load manifest: ${err}`,
       );
@@ -1651,159 +1538,6 @@ interface ConnectorManifestOut {
   auth?: ConnectorAuthPolicy;
   http?: ConnectorHttpPolicy;
   webhook?: ConnectorWebhookPolicy;
-}
-
-/**
- * Base-class contract, not app-callable surface. The platform calls these; an
- * app never can, so they are not capabilities and are not declared.
- */
-const CONNECTOR_RESERVED_METHODS = new Set([
-  "initialize",
-  "testConnection",
-  "handleWebhook",
-]);
-
-/**
- * Every public method on a connector class must be declared in `telemetry`.
- *
- * WHY THIS IS A BUILD ERROR AND NOT A LINT. The Connector Registry's Access tab
- * answers "what can this reach, and can it change anything" from `telemetry`
- * plus each entry's `mutates`. That answer is only trustworthy if the list is
- * COMPLETE — and `telemetry` was designed as opt-in instrumentation, so nothing
- * made it so. A connector could ship a `sendMessage()`, leave it undeclared,
- * and the tab would report "no method changes anything upstream" about a
- * connector that sends mail.
- *
- * Under-reporting is the one failure a permissions view cannot have: the whole
- * reason an admin opens it is to find out what this thing could do to their
- * data. Over-reporting is a nuisance; under-reporting is a false assurance.
- *
- * Parsed from the AST rather than by regex, because the answer has to be right:
- * a regex cannot tell a method on the connector class from one on a helper
- * class in the same file, nor see the `private` that makes it not count.
- */
-function validateConnectorMethods(
-  name: string,
-  dir: string,
-  telemetry: ConnectorTelemetryDefinition[],
-): void {
-  const entry = path.join(dir, "index.ts");
-  if (!fs.existsSync(entry)) return;
-
-  const source = ts.createSourceFile(
-    entry,
-    fs.readFileSync(entry, "utf-8"),
-    ts.ScriptTarget.Latest,
-    true,
-  );
-
-  const declared = new Set(telemetry.map((t) => t.method));
-  const undeclared: string[] = [];
-
-  for (const statement of source.statements) {
-    if (!ts.isClassDeclaration(statement)) continue;
-    // Only a class that extends something — i.e. the connector, not a local
-    // helper or a plain data class defined alongside it.
-    const extendsClause = statement.heritageClauses?.some(
-      (h) => h.token === ts.SyntaxKind.ExtendsKeyword,
-    );
-    if (!extendsClause) continue;
-
-    for (const member of statement.members) {
-      if (!ts.isMethodDeclaration(member) || !ts.isIdentifier(member.name))
-        continue;
-      const modifiers = ts.getModifiers(member) ?? [];
-      const hidden = modifiers.some(
-        (m) =>
-          m.kind === ts.SyntaxKind.PrivateKeyword ||
-          m.kind === ts.SyntaxKind.ProtectedKeyword ||
-          m.kind === ts.SyntaxKind.StaticKeyword,
-      );
-      const methodName = member.name.text;
-      if (
-        hidden ||
-        methodName.startsWith("#") ||
-        CONNECTOR_RESERVED_METHODS.has(methodName) ||
-        declared.has(methodName)
-      ) {
-        continue;
-      }
-      undeclared.push(methodName);
-    }
-  }
-
-  if (undeclared.length > 0) {
-    throw new Error(
-      `connector.json: these public methods are not declared in "telemetry": ` +
-        `${undeclared.join(", ")}.\n` +
-        `  The Connector Registry reports what a connector can do from that list, ` +
-        `so an undeclared method is one an admin is never told about — and if it ` +
-        `writes, the registry says this connector changes nothing.\n` +
-        `  Add each with a description and, when it changes anything upstream, ` +
-        `"mutates": true. Make it private if apps should not call it.`,
-    );
-  }
-}
-
-/**
- * The Connector Registry contract: what a connector must declare for its admin
- * experience to exist at all.
- *
- * These are not stylistic preferences. Each one is a specific hole in the
- * registry when it is absent:
- *
- *   · no `icon`         — an unidentifiable tile in a grid of tiles
- *   · no `setup`        — a Configure wizard whose first step is blank, so the
- *                         admin is asked for a Client ID with no idea where to
- *                         get one
- *   · no `scopesUrl`    — a permissions list that can never be populated, and
- *                         no way to answer "what can this reach"
- *
- * Reported together rather than one per run: an author adding a connector
- * should learn everything that is missing in one build, not discover it three
- * builds in a row.
- *
- * See docs/connectors/registry-ux.md.
- */
-function validateRegistryContract(
-  name: string,
-  raw: {
-    icon?: string;
-    auth?: { scopesUrl?: string };
-    setup?: { title?: string; steps?: unknown[] };
-  },
-): void {
-  const missing: string[] = [];
-
-  if (!raw.icon) {
-    missing.push(
-      '"icon" — a square PNG/WebP/SVG of at least 512x512 in this connector\'s assets/',
-    );
-  }
-  if (!raw.auth?.scopesUrl) {
-    missing.push(
-      '"auth.scopesUrl" — the provider\'s scope reference page, which the registry parses to list permissions in plain English',
-    );
-  }
-  if (!raw.setup?.title) {
-    missing.push(
-      '"setup.title" — the label for the provider-side step, e.g. "Create a Google Cloud OAuth app"',
-    );
-  }
-  if (!raw.setup?.steps || raw.setup.steps.length === 0) {
-    missing.push(
-      '"setup.steps" — at least one step covering what the admin does in the provider\'s own console',
-    );
-  }
-
-  if (missing.length > 0) {
-    throw new Error(
-      `connector.json is missing what the Connector Registry needs:\n` +
-        missing.map((m) => `    - ${m}`).join("\n") +
-        `\n  Every connector ships a configuration experience; these are the parts ` +
-        `the platform cannot invent. See docs/connectors/registry-ux.md.`,
-    );
-  }
 }
 
 /** Smallest edge a connector icon may have, and it must be square. */
@@ -2038,7 +1772,18 @@ function expectedSchemaVersion(): number {
 }
 
 /**
- * The one build-time fact the running server cannot work out for itself.
+ * Every app migration in apps/<slug>/migrations/, as the release step's runner
+ * lists them (scripts/app-migration-files.ts), so the two agree on what "every
+ * app migration" is.
+ */
+function expectedAppMigrations(): { slug: string; file: string }[] {
+  return listAppMigrations(APPS_DIR).flatMap(({ slug, files }) =>
+    files.map((file) => ({ slug, file })),
+  );
+}
+
+/**
+ * The build-time facts the running server cannot work out for itself.
  *
  * Everything else about build identity is a RUNTIME variable, and deliberately:
  * `MIXOS_RELEASE` already carries the tag and is stamped into the runner stage
@@ -2052,6 +1797,10 @@ function expectedSchemaVersion(): number {
  * and that directory is not copied into the runner image at all, so the number
  * has to travel with the build or not exist.
  *
+ * So is the list of app migrations the readiness probe waits for. `apps/` is in
+ * the Docker image, but a serverless function sees a repository file only if
+ * output tracing put it there; a list compiled into the server needs neither.
+ *
  * NOTE: no timestamp and no commit here. Every value in this file is stable for
  * a given checkout, so re-running the generator rewrites an identical file and
  * the dev server has nothing to recompile. A timestamp — or a git SHA, which
@@ -2059,20 +1808,27 @@ function expectedSchemaVersion(): number {
  */
 function writeBuildInfo(): void {
   const schema = expectedSchemaVersion();
+  const appMigrations = expectedAppMigrations();
 
   const output = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
 //
-// Derived from supabase/migrations/ at build time, because that directory does
-// not exist in the runner image. See src/lib/platform/schema-version.ts for
+// Derived from supabase/migrations/ and apps/*/migrations/ at build time, so the
+// running server knows what it was built against without reading either. See
+// src/lib/platform/schema-version.ts and src/lib/platform/app-migrations.ts for
 // what this gates, and src/lib/platform/version.ts for the runtime half of
 // build identity.
 
 /** Highest migration number in supabase/migrations/ at build time. */
 export const EXPECTED_SCHEMA_VERSION = ${schema};
+
+/** Every app migration in apps/<slug>/migrations/ at build time. */
+export const EXPECTED_APP_MIGRATIONS: readonly { slug: string; file: string }[] = ${JSON.stringify(appMigrations, null, 2)};
 `;
 
   fs.writeFileSync(BUILD_INFO_FILE, output, "utf-8");
-  console.log(`Build stamp: expected schema version ${schema}`);
+  console.log(
+    `Build stamp: expected schema version ${schema}, ${appMigrations.length} app migration(s)`,
+  );
 }
 
 async function main() {
@@ -2311,8 +2067,9 @@ export function getTheme(slug: string): ThemeManifest {
   fs.writeFileSync(THEME_REGISTRY_FILE, themeOutput, "utf-8");
 
   // Read by eslint-rules/no-low-contrast-token-pairs.mjs, which cannot import
-  // TypeScript and must not re-parse CSS. It lints against the fallback theme:
-  // which theme is *active* is a runtime database value the build cannot know.
+  // TypeScript and must not re-parse CSS. It lints against every installed
+  // theme: which one is *active* is a runtime database value the build cannot
+  // know, so an element has to clear the floor under each of them.
   fs.writeFileSync(
     THEME_TOKENS_FILE,
     JSON.stringify({ fallback: fallbackTheme, tokens: themeTokens }, null, 2),

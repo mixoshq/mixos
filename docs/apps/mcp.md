@@ -190,8 +190,9 @@ interface McpToolContext {
 ```
 
 It's the same connectors, roles, and scoped data your own API routes get for this
-user — deliberately, so there's no second authorization surface to keep in step.
-No `notifications`, no `hooks`: a tool answers a question, it does not act.
+user — deliberately, so there's no second authorization surface to keep in step —
+narrowed to reads. No `notifications`, no `hooks`: a tool answers a question, it
+does not act.
 
 `ctx.caller.clientName` is the client's self-reported name. Display only —
 never authorize on it.
@@ -203,22 +204,29 @@ never authorize on it.
 | **Type** | `ctx.db` has no `insert` / `update` / `upsert` / `delete`. Compile error. |
 | **Runtime** | The scoped client is a Proxy that throws on those verbs, surviving `as any` and every `.select().eq()` hop. |
 | **Imports** | No app code can import `@/lib/db*`, the App Services broker, or the context builder. The build refuses the app, and ESLint flags it in an editor. |
-| **Connectors** | A method a connector declares as `mutates` throws when called from a tool. |
+| **Connectors** | A tool can call only the methods a connector declares as reads. A method declared `mutates`, or one it doesn't declare at all (`request()` included), throws. |
+| **App Services** | A provider reached through `ctx.services` runs read-only too: its `db` refuses writes and its connectors are narrowed the same way. |
 
 **Connectors used to be the gap the platform couldn't close**, because it could
 not know which connector methods mutate. A connector now declares that
 (`mutates: true` on a method in its manifest), and the MCP context wraps
-`ctx.connectors` to throw on those calls — so a write from a read-only tool is a
-runtime error, not a blocking review finding somebody has to catch.
+`ctx.connectors` so that only the declared reads can be called — so a write from
+a read-only tool is a runtime error, not a blocking review finding somebody has
+to catch. Anything a connector doesn't declare is refused as well, including the
+base class's `request()`: it is protected, but `as any` reaches it, and it sends
+whatever verb it is given.
 
-**The residue is honest and worth knowing.** The check covers methods a connector
-*declared*. An undeclared method passes through, because inferring intent from a
-method name would be worse than a stated gap. So: declare your connector's
-writes, and keep watching for side effects hiding inside a helper you're
-reusing — a hook fired on the way past is a side effect even when nothing in your
-tool's own code writes anything. If a route's builder fires a hook or writes an audit row
-on the way past, the tool must call a variant that doesn't — firing a hook is a
-side effect even when nothing in the tool's own code writes anything.
+**A tool can't write by asking another app to.** When it calls
+`ctx.services.request(...)`, the provider's handler gets a read-only `db` and
+read-only connectors, and `ctx.caller.readOnly` is `true` so it can skip a write
+it would normally make. A write it attempts anyway fails the request.
+
+**The residue is honest and worth knowing.** The check trusts the declaration: a
+method that writes but isn't declared `mutates` runs. So: declare your
+connector's writes, and keep watching for side effects hiding inside a helper
+you're reusing. If a route's builder fires a hook or writes an audit row on the
+way past, the tool must call a variant that doesn't — firing a hook is a side
+effect even when nothing in the tool's own code writes anything.
 
 ## Reuse, don't duplicate
 

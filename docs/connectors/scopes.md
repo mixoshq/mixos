@@ -31,7 +31,10 @@ Usage lives on its own tab, under its own heading, and says so in words.
 
 Point it at the page that **tabulates scopes against descriptions** — not an API
 overview, not a quickstart. The parser looks for table rows containing something
-shaped like a scope, and takes the longest other cell as the description.
+shaped like a scope, and takes the longest other cell as the description. A
+scope is a URL (`https://…/auth/records.readonly`), a name with structure
+(`channels:read`, `Mail.Read`, `read_products`), or a single word the page sets
+as code in a row's first cell (GitHub's `repo`).
 
 Read it, and write the result into the manifest:
 
@@ -138,6 +141,10 @@ answer would report one user's refusal as everybody's.
 | ✓ **Granted** | requested by this connector, and in the grant |
 | ✗ **Refused** | requested, and **not** in the grant |
 | ? **Unknown** | this API documents it; this connector never asks for it |
+
+A provider may leave `scope` out of its token response when it granted exactly
+what was requested (RFC 6749 §5.1). That is recorded as a grant of every
+requested scope, not as a grant of none.
 
 **Refused is the one that earns the feature.** It happens when someone unticks a
 permission on the consent screen, when a workspace policy narrows the grant, or

@@ -76,7 +76,8 @@ serving. The pre-deploy logs say why.
 
 - **The deploy fails at the health check.** Open the pre-deploy logs. If the
   release step didn't run, or failed, `/api/health/ready` answers 503 with
-  `"reason": "schema-behind"`.
+  `"reason": "schema-behind"` or, when an app's migrations are what's missing,
+  `"reason": "app-migrations-behind"`. The web service's log names the files.
 - **The release step warns that keys are missing.** A key's value was replaced
   with something that isn't 32 bytes. Restore it from your copy;
   `npm run keys:generate` makes new ones for a fresh install.

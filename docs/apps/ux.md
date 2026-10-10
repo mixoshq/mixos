@@ -49,7 +49,9 @@ const query = useAppQuery<Result>(appSlug, "GET /items", { scope });
 You cannot reach the data branch without a `skeleton` and an `empty` — the types
 require both — and `empty` takes a `cause`, so a generic grey box is not
 expressible. Loading, refetching and error are handled for you, including keeping
-the previous data on screen during a user-triggered refetch.
+the previous data on screen during a user-triggered refetch. A failed connector
+call renders as that connector's state — "Not connected" with no Retry when an
+administrator has to act — rather than as a generic error.
 
 `useAppQuery` models the four states as a discriminated union rather than three
 booleans, because `loading && error` and `!loading && !data && !error` are states
@@ -168,7 +170,7 @@ Measured, light theme, tint composited over `bg-card`:
 
 Read those last five together, because they are the argument for the rule over the convention: **the same construction passes in success and fails in warning and destructive.** Nobody eyeballs a 0.4 difference. The three status tokens are equally legible *on the page*, and equally illegible *on their own tint* — but not at the same alpha, so there is no threshold to memorise.
 
-**This is lint-enforced, as an error.** `mos-design/no-low-contrast-token-pairs` parses the tokens out of `globals.css`, resolves the classes on each element per variant state, composites any alpha, and computes the ratio. It shipped as a warning while ~215 pre-existing elements across 16 apps were outstanding; that backlog is gone, and a floor that only warns is not a floor.
+**This is lint-enforced, as an error.** `mos-design/no-low-contrast-token-pairs` reads every installed theme's tokens from the generated `theme-tokens.json`, resolves the classes on each element per variant state, composites any alpha over that theme's own ground, and computes the ratio under each theme. Which theme is active is an admin's choice at runtime, so an element has to clear the floor in all of them. It shipped as a warning while ~215 pre-existing elements across 16 apps were outstanding; that backlog is gone, and a floor that only warns is not a floor.
 
 It earns its keep on new code too. Promoting it immediately caught two elements in the primitives above: `hover:bg-destructive/90` under `text-destructive-foreground` composites to **4.11:1** — while the identical treatment on `primary` and `secondary` passes, which is exactly the "no threshold to memorise" asymmetry this section describes. The destructive button signals hover with a ring instead. Its blind spots are documented in the rule file — runtime-assembled class names and imported constants are invisible to it, exactly as they are to the colour rule.
 
