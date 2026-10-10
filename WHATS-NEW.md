@@ -40,6 +40,14 @@ just pulled.
   both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
   new app, and the old slug keeps the old data. Migration 0010; run
   `npm run db:local` to apply it.
+- **A maintenance page while the database is behind.** When the platform
+  schema is behind the build, every page shows a plain maintenance page and
+  every API route, `/api/cron`, `/api/webhooks` and `/api/mcp` included,
+  answers 503 with `Retry-After: 30` until the release step runs. Only
+  `/api/health/live` and `/api/health/ready` answer as usual. Locally,
+  `npm run db:local` brings it back. **Breaking:** `/api/health/ready` returns
+  only `status` and `reason`. The schema versions, the count of pending app
+  migrations and the message are gone; the server log has them.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 
