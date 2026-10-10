@@ -84,6 +84,7 @@ skill actually does? The same steps by hand are under
 - [Developing](#developing)
 - [Troubleshooting](#troubleshooting)
 - [Hosting MixOS](#hosting-mixos)
+- [Releases](#releases)
 - [Licence](#licence)
 
 ## Prerequisites
@@ -396,7 +397,8 @@ questions before it starts.
 - **`/mixos theme`** — create or update a theme under `themes/`.
 - **`/mixos deploy`** — commit what you have in sensible commits, push, and
   open the pull request (branching first if you are on `main`). `--reset`
-  brings you back to a fresh `main` after the PR merges.
+  brings you back to a fresh `main` after the PR merges. `release` cuts a
+  version of MixOS, for maintainers (see [Releases](#releases)).
 
 ## Authentication
 
@@ -576,6 +578,31 @@ boundaries, the key inventory and what rotating each key costs, and the
 Row-Level Security coverage — and
 [docs/secure-edge-gateway-architecture.md](docs/secure-edge-gateway-architecture.md)
 for the request path in front of it.
+
+## Releases
+
+A release of MixOS is an annotated tag on `main`, `vX.Y.Z`, with a
+[GitHub Release](https://github.com/mixoshq/mixos/releases) whose notes are
+its section of `CHANGELOG.md`: breaking changes first, then features and
+fixes. Until 1.0, a release with a breaking change or any change to the
+platform is a minor version (`v0.2.0` → `v0.3.0`), and any other release is a
+patch (`v0.3.0` → `v0.3.1`). Prereleases have a suffix, such as
+`v0.3.0-rc.1`, and GitHub marks them as prereleases.
+
+**To upgrade a deployment,** merge the newest release tag into your fork, not
+`upstream/main`, which holds work that hasn't been released yet. The steps
+are in [docs/hosting/README.md](docs/hosting/README.md#upgrading).
+
+**To cut a release** (maintainers), run `/mixos deploy release` on an
+up-to-date `main`. It opens a release PR that sets the version in
+`package.json` and adds the `CHANGELOG.md` section, both worked out by
+[`scripts/release-prep.ts`](scripts/release-prep.ts) from the Conventional
+Commits since the last release. Once the PR merges, run it again: it gives you
+the commands that tag the merge commit and publish the GitHub Release, and a
+person runs them.
+
+A version release is not the release step, `npm run release`, which applies
+a deployment's database migrations.
 
 ## Licence
 
