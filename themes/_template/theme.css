@@ -14,10 +14,11 @@
  * palette that has a `:root[data-mode="dark"]` block, split it into its own
  * theme folder; the build rejects that selector and tells you so.
  *
- * Every value must be a hex, rgb() or hsl() literal, or a var() chain ending
- * in one. The build computes WCAG contrast for ~24 pairs and fails if any is
- * short — a value it cannot evaluate is a token the check silently stops
- * covering, so those are rejected too.
+ * Every colour must be an opaque hex, rgb() or hsl() literal, or a var()
+ * chain ending in one; only --border may be translucent. The build computes
+ * WCAG contrast for ~24 pairs and fails if any is short — a value it cannot
+ * evaluate is a token the check silently stops covering, so those are
+ * rejected too.
  *
  * Verify with:  npx tsx scripts/generate-project-registry.ts
  * See the ratio table with:  THEME_REPORT=1 npx tsx scripts/generate-project-registry.ts
