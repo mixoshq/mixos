@@ -30,6 +30,19 @@ just pulled.
 - **`updatedAt` in `app.json`** lists columns the platform sets to `now()` on
   every update, with its own trigger, since an app migration can no longer
   create one.
+- **Every build knows its version.** The admin pages show it with the commit,
+  e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
+  into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
+  from Vercel, Render and Railway's own variables; on Docker Compose, build with
+  `MIXOS_COMMIT=$(git rev-parse HEAD)`, and on Coolify set
+  `MIXOS_COMMIT=$SOURCE_COMMIT`. See `docs/hosting/README.md`. **Breaking:** an
+  extension's `requiresMixOS` is now checked in a checkout too, against
+  `package.json`; bump it locally to try an extension that needs a newer MixOS.
+- **A built deployment browses mixos.org.** The Docker image on any host, and
+  Vercel, ignore `MIXOS_REPOSITORY_URL` unless it names their own machine
+  (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), and log it.
+  **Breaking:** a deployment pointed at another catalogue now browses
+  mixos.org; a source checkout still honours the override.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 
