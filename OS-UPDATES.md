@@ -35,13 +35,13 @@ change, exactly as changing `AppManifest` is.
 
 - **Backwards compatibility.** Will this break existing apps, connectors, or themes? Check how `AppManifest`, `WidgetProps`, `BaseConnector`, `AppContext`, and `ThemeManifest` are used across all apps and themes. A token removed from the contract in `src/lib/themes/tokens.ts` breaks **every** theme at once.
 - **Registry generation.** If you change `AppManifest`, `ConnectorManifest`, or `ThemeManifest` types, update `scripts/generate-project-registry.ts` to match and run `npm run dev` to regenerate.
-- **Database migrations.** New migrations in `supabase/migrations/` run in alphabetical order. Use a numbered prefix (e.g., `0010_my_change.sql`) and test against the local Docker stack (`npm run db:local`) and a plain Postgres (`npm run db:migrate`) first. Keep them portable: MixOS runs on any Postgres 13+, so a statement that names a Supabase-only role or schema (`anon`, `authenticated`, `service_role`, `auth.*`) has to be skipped where those do not exist — see the guarded grants in `0005_app_schema_columns.sql`.
+- **Database migrations.** New migrations in `supabase/migrations/` run in alphabetical order. Use a numbered prefix (e.g., `0011_my_change.sql`) and test against the local Docker stack (`npm run db:local`) and a plain Postgres (`npm run db:migrate`) first. Keep them portable: MixOS runs on any Postgres 13+, so a statement that names a Supabase-only role or schema (`anon`, `authenticated`, `service_role`, `auth.*`) has to be skipped where those do not exist — see the guarded grants in `0005_app_schema_columns.sql`.
 
   **Every new migration must bump `platform_schema_version` to its own number, as its last statement:**
 
   ```sql
   insert into public.platform_settings (key, value)
-  values ('platform_schema_version', '10')
+  values ('platform_schema_version', '11')
   on conflict (key) do update set value = excluded.value, updated_at = now();
   ```
 
