@@ -90,8 +90,9 @@ export default async function UsersAdminPage() {
       const grantedSet = new Set(explicitGrants);
       for (const slug of globalSlugs) grantedSet.add(slug);
       const grantedSlugs = Array.from(grantedSet);
-      // A grant for a slug no longer in the registry is not counted: the app is
-      // gone from the repo and the row is on its way out on the next sync.
+      // A grant for a slug not in this build is not counted: nobody can open
+      // that app here. The release step keeps the row in case the app comes
+      // back (scripts/sync-app-registry.ts).
       const inRegistry = new Set(grantableApps.map((a) => a.slug));
       const grantedActiveCount = grantedSlugs.filter((s) =>
         inRegistry.has(s),

@@ -27,6 +27,10 @@ import { cn } from "@/lib/utils";
  *
  * Every message here already passed through `connectorErrorEnvelope`, so it is
  * safe to render as-is — no raw error strings, no upstream bodies.
+ *
+ * `AsyncView` renders it for a failed connector call. An app handling a call
+ * itself imports it from here, with `connectorErrorOf` from @/lib/apps/sdk, and
+ * like every UI primitive it imports nothing an app could not use itself.
  */
 export default function ConnectorErrorState({
   envelope,

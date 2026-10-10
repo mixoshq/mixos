@@ -30,6 +30,16 @@ just pulled.
 - **`updatedAt` in `app.json`** lists columns the platform sets to `now()` on
   every update, with its own trigger, since an app migration can no longer
   create one.
+- **An app that leaves the build keeps its data.** The release step and
+  `npm run migrate:apps` used to delete an app the build no longer carried,
+  with its grants, installs, password and widgets, even when the build had only
+  skipped it. They now mark it missing and keep everything, scheduled jobs
+  included, and Admin > Apps lists it under **Not in this build**. If it comes
+  back with the same files it is as it left; with different files it comes
+  back inactive and flagged until an admin activates it. The audit log records
+  both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
+  new app, and the old slug keeps the old data. Migration 0010; run
+  `npm run db:local` to apply it.
 - **Every build knows its version.** The admin pages show it with the commit,
   e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
   into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
@@ -132,6 +142,19 @@ just pulled.
 - **App settings** are filled in on the Settings tab of an app's details in
   Administration → Apps. `password` values are encrypted when saved and never
   shown again.
+- **App code imports from a published list.** An app imports its own files,
+  the platform modules listed in `docs/apps/architecture.md` (some by name
+  only), and `react`, `zod`, `lucide-react`, `next/link`, `next/navigation` and
+  `next/font/*`. Types may come from anywhere. The registry generator judges
+  each import by the file it lands on, on every build and every Registry
+  install, and skips an app that imports anything else; ESLint shows the same
+  findings.
+- **Refused in app code:** Node built-ins, `require` and `module`, an
+  `import()` with a computed name or a URL, code in a dot-folder or `assets/`,
+  a symlink, `node_modules/` or `package.json` anywhere in an app, and writes
+  to an imported module.
+- **`callAppRoute` takes the app's own slug** as a string literal. The build
+  refuses another app's slug, one built at runtime, and any other use of it.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
 - **Fix:** a deactivated app's `/p` pages return 404, as its API routes already
