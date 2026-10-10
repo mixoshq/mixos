@@ -332,8 +332,10 @@ merge (OS-UPDATES.md)." Omit the section otherwise.>
 
 <list any new **/migrations/*.sql. Note how they reach production: on Docker
 Compose, Render and Railway the release step applies them as part of the
-deploy; on Vercel a human runs `npm run release` against production before
-promoting it (docs/hosting/vercel.md). Omit the section if there are none.>
+deploy; on Vercel the production build runs it after `next build`
+(docs/hosting/vercel.md). Either way the version still serving runs against the
+migrated database for a while, so each has to work with it. Omit the section if
+there are none.>
 
 ## Verify on the preview
 
