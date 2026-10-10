@@ -68,6 +68,7 @@ import {
   windowsDockerDesktop,
 } from "./host-platform";
 import { resolveInstance } from "./instance";
+import { listPlatformMigrations } from "./platform-migration-files";
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -470,9 +471,9 @@ class Preflight {
   fail(label: string, detail: string, next: string): void {
     this.results.push({ state: "fail", label, detail });
     if (!this.collectOnly)
-      throw new SetupError(`${label}\n    ${detail}`, next);
+      throw new SetupError(`${label}\n    ${detail.replace(/\n/g, "\n    ")}`, next);
     console.log(`    ${c.red("FAIL")} ${label}`);
-    console.log(`         ${c.dim(detail)}`);
+    console.log(`         ${c.dim(detail.replace(/\n/g, "\n         "))}`);
     console.log(`         ${c.dim(`-> ${next}`)}`);
   }
 
@@ -771,6 +772,22 @@ async function preflight(opts: {
         why,
         "Your checkout is incomplete. `git status` to see what is missing, or pull the latest main.",
       );
+  }
+
+  // ── platform migrations ──
+  // On a new volume `supabase start` applies these itself, before this
+  // script's own migration step, and the Supabase CLI reports two files with
+  // one number only as a duplicate key in its ledger. Listed here, before
+  // anything starts, the refusal names both files and the next free number.
+  try {
+    listPlatformMigrations(path.join(ROOT, "supabase", "migrations"));
+    pf.ok("supabase/migrations", "one file per number");
+  } catch (err) {
+    pf.fail(
+      "supabase/migrations",
+      err instanceof Error ? err.message : String(err),
+      "Fix supabase/migrations as described above, then re-run. Nothing has been started.",
+    );
   }
 
   // ── Supabase CLI ──
