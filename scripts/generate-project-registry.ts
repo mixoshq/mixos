@@ -45,6 +45,13 @@ import { FatalManifestError } from "./manifest-errors";
 import { readImageSize } from "./image-size";
 import { resolveThemeLogo, validateAppBranding } from "./brand-checks";
 import { listAppMigrations } from "./app-migration-files";
+import {
+  checkHookNamespaces,
+  formatHookFindings,
+  scanHooks,
+  validateHookWiring,
+} from "./hook-checks";
+import { formatFindings, scanAppContainment } from "./app-containment";
 import type { Screenshot, ScreenshotKind } from "../src/lib/screenshots";
 import {
   SCREENSHOT_EXTENSIONS,
@@ -53,8 +60,21 @@ import {
   SCREENSHOT_MIN_WIDTH,
   screenshotUrl,
 } from "../src/lib/screenshots";
-import { BRAND_HOOKS } from "../src/lib/branding/types";
 import * as ts from "typescript";
+
+/**
+ * Thrown when an app is refused for what its code does, not for a malformed
+ * manifest — an undeclared escape, or a hook call the hook rules refuse (see
+ * scripts/hook-checks.ts). Takes the per-app `Skipping ...`
+ * path like any other per-app failure, but prints its own message rather than
+ * "invalid manifest", which would send the author to the wrong file.
+ */
+class AppRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AppRejectedError";
+  }
+}
 
 /**
  * Manifests store `lastUpdated` as an ISO 8601 string (legible in a diff);
@@ -159,76 +179,6 @@ function countPages(dir: string): number {
     }
   }
   return n;
-}
-
-// Core hook names are never slug-prefixed. Keep in sync with CORE_HOOKS in
-// src/lib/hooks/hook-system.ts.
-const CORE_HOOK_NAMES = new Set<string>([
-  "init",
-  "user-login",
-  "user-sync",
-  "user-display-name",
-  ...BRAND_HOOKS,
-]);
-
-// Mirror resolveHookName(): an app's own custom hook is qualified with its
-// slug; core hooks and already-qualified ("app:hook") names pass through.
-function qualifyHookName(name: string, slug: string): string {
-  if (CORE_HOOK_NAMES.has(name) || name.includes(":")) return name;
-  return `${slug}:${name}`;
-}
-
-interface HookScan {
-  // Emitted-hook counts, including dynamic (non-literal) calls — preserves the
-  // historical `hookCounts` semantics.
-  counts: { actions: number; filters: number };
-  // String-literal hook names this app fires / listens for, slug-qualified.
-  emits: { actions: string[]; filters: string[] };
-  listens: { actions: string[]; filters: string[] };
-}
-
-function scanHooks(appDir: string, slug: string): HookScan {
-  let actionCount = 0;
-  let filterCount = 0;
-  const emitActions = new Set<string>();
-  const emitFilters = new Set<string>();
-  const listenActions = new Set<string>();
-  const listenFilters = new Set<string>();
-
-  // First string-literal arg of a hook call, e.g. .doAction("new-deal").
-  // Dynamic (variable) names can't be captured and only show in the counts.
-  const literalCall = (method: string) =>
-    new RegExp(`\\.${method}\\s*\\(\\s*["'\\\`]([^"'\\\`]+)["'\\\`]`, "g");
-  const collect = (src: string, re: RegExp, into: Set<string>) => {
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(src)) !== null) into.add(qualifyHookName(m[1], slug));
-  };
-
-  function walk(dir: string) {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) {
-        const src = fs.readFileSync(full, "utf-8");
-        actionCount += (src.match(/\.doAction\s*\(/g) ?? []).length;
-        filterCount += (src.match(/\.applyFilters\s*\(/g) ?? []).length;
-        collect(src, literalCall("doAction"), emitActions);
-        collect(src, literalCall("applyFilters"), emitFilters);
-        collect(src, literalCall("addAction"), listenActions);
-        collect(src, literalCall("addFilter"), listenFilters);
-      }
-    }
-  }
-  walk(appDir);
-
-  const sorted = (s: Set<string>) => [...s].sort();
-  return {
-    counts: { actions: actionCount, filters: filterCount },
-    emits: { actions: sorted(emitActions), filters: sorted(emitFilters) },
-    listens: { actions: sorted(listenActions), filters: sorted(listenFilters) },
-  };
 }
 
 /**
@@ -475,7 +425,6 @@ interface RawRouteDefinition {
   raw: boolean;
   input?: unknown;
   output?: unknown;
-  outputValidation: "always" | "dev-only";
   summary?: string;
 }
 
@@ -620,7 +569,6 @@ async function scanApiRoutes(
           raw: exported.raw,
           hasInput: exported.input != null,
           hasOutput: exported.output != null,
-          outputValidation: exported.outputValidation,
           ...(exported.summary ? { summary: exported.summary } : {}),
         });
       }
@@ -747,47 +695,6 @@ function validateRouteContracts(
   }
 }
 
-/**
- * Carry through the app's declared escapes, failing on a duplicate rule. Shape
- * and the closed rule set are already schema-validated; a duplicate would leave
- * two different reasons on the record for one exception.
- */
-/**
- * Two-sided consent for cross-app hooks, mirroring `validateServiceWiring`.
- *
- * A listener must declare what it listens for, and the emitter must allow that
- * listener. Either half missing is a build failure — the same default-deny App
- * Services has had all along, applied to the one channel that never had it.
- */
-function validateHookWiring(manifests: AppManifest[]): void {
-  const bySlug = new Map(manifests.map((m) => [m.slug, m]));
-
-  for (const consumer of manifests) {
-    for (const dep of consumer.listensTo ?? []) {
-      const provider = bySlug.get(dep.app);
-      if (!provider) {
-        throw new FatalManifestError(
-          `apps/${consumer.slug}/app.json: listensTo names app "${dep.app}", which does not exist.`,
-        );
-      }
-      const emit = (provider.emits ?? []).find((e) => e.name === dep.hook);
-      if (!emit) {
-        throw new FatalManifestError(
-          `apps/${consumer.slug}/app.json: listensTo "${dep.app}:${dep.hook}", but "${dep.app}" does not declare that hook under \`emits\`.`,
-        );
-      }
-      const allowed =
-        emit.consumers === "*" || emit.consumers.includes(consumer.slug);
-      if (!allowed) {
-        throw new FatalManifestError(
-          `apps/${dep.app} does not allow "${consumer.slug}" to listen to "${dep.hook}". ` +
-            `Add it to that hook's \`consumers\`, or use "*".`,
-        );
-      }
-    }
-  }
-}
-
 // ── brand hooks ──────────────────────────────────────────────────────────────
 
 /** Copy an app's declared marks to public/branding/apps/<slug>/. */
@@ -807,8 +714,13 @@ function copyBrandLogos(
   }
 }
 
+/**
+ * Carry through the app's declared escapes, failing on a duplicate rule. Shape
+ * and the closed rule set are already schema-validated; a duplicate would leave
+ * two different reasons on the record for one exception.
+ */
 function validateEscapes(
-  raw: { rule: string; reason: string }[] | undefined,
+  raw: AppEscape[] | undefined,
   slug: string,
 ): AppEscape[] {
   if (!raw || raw.length === 0) return [];
@@ -978,7 +890,7 @@ function validateProvides(
  * The export check is a source scan rather than an import, deliberately: MCP
  * handlers pull in connectors and server modules, and the generator must stay
  * runnable during a build with no DB or credentials present. Same
- * trade-off (and same regex approach) as `scanHooks`. It catches the common
+ * trade-off as `scanHooks` in ./hook-checks.ts. It catches the common
  * mistake — a handler file that forgot `inputSchema` — without the blast radius
  * of executing app code at build time.
  *
@@ -1448,6 +1360,22 @@ async function scanApps(): Promise<AppManifest[]> {
     if (entry.name.startsWith("_")) continue; // template directories
 
     const appDir = path.join(APPS_DIR, entry.name);
+
+    // Containment runs FIRST, before anything imports the app's code: loading
+    // the manifest imports widgets.ts and scanning routes imports every
+    // route.ts, and an import runs the module's top level. A finding skips the
+    // app rather than aborting the run — on the install path a `Skipping
+    // <slug>/` line is a `rejected-by-registry`, rolled back, which is the
+    // right verdict on the extension (see regenerateRegistry() in
+    // src/lib/repository/install.ts). See scripts/app-containment.ts.
+    const findings = scanAppContainment(appDir);
+    if (findings.length > 0) {
+      console.warn(
+        `  Skipping ${entry.name}/ — its code reaches what an app may not:${formatFindings(findings)}`,
+      );
+      continue;
+    }
+
     let raw: Record<string, unknown> | null;
     try {
       raw = await loadAppManifest(appDir);
@@ -1519,7 +1447,44 @@ async function scanApps(): Promise<AppManifest[]> {
       const routes = await scanApiRoutes(appDir, entry.name);
       validateRouteContracts(routes, entry.name, r.roles ?? [], apiVisibility);
 
+      // The one remaining escape is load-bearing: a route that owns its own
+      // Response registers only when the manifest says so, with a reason, where
+      // a reviewer and the admin dialog can see it.
+      const rawRoutes = routes.flatMap((route) =>
+        route.methods
+          .filter((m) => m.raw)
+          .map((m) => `${m.method} /${route.path}`),
+      );
+      const declaresRaw = (r.escapes ?? []).some((e) => e.rule === "raw-response");
+      if (rawRoutes.length > 0 && !declaresRaw) {
+        throw new AppRejectedError(
+          `${rawRoutes.join(", ")} ${rawRoutes.length === 1 ? "returns its" : "return their"} own Response ` +
+            `(\`raw: true\`), which needs { "rule": "raw-response", "reason": "…" } under \`escapes\` in app.json.`,
+        );
+      }
+      if (rawRoutes.length === 0 && declaresRaw) {
+        // Not a refusal — the declaration costs nothing — but a stale one tells
+        // a reviewer something about the app that is no longer true.
+        console.warn(
+          `    apps/${entry.name}/app.json declares the raw-response escape, but no route sets \`raw: true\`. Remove it.`,
+        );
+      }
+
+      // What the code fires and listens to, held to the app's own namespace and
+      // its `listensTo`. A finding skips this app, as a containment finding
+      // does. validateHookWiring, after the loop, holds each `listensTo` to the
+      // emitter's `consumers`, and a mismatch there still aborts the run.
       const hookScan = scanHooks(path.join(APPS_DIR, entry.name), entry.name);
+      const hookFindings = checkHookNamespaces(
+        entry.name,
+        hookScan.calls,
+        r.listensTo ?? [],
+      );
+      if (hookFindings.length > 0) {
+        throw new AppRejectedError(
+          `its hook calls break the cross-app hook rules:${formatHookFindings(hookFindings)}`,
+        );
+      }
 
       const manifest: AppManifest = {
         slug: entry.name,
@@ -1603,7 +1568,11 @@ async function scanApps(): Promise<AppManifest[]> {
     } catch (err) {
       // FatalManifestError aborts the entire generator run — see class doc.
       if (err instanceof FatalManifestError) throw err;
-      console.warn(`  Skipping ${entry.name}/ — invalid manifest: ${err}`);
+      console.warn(
+        err instanceof AppRejectedError
+          ? `  Skipping ${entry.name}/ — ${err.message}`
+          : `  Skipping ${entry.name}/ — invalid manifest: ${err}`,
+      );
     }
   }
 
