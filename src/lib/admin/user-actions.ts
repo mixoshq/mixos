@@ -30,7 +30,8 @@ import {
   isAllowedEmailDomain,
   allowedEmailDomains,
 } from "@/lib/apps/access";
-import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { hashPassword } from "@/lib/auth/password";
+import { recheckOwnPassword, RECHECK_LIMITED_MESSAGE } from "@/lib/auth/recheck-limit";
 import { revokeUserSessions } from "@/lib/auth/revocation";
 import {
   recordAdminAction,
@@ -334,8 +335,17 @@ export async function adminSetPassword(
     }
     if (!actorPassword)
       return { error: "Enter your own password to confirm.", success: null };
-    const actorOk = await verifyPassword(actorPassword, actor.password_hash);
-    if (!actorOk)
+    // Limited per acting admin, and charged before the hash. It shares the
+    // budget of their own "change my password", which re-checks the same
+    // password.
+    const recheck = await recheckOwnPassword(
+      actor.id,
+      actorPassword,
+      actor.password_hash,
+    );
+    if (recheck === "limited")
+      return { error: RECHECK_LIMITED_MESSAGE, success: null };
+    if (recheck === "wrong")
       return { error: "Your password is incorrect.", success: null };
 
     const supabase = createServiceClient();
