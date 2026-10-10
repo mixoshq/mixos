@@ -1,6 +1,6 @@
 # Updating MixOS
 
-This guide explains how to make changes to the MixOS platform itself — the core code that powers apps, connectors, and themes.
+This guide explains how to make changes to the MixOS platform itself — the core code that powers apps, connectors, and themes. To upgrade a deployment to a new release of MixOS instead, see [Upgrading](docs/hosting/README.md#upgrading).
 
 ## What counts as an OS change?
 
@@ -64,7 +64,7 @@ change, exactly as changing `AppManifest` is.
 | Registry generation | `scripts/generate-project-registry.ts` |
 | Auth & middleware | `src/lib/auth/session.ts`, `src/proxy.ts` |
 | Hook system | `src/lib/hooks/hook-system.ts` |
-| Build identity | `src/generated/build-info.ts` (generated), `src/lib/platform/version.ts` |
+| Build identity | `src/generated/build-info.ts` (generated: the version, from `package.json`), `src/lib/platform/version.ts` (the version, the commit and `requiresMixOS`), `src/lib/platform/build.ts` (built deployment or checkout) |
 | Schema gate | `src/lib/platform/schema-version.ts`, `src/lib/platform/app-migrations.ts`, `src/app/api/health/ready/route.ts` |
 | Instance-wide locks | `src/lib/platform/lock.ts` |
 | Database migrations | `supabase/migrations/` |

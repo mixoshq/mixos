@@ -49,12 +49,20 @@ import RegisterDialog from "./register-dialog";
 export default function ExtensionBrowser({
   kind,
   repositoryOrigin,
+  repositoryOverridable,
   installedSlugs,
   installable,
 }: {
   kind: ExtensionKind;
   /** Origin of the repository being browsed, for links out to its listings. */
   repositoryOrigin: string;
+  /**
+   * Whether `MIXOS_REPOSITORY_URL` can point this instance somewhere else. A
+   * built deployment searches only mixos.org or a catalogue on its own machine
+   * (src/lib/repository/client.ts), so suggesting the variable there would send
+   * an admin to a setting that is ignored.
+   */
+  repositoryOverridable: boolean;
   /** Already on this instance. Server-rendered from the generated registry. */
   installedSlugs: string[];
   /** `null` when this deployment can register; the reason it cannot otherwise. */
@@ -158,7 +166,7 @@ export default function ExtensionBrowser({
               <p className="mt-1 text-sm text-muted-foreground">
                 {outcome.message}
               </p>
-              {outcome.unreachable && (
+              {outcome.unreachable && repositoryOverridable && (
                 <p className="mt-2 text-sm text-muted-foreground">
                   Set{" "}
                   <code className="font-mono text-xs">
