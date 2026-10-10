@@ -408,6 +408,34 @@ const syncDefinitionSchema = z.strictObject({
 });
 
 /**
+ * A table or column name in an app's own schema, as the query builder accepts
+ * one: unquoted, lowercase, and short enough that Postgres keeps all of it.
+ */
+const sqlNameSchema = z
+  .string()
+  .max(63, "at most 63 characters, or Postgres would cut the name short")
+  .regex(/^[a-z_][a-z0-9_]*$/, "a plain SQL name: lowercase letters, digits and underscores");
+
+/**
+ * A timestamp column the platform keeps current on every UPDATE, through its
+ * own reviewed trigger, because an app migration may not create one. The
+ * generator checks that the app's migrations create the table and the column,
+ * and that the app declares a database.
+ */
+const updatedAtSchema = z
+  .array(
+    z.strictObject({
+      table: sqlNameSchema,
+      // Defaults to `updated_at`.
+      column: sqlNameSchema.optional(),
+    }),
+  )
+  .refine(
+    (cols) => new Set(cols.map((c) => `${c.table}.${c.column ?? "updated_at"}`)).size === cols.length,
+    { message: "a column is listed twice" },
+  );
+
+/**
  * A hook this app fires, and who may listen.
  *
  * Cross-app hook listening was the one channel between apps with NO consent at
@@ -732,6 +760,9 @@ export const RawAppManifestSchema = z
      */
     optionalConnectors: z.array(z.string().min(1)).optional(),
     database: z.boolean().optional(),
+    // Columns the platform's trigger sets to now() on every update. Requires
+    // `database`; the generator checks each one against the app's migrations.
+    updatedAt: updatedAtSchema.optional(),
     notifications: z.boolean().optional(),
     global: z.boolean().optional(),
     // Declared exceptions to platform guarantees. Rule names are a closed set;

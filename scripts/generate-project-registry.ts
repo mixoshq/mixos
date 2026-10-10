@@ -20,6 +20,7 @@ import type {
   ServiceDependency,
   SyncDefinition,
   TelemetryEventDefinition,
+  UpdatedAtColumn,
 } from "../src/lib/apps/types";
 import { MOS_SOURCE } from "../src/lib/apps/types";
 import type {
@@ -45,7 +46,13 @@ import { applyWidgetConfigs } from "./widget-configs";
 import { FatalManifestError } from "./manifest-errors";
 import { readImageSize } from "./image-size";
 import { resolveThemeLogo, validateAppBranding } from "./brand-checks";
-import { listAppMigrations } from "./app-migration-files";
+import { appMigrationFiles, listAppMigrations } from "./app-migration-files";
+import { checkAppMigrationSql, describeAppTables, formatSqlProblems } from "./app-sql-policy";
+import {
+  appIdentifierProblems,
+  appSchemaName,
+  appSlugProblem,
+} from "../src/lib/apps/app-identifiers";
 import {
   checkHookNamespaces,
   formatHookFindings,
@@ -1275,6 +1282,88 @@ async function scanThemes(): Promise<{
   return { themes, css: cssParts.join("\n\n"), tokens };
 }
 
+/**
+ * An app's database declarations, checked against its migrations/.
+ *
+ * Only an app with `"database": true` has a schema, so only it may ship
+ * migrations or list `updatedAt` columns. (A `sync`, whose state the platform
+ * keeps in that schema, needs it too; the manifest schema refuses that one.)
+ * Every statement in its migrations must be one an app may run
+ * (scripts/app-sql-policy.ts): the release step checks again before it applies
+ * anything, and this is the same check, on the next build instead of at deploy
+ * time. Each `updatedAt` column must be one the migrations create, as a
+ * timestamp.
+ *
+ * Returns the `updatedAt` columns with their defaults filled in.
+ */
+async function validateAppDatabase(
+  raw: {
+    database?: boolean;
+    updatedAt?: { table: string; column?: string }[];
+  },
+  slug: string,
+): Promise<UpdatedAtColumn[]> {
+  const files = appMigrationFiles(APPS_DIR, slug);
+  const updatedAt = (raw.updatedAt ?? []).map((c) => ({
+    table: c.table,
+    column: c.column ?? "updated_at",
+  }));
+
+  if (!raw.database) {
+    if (files.length > 0) {
+      throw new FatalManifestError(
+        `apps/${slug}/migrations/ holds ${files.length} SQL file(s), but app.json does not set ` +
+          `"database": true. Migrations apply to the schema a database gives the app: set ` +
+          `"database": true, or remove migrations/.`,
+      );
+    }
+    if (updatedAt.length > 0) {
+      throw new FatalManifestError(
+        `apps/${slug}/app.json lists "updatedAt" columns but does not set "database": true.`,
+      );
+    }
+    return [];
+  }
+
+  const schema = appSchemaName(slug);
+  const texts: string[] = [];
+  const problems: string[] = [];
+  for (const file of files) {
+    const text = fs.readFileSync(path.join(APPS_DIR, slug, "migrations", file), "utf-8");
+    texts.push(text);
+    const found = await checkAppMigrationSql(text, schema);
+    if (found.length > 0) {
+      problems.push(formatSqlProblems(`apps/${slug}/migrations/${file}`, found));
+    }
+  }
+  if (problems.length > 0) {
+    throw new FatalManifestError(
+      `${problems.join("\n")}\nAn app migration may create, change and fill the app's own ` +
+        `tables, and nothing else. See docs/apps/database.md.`,
+    );
+  }
+
+  if (updatedAt.length > 0) {
+    const tables = await describeAppTables(texts, schema);
+    for (const c of updatedAt) {
+      const type = tables.get(c.table)?.get(c.column);
+      if (type === undefined) {
+        throw new FatalManifestError(
+          `apps/${slug}/app.json lists ${c.table}.${c.column} under "updatedAt", but no ` +
+            `migration in apps/${slug}/migrations/ creates that column.`,
+        );
+      }
+      if (type !== "timestamptz" && type !== "timestamp") {
+        throw new FatalManifestError(
+          `apps/${slug}/app.json lists ${c.table}.${c.column} under "updatedAt", but its ` +
+            `migrations make it ${type}. It must be timestamptz or timestamp.`,
+        );
+      }
+    }
+  }
+  return updatedAt;
+}
+
 async function scanApps(): Promise<AppManifest[]> {
   if (!fs.existsSync(APPS_DIR)) {
     fs.mkdirSync(APPS_DIR, { recursive: true });
@@ -1331,6 +1420,14 @@ async function scanApps(): Promise<AppManifest[]> {
     }
 
     try {
+      // The folder name is the slug, and it names the app's schema and role
+      // (src/lib/apps/app-identifiers.ts), its URLs and its hooks. A slug that
+      // could not name a schema unambiguously never gets as far as having one.
+      const slugProblem = appSlugProblem(entry.name);
+      if (slugProblem) {
+        throw new FatalManifestError(`apps/${entry.name}: ${slugProblem}`);
+      }
+
       const pagesDir = path.join(APPS_DIR, entry.name, "pages");
       const hasPages =
         fs.existsSync(pagesDir) && fs.readdirSync(pagesDir).length > 0;
@@ -1417,6 +1514,8 @@ async function scanApps(): Promise<AppManifest[]> {
         );
       }
 
+      const updatedAt = await validateAppDatabase(r, entry.name);
+
       const manifest: AppManifest = {
         slug: entry.name,
         name: r.name,
@@ -1426,6 +1525,7 @@ async function scanApps(): Promise<AppManifest[]> {
         connectors: r.connectors ?? [],
         optionalConnectors: r.optionalConnectors ?? [],
         database: r.database ?? false,
+        updatedAt,
         notifications: r.notifications ?? false,
         hasPages,
         pageCount,
@@ -1519,6 +1619,11 @@ async function scanApps(): Promise<AppManifest[]> {
   // App Services two-sided consent: every consumes ↔ provides pair must agree.
   validateServiceWiring(manifests);
   validateHookWiring(manifests);
+
+  // No two apps may share a schema or a role. With valid slugs the encoding
+  // cannot produce a clash; this is what would catch a change that let one.
+  const clashes = appIdentifierProblems(manifests.filter((m) => m.database).map((m) => m.slug));
+  if (clashes.length > 0) throw new FatalManifestError(clashes.join("\n"));
 
   return manifests;
 }
@@ -1772,12 +1877,13 @@ function expectedSchemaVersion(): number {
 }
 
 /**
- * Every app migration in apps/<slug>/migrations/, as the release step's runner
- * lists them (scripts/app-migration-files.ts), so the two agree on what "every
- * app migration" is.
+ * Every app migration the release step will run: the files of each app this
+ * build accepted with `"database": true`, listed as the runner lists them
+ * (scripts/app-migration-files.ts), so the two agree on what "every app
+ * migration" is.
  */
-function expectedAppMigrations(): { slug: string; file: string }[] {
-  return listAppMigrations(APPS_DIR).flatMap(({ slug, files }) =>
+function expectedAppMigrations(apps: readonly AppManifest[]): { slug: string; file: string }[] {
+  return listAppMigrations(APPS_DIR, apps).flatMap(({ slug, files }) =>
     files.map((file) => ({ slug, file })),
   );
 }
@@ -1806,9 +1912,9 @@ function expectedAppMigrations(): { slug: string; file: string }[] {
  * the dev server has nothing to recompile. A timestamp — or a git SHA, which
  * moves on every commit — would invalidate that on every `predev`.
  */
-function writeBuildInfo(): void {
+function writeBuildInfo(apps: readonly AppManifest[], report = true): void {
   const schema = expectedSchemaVersion();
-  const appMigrations = expectedAppMigrations();
+  const appMigrations = expectedAppMigrations(apps);
 
   const output = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
 //
@@ -1821,14 +1927,16 @@ function writeBuildInfo(): void {
 /** Highest migration number in supabase/migrations/ at build time. */
 export const EXPECTED_SCHEMA_VERSION = ${schema};
 
-/** Every app migration in apps/<slug>/migrations/ at build time. */
+/** Every app migration the release step runs, at build time. */
 export const EXPECTED_APP_MIGRATIONS: readonly { slug: string; file: string }[] = ${JSON.stringify(appMigrations, null, 2)};
 `;
 
   fs.writeFileSync(BUILD_INFO_FILE, output, "utf-8");
-  console.log(
-    `Build stamp: expected schema version ${schema}, ${appMigrations.length} app migration(s)`,
-  );
+  if (report) {
+    console.log(
+      `Build stamp: expected schema version ${schema}, ${appMigrations.length} app migration(s)`,
+    );
+  }
 }
 
 async function main() {
@@ -1836,10 +1944,14 @@ async function main() {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
   }
 
-  writeBuildInfo();
+  // The stamp lists only the migrations of apps the scan accepts, so it is
+  // written after the scan. A fresh checkout still gets one first, in case a
+  // module the scan imports reads it.
+  if (!fs.existsSync(BUILD_INFO_FILE)) writeBuildInfo([], false);
 
   console.log("Scanning apps...");
   const apps = await scanApps();
+  writeBuildInfo(apps);
   const slugs = apps.map((m) => `"${m.slug}"`).join(", ");
 
   // Build static import maps for pages and widgets

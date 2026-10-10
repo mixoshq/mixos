@@ -52,7 +52,7 @@ Do not infer conventions from surrounding code alone, and do not guess based on 
 - Do not set `slug`, `hasPages`, or `hookCounts` in `app.json` — the registry fills these in. `lastUpdated` is stamped automatically by the pre-commit hook, not written by hand.
 - `icon` must be a lowercase hyphenated Lucide name (e.g. `bar-chart`).
 - Widget `id` is derived from the component filename — renaming breaks saved dashboards.
-- Scoped-DB tables: write bare names in migrations/queries; the platform prefixes `_app_<slug>_`.
+- Scoped-DB tables: each app has its own schema (`app_<slug>`, needs `"database": true`); write bare names in migrations and queries. Migrations are checked before they run: no triggers, functions, `DO`, grants, `SET`, or anything outside the app's schema (list `updatedAt` columns in `app.json` instead of writing a trigger). See `docs/apps/database.md`.
 - MCP tools (`mcp` in `app.json` → `mcp/<name>.ts`) are READ-ONLY and capped at 5 per app. Export both `inputSchema` (Zod) and a default handler. Never write from one, and never call a connector method that mutates — `ctx.db` blocks writes, but the connector is on you. Share the builder the matching API route uses; don't duplicate query logic.
 
 ## Connector-call discipline (widgets & routes)

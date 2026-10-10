@@ -12,7 +12,9 @@
 // Step 3 runs only when INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD are both
 // set, and never touches an account that already exists. Step 2 removes apps
 // that are no longer in this build's registry, with their grants, installs and
-// widgets — the same thing `npm run migrate:apps` does on every local boot.
+// widgets — the same thing `npm run migrate:apps` does on every local boot — and
+// runs each app's migrations as that app's own role, in its own schema, once
+// every pending statement has passed scripts/app-sql-policy.ts.
 //
 // Each step takes the same lock and re-reads what it is about to change once it
 // holds it (scripts/migration-lock.ts), so two release steps at once — two
@@ -23,7 +25,9 @@
 // image it is bundled to ops/release.cjs (`npm run build:ops`, run by the
 // Dockerfile), because the image carries compiled output and no tsx, so the
 // same step works as a Render or Railway pre-deploy command and as the
-// one-shot `migrate` service in deploy/docker-compose.yml:
+// one-shot `migrate` service in deploy/docker-compose.yml. The SQL parser that
+// checks app migrations loads ops/libpg-query.wasm from beside the bundle,
+// which `build:ops` copies there:
 //
 //   node ops/release.cjs
 //

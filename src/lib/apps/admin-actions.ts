@@ -19,6 +19,7 @@ import {
   setAppPassword,
 } from "@/lib/apps/app-password-store";
 import { recordAdminAction } from "@/lib/apps/admin-audit";
+import { appSchemaName } from "@/lib/apps/app-identifiers";
 import { revokeUserSessions } from "@/lib/auth/revocation";
 
 /**
@@ -55,35 +56,27 @@ export async function getAppGrantCounts(): Promise<Record<string, number>> {
  * the list renders every app at once. Apps with no tables are absent — callers
  * read a missing key as 0.
  *
- * Assignment is LONGEST PREFIX FIRST, not first match. Slugs `crm` and
- * `crm-extra` produce prefixes `_app_crm_` and `_app_crm_extra_`, and every
- * table of the second one also starts with the first — so a naive scan would
- * file the whole of `crm-extra` under `crm`.
+ * Each app's tables are its schema's (src/lib/apps/app-identifiers.ts), so a
+ * table belongs to exactly one app by where it is, not by what it is called.
  */
 export async function getAppTableCounts(): Promise<Record<string, number>> {
   const session = await requireReadOnlySession();
   await requireAdmin(session);
 
-  const rows = await sql<{ table_name: string }[]>`
-    select table_name from public.get_app_schema(${"_app_"})
+  const bySchema = new Map(
+    appRegistry.filter((a) => a.database).map((a) => [appSchemaName(a.slug), a.slug]),
+  );
+  if (bySchema.size === 0) return {};
+
+  const rows = await sql<{ table_schema: string; table_name: string }[]>`
+    select table_schema, table_name from public.get_app_schema(${[...bySchema.keys()]})
   `;
 
-  const prefixes = appRegistry
-    .filter((a) => a.database)
-    .map((a) => ({
-      slug: a.slug,
-      prefix: `_app_${a.slug.replace(/-/g, "_")}_`,
-    }))
-    .sort((a, b) => b.prefix.length - a.prefix.length);
-
-  // The function filters with SQL LIKE, where `_` is a single-character
-  // wildcard — so `_app_%` is a looser net than it looks. Re-checking with
-  // startsWith here is an exact match, and the set collapses the
-  // one-row-per-column result to one entry per table.
+  // One row per column; the set collapses them to one entry per table.
   const counts: Record<string, number> = {};
-  for (const table of new Set(rows.map((r) => r.table_name))) {
-    const hit = prefixes.find((p) => table.startsWith(p.prefix));
-    if (hit) counts[hit.slug] = (counts[hit.slug] ?? 0) + 1;
+  for (const key of new Set(rows.map((r) => `${r.table_schema}.${r.table_name}`))) {
+    const slug = bySchema.get(key.slice(0, key.indexOf(".")));
+    if (slug) counts[slug] = (counts[slug] ?? 0) + 1;
   }
   return counts;
 }
@@ -97,11 +90,10 @@ export interface AppSchemaColumn {
   default: string | null;
   primaryKey: boolean;
   /**
-   * What this column references, with the app's table prefix already stripped
-   * so it names the table the way the app's own migrations do. Null when the
-   * column is not a foreign key, and null when it points outside the app —
-   * `auth.users`, say — since that target is not one of the tables being
-   * listed and a bare "users" would look like one.
+   * What this column references, named the way the app's own migrations name
+   * it. Null when the column is not a foreign key, and null when it points
+   * outside the app's schema, since that target is not one of the tables being
+   * listed and a bare name would look like one.
    */
   references: { table: string; column: string } | null;
 }
@@ -173,7 +165,9 @@ export async function getAppSchema(slug: string): Promise<AppSchemaTable[]> {
   const session = await requireReadOnlySession();
   await requireAdmin(session);
 
-  const prefix = `_app_${slug.replace(/-/g, "_")}_`;
+  const app = appRegistry.find((a) => a.slug === slug);
+  if (!app?.database) return [];
+  const schema = appSchemaName(slug);
   const rows = await sql<
     {
       table_name: string;
@@ -182,21 +176,18 @@ export async function getAppSchema(slug: string): Promise<AppSchemaTable[]> {
       is_nullable: boolean;
       column_default: string | null;
       is_primary_key: boolean;
+      foreign_schema: string | null;
       foreign_table: string | null;
       foreign_column: string | null;
     }[]
-  >`select * from public.get_app_schema(${prefix})`;
+  >`select * from public.get_app_schema(${[schema]})`;
 
   const byTable = new Map<string, AppSchemaTable>();
   for (const r of rows) {
-    // Strip prefix so the UI shows the bare table name the app uses.
-    const bare = r.table_name.startsWith(prefix)
-      ? r.table_name.slice(prefix.length)
-      : r.table_name;
-    let t = byTable.get(bare);
+    let t = byTable.get(r.table_name);
     if (!t) {
-      t = { name: bare, columns: [] };
-      byTable.set(bare, t);
+      t = { name: r.table_name, columns: [] };
+      byTable.set(r.table_name, t);
     }
     t.columns.push({
       name: r.column_name,
@@ -205,16 +196,10 @@ export async function getAppSchema(slug: string): Promise<AppSchemaTable[]> {
       default: r.column_default,
       primaryKey: r.is_primary_key,
       references:
-        r.foreign_table && r.foreign_column
-          ? // Only references INTO this app. A column pointing at a platform
-            // table is left null rather than rendered as a bare, prefix-less
-            // name the reader would hunt for in the list above and never find.
-            r.foreign_table.startsWith(prefix)
-            ? {
-                table: r.foreign_table.slice(prefix.length),
-                column: r.foreign_column,
-              }
-            : null
+        // Only references within this app's schema, which are the only kind
+        // its migrations can make.
+        r.foreign_schema === schema && r.foreign_table && r.foreign_column
+          ? { table: r.foreign_table, column: r.foreign_column }
           : null,
     });
   }

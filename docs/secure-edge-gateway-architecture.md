@@ -60,7 +60,7 @@ flowchart TD
 
     DISPATCH["dispatchAppRoute() — src/lib/apps/dispatch.ts<br/>twelve checks, in order — enumerated below<br/>413 · 404 · 429 · 405 · 401 · 403 · 500"]
 
-    DISPATCH --> DB["Scoped DB<br/>_app_*"]
+    DISPATCH --> DB["Scoped DB<br/>the app's own schema"]
     DISPATCH --> CONN["Connector<br/>(Gmail, …)"]
     DISPATCH --> HTTP["context.http<br/>(egress)"]
 ```
@@ -241,11 +241,12 @@ context entirely** — never present in a half-initialized state. Handlers check
 
 ### Scoped DB
 
-`context.db` is a `ScopedClient` pinned to the app's `_app_<slug>_` tables. It
-exposes only `.table(name)`, which prepends the prefix; app code never sees or
-constructs a raw table name. MCP tool handlers get a `ReadOnlyScopedClient`
-instead — a `Proxy` that throws on `insert`/`update`/`upsert`/`delete` and
-re-wraps itself across chained calls, so `as any` does not defeat it.
+`context.db` is a `ScopedClient` pinned to the app's own schema, `app_<slug>`.
+It exposes only `.table(name)`, which names a table in that schema; app code
+never sees or constructs another schema's name. MCP tool handlers get a
+`ReadOnlyScopedClient` instead — a `Proxy` that throws on
+`insert`/`update`/`upsert`/`delete` and re-wraps itself across chained calls, so
+`as any` does not defeat it.
 
 ### Egress (`context.http`)
 
@@ -330,7 +331,7 @@ The boundary holds in five places:
    An import is judged by the file it resolves to, so neither a relative path
    into `src/` nor `@/lib/db/../db/client` gets round it. Types may come from
    anywhere: a handler needs `import type { ScopedClient }` to type
-   `context.db`, and a type cannot construct a client for another app's prefix.
+   `context.db`, and a type cannot construct a client for another app's schema.
 
    This replaced three ESLint `no-restricted-imports` blocks, a denylist of
    spellings that had to restate itself in every tier because flat config
@@ -387,7 +388,8 @@ produces all three registries.
 - **Auth is done once, in one place.** Apps cannot forget to check.
 - **Connector reuse.** Configure Gmail once; any app declaring it gets a
   ready-to-call instance, tenant-wide or per-user.
-- **Per-app DB isolation** by construction, via the prefix.
+- **Per-app DB isolation** by construction: a schema and a role per app, and
+  migrations checked before they run as that role.
 - **Declared capability.** `db`, `notifications`, `services`, `env`, `http` are
   each null unless asked for — the manifest is the grant.
 - **Platform features are free.** Rate limiting, telemetry, budgets, schema
