@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { AlertCircle, Search } from "lucide-react";
-import type { AppManifest } from "@/lib/apps/types";
+import type { AppManifest, EscapeRule } from "@/lib/apps/types";
 import { MOS_SOURCE } from "@/lib/apps/types";
 import {
   getAppSchema,
@@ -18,6 +18,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { StatusPill } from "@/components/ui/status";
 import FolderTabs from "@/components/ui/folder-tabs";
 import LucideIcon from "@/components/lucide-icon";
+import AppSettingsPanel from "./app-settings-panel";
 import {
   renderAuthors,
   formatLastUpdated,
@@ -32,7 +33,7 @@ interface MissingConnector {
 }
 
 type DialogTab =
-  "overview" | "access" | "wiring" | "connectors" | "mcp" | "database";
+  "overview" | "access" | "settings" | "wiring" | "connectors" | "mcp" | "database";
 
 /**
  * Every tab, on every app, always.
@@ -51,6 +52,7 @@ type DialogTab =
 const TABS: Array<{ key: DialogTab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "access", label: "Access" },
+  { key: "settings", label: "Settings" },
   { key: "wiring", label: "Hooks & Services" },
   { key: "connectors", label: "Connectors" },
   { key: "mcp", label: "MCP" },
@@ -70,6 +72,16 @@ function SectionHeading({ children }: { children: ReactNode }) {
     </h3>
   );
 }
+
+/**
+ * What each escape means for the admin deciding whether to run the app — the
+ * consequence, not the mechanism. `Record` over the rule type, so adding a rule
+ * without saying what it means here fails the typecheck.
+ */
+const ESCAPE_MEANING: Record<EscapeRule, string> = {
+  "raw-response":
+    "Some routes return their own response, such as a download, a stream or a redirect, instead of validated data. Sign-in, role, CSRF and rate-limit checks still apply.",
+};
 
 /** What a tab says when the app declares nothing for it. */
 function Empty({ children }: { children: ReactNode }) {
@@ -632,6 +644,33 @@ export default function AppDetailsDialog({
               <Row label="Services consumed" value={app.consumes.length} />
             </FactsPanel>
           </div>
+
+          {/*
+            Here, where an admin looks before activating an app. The generator
+            will not register a route that uses an escape the manifest does not
+            declare, so an app cannot use one without it appearing in this list.
+            See docs/plans/20261005_2150-app-escapes.md.
+          */}
+          <FactsPanel title="Escapes">
+            {app.escapes.length === 0 ? (
+              <Empty>None. No route sends its own response.</Empty>
+            ) : (
+              <ul className="mt-2 space-y-3">
+                {app.escapes.map((escape) => (
+                  <li key={escape.rule} className="text-sm">
+                    <Mono>{escape.rule}</Mono>
+                    <p className="mt-1 text-muted-foreground">
+                      {ESCAPE_MEANING[escape.rule]}
+                    </p>
+                    <p className="mt-1 text-foreground">
+                      <span className="text-muted-foreground">Reason given: </span>
+                      {escape.reason}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </FactsPanel>
         </div>
       )}
 
@@ -886,6 +925,8 @@ export default function AppDetailsDialog({
           )}
         </section>
       )}
+
+      {tab === "settings" && <AppSettingsPanel app={app} />}
     </Dialog>
   );
 }

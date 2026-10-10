@@ -518,6 +518,7 @@ What the platform does between those two boxes, in order:
 | DB table prefixing   | Cross-app data access         | `_app_<slug>_` prefix via `ScopedClient`     | `scoped-db.ts`               |
 | Notification scope   | Cross-app push spam           | `send()` filters recipients to users with the app | `notifications.ts` (`hasAppGrant`) |
 | ESLint import rules  | Client importing server code  | Build-time import restrictions               | `eslint.config.mjs`          |
+| App containment scan | Secrets, egress, injection    | Syntax-tree scan; a finding skips the app    | `app-containment.ts` (see §24) |
 | SDK routing          | Direct DB/connector access    | All client calls go through `/api/apps/...`  | `sdk.ts`                     |
 | Safe error responses | Internal detail leakage       | `safeErrorMessage()` strips details in prod  | `safe-error.ts`, all routes  |
 | Request body limit   | Memory-exhaustion DoS         | 27 MB cap, `content-length` checked first    | `dispatch.ts` (`MAX_BODY_BYTES`) |
@@ -982,13 +983,16 @@ implements **both** halves, and the second is the one people skip:
      past them.
 ```
 
-**Raw `fetch` is an ESLint error in `apps/**`**, which is what makes this the only
-door. Anything with a fixed, admin-configured upstream belongs in a connector
-instead.
+**Raw network access fails the build in `apps/**`**, which is what makes this the
+only door: `fetch`, `WebSocket`, `EventSource`, `XMLHttpRequest`, the
+`http`/`https`/`http2`/`net`/`tls`/`dgram` modules, and the common HTTP client
+packages. Lint flags them in the editor, and the registry generator's containment
+scan refuses the app on every build and every install (§24). Anything with a
+fixed, admin-configured upstream belongs in a connector instead.
 
-**The escape hatch is declared, not silent.** An app may name `raw-fetch` in its
-manifest `escapes` array with a written reason. That disclaims everything above,
-and is a blocking review item.
+**There is no escape hatch.** The `raw-fetch` escape was removed: if
+`context.http` cannot do something an app needs, that is a platform gap to fix,
+not a rule for the app to disclaim.
 
 **Platform code** fetches URLs it did not author in two places, and neither goes
 through `context.http`:
@@ -1262,7 +1266,8 @@ one of these.
 | `/login`, `/api/auth` | the sign-in flow itself |
 | `/api/health` | none — see below |
 | `/manifest.webmanifest` | none; static |
-| `/p`, `/api/p` | the dispatcher's `password` / `key` / `public` tiers (§1) |
+| `/p` | the public page route (`src/lib/apps/public-page.ts`): the page's own `pageVisibility`, the app being active, and the unlock cookie for a `password` page |
+| `/api/p` | the dispatcher's `password` / `key` / `public` tiers (§1) |
 | `/api/mcp` | OAuth 2.1 bearer token (§17) |
 | `/api/oauth`, `/.well-known`, `/api/well-known` | the OAuth endpoints' own validation (§17) |
 | `/api/webhooks` | HMAC signature over the raw body (§19) |
@@ -1440,17 +1445,57 @@ reachable — a public consumer route must do its own authorization first.
 
 ## 24. Environment Containment
 
-Apps do not read `process.env`. It is an ESLint error in `apps/**`, for the
-obvious reason: the raw environment holds `CONNECTOR_ENCRYPTION_KEY`,
-`DATABASE_URL`, and `AUTH_SECRET`.
+Apps do not read `process.env`, for the obvious reason: the raw environment
+holds `CONNECTOR_ENCRYPTION_KEY`, `DATABASE_URL`, and `AUTH_SECRET`, and apps
+run in the platform's own process.
 
 `context.env` (`src/lib/apps/env.ts`) is what apps get instead. Only the keys the
 manifest declared under `env` are resolved, from `app_settings` keyed
 `(app_slug, key)` and filled in by an admin. `password`-typed values are
 encrypted at rest and decrypted here and nowhere else.
 
-The escape hatch is `process-env` in the manifest's `escapes` array — declared,
-reasoned, and a blocking review item.
+### Enforced by the build
+
+Lint flags the environment in the editor, but lint runs on pull requests to this
+repository and nowhere else, so for an extension installed from the Registry it
+would be advice. The rule that holds is in the registry generator, which runs on
+every build and as step 9 of every install (§31). Before it loads any of an
+app's code, it reads the syntax tree of every source file under `apps/<slug>/`
+(`scripts/app-containment.ts`) and skips the app — on the install path, rejects
+it and rolls it back — if the code references:
+
+- `process` in any form: `process.env`, `globalThis.process`, an import of
+  `process` or `node:process`;
+- the network outside `context.http` (§13): `fetch`, `WebSocket`, `EventSource`,
+  `XMLHttpRequest`, the `http`/`https`/`http2`/`net`/`tls`/`dgram` modules, or
+  an HTTP client package;
+- an HTML sink: `dangerouslySetInnerHTML`, assigning `innerHTML` or
+  `outerHTML`, `insertAdjacentHTML`, `document.write`. Formatted text goes
+  through the `Markdown` primitive (`src/components/ui/markdown.tsx`), which
+  drops raw HTML;
+- `eval` or `Function`, which is how every rule above would otherwise be routed
+  around.
+
+A name read off `globalThis`, `window`, `self` or `global` counts the same as
+the bare identifier. A name built at runtime is refused outright, whether it
+indexes one of those objects or names the module in a `require()` or `import()`
+(a relative template path such as `./locales/${lang}` excepted). A local
+variable that happens to be called `fetch` is not a finding: the scan resolves
+each name, and only one that resolves to nothing in the app is a global.
+
+**This is not a sandbox.** The scan reads syntax. Code determined to evade it
+can assemble a name at runtime or reach the same object through another module.
+What it does is make accidental and naive use impossible to ship, and evasion
+conspicuous in review.
+
+**There is no escape hatch.** `process-env`, `raw-fetch` and `raw-html` used to
+be declarable; they were removed in
+[`plans/20261005_2150-app-escapes.md`](plans/20261005_2150-app-escapes.md),
+because `env` and `context.http` cover every legitimate need, and a reviewer
+told "this app declares `process-env`" was being asked to approve an app that
+could read the keys to the whole instance. The one remaining escape,
+`raw-response`, lets a route return its own Response and loosens nothing in this
+section.
 
 ---
 
@@ -1643,7 +1688,8 @@ them.
 6. Pre-flight the manifest: it exists, it parses, it is for this slug
 7. Write to `.installing-<slug>` beside the target, never to the target
 8. Rename into place — the first moment the tree is live
-9. Run scripts/generate-project-registry.ts — the authoritative validation
+9. Run scripts/generate-project-registry.ts — the authoritative validation,
+   containment scan included (§24)
 10. If it was rejected, remove the directory and regenerate, so a failed
     registration leaves the instance exactly as it was
 ```

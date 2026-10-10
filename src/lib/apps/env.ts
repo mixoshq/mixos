@@ -69,6 +69,19 @@ export async function loadAppEnv(
   return Object.freeze(env);
 }
 
+/**
+ * The stored form of one value: a `password` field is encrypted, under its own
+ * key, before it reaches the database. Nothing else ever writes the plaintext.
+ */
+export function encodeAppSetting(
+  field: AppEnvField,
+  value: string,
+): { value: string; encrypted: boolean } {
+  return field.type === "password"
+    ? { value: encrypt(value, platformKey("appSettingsEncryption")), encrypted: true }
+    : { value, encrypted: false };
+}
+
 /** Admin-side write. `password` fields are encrypted before they reach the DB. */
 export async function setAppSetting(
   appSlug: string,
@@ -76,17 +89,87 @@ export async function setAppSetting(
   value: string,
 ): Promise<void> {
   const supabase = createServiceClient();
-  const shouldEncrypt = field.type === "password";
-  await supabase.from("app_settings").upsert(
+  const { error } = await supabase.from("app_settings").upsert(
     {
       app_slug: appSlug,
       key: field.key,
-      value: shouldEncrypt
-        ? encrypt(value, platformKey("appSettingsEncryption"))
-        : value,
-      encrypted: shouldEncrypt,
+      ...encodeAppSetting(field, value),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "app_slug,key" },
   );
+  if (error) throw new Error(`Failed to save ${appSlug}.${field.key}: ${error.message}`);
+}
+
+/** Admin-side removal. The app reads the key as unset from its next request. */
+export async function clearAppSetting(appSlug: string, key: string): Promise<void> {
+  const supabase = createServiceClient();
+  const { error } = await supabase
+    .from("app_settings")
+    .delete()
+    .eq("app_slug", appSlug)
+    .eq("key", key);
+  if (error) throw new Error(`Failed to clear ${appSlug}.${key}: ${error.message}`);
+}
+
+/** One declared setting as the admin form shows it. */
+export interface AppSettingStatus {
+  key: string;
+  label: string;
+  type: AppEnvField["type"];
+  required: boolean;
+  /** True when a value is stored. */
+  set: boolean;
+  /**
+   * The stored value of a `text` setting, so the form can show it. Always
+   * `null` for a `password` setting: once saved, it is never read back out.
+   */
+  value: string | null;
+  /** When the value was last saved. ISO-8601, or null when unset. */
+  updatedAt: string | null;
+}
+
+interface StoredSettingRow extends StoredSetting {
+  updated_at: string | Date;
+}
+
+/**
+ * What an admin may see of an app's settings: one entry per declared field,
+ * and a value only for a `text` field stored in plain text. A row stored
+ * encrypted, or a field now declared `password`, shows as set and nothing more.
+ * Rows for keys the manifest no longer declares are not shown.
+ */
+export function describeAppSettings(
+  declared: readonly AppEnvField[],
+  rows: readonly StoredSettingRow[],
+): AppSettingStatus[] {
+  const stored = new Map(rows.map((row) => [row.key, row]));
+  return declared.map((field) => {
+    const row = stored.get(field.key);
+    return {
+      key: field.key,
+      label: field.label,
+      type: field.type,
+      required: field.required ?? false,
+      set: !!row,
+      value:
+        row && field.type === "text" && !row.encrypted ? row.value : null,
+      updatedAt: row ? new Date(row.updated_at).toISOString() : null,
+    };
+  });
+}
+
+/** An app's declared settings with what is stored for each. For the admin UI. */
+export async function readAppSettings(
+  appSlug: string,
+  declared: readonly AppEnvField[],
+): Promise<AppSettingStatus[]> {
+  if (declared.length === 0) return [];
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("app_settings")
+    .select("key, value, encrypted, updated_at")
+    .eq("app_slug", appSlug);
+  if (error) throw new Error(`Failed to read ${appSlug} settings: ${error.message}`);
+  return describeAppSettings(declared, (data as StoredSettingRow[] | null) ?? []);
 }

@@ -112,17 +112,6 @@ const DEFAULT_BUDGET_MS = 30_000;
 const MAX_PAYLOAD_CHARS = 5_000_000;
 
 /**
- * Output validation can be relaxed for a measured hot path, but only as a
- * *declared* escape (`output-validate-dev-only` in the manifest's `escapes`),
- * so it appears in review rather than being a quiet omission.
- */
-export type OutputValidation = "always" | "dev-only";
-
-export type RouteOutput<TOut> =
-  | z.ZodType<TOut>
-  | { schema: z.ZodType<TOut>; validate: OutputValidation };
-
-/**
  * The context handed to a handler that resolved to an identity-carrying tier.
  * `auth` says which one, so a route serving both a member and a stranger can
  * branch on the fact rather than inferring it from `user !== null`.
@@ -189,7 +178,13 @@ export interface JsonRouteSpec<
 > extends BaseRouteSpec<A> {
   raw?: false;
   input?: S;
-  output: RouteOutput<TOut>;
+  /**
+   * Validated on every response, in every environment. The parse is also what
+   * strips keys the schema does not declare, so it is never skipped; there used
+   * to be a `{ schema, validate: "dev-only" }` form, removed with its escape in
+   * docs/plans/20261005_2150-app-escapes.md.
+   */
+  output: z.ZodType<TOut>;
   handler: (ctx: ContextFor<A>, input: ParsedInput<S>) => TOut | Promise<TOut>;
 }
 
@@ -225,7 +220,6 @@ export interface RouteDefinition<S = unknown, TOut = unknown> {
   readonly raw: boolean;
   readonly input?: z.ZodType;
   readonly output?: z.ZodType;
-  readonly outputValidation: OutputValidation;
   readonly handler: (
     ctx: never,
     input: never,
@@ -277,15 +271,19 @@ export function defineRoute(
     | RawRouteSpec<z.ZodType | undefined, readonly RouteAuth[]>,
 ): RouteDefinition {
   const raw = spec.raw === true;
-  const declaredOutput = raw
+  const output = raw
     ? undefined
     : (spec as JsonRouteSpec<z.ZodType | undefined, unknown, readonly RouteAuth[]>)
         .output;
 
-  const output =
-    declaredOutput && "schema" in declaredOutput ? declaredOutput.schema : declaredOutput;
-  const outputValidation: OutputValidation =
-    declaredOutput && "validate" in declaredOutput ? declaredOutput.validate : "always";
+  // TypeScript already refuses anything but a schema; this is for a route that
+  // reached here without it, so the mistake surfaces when the route is defined
+  // (which the generator does at build time) rather than on its first request.
+  if (output !== undefined && typeof (output as { safeParse?: unknown }).safeParse !== "function") {
+    throw new Error(
+      "defineRoute: `output` must be a Zod schema. The `{ schema, validate }` form was removed — output is validated on every response.",
+    );
+  }
 
   return {
     brand: ROUTE_DEFINITION,
@@ -303,7 +301,6 @@ export function defineRoute(
     raw,
     ...(spec.input ? { input: spec.input as z.ZodType } : {}),
     ...(output ? { output: output as z.ZodType } : {}),
-    outputValidation,
     handler: spec.handler as RouteDefinition["handler"],
   };
 }
@@ -679,26 +676,17 @@ async function executeRoute(
   if (!def.output) return { kind: "data", payload: result };
 
   const parsed = def.output.safeParse(result);
-  // The `dev-only` escape downgrades a FAILURE from a 500 to a log. It does not
-  // skip the parse, because `parsed.data` is also what strips undeclared keys —
-  // skipping it would turn a performance escape into a data leak, and production
-  // would send fields the schema exists to withhold.
+  // The parse is also what strips keys the schema does not declare, so it is
+  // the parsed data — never the raw result — that goes out.
   if (parsed.success) return { kind: "data", payload: parsed.data };
 
-  const enforce =
-    def.outputValidation === "always" || process.env.NODE_ENV !== "production";
-
-  // Logged either way, because safeErrorMessage never logs and in production
-  // the caller only sees the generic message. Without this an output mismatch
-  // is invisible on the server.
+  // Logged, because safeErrorMessage never logs and in production the caller
+  // only sees the generic message. Without this an output mismatch is invisible
+  // on the server.
   console.error(
-    enforce
-      ? `[route] ${label} returned a payload that failed its own output schema:`
-      : `[route] ${label} failed its own output schema (validation relaxed by a declared escape):`,
+    `[route] ${label} returned a payload that failed its own output schema:`,
     parsed.error.issues,
   );
-
-  if (!enforce) return { kind: "data", payload: result };
 
   throw new AppError(
     "INVALID_OUTPUT",
