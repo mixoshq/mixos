@@ -139,10 +139,15 @@ export const CommitShaSchema = z
  * and for humans, `commitSha` is what the tag pointed at when mixos.org
  * resolved it, and `contentHash` is what those files hashed to. Installs fetch
  * the commit and verify the hash, so moving a tag afterwards changes nothing.
+ *
+ * `gitTag` may be absent: a release published from the mixos.org website is
+ * resolved from the repository's default branch, so it has no tag and its
+ * version is the short commit SHA. Nothing here reads the tag to decide what to
+ * fetch, so an untagged release installs exactly as a tagged one does.
  */
 export const ReleaseSchema = z.object({
   version: z.string(),
-  gitTag: z.string(),
+  gitTag: z.string().nullish(),
   commitSha: CommitShaSchema,
   /** Display only here; see CONTENT_HASH_PATTERN on why this is not validated. */
   contentHash: z.string(),
@@ -302,7 +307,8 @@ export const InstallManifestSchema = z.object({
   name: z.string(),
   version: z.string(),
   commitSha: CommitShaSchema,
-  gitTag: z.string(),
+  /** Null for an untagged release; see ReleaseSchema. */
+  gitTag: z.string().nullish(),
   /**
    * Where to fetch from, pinned to `commitSha`.
    *
