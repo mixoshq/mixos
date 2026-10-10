@@ -4,6 +4,7 @@
 
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getDecryptedConfig } from "@/lib/connectors/config";
+import { isConnectorDisabled } from "@/lib/connectors/switch";
 import {
   claimWebhookDelivery,
   releaseWebhookDelivery,
@@ -30,8 +31,9 @@ import type {
  *    would achieve nothing),
  *  - a handler failure answers 500 *and releases the claim*, so the retry is
  *    actually processed rather than swallowed by the replay guard,
- *  - every verification failure answers one uniform 401 with no detail, so the
- *    endpoint cannot be used to probe which secret or scheme is in use.
+ *  - every verification failure, and a connector an admin has turned off,
+ *    answers one uniform 401 with no detail, so the endpoint cannot be used to
+ *    probe which secret or scheme is in use.
  */
 export const dynamic = "force-dynamic";
 
@@ -51,6 +53,15 @@ export async function POST(
   const { name } = await ctx.params;
   const manifest = connectorRegistry.find((c) => c.name === name);
   if (!manifest?.webhook) return new Response(null, { status: 404 });
+
+  // Turned off by an admin (src/lib/connectors/switch.ts): the same 401 as a
+  // connector with no signing secret saved, before anything is decrypted,
+  // claimed or run. Nothing is marked as seen, so a delivery the provider
+  // retries after the connector is back on is processed.
+  if (await isConnectorDisabled(name)) {
+    console.warn(`[connector-webhook] ${name} rejected: disabled`);
+    return rejected();
+  }
 
   // Raw bytes, before any parsing. Re-serialising JSON reorders keys and
   // rewrites whitespace, and the signature is over the bytes as sent.

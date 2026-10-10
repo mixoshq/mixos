@@ -7,6 +7,7 @@ import { requireReadOnlySession } from "@/lib/auth/session";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getDecryptedConfig } from "@/lib/connectors/config";
 import { connectorConfigState } from "@/lib/connectors/status";
+import { getDisabledConnectors } from "@/lib/connectors/switch";
 import {
   deleteUserTokens,
   listUserConnections,
@@ -27,6 +28,9 @@ export default async function ConnectionsPage() {
   const userScoped = connectorRegistry.filter((c) => c.userScoped);
   const connections = await listUserConnections(userId);
   const byName = new Map(connections.map((c) => [c.connectorName, c]));
+  // Connect is refused for a connector an admin disabled, so the page says so
+  // rather than offering a button that bounces.
+  const disabled = await getDisabledConnectors(userScoped.map((c) => c.name));
 
   const items = await Promise.all(
     userScoped.map(async (connector) => {
@@ -48,6 +52,7 @@ export default async function ConnectionsPage() {
         description: connector.description,
         icon: connector.icon ?? null,
         appRegistered,
+        disabled: disabled.has(connector.name),
         connectedAt: mine?.connectedAt ?? null,
         expiresAt: mine?.expiresAt ?? null,
       };

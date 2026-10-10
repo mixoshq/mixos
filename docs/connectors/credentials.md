@@ -74,6 +74,32 @@ Connection** in the Registry runs the connector's `testConnection()` against the
 real API, which is how an admin finds out a key was pasted with a trailing space
 now rather than through a broken widget next week.
 
+## Turning a connector off
+
+**Disable** on a connector's tile at Admin > Connectors turns it off for the
+whole instance, until an admin presses **Enable**. It first names the apps that
+use the connector and asks you to confirm.
+
+While a connector is disabled:
+
+- Apps can't call it. `context.connectors.<name>` is still there, with
+  `configured` false, and every method fails with a `ConnectorError` whose
+  message is `<Name> has been disabled by an administrator.` Its category is
+  `unconfigured`, so a route that lets it propagate answers 503, and
+  `ConnectorErrorState` shows the message with no Retry. Scheduled jobs, public
+  routes, App Services and MCP tools get the same.
+- Its webhooks get the 401 a connector with no signing secret gets, and nothing
+  is recorded, so a delivery the provider retries after it is enabled is
+  processed.
+- Connect, the OAuth callback and Test Connection are refused.
+- Activating an app doesn't check it. An app activated while a connector it
+  requires is disabled runs, and its calls to that connector fail as above.
+
+Disabling keeps the credentials, and each person's grant for a user-scoped
+connector, so enabling needs nothing entered again. It doesn't make a leaked
+credential safe: if you suspect a leak, revoke the credential at the provider,
+then enter a new one here.
+
 ---
 
 ## Caching a user-scoped response

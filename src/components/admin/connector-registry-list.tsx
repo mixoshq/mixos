@@ -4,19 +4,24 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Search } from "lucide-react";
 import type { ConnectorManifest } from "@/lib/connectors/types";
 import type { ConnectorVerification } from "@/lib/connectors/config";
 import type { ConnectorAccess } from "@/lib/connectors/access";
 import type { ScopeStatusRow } from "@/lib/connectors/scope-status";
 import type { ConnectorScope } from "@/lib/connectors/types";
-import type { ConnectorDependents } from "@/lib/connectors/dependents";
+import {
+  describeDependents,
+  type ConnectorDependents,
+} from "@/lib/connectors/dependents";
 import type { ConnectorConfigState } from "@/lib/connectors/status";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import ConnectorTile from "./connector-tile";
 import ConnectorConfigureDialog from "./connector-configure-dialog";
+import { Button } from "@/components/ui/button";
 import { CARD_SHELL } from "@/components/ui/card";
+import { Dialog } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 /** Connection state for a three-legged connector; null for every other kind. */
@@ -59,6 +64,11 @@ export type ConnectorWithStatus = ConnectorManifest & {
   scopeStatus: ScopeStatusRow[];
   /** Which apps declare this connector, required vs optional. */
   dependents: ConnectorDependents;
+  /**
+   * When an admin disabled it (ISO 8601), or null while it is enabled. A
+   * disabled connector keeps its credentials and its `state`; nothing calls it.
+   */
+  disabledAt: string | null;
   oauth: ConnectorOAuthStatus | null;
 };
 
@@ -69,6 +79,8 @@ interface Props {
   /** Returns whether the connector now holds a usable credential set. */
   configureAction: (formData: FormData) => Promise<boolean>;
   testAction: (connectorName: string) => Promise<ConnectorTestOutcome>;
+  /** Disable (`enabled: false`) or Enable a connector. */
+  switchAction: (connectorName: string, enabled: boolean) => Promise<void>;
 }
 
 type StatusFilter = "all" | "configured" | "unconfigured";
@@ -84,6 +96,7 @@ export default function ConnectorRegistryList({
   initialOpen = null,
   configureAction,
   testAction,
+  switchAction,
 }: Props) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -100,6 +113,26 @@ export default function ConnectorRegistryList({
   function openTile(name: string) {
     setOpenedFromUrl(false);
     setOpenName(name);
+  }
+
+  const [switching, startSwitch] = useTransition();
+  /** The connector awaiting Disable's confirmation, or null. */
+  const [confirmingDisable, setConfirmingDisable] =
+    useState<ConnectorWithStatus | null>(null);
+
+  function enable(name: string) {
+    startSwitch(async () => {
+      await switchAction(name, true);
+    });
+  }
+
+  function confirmDisable() {
+    if (!confirmingDisable) return;
+    const name = confirmingDisable.name;
+    startSwitch(async () => {
+      await switchAction(name, false);
+      setConfirmingDisable(null);
+    });
   }
 
   const lower = query.toLowerCase();
@@ -215,6 +248,9 @@ export default function ConnectorRegistryList({
               key={connector.name}
               connector={connector}
               onConfigure={() => openTile(connector.name)}
+              onDisable={() => setConfirmingDisable(connector)}
+              onEnable={() => enable(connector.name)}
+              switching={switching}
             />
           ))}
         </div>
@@ -245,6 +281,73 @@ export default function ConnectorRegistryList({
           testAction={testAction}
         />
       )}
+
+      {/*
+        Disabling asks first, and names what it affects: every app that
+        declares the connector starts failing its calls to it. Enabling only
+        puts things back, so it does not ask.
+      */}
+      <Dialog
+        open={confirmingDisable !== null}
+        onClose={() => setConfirmingDisable(null)}
+        title={
+          confirmingDisable ? `Disable ${confirmingDisable.displayName}?` : ""
+        }
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => setConfirmingDisable(null)}
+              disabled={switching}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDisable}
+              busy={switching}
+              busyLabel="Disabling…"
+            >
+              Disable
+            </Button>
+          </div>
+        }
+      >
+        {confirmingDisable && (
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              Apps can&apos;t call it until you enable it again, and its
+              webhooks, Connect and Test Connection are refused. Its credentials
+              are kept.
+            </p>
+            <p className="text-foreground">
+              {describeDependents(confirmingDisable.dependents)}
+            </p>
+            {(confirmingDisable.dependents.required.length > 0 ||
+              confirmingDisable.dependents.optional.length > 0) && (
+              <dl className="space-y-1">
+                {confirmingDisable.dependents.required.length > 0 && (
+                  <div className="flex flex-wrap gap-x-2">
+                    <dt className="text-muted-foreground">Required by</dt>
+                    <dd className="text-foreground">
+                      {confirmingDisable.dependents.required.join(" · ")}
+                    </dd>
+                  </div>
+                )}
+                {confirmingDisable.dependents.optional.length > 0 && (
+                  <div className="flex flex-wrap gap-x-2">
+                    <dt className="text-muted-foreground">Optional for</dt>
+                    <dd className="text-foreground">
+                      {confirmingDisable.dependents.optional.join(" · ")}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            )}
+          </div>
+        )}
+      </Dialog>
     </>
   );
 }
