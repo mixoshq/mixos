@@ -4,6 +4,7 @@
 
 import { NextResponse } from "next/server";
 import { getReadOnlySession } from "@/lib/auth/session";
+import { isPushServiceEndpoint } from "@/lib/push/endpoint";
 import { saveSubscription, type RawSubscription } from "@/lib/push/subscriptions";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,14 @@ export async function POST(request: Request) {
   const sub = (await request.json().catch(() => null)) as RawSubscription | null;
   if (!sub?.endpoint || !sub.keys?.p256dh || !sub.keys?.auth) {
     return NextResponse.json({ error: "Invalid subscription" }, { status: 400 });
+  }
+  // The server POSTs to this URL for every notification, so it must belong to
+  // a browser push service and not be anywhere a user chose.
+  if (!isPushServiceEndpoint(sub.endpoint)) {
+    return NextResponse.json(
+      { error: "Unsupported push service" },
+      { status: 400 },
+    );
   }
 
   try {

@@ -268,7 +268,7 @@ run Docker, or if you need to work against shared data.
 
    ```bash
    cp .env.local.example .env.local
-   npm run keys:generate        # prints a fresh value for every platform key
+   npm run keys:generate        # prints a fresh value for every key
    ```
 
    Populate `.env.local`. The database is one variable, `DATABASE_URL` — for a
@@ -295,10 +295,12 @@ run Docker, or if you need to work against shared data.
    `supabase/migrations/NNNN_*.sql`.
 
    Apps that declare their own tables are separate — their migrations live in
-   `apps/<slug>/migrations/` and are applied by `npm run migrate:apps`. That
-   runner prefixes every table with `_app_<slug>_` (which is what keeps one app
-   out of another's data) and records applied files in `_migrations`, so
-   re-running it is a no-op. See [docs/apps/database.md](docs/apps/database.md).
+   `apps/<slug>/migrations/` and are applied by `npm run migrate:apps`. Each app
+   gets a schema of its own, `app_<slug>`, and its migrations run there as the
+   app's own database role, after every statement has been checked against what
+   an app may do (which is what keeps one app out of another's data, and out of
+   the platform's). Applied files are recorded in `_migrations`, so re-running
+   it is a no-op. See [docs/apps/database.md](docs/apps/database.md).
 
 3. Seed the first admin:
 
@@ -334,7 +336,7 @@ before writing code; don't infer conventions from surrounding code alone.
 
 An app is a folder under `apps/<slug>/` with an `app.json` manifest. The folder
 name _is_ the slug. From the manifest an app can declare pages, API routes,
-its own Postgres tables (namespaced `_app_<slug>_`), scheduled jobs, web push
+its own Postgres tables (in a schema of its own, `app_<slug>`), scheduled jobs, web push
 notifications, MCP tools, role requirements, and public or password-protected
 surfaces. The platform supplies auth, navigation, theming, telemetry, and
 per-app data isolation; the app supplies the parts that are actually specific to

@@ -9,6 +9,30 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-10-08
+
+- **Each app's tables are in a schema of its own.** An app with
+  `"database": true` gets `app_<slug>`, owned by a database role of its own,
+  `mixos_app_<slug>`, which the release step and `npm run migrate:apps` create.
+  The `_app_<slug>_` table prefix is gone: write bare names, as before, and
+  `context.db` reads the app's schema. The release step's role needs
+  `CREATEROLE`, which every supported host's default role has, and a Postgres
+  server holds one MixOS database: app roles belong to the whole server.
+- **App migrations are checked before they run, and run as the app.** Every
+  statement is parsed with Postgres's own parser and checked against what an app
+  migration may do: tables, indexes, views, sequences, enum types and their rows
+  in the app's schema. Triggers, functions, `DO`, policies, grants, `SET`,
+  extensions, anything outside the app's schema, and function calls beyond a
+  short list of built-ins fail the build and the release step, with the file
+  and line. See `docs/apps/database.md`. **Breaking:** an app that ships
+  `migrations/` must set `"database": true`, and an app slug must be lowercase
+  letters and digits joined by single hyphens or underscores.
+- **`updatedAt` in `app.json`** lists columns the platform sets to `now()` on
+  every update, with its own trigger, since an app migration can no longer
+  create one.
+- **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
+  and `my-app` and `my_app` no longer share tables.
+
 ## 2026-10-07
 
 - **Runs on any Postgres.** The platform no longer uses supabase-js or
@@ -59,6 +83,21 @@ just pulled.
   blanked, styled from the theme's tokens.
 - **Route output is validated on every response.** The
   `output: { schema, validate: "dev-only" }` form is removed; pass the schema.
+- **Theme checks the build used to skip now fail it:** a custom property
+  outside the top-level `:root` (in a `.mix-*` rule, or a `:root` inside
+  `@media` or `@supports`), a colour token the build cannot evaluate or that is
+  translucent, a `var()` naming a token `:root` never sets, and an `@font-face`
+  missing from `fonts[]`. Only `--border` may be translucent; the build
+  composites it over `--background`. Both bundled themes already comply.
+- **The colour fence covers app widgets and pages again.** Raw palette classes,
+  an opaque `bg-white` / `bg-black` and `dark:` variants are lint errors in
+  `apps/**/*.tsx`, where a later config block had been switching them off.
+- **The contrast lint rule checks every installed theme**, not only `mixos`,
+  and names each theme an element fails under.
+- **`npm run lint` generates the registry first**, so the contrast rule has
+  theme tokens to read in CI, where it had been inactive.
+- **The theme picker shows `assets.preview`** above the theme's swatch row,
+  cropped to 16:9 from its top-left corner.
 - **More manifest rules fail the build.** A `sync` needs `"database": true`
   and a `budgetMs` of at most 200000, because the scheduler stops a run at 240
   seconds. Role keys must be unique. A `widgets.ts` that disagrees with
@@ -72,8 +111,18 @@ just pulled.
   `required` is empty, and says which field.
 - **Untagged releases install.** A release published from the mixos.org website
   has no git tag, and installs pinned to its commit like any other.
+- **Cross-app hooks are checked where they're used.** The build skips an app
+  that listens to another app's hook without `listensTo`, or fires another
+  app's hook, and the registrar refuses both at runtime. The bare `hooks` from
+  `@/lib/hooks` takes core hooks only. Listeners follow their app's activation,
+  checked each time a hook fires.
+- **App settings** are filled in on the Settings tab of an app's details in
+  Administration → Apps. `password` values are encrypted when saved and never
+  shown again.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
+- **Fix:** a deactivated app's `/p` pages return 404, as its API routes already
+  did.
 
 ## 2026-10-05
 

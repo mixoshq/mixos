@@ -30,7 +30,9 @@
  * codebase's history — a raw `error.message` reaching the browser, a forgotten
  * status code, a handler that returns `undefined` and 200s. A route that
  * genuinely needs to own its Response (a file stream, a redirect) declares
- * `raw: true`, and that shows up in review as the exception it is.
+ * `raw: true`, and that shows up in review as the exception it is. A failed
+ * connector call needs no Response either: the handler lets the ConnectorError
+ * propagate and the pipeline answers with that connector's envelope.
  *
  * WHAT AN OMITTED `input` MEANS. Not "unvalidated" — *unavailable*. A route
  * with no `input` schema receives `{}`, and anything the caller sent is
@@ -48,6 +50,7 @@ import {
   type RouteAuth,
 } from "@/lib/apps/types";
 import type { BaseConnector } from "@/lib/connectors/types";
+import { isConnectorError } from "@/lib/connectors/errors";
 import { AppError, toErrorResponse } from "@/lib/apps/errors";
 import { withTimeout } from "@/lib/timeout";
 import { recordRouteCall } from "@/lib/apps/telemetry";
@@ -764,6 +767,21 @@ function budgetFrom(err: unknown): "timeout" | "connector-budget" | undefined {
 }
 
 /**
+ * The server-side record of a failed route. An `AppError` is an answer the
+ * route chose, so it is not logged. A connector failure is logged as our own
+ * classification only (`[acme] auth_failed (HTTP 401)`): its `cause` can be
+ * the transport error itself, and that may carry the URL a key was sent in.
+ */
+function logFailure(label: string, err: unknown): void {
+  if (err instanceof AppError) return;
+  if (isConnectorError(err)) {
+    console.error(`[route] ${label} failed: ${err.message}`);
+    return;
+  }
+  console.error(`[route] ${label} threw:`, err);
+}
+
+/**
  * Run a declared route and produce its HTTP Response. Used by both mounts.
  *
  * Never throws: every failure becomes a Response, which is the contract the
@@ -828,13 +846,16 @@ export async function runRoute(
       headers: { "content-type": "application/json" },
     });
   } catch (err) {
-    if (!(err instanceof AppError)) {
-      console.error(`[route] ${label} threw:`, err);
-    }
-    const { status, body } = toErrorResponse(err, `${label} failed.`);
+    logFailure(label, err);
+    // A connector failure the handler let propagate comes back as that
+    // connector's envelope, with its own status and headers; `isAdmin` is what
+    // decides whether its admin-only fields are in it.
+    const { status, body, headers } = toErrorResponse(err, `${label} failed.`, {
+      isAdmin: context.user?.isAdmin === true,
+    });
     record(status, budgetFrom(err));
     try {
-      return NextResponse.json(body, { status });
+      return NextResponse.json(body, { status, headers });
     } catch {
       // `details` is app-supplied (Zod issues, but also whatever an author put
       // in an AppError). A BigInt or a circular reference in there would throw
@@ -893,9 +914,7 @@ export async function runRouteData<TOut = unknown>(
     record(200);
     return out.payload as TOut;
   } catch (err) {
-    if (!(err instanceof AppError)) {
-      console.error(`[route] ${label} threw:`, err);
-    }
+    logFailure(label, err);
     const { status } = toErrorResponse(err, `${label} failed.`);
     record(status, budgetFrom(err));
     throw err;

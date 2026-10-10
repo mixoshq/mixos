@@ -3,25 +3,26 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { createServiceClient } from "@/lib/db/server";
+import { appSchemaName } from "./app-identifiers";
+import { ReadOnlyError } from "./read-only";
 
 /**
- * Per-app database handle. Every table name an app asks for is rewritten to
- * `_app_<slug>_<name>`, which is the entire basis of app data isolation: an app
- * cannot name another app's table, and cannot name a platform table either.
- * The prefix is applied here and nowhere else — see docs/apps/database.md and
- * the matching rewrite in scripts/migrate.ts.
+ * Per-app database handle: the query builder, pinned to the app's own schema,
+ * `app_<slug>` (./app-identifiers.ts). `context.db.table("orders")` is
+ * `app_<slug>.orders`, the table the app's migration created as `orders`. An app
+ * cannot name another app's table, or a platform table, through it.
+ *
+ * It connects as the platform's role, like every other query, and reaches the
+ * app's tables because that role is a member of the app's. What app SQL could
+ * leave behind for that role to run is bounded when the migration is checked
+ * (scripts/app-sql-policy.ts). See docs/apps/database.md.
  */
-export function tablePrefix(appSlug: string): string {
-  return `_app_${appSlug.replace(/-/g, "_")}_`;
-}
-
 export function createScopedClient(appSlug: string) {
-  const db = createServiceClient();
-  const prefix = tablePrefix(appSlug);
+  const db = createServiceClient().schema(appSchemaName(appSlug));
   return {
     // The builder refuses any name that is not a plain identifier, so `name`
-    // cannot carry a quote, a dot or a schema out of the prefix.
-    table: (name: string) => db.from(`${prefix}${name}`),
+    // cannot carry a quote, a dot or another schema out of this one.
+    table: (name: string) => db.from(name),
   };
 }
 
@@ -48,7 +49,8 @@ const MUTATING_METHODS = new Set(["insert", "update", "upsert", "delete"]);
 
 /**
  * A scoped DB client that can only read. Used by MCP tool handlers, which are
- * read-only by contract (see docs/apps/mcp.md).
+ * read-only by contract (see docs/apps/mcp.md), and by an App Services provider
+ * answering a request from one.
  *
  * The type alone would satisfy an honest caller; the Proxy is here for the
  * dishonest one. `ctx.db as any` is a one-token bypass of the compiler, and the
@@ -63,7 +65,7 @@ export function createReadOnlyScopedClient(appSlug: string): ReadOnlyScopedClien
     new Proxy(builder, {
       get(target, prop, receiver) {
         if (typeof prop === "string" && MUTATING_METHODS.has(prop)) {
-          throw new Error(
+          throw new ReadOnlyError(
             `MCP tools are read-only: "${prop}()" is not available on context.db (app "${appSlug}", table "${name}").`,
           );
         }

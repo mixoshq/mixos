@@ -19,6 +19,8 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Access control       | `src/lib/apps/access.ts`                      |
 | Context builder      | `src/lib/apps/context.ts`                     |
 | Scoped DB client     | `src/lib/apps/scoped-db.ts`                   |
+| App schema and role names | `src/lib/apps/app-identifiers.ts`        |
+| App migrations       | `scripts/app-migrations.ts`, `scripts/app-sql-policy.ts` |
 | Notifications client | `src/lib/apps/notifications.ts`               |
 | Web Push sender      | `src/lib/push/server.ts`                      |
 | Push subscribe API   | `src/app/api/push/*/route.ts`                 |
@@ -60,7 +62,7 @@ flowchart TD
 
     HANDLER["APP HANDLER — apps/{slug}/api/{path}/route.ts<br/>a DECLARATION, not a bare function<br/>export const GET = defineRoute({ auth, input, output, handler })"]
 
-    HANDLER -- "context.db.table(…)" --> PG["POSTGRES<br/>prefixed tables · query builder + pool"]
+    HANDLER -- "context.db.table(…)" --> PG["POSTGRES<br/>the app's own schema · query builder + pool"]
     HANDLER -- "context.connectors<br/>.name.search(…)" --> EXT["EXTERNAL API<br/>whatever the connector wraps"]
 ```
 
@@ -282,71 +284,109 @@ app.
 
 ### 3.2 Database table isolation
 
-Apps that declare `"database": true` in their manifest receive a scoped
-database client. All table names are automatically prefixed.
+Apps that declare `"database": true` in their manifest get a schema of their
+own, and a scoped database client pinned to it.
 
 ```mermaid
 flowchart LR
-    APP["app code<br/>context.db.table('goals')"] --> SCOPED["createScopedClient('my-app')<br/>prefixes every name"]
-    SCOPED --> REAL["db.from('_app_my_app_goals')"]
+    APP["app code<br/>context.db.table('goals')"] --> SCOPED["createScopedClient('my-app')<br/>pinned to the app's schema"]
+    SCOPED --> REAL["app_my_app.goals"]
 ```
 
-The prefix is derived from the app slug, so two apps asking for the same table
-name never reach the same rows:
+The schema, and the role that owns it, are derived from the slug by one
+encoding (`src/lib/apps/app-identifiers.ts`), so two apps asking for the same
+table name never reach the same rows:
 
 | App | Writes | Actually reads |
 |---|---|---|
-| `my-app` | `context.db.table("goals")` | `_app_my_app_goals` |
-| `reports` | `context.db.table("renewals")` | `_app_reports_renewals` |
+| `my-app` | `context.db.table("goals")` | `app_my_app.goals` |
+| `my_app` | `context.db.table("goals")` | `app_my__app.goals` |
+| `reports` | `context.db.table("renewals")` | `app_reports.renewals` |
+
+The encoding writes `-` as `_` and `_` as `__`, and a slug may not start or end
+with a separator or put two side by side, so every encoded name reads back to
+exactly one slug. The build fails on a slug outside that form, and on any two
+apps whose schema or role names would be the same.
 
 **Isolation guarantees:**
 
 ```
-+-------------------------------+
-| Postgres (shared database)    |
-|                               |
-|  Platform tables (25, all RLS |
-|  enabled, zero policies):     |
-|    users, apps                |
-|    user_apps, user_app_grants |
-|    app_passwords              |
-|    app_api_keys               |
-|    app_settings               |
-|    connector_configs          |
-|    user_connector_oauth       |
-|    connector_scope_status     |
-|    connector_webhook_events   |
-|    app_unlock_failures        |
-|    dashboard_layouts/_widgets |
-|    push_subscriptions         |
-|    app_scheduled_jobs         |
-|    app_job_runs               |
-|    platform_settings          |
-|    app_open_events            |
-|    telemetry_events           |
-|    oauth_clients              |
-|    oauth_authorization_codes  |
-|    oauth_tokens               |
-|    rate_buckets               |
-|    _migrations                |
-|                               |
-|  App-scoped tables:           |
-|    _app_my_app_goals          |
-|    _app_my_app_quotes         |
-|    _app_reports_renewals      |
-|    _app_reports_history       |
-|    ...                        |
-|                               |
-|  Each app can ONLY access     |
-|  tables with its own prefix   |
-|  via createScopedClient()     |
-+-------------------------------+
++-----------------------------------+
+| Postgres (shared database)        |
+|                                   |
+|  public: platform tables (25, all |
+|  RLS enabled, zero policies):     |
+|    users, apps                    |
+|    user_apps, user_app_grants     |
+|    app_passwords                  |
+|    app_api_keys                   |
+|    app_settings                   |
+|    connector_configs              |
+|    user_connector_oauth           |
+|    connector_scope_status         |
+|    connector_webhook_events       |
+|    app_unlock_failures            |
+|    dashboard_layouts/_widgets     |
+|    push_subscriptions             |
+|    app_scheduled_jobs             |
+|    app_job_runs                   |
+|    platform_settings              |
+|    app_open_events                |
+|    telemetry_events               |
+|    oauth_clients                  |
+|    oauth_authorization_codes      |
+|    oauth_tokens                   |
+|    rate_buckets                   |
+|    _migrations                    |
+|                                   |
+|  app_my_app    (mixos_app_my_app) |
+|    goals                          |
+|    quotes                         |
+|  app_reports   (mixos_app_reports)|
+|    renewals                       |
+|    history                        |
+|  ...                              |
+|                                   |
+|  Each app reaches only its own    |
+|  schema, via createScopedClient() |
++-----------------------------------+
 ```
 
-- The `ScopedClient` only exposes a `.table(name)` method that prepends the prefix
-- App code never sees or constructs raw table names
-- Hyphens in slugs are converted to underscores in prefixes
-- Apps without `"database": true` receive `context.db = null`
+- The `ScopedClient` only exposes a `.table(name)` method, on the query builder
+  pinned to the app's schema. A name cannot carry a quote, a dot or another
+  schema out of it (§8).
+- App code never sees or constructs another schema's name.
+- Apps without `"database": true` receive `context.db = null`, and may not ship
+  `migrations/`: the build fails, and so does the release step.
+
+**What an app's migrations can do.** The release step runs each app's
+`migrations/*.sql` as the app's own role, `mixos_app_<slug>`: NOLOGIN, a member of
+nothing, owner of its schema and of nothing else. Each file runs through a
+`SECURITY DEFINER` function owned by that role, with the schema first on its
+search path, created and dropped inside the file's own transaction
+(`scripts/app-migrations.ts`). Postgres refuses `SET ROLE` and `SET SESSION
+AUTHORIZATION` inside such a function, so the file cannot step back out to the
+platform's role, and the app role's privileges keep it off every table but its
+own. Only apps the registry accepted run any SQL.
+
+That bounds what a migration does while it runs, not what it leaves behind. A
+trigger, rule, column default, check, index expression or view on an app's table
+runs later, when the platform reads or writes the table, and runs as the
+platform's role. So before anything is applied, every statement is parsed with
+Postgres's own parser (libpg_query) and checked against an allowlist
+(`scripts/app-sql-policy.ts`). It allows tables, indexes, views, sequences and
+enum types in the app's schema, and the rows in them. It refuses triggers,
+rules, functions, `DO`, policies, grants, role and session statements,
+extensions, any reference to anything outside the schema, and any function call,
+in any expression, outside a short list of pure built-ins such as `now()` and
+`gen_random_uuid()`. The build runs the same check, so a refused statement fails
+the build before it can fail a deploy.
+
+The one trigger apps asked for, an `updated_at` that keeps itself current,
+belongs to the platform: an app lists the column under `updatedAt` in its
+manifest, and the release step installs `public.mixos_touch_updated_at()` on it
+(`supabase/migrations/0009_app_schemas.sql`). That function sets the one column
+to `now()` and reads nothing else.
 
 ### 3.3 Client-server boundary enforcement
 
@@ -440,9 +480,10 @@ Constraints, all build-enforced:
 - **A user-scoped connector cannot be used by a scheduled job.** A job runs with
   no user, so there is no grant to resolve — the connector would be silently
   absent at 3am and present in a page request.
-- **Absent, not broken.** No user in context, or a user who has never connected,
-  omits the connector rather than handing over an unusable one. That is the same
-  shape an app already handles for a connector an admin has not configured.
+- **Absent, not broken.** No user in context, a user who has never connected, or
+  a grant the provider will no longer renew omits the connector rather than
+  handing over an unusable one. That is the same shape an app already handles
+  for a connector an admin has not configured.
 
 **What this model costs.** Once a connector answers differently per user, every
 place a response is cached, logged, or shared becomes a place it can reach the
@@ -488,8 +529,11 @@ What the platform does between those two boxes, in order:
 - **Subscriptions are platform-owned.** `push_subscriptions` is a `public.*`
   table written only by the session-gated subscribe/unsubscribe routes
   (`src/app/api/push/*`), each pinning `user_id` from `requireReadOnlySession()`.
-  App code never reads or writes it, and the `ScopedClient` cannot reach it
-  (no `_app_<slug>_` prefix).
+  App code never reads or writes it, and the `ScopedClient` cannot reach it:
+  it is in `public`, not the app's schema.
+- **Endpoints are push services only.** The server POSTs to every stored
+  endpoint, so one is accepted only on a browser vendor's push service (§13),
+  at subscribe time and again before each send.
 - **No client-side push API.** Widgets/pages opt in only through the SDK helper
   `enablePushNotifications()` (`src/lib/apps/sdk.ts`), which posts the browser
   subscription to the platform route. The VAPID **private** key never leaves the
@@ -515,7 +559,8 @@ What the platform does between those two boxes, in order:
 | Email domain gate    | Unauthorized user provisioning| `ALLOWED_EMAIL_DOMAINS` env var check        | `access.ts` (`ensureUser`)   |
 | Encryption at rest   | Credential exposure in DB     | AES-256-GCM with random IV per record        | `encryption.ts`              |
 | Per-request decrypt  | Credential caching/leakage   | Stateless connectors, fresh per request      | `context.ts`                 |
-| DB table prefixing   | Cross-app data access         | `_app_<slug>_` prefix via `ScopedClient`     | `scoped-db.ts`               |
+| Per-app schemas      | Cross-app data access         | A schema and role per app; `ScopedClient` pinned to it | `scoped-db.ts`, `app-identifiers.ts` |
+| App migration checks | App SQL reaching past its app | Parsed against an allowlist, run as the app's role | `app-sql-policy.ts`, `app-migrations.ts` |
 | Notification scope   | Cross-app push spam           | `send()` filters recipients to users with the app | `notifications.ts` (`hasAppGrant`) |
 | ESLint import rules  | Client importing server code  | Build-time import restrictions               | `eslint.config.mjs`          |
 | App containment scan | Secrets, egress, injection    | Syntax-tree scan; a finding skips the app    | `app-containment.ts` (see §24) |
@@ -571,7 +616,7 @@ a missing key fails closed naming the variable, because a fallback would mean
 nobody sets the others and the single point of failure quietly survives.
 
 ```
-npm run keys:generate     # all six, paste-ready, with rotation notes
+npm run keys:generate     # all six, plus AUTH_SECRET and CRON_SECRET, paste-ready, with rotation notes
 npm run keys:check        # exits non-zero naming anything missing or malformed
 ```
 
@@ -720,18 +765,19 @@ the one pool configured from `DATABASE_URL`:
 | The query builder (`createServiceClient()`) | [`src/lib/db/query.ts`](../src/lib/db/query.ts), from [`src/lib/db/server.ts`](../src/lib/db/server.ts) | Essentially everything, including the app-facing `context.db` |
 | Raw `postgres.js` pool (`sql`) | [`src/lib/db/client.ts`](../src/lib/db/client.ts), options in [`src/lib/db/pg-options.ts`](../src/lib/db/pg-options.ts) | The few queries the builder cannot express: analytics aggregates, telemetry rollups, the scheduler's atomic job claim, and the schema's own functions |
 
-**Both connect as the role that owns every table, and Row-Level Security does
-not apply to a table's owner.** That is the single most important fact in this
-section, and everything below follows from it. (On Supabase this role is
+**Both connect as the role that owns every platform table and is a member of
+every app's role, and Row-Level Security does not apply to a table's owner or to
+a member of the role that owns it.** That is the single most important fact in
+this section, and everything below follows from it. (On Supabase this role is
 `postgres`; until the builder replaced supabase-js the app also went through
 the `service_role`, which bypasses RLS outright. The consequence is the same.)
 
 The builder is also where SQL injection would live if it lived anywhere, so it
-is built not to have any: every table, column, alias and conflict target must be
-a plain identifier and is quoted, and every value is a bind parameter. A name
-that is not a plain identifier is refused before any SQL is written. That rule
-is what keeps the `_app_<slug>_` prefix below a boundary: an app's table name
-cannot carry a quote, a dot or a schema out of it.
+is built not to have any: every schema, table, column, alias and conflict target
+must be a plain identifier and is quoted, and every value is a bind parameter. A
+name that is not a plain identifier is refused before any SQL is written. That
+rule is what keeps `context.db` inside the app's schema: an app's table name
+cannot carry a quote, a dot or another schema out of it.
 
 ### What RLS does and does not do here
 
@@ -753,13 +799,11 @@ table in `public` that lacks it, skipping extension-owned tables. A rule that
 says "every table in `public`" is enforced by asking for every table in `public`.
 Adding a table cannot miss it, and there is nothing to remember.
 
-**App tables were never covered at all.** `scripts/migrate.ts` applies
-`apps/<slug>/migrations/*.sql` with table names rewritten to the `_app_<slug>_`
-prefix, and whatever `create table` the app wrote landed in `public` exactly as
-written — with no RLS. Every `_app_*` table was reachable through PostgREST for
-as long as apps have had migrations. `migrate.ts` now runs the same sweep after
-applying app migrations, so an app's tables are hardened by the run that creates
-them.
+**App tables are swept too.** Each app's tables are in its own schema, which
+PostgREST does not publish unless someone configures it to, and belong to the
+app's role. The release step (`scripts/app-migrations.ts`) runs the same sweep
+over every app schema as well as `public`, after applying app migrations, so an
+app's tables are hardened by the run that creates them.
 
 This is load-bearing on Supabase and would not be on a plain Postgres instance.
 Every Supabase project publishes the `public` schema through PostgREST,
@@ -772,7 +816,10 @@ opens one.
 
 The flip side is a deployment rule: **migrations must run as the role the
 application connects as.** A table owned by some other role is invisible to the
-app — RLS with no policies denies everyone but the owner.
+app — RLS with no policies denies everyone but the owner. App tables are the one
+deliberate exception, and they follow the same rule one step removed: each
+belongs to its app's role, and the release step makes the role it runs as, the
+one the application connects as, a member of it.
 
 What it is **not**:
 
@@ -803,25 +850,30 @@ Entirely at the application layer:
   `actions.ts` files require a `userId` derived from `requireServerSession()`
   (or `requireAdmin()` on admin paths) before issuing a query. The session pins
   the userId, so a caller cannot read or write another user's row.
-- App-scoped tables carry an `_app_<slug>_` prefix applied by `ScopedClient`
-  ([`src/lib/apps/scoped-db.ts`](../src/lib/apps/scoped-db.ts)). **This prefix is
-  the entire app-to-app isolation boundary** — an app cannot name another app's
-  table, and cannot name a platform table. It is enforced in application code,
-  not by the database.
+- App tables live in a schema per app, `app_<slug>`, owned by a role per app
+  (§3.2). At runtime the boundary is the `ScopedClient`
+  ([`src/lib/apps/scoped-db.ts`](../src/lib/apps/scoped-db.ts)), the query
+  builder pinned to the app's schema: an app cannot name another app's table,
+  and cannot name a platform table. It connects as the platform's role, like
+  every other query, so at runtime the boundary is held in application code.
+  The other half is settled before anything runs: an app's migrations run as
+  the app's own role, and what they may leave behind for the platform's role
+  to run is checked first (§3.2).
 
-  **The prefix bounds the table name, not the app.** `createScopedClient(slug)`
-  accepts *any* slug and builds its own full-access client for it, so the
-  guarantee rests entirely on app code never calling it — `context.db` is the
-  client the dispatcher pins to the calling app. That factory used to be
-  importable from every app tier, including widgets, with no lint error; an app
-  could have written `createScopedClient("other-app").table("secrets")` and read
-  or written another app's data. It is now a restricted import in all three
-  tiers, by **name** (`createScopedClient`, `createReadOnlyScopedClient`) so that
+  **The schema bounds the table name, not the app.** `createScopedClient(slug)`
+  accepts *any* slug and builds its own full-access client for that app's
+  schema, so the guarantee rests entirely on app code never calling it —
+  `context.db` is the client the dispatcher pins to the calling app. That
+  factory used to be importable from every app tier, including widgets, with no
+  lint error; an app could have written
+  `createScopedClient("other-app").table("secrets")` and read or written another
+  app's data. It is now a restricted import in all three tiers, by **name**
+  (`createScopedClient`, `createReadOnlyScopedClient`) so that
   `import type { ScopedClient }` — how a handler types the client it is given —
   still works.
 - The ESLint rules in [`eslint.config.mjs`](../eslint.config.mjs) stop app code
-  importing the raw client at all, so an app cannot hand-write SQL that would
-  sidestep the prefix.
+  importing the raw client at all, so an app cannot hand-write SQL at runtime
+  that would sidestep its schema.
 
 ### Reachability of the database credential
 
@@ -977,7 +1029,14 @@ implements **both** halves, and the second is the one people skip:
      at fetch time.
    - Every returned address is checked against 0/8, 10/8, 127/8,
      172.16-31, 192.168/16, 169.254/16 (metadata), 100.64/10 (CGNAT),
-     198.18-19, multicast, ::1, fc00::/7, fe80::/10, and IPv4-mapped v6.
+     198.18-19, multicast, ::/96 (incl. ::1), fc00::/7, fe80::/10,
+     fec0::/10, ff00::/8, Teredo, and any v6 form that carries an IPv4
+     address (mapped, NAT64, 6to4), which is judged as that address.
+   - The connection is PINNED to the addresses checked. The request goes
+     out over node:http(s) with a `lookup` that answers with them, so the
+     name is never resolved a second time; the URL's hostname still sets
+     the Host header, the TLS server name and the certificate check.
+     (`fetch` cannot be handed an address, which is why it is not used.)
    - Redirects are followed MANUALLY (max 3 hops) so every hop repeats
      both checks. A 302 to 169.254.169.254 would otherwise walk straight
      past them.
@@ -994,7 +1053,7 @@ fixed, admin-configured upstream belongs in a connector instead.
 `context.http` cannot do something an app needs, that is a platform gap to fix,
 not a rule for the app to disclaim.
 
-**Platform code** fetches URLs it did not author in two places, and neither goes
+**Platform code** fetches URLs it did not author in three places, and none goes
 through `context.http`:
 
 - **The connector OAuth token exchange** (§18). The token endpoint comes from the
@@ -1003,6 +1062,13 @@ through `context.http`:
 - **The repository install path** (§31). The tarball URL is chosen by
   mixos.org, which makes it the sharper of the two. It is confined by a fixed
   host allowlist rather than by resolve-and-recheck, for the reason given there.
+- **Web Push delivery** (§3.5). Each notification is a POST to the endpoint a
+  browser handed `/api/push/subscribe`, which any signed-in user can call. It is
+  confined to the browser vendors' push services by a fixed host allowlist
+  (`src/lib/push/endpoint.ts`), checked when a subscription is saved and again
+  before each send — for the same reason as §31: the legitimate destinations
+  are a handful of names, and an allowlist also refuses public hosts that
+  resolve-and-recheck would let through.
 
 ## 14. Security Response Headers
 
@@ -1152,7 +1218,7 @@ already reach in that app.
 
 ### Read-only enforcement
 
-Three layers, because a model-driven caller with a leaked token writing to app
+Layered, because a model-driven caller with a leaked token writing to app
 tables is the worst outcome this feature could have:
 
 1. **Type** — `McpToolContext.db` is a `ReadOnlyScopedClient` with no
@@ -1164,15 +1230,26 @@ tables is the worst outcome this feature could have:
 
 4. **Connector declaration** — a connector marks each method `mutates: true` in
    its `telemetry` list, and the MCP context wraps `ctx.connectors` in a proxy
-   that throws on those. This used to be the acknowledged hole: the platform
-   could not know which connector methods write, so it was reviewer-enforced.
+   (`src/lib/apps/read-only.ts`) through which a tool can call only the methods
+   declared as reads. A `mutates` method throws, and so does anything the
+   manifest does not declare — the base class's `request()` included, which is
+   protected to the compiler but reachable with `as any`, and sends whatever
+   verb it is handed. This used to be the acknowledged hole: the platform could
+   not know which connector methods write, so it was reviewer-enforced.
 
    Two details make the declaration trustworthy rather than decorative. The
    generator parses the connector class **from the AST** and fails the build if
-   any public method is missing from `telemetry` — under-reporting is the one
-   failure a permissions view cannot have. And the proxy does not *guess*: an
-   undeclared method would pass through, which is why completeness is a build
-   error rather than a lint.
+   any public method is missing from `telemetry` — a method written as an
+   arrow-function property counts — because under-reporting is the one failure
+   a permissions view cannot have. And the proxy does not *guess*: it refuses
+   whatever is undeclared rather than reading intent from a method's name. What
+   it does trust is the declaration itself — a method that writes but is not
+   marked `mutates` runs.
+
+5. **App Services** — a tool's `ctx.services` is a client that runs the
+   provider's handler read-only: the provider gets the read-only scoped client
+   and connectors narrowed as in (4), and `caller.readOnly` tells it so. Without
+   this a tool could write by asking another app to.
 
 ### Token handling
 
@@ -1266,7 +1343,8 @@ one of these.
 | `/login`, `/api/auth` | the sign-in flow itself |
 | `/api/health` | none — see below |
 | `/manifest.webmanifest` | none; static |
-| `/p`, `/api/p` | the dispatcher's `password` / `key` / `public` tiers (§1) |
+| `/p` | the public page route (`src/lib/apps/public-page.ts`): the page's own `pageVisibility`, the app being active, and the unlock cookie for a `password` page |
+| `/api/p` | the dispatcher's `password` / `key` / `public` tiers (§1) |
 | `/api/mcp` | OAuth 2.1 bearer token (§17) |
 | `/api/oauth`, `/.well-known`, `/api/well-known` | the OAuth endpoints' own validation (§17) |
 | `/api/webhooks` | HMAC signature over the raw body (§19) |
@@ -1309,10 +1387,20 @@ Both halves are required, and the second is the one that gets skipped:
    and deliveries outside the tolerance are rejected as `stale`.
 
 **Replay protection** is a separate table, `connector_webhook_events`, keyed by a
-**digest of the signature** rather than the signature itself — the row is a dedupe
-marker that outlives the request, and there is no reason for a live
-credential-adjacent value to sit in it. Rows are pruned by the cron sweep, since
-beyond the freshness window the timestamp check already rejects the replay.
+**digest of the MAC that verified** rather than the MAC itself — the row is a
+dedupe marker that outlives the request, and there is no reason for a live
+credential-adjacent value to sit in it. The key is never taken from the header
+as sent: one MAC has several accepted spellings (hex or base64, bare or behind
+any `prefix=`), and a key per spelling would let a captured delivery replay
+under a new one.
+
+Rows of a connector whose policy declares a timestamp header are pruned by the
+cron sweep after a day, since beyond the freshness window the timestamp check
+already rejects the replay. A policy without one has no window — the signature
+is valid for as long as the secret is — so its rows are kept for **90 days**,
+and that is the limit of the protection: for a connector that signs no
+timestamp, a delivery captured more than 90 days ago could be accepted once.
+Declaring the provider's timestamp header, where it signs one, removes that.
 
 **Do not swallow errors in `handleWebhook()`.** Throw. A swallowed error loses the
 delivery for good; a thrown one makes the provider retry.
@@ -1416,9 +1504,8 @@ The `key` tier (§1), for machine-to-machine callers. Public mount only.
 ## 23. App Services (Cross-App Data Requests)
 
 `context.services` (`src/lib/apps/services.ts`) is a governed app-to-app call
-path — a second cross-app channel that the `_app_` table prefix does **not**
-describe, and therefore the one place "apps cannot reach each other's data" needs
-qualifying.
+path — a second cross-app channel that per-app schemas do **not** describe, and
+therefore the one place "apps cannot reach each other's data" needs qualifying.
 
 Non-null only when the app declares `consumes`. Authorization is four-sided and
 default-deny:
@@ -1439,6 +1526,9 @@ another provider, so there are no cycles and no impersonation.
 
 On the public surface there is no user, so only `audience: "app"` services are
 reachable — a public consumer route must do its own authorization first.
+
+A request from an MCP tool runs the provider read-only, as the tool itself is
+(§17).
 
 ---
 

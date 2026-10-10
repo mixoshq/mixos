@@ -33,40 +33,59 @@
 // used to happen when an admin deregistered an app, and it is the only thing
 // that cleans up after an app is removed from the repo. Because it is
 // destructive, this reports what it is about to do before it does it.
+//
+// One transaction under the release step's lock (scripts/migration-lock.ts), so
+// the mirror is replaced whole or not at all, and two runners take turns.
 
 import type { Sql } from "postgres";
-import { appRegistry } from "../src/generated/app-registry";
+import type { AppManifest } from "../src/lib/apps/types";
+import { appRegistry as builtRegistry } from "../src/generated/app-registry";
+import { takeMigrationLock } from "./migration-lock";
 
 export interface AppRegistrySyncResult {
   upserted: number;
   removed: string[];
 }
 
-export async function syncAppRegistry(sql: Sql): Promise<AppRegistrySyncResult> {
+/** What the mirror records of each app. */
+export type MirroredApp = Pick<AppManifest, "slug" | "name" | "description" | "icon">;
+
+/**
+ * `appRegistry` is this build's registry. A test passes its own, the way it
+ * passes the app migration runner its own apps.
+ */
+export async function syncAppRegistry(
+  sql: Sql,
+  appRegistry: readonly MirroredApp[] = builtRegistry,
+): Promise<AppRegistrySyncResult> {
   const slugs = appRegistry.map((a) => a.slug);
 
-  for (const app of appRegistry) {
-    await sql`
-      insert into public.apps (slug, name, description, icon, is_active)
-      values (${app.slug}, ${app.name}, ${app.description}, ${app.icon}, false)
-      on conflict (slug) do update set
-        name        = excluded.name,
-        description = excluded.description,
-        icon        = excluded.icon
-    `;
-  }
+  return sql.begin(async (tx) => {
+    await takeMigrationLock(tx);
 
-  // `= any(...)` rather than `not in (...)`: an empty registry would make
-  // `not in ()` a syntax error, and this has to behave sanely for a repo with
-  // no apps in it rather than blowing up on the edge case.
-  const stale = await sql<{ slug: string }[]>`
-    select slug from public.apps where not (slug = any(${slugs}))
-  `;
-  if (stale.length > 0) {
-    await sql`
-      delete from public.apps where not (slug = any(${slugs}))
-    `;
-  }
+    for (const app of appRegistry) {
+      await tx`
+        insert into public.apps (slug, name, description, icon, is_active)
+        values (${app.slug}, ${app.name}, ${app.description}, ${app.icon}, false)
+        on conflict (slug) do update set
+          name        = excluded.name,
+          description = excluded.description,
+          icon        = excluded.icon
+      `;
+    }
 
-  return { upserted: appRegistry.length, removed: stale.map((r) => r.slug) };
+    // `= any(...)` rather than `not in (...)`: an empty registry would make
+    // `not in ()` a syntax error, and this has to behave sanely for a repo with
+    // no apps in it rather than blowing up on the edge case.
+    const stale = await tx<{ slug: string }[]>`
+      select slug from public.apps where not (slug = any(${slugs}))
+    `;
+    if (stale.length > 0) {
+      await tx`
+        delete from public.apps where not (slug = any(${slugs}))
+      `;
+    }
+
+    return { upserted: appRegistry.length, removed: stale.map((r) => r.slug) };
+  });
 }

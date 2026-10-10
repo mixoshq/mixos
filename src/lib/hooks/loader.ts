@@ -3,7 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { hookLoaders } from "@/generated/app-hook-loaders";
+import { appRegistry } from "@/generated/app-registry";
+import { isAppActive } from "@/lib/apps/access";
 import { hooks } from "./hook-system";
+import { consentedListens } from "./scope";
 import type { HookRegistrar } from "./types";
 
 /**
@@ -29,14 +32,22 @@ import type { HookRegistrar } from "./types";
  * runs synchronously after the import resolves, so two concurrent requests
  * cannot both register the same new module.
  *
- * Activation is NOT decided here. Every installed app's entrypoint is loaded;
- * a dispatcher checks `isAppActive` per request, because that switch can flip
- * at any time and a process outlives many flips.
+ * Activation is NOT decided at load. Every installed app's entrypoint is
+ * loaded; dispatch checks `isAppActive` per request (installed below), because
+ * that switch can flip at any time and a process outlives many flips.
  */
 
 type Entrypoint = (hooks: HookRegistrar) => void;
 
 const registered = new Map<string, Entrypoint>();
+
+/**
+ * How `hooks.doAction` and `hooks.applyFilters` decide whether an app's
+ * listener runs: the admin's switch, asked per dispatch and request-cached.
+ * Installed here because an app's listeners come only from the two registrars
+ * this module hands out, so it is in place before any of them can exist.
+ */
+hooks.setActivation(isAppActive);
 
 export async function ensureHooksLoaded(): Promise<void> {
   await Promise.all(
@@ -59,13 +70,32 @@ export async function ensureHooksLoaded(): Promise<void> {
       registered.set(slug, entry as Entrypoint);
       hooks.clearEntrypoint(slug);
       try {
-        (entry as Entrypoint)(hooks.createRegistrar(slug, { entrypoint: true }));
+        (entry as Entrypoint)(
+          hooks.createRegistrar(slug, {
+            entrypoint: true,
+            listens: consentedListens(slug, appRegistry),
+          }),
+        );
       } catch (err) {
         // Whatever it registered before throwing is dropped too: half an
-        // entrypoint is not what anyone reviewed.
+        // entrypoint is not what anyone reviewed. That includes a listener on
+        // another app's hook the registrar refused for want of consent.
         hooks.clearEntrypoint(slug);
         console.error(`[hooks] apps/${slug}/hooks.ts threw while registering:`, err);
       }
     }),
   );
+}
+
+/**
+ * The registrar an app's server code gets as `context.hooks`: attributed to the
+ * app, holding the other apps' hooks it may listen to, and loading every
+ * `hooks.ts` before it fires, so a listener declared in one runs whichever
+ * request happens to come first.
+ */
+export function appRegistrar(slug: string): HookRegistrar {
+  return hooks.createRegistrar(slug, {
+    listens: consentedListens(slug, appRegistry),
+    beforeDispatch: ensureHooksLoaded,
+  });
 }

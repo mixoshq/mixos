@@ -30,6 +30,12 @@ export type ConnectorConfigState =
 export function connectorConfigState(
   auth: ConnectorAuthPolicy | undefined,
   credentials: Record<string, string> | null | undefined,
+  /**
+   * The manifest's `credentialFields`, from a caller that has the manifest.
+   * Needed to tell a connector that asks for no credentials at all from one
+   * whose credentials have not been entered yet.
+   */
+  fields?: readonly { key: string }[],
 ): ConnectorConfigState {
   const creds = credentials ?? {};
   const has = (...keys: string[]) =>
@@ -49,8 +55,47 @@ export function connectorConfigState(
     return has(...keys) ? "ready" : "unconfigured";
   }
 
+  // Nothing to configure: no strategy, and no field for an admin to fill in —
+  // a public API. Ready as soon as it is installed. Falling through to the
+  // rule below reported it unconfigured forever, because there was nothing an
+  // admin could save to change that.
+  if ((auth?.strategy ?? "none") === "none" && fields?.length === 0) {
+    return "ready";
+  }
+
   // No declaration to go on: any credential at all counts as configured.
   return Object.values(creds).some((v) => (v ?? "").length > 0)
     ? "ready"
     : "unconfigured";
+}
+
+/**
+ * How far the DEPLOYMENT's half of a connector's setup has got. This is the
+ * Connector Registry's question, where `connectorConfigState` answers "can
+ * this instance make a call?".
+ *
+ * For a tenant connector the two are the same question. For a user-scoped one
+ * they are not: the tenant row holds the application's client id and secret
+ * and never a grant, because each person's grant lives in
+ * user_connector_oauth. Asked for a grant, that row said "needs authorization"
+ * however complete the setup was. Once the client credentials are saved, the
+ * deployment's part is done and people connect their own accounts.
+ */
+export function registryConfigState(
+  manifest: {
+    auth?: ConnectorAuthPolicy;
+    credentialFields?: readonly { key: string }[];
+    userScoped?: boolean;
+  },
+  credentials: Record<string, string> | null | undefined,
+): ConnectorConfigState {
+  const { auth } = manifest;
+  if (manifest.userScoped && auth?.strategy === "oauth2_authorization_code") {
+    const creds = credentials ?? {};
+    const [idKey, secretKey] = auth.credentialKeys ?? ["clientId", "clientSecret"];
+    return (creds[idKey] ?? "").length > 0 && (creds[secretKey] ?? "").length > 0
+      ? "ready"
+      : "unconfigured";
+  }
+  return connectorConfigState(auth, credentials, manifest.credentialFields);
 }

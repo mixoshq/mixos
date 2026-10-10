@@ -7,7 +7,7 @@ Hooks are scoped by the app's folder name using a `:` separator. Core platform h
 - **Core hooks** (`init`, `user-login`, etc.) — no prefix, accessible to all apps
 - **App hooks** — auto-prefixed with your app folder name. `doAction("ready")` in `apps/_example` fires as `_example:ready`
 - **Listening across apps requires two-sided consent.** An emitter declares who may listen; a listener declares what it listens for. Both halves are build-enforced and default-deny.
-- **Firing** — apps can only fire their own custom hooks (auto-prefix prevents firing another app's hooks) and core hooks
+- **Firing** — apps can only fire their own custom hooks and core hooks. Another app's hook, named in full, is refused: the build skips an app that fires one by a literal name, and the registrar throws on one built at runtime
 
 ## Cross-app hooks: two-sided consent
 
@@ -29,9 +29,14 @@ same:
 "listensTo": [{ "app": "emitter", "hook": "thing-happened" }]
 ```
 
-Either half missing fails the build, naming the app and the hook. `"consumers":
-"*"` opens a hook to any app that declares the dependency — still a declaration,
-just a broad one.
+A `listensTo` entry the emitter does not allow fails the build, naming the app
+and the hook. The build also reads every `addAction` and `addFilter` call in
+your app's source. If one listens to another app's hook with no `listensTo`
+entry, the build skips your app and names the file and line: the app is left
+out of the registry, and a Registry install of it is rejected. A hook name built
+at runtime is checked when it is registered: the registrar throws.
+`"consumers": "*"` opens a hook to any app that declares the dependency — still
+a declaration, just a broad one.
 
 This applies to **cross-app** hooks only. An app firing and listening to its own
 hooks, and any app listening to a **core** hook (`init`, `user-login`), needs no
@@ -68,7 +73,11 @@ registered elsewhere for now.
 
 ## Using Hooks in Your App
 
-Import the hook system from anywhere in your app — pages, widgets, API routes, or utility files. There are four methods:
+Register listeners in `hooks.ts`, and fire hooks from server code with
+`context.hooks`. Both are registrars attributed to your app, which is what
+prefixes your hook names and checks cross-app consent. The bare `hooks` export
+of `@/lib/hooks` belongs to no app, so it takes core hooks only. A registrar
+has four methods:
 
 - `hooks.addAction(name, callback, priority?)` — register a callback for an action hook
 - `hooks.addFilter(name, callback, priority?)` — register a callback for a filter hook
@@ -76,27 +85,34 @@ Import the hook system from anywhere in your app — pages, widgets, API routes,
 - `hooks.applyFilters(name, value, ...args)` — pipe a value through all registered filter callbacks
 
 ```ts
-// In a page, widget, or any file in your app
-import { hooks } from "@/lib/hooks";
+// apps/my-app/hooks.ts
+import type { HookRegistrar } from "@/lib/hooks";
 
-// Listen to a core action (no prefix)
-hooks.addAction("user-login", async (user) => {
-  console.log(`[my-app] user logged in: ${user.email}`);
-});
+export default function register(hooks: HookRegistrar) {
+  // Modify data flowing through a core filter (no prefix)
+  hooks.addFilter("user-display-name", async (name, user) => {
+    return `${name} (VIP)`;
+  });
 
-// Modify data flowing through a core filter (no prefix)
-hooks.addFilter("user-display-name", async (name, user) => {
-  return `${name} (VIP)`;
-});
+  // Listen to your own hook (stored as "my-app:ready")
+  hooks.addAction("ready", async () => {
+    console.log("[my-app] ready");
+  });
 
-// Fire a custom action — auto-prefixed as "my-app:ready"
-await hooks.doAction("ready");
-
-// Listen to another app's custom hook (use full prefixed name)
-hooks.addAction("other-app:data-updated", async (data) => {
-  console.log("other-app updated:", data);
-});
+  // Listen to another app's hook: the full name, declared under listensTo
+  hooks.addAction("other-app:data-updated", async (data) => {
+    console.log("other-app updated:", data);
+  });
+}
 ```
+
+```ts
+// In an API route, a job or a service handler
+await context.hooks.doAction("ready"); // fires "my-app:ready"
+```
+
+Your listeners run only while your app is active. That is checked each time a
+hook fires, so deactivating an app stops its listeners from the next request.
 
 ## Available Core Hooks
 

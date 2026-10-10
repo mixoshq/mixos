@@ -39,14 +39,14 @@ import type { Sql } from "postgres";
  * does not exist is a compile error, which is the honest failure. The supported
  * surface is listed in docs/apps/database.md.
  *
- * SECURITY. Every identifier — table, column, alias, conflict target — must
- * match a strict pattern and is double-quoted; every value is a bind
+ * SECURITY. Every identifier — schema, table, column, alias, conflict target —
+ * must match a strict pattern and is double-quoted; every value is a bind
  * parameter. Nothing a caller passes is spliced into SQL text. That is what
- * keeps `context.db` inside its own app: the scoped client prepends
- * `_app_<slug>_` to the table name (src/lib/apps/scoped-db.ts), and a name
- * that could carry a quote, a dot or a parenthesis would step outside that
- * prefix. The builder's state lives in private fields for the same reason —
- * an app holding a builder cannot rewrite the table it already names.
+ * keeps `context.db` inside its own app: the scoped client is this builder
+ * pinned to the app's schema (src/lib/apps/scoped-db.ts), and a table name that
+ * could carry a quote, a dot or a parenthesis would step outside it. The
+ * builder's state lives in private fields for the same reason — an app holding
+ * a builder cannot rewrite the schema or table it already names.
  */
 
 /**
@@ -127,6 +127,7 @@ interface Filter {
 }
 
 interface QueryState {
+  schema: string;
   table: string;
   action: Action;
   /**
@@ -180,9 +181,12 @@ function quote(name: unknown, what: string): string {
   return `"${name}"`;
 }
 
-/** The only schema the builder reaches. Tables are always schema-qualified. */
-function qualified(table: string): string {
-  return `"public".${quote(table, "table name")}`;
+/**
+ * A table, always schema-qualified: `public` for the platform's own tables, an
+ * app's schema for the client its `context.db` is.
+ */
+function qualified(schema: string, table: string): string {
+  return `${quote(schema, "schema name")}.${quote(table, "table name")}`;
 }
 
 /**
@@ -331,7 +335,7 @@ function compile(
   state: QueryState,
   conflict: string[] | null = state.onConflict,
 ): { data: CompiledQuery | null; count: CompiledQuery | null } {
-  const table = qualified(state.table);
+  const table = qualified(state.schema, state.table);
 
   if (state.action === "select") {
     const countQuery = state.count
@@ -489,14 +493,14 @@ function toDbError(err: unknown): DbError {
  * `onConflict` are rare and off the hot path, and a cache would outlive a
  * migration that changed the key.
  */
-async function primaryKey(sql: Sql, table: string): Promise<string[]> {
+async function primaryKey(sql: Sql, schema: string, table: string): Promise<string[]> {
   const rows = await sql.unsafe<{ name: string }[]>(
     `select a.attname as name
        from pg_index i
        join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey)
       where i.indrelid = to_regclass($1) and i.indisprimary
       order by array_position(i.indkey::int2[], a.attnum)`,
-    [`public.${quote(table, "table name")}`],
+    [qualified(schema, table)],
   );
   return rows.map((r) => r.name);
 }
@@ -515,7 +519,7 @@ async function execute(sql: Sql, state: QueryState): Promise<DbResponse<Row>> {
   try {
     const conflict =
       state.action === "upsert" && !state.onConflict && state.rows.length > 0
-        ? await primaryKey(sql, state.table)
+        ? await primaryKey(sql, state.schema, state.table)
         : state.onConflict;
     const compiled = compile(state, conflict);
 
@@ -607,8 +611,9 @@ function writtenColumns(rows: Record<string, unknown>[], many: boolean): string[
   return [...seen];
 }
 
-function blankState(table: string, action: Action): QueryState {
+function blankState(schema: string, table: string, action: Action): QueryState {
   return {
+    schema,
     table,
     action,
     columns: action === "select" ? "*" : null,
@@ -757,15 +762,17 @@ export class FilterQuery<T> implements PromiseLike<DbResponse<T>> {
 /** The verbs for one table. Each returns a {@link FilterQuery}. */
 export class TableQuery {
   readonly #sql: Sql;
+  readonly #schema: string;
   readonly #table: string;
 
-  constructor(sql: Sql, table: string) {
+  constructor(sql: Sql, schema: string, table: string) {
     this.#sql = sql;
+    this.#schema = schema;
     this.#table = table;
   }
 
   #start<T>(action: Action, build: (state: QueryState) => void): FilterQuery<T> {
-    const state = blankState(this.#table, action);
+    const state = blankState(this.#schema, this.#table, action);
     try {
       build(state);
       return new FilterQuery<T>(this.#sql, state);
@@ -828,15 +835,26 @@ export class TableQuery {
   }
 }
 
-/** The full-access client: any table in `public`, every verb. */
+/**
+ * Every verb, on any table in one schema: `public` unless constructed with
+ * another. The platform's own client is the `public` one; an app's
+ * `context.db` is one built for the app's schema.
+ */
 export class DbClient {
   readonly #sql: Sql;
+  readonly #schema: string;
 
-  constructor(sql: Sql) {
+  constructor(sql: Sql, schema = "public") {
     this.#sql = sql;
+    this.#schema = schema;
+  }
+
+  /** The same pool, reaching tables in `schema` instead. */
+  schema(schema: string): DbClient {
+    return new DbClient(this.#sql, schema);
   }
 
   from(table: string): TableQuery {
-    return new TableQuery(this.#sql, table);
+    return new TableQuery(this.#sql, this.#schema, table);
   }
 }

@@ -79,6 +79,25 @@ export function isAdminActionable(category: EnvelopeCategory): boolean {
   return ADMIN_ACTIONABLE.has(category as ConnectorErrorCategory);
 }
 
+/**
+ * Is this parsed response body a connector failure envelope?
+ *
+ * Structural rather than `instanceof`, because it runs where there is no
+ * ConnectorError to check against: in the browser, on the JSON a route
+ * answered with.
+ */
+export function isConnectorErrorEnvelope(
+  value: unknown,
+): value is ConnectorErrorEnvelope {
+  const error = (value as { error?: unknown } | null)?.error;
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    typeof (error as { category?: unknown }).category === "string" &&
+    typeof (error as { message?: unknown }).message === "string"
+  );
+}
+
 /** Deep link to the Registry row for this connector. */
 export function registryUrlFor(connectorName: string): string {
   return `/admin/connectors?connector=${encodeURIComponent(connectorName)}`;
@@ -152,13 +171,18 @@ export function connectorErrorEnvelope(
 }
 
 /**
- * The one-liner an app route uses:
+ * The envelope as a Response, for code that owns its own Response — a `raw`
+ * route, a server action:
  *
  *   try {
  *     return Response.json(await context.connectors.acme.listThings());
  *   } catch (err) {
  *     return connectorErrorResponse(err, { isAdmin: context.user?.isAdmin });
  *   }
+ *
+ * A `defineRoute` handler does not need it: a ConnectorError it lets propagate
+ * is answered with this same envelope by the route pipeline (see
+ * `toErrorResponse` in src/lib/apps/errors.ts).
  */
 export function connectorErrorResponse(
   err: unknown,

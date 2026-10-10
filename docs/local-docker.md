@@ -98,7 +98,7 @@ the two orchestrators look like one command.
 2. `supabase start` — a no-op if the stack is already up.
 3. Read `supabase status -o json` and write `.env.docker.local`.
 4. `supabase migration up --local` — the platform schema, incrementally.
-5. `npm run migrate:apps` — each app's own tables, `_app_<slug>_`-prefixed.
+5. `npm run migrate:apps` — each app's own tables, in its own `app_<slug>` schema.
 6. `npm run seed-admin` — idempotent; updates the admin if it already exists.
 7. `docker compose --profile dev up` (or `--profile prod`) — attached, unless
    `--detach` was passed, in which case `up -d` plus a readiness poll.
@@ -441,6 +441,9 @@ budget. Check `DATABASE_URL` in `.env.docker.local` uses
 `host.docker.internal`, not `127.0.0.1` — a container pointed at `127.0.0.1` is
 pointed at itself. Confirm the mapping resolves from inside:
 `docker compose -p mixos exec app-dev getent hosts host.docker.internal`.
+If the body has a `reason`, the database is reachable but missing a migration:
+`schema-behind` wants `npm run db:local`, and `app-migrations-behind` (an app
+migration you added since the last boot) wants `npm run migrate:apps`.
 
 **App API routes 404 in the prod image, with `{"error":"Route not found"}`.**
 `apps/` didn't make it into the standalone output. Note the failure mode: the

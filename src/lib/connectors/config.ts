@@ -146,6 +146,18 @@ export async function recordConnectorVerified(
   connectorName: string,
   detail: string | null,
 ): Promise<void> {
+  // A connector that asks for no credentials has nothing for an admin to save,
+  // so its first successful test is when its row comes into being. Without
+  // one, the verification below would update nothing and never be recorded.
+  await sql`
+    insert into public.connector_configs (connector_name, encrypted_credentials)
+    values (
+      ${connectorName},
+      ${encrypt(JSON.stringify({}), platformKey("connectorEncryption"))}
+    )
+    on conflict (connector_name) do nothing
+  `;
+
   const supabase = createServiceClient();
   await supabase
     .from("connector_configs")
@@ -289,8 +301,13 @@ export async function refreshConnectorTokens(opts: {
   policy: ConnectorAuthPolicy;
   /** Treat a token expiring within this window as already expired. */
   skewMs: number;
+  /**
+   * The access token the upstream just refused with a 401, when this refresh
+   * follows one. It is renewed even if its stored expiry has not passed.
+   */
+  rejected?: string;
 }): Promise<Record<string, string>> {
-  const { connectorName, subject, policy, skewMs } = opts;
+  const { connectorName, subject, policy, skewMs, rejected } = opts;
   const [idKey, secretKey] = policy.credentialKeys ?? [
     "clientId",
     "clientSecret",
@@ -298,8 +315,12 @@ export async function refreshConnectorTokens(opts: {
 
   return mutateConnectorCredentials(connectorName, async (current) => {
     const expiresAt = Number(current[TOKEN_KEYS.expiresAt] ?? 0);
-    if (current[TOKEN_KEYS.access] && expiresAt - skewMs > Date.now()) {
-      // Another invocation refreshed while we waited for the lock.
+    const stored = current[TOKEN_KEYS.access];
+    // A live token means another invocation refreshed while we waited for the
+    // lock — unless it is the token the upstream just refused, revoked or
+    // rotated before its expiry. Handing that one back made the retry after a
+    // 401 fail the same way.
+    if (stored && stored !== rejected && expiresAt - skewMs > Date.now()) {
       return null;
     }
 

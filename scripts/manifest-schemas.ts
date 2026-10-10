@@ -408,6 +408,34 @@ const syncDefinitionSchema = z.strictObject({
 });
 
 /**
+ * A table or column name in an app's own schema, as the query builder accepts
+ * one: unquoted, lowercase, and short enough that Postgres keeps all of it.
+ */
+const sqlNameSchema = z
+  .string()
+  .max(63, "at most 63 characters, or Postgres would cut the name short")
+  .regex(/^[a-z_][a-z0-9_]*$/, "a plain SQL name: lowercase letters, digits and underscores");
+
+/**
+ * A timestamp column the platform keeps current on every UPDATE, through its
+ * own reviewed trigger, because an app migration may not create one. The
+ * generator checks that the app's migrations create the table and the column,
+ * and that the app declares a database.
+ */
+const updatedAtSchema = z
+  .array(
+    z.strictObject({
+      table: sqlNameSchema,
+      // Defaults to `updated_at`.
+      column: sqlNameSchema.optional(),
+    }),
+  )
+  .refine(
+    (cols) => new Set(cols.map((c) => `${c.table}.${c.column ?? "updated_at"}`)).size === cols.length,
+    { message: "a column is listed twice" },
+  );
+
+/**
  * A hook this app fires, and who may listen.
  *
  * Cross-app hook listening was the one channel between apps with NO consent at
@@ -493,11 +521,11 @@ const connectorTelemetryEventSchema = z.strictObject({
    * Declared here, the platform can. The MCP context wraps `ctx.connectors` and
    * throws on a method marked `mutates`, so a read-only tool calling a write is
    * a runtime error rather than a blocking review finding somebody has to catch.
+   * A method that is not declared at all cannot be called from a tool either.
    *
-   * Defaults to `false`, which is safe for the wrong reason and stated here so
-   * nobody mistakes it for a guarantee: an UNDECLARED method is invisible to
-   * this check entirely. Declaring a connector's writes is what buys the
-   * enforcement.
+   * Defaults to `false`, which is not a guarantee: a method that writes but is
+   * declared without `mutates` is treated as a read. Declaring a connector's
+   * writes is what buys the enforcement.
    */
   mutates: z.boolean().optional(),
 });
@@ -732,6 +760,9 @@ export const RawAppManifestSchema = z
      */
     optionalConnectors: z.array(z.string().min(1)).optional(),
     database: z.boolean().optional(),
+    // Columns the platform's trigger sets to now() on every update. Requires
+    // `database`; the generator checks each one against the app's migrations.
+    updatedAt: updatedAtSchema.optional(),
     notifications: z.boolean().optional(),
     global: z.boolean().optional(),
     // Declared exceptions to platform guarantees. Rule names are a closed set;
@@ -1021,6 +1052,23 @@ const connectorDocLinkSchema = z.strictObject({
     .refine((u) => u.startsWith("https://"), "must be an https:// URL"),
 });
 
+/**
+ * A `setup.docs` entry: reference material shown below the checklist, not a
+ * step. `why` is required because a link inside a step is explained by the
+ * sentence around it, and this one has nothing around it — "Gmail API scopes"
+ * does not tell an admin whether they need it now, later or never. If its
+ * author cannot say when someone would open it, the link should not ship.
+ */
+const connectorReferenceLinkSchema = connectorDocLinkSchema.extend({
+  why: z
+    .string()
+    .min(1)
+    .max(
+      300,
+      "a tooltip, not an essay — say when someone would open this link",
+    ),
+});
+
 const connectorSetupStepSchema = z
   .strictObject({
     /**
@@ -1133,7 +1181,7 @@ const connectorSetupSchema = z.strictObject({
   steps: z.array(connectorSetupStepSchema).min(1),
   notes: connectorSetupNotesSchema.optional(),
   /** Reference material — scope tables, API docs. Not steps to carry out. */
-  docs: z.array(connectorDocLinkSchema).optional(),
+  docs: z.array(connectorReferenceLinkSchema).optional(),
 });
 
 /**
@@ -1221,6 +1269,12 @@ export const RawConnectorManifestSchema = z
     /** Where a user reports a problem with the connector. */
     connectorSupportUrl: listingUrlSchema.optional(),
     setup: connectorSetupSchema.optional(),
+    /**
+     * What an admin enters. Omit it only for a connector that needs no
+     * credentials (auth.strategy "none") — that one is ready as soon as it is
+     * installed, and the cross-field check below rejects any other strategy
+     * without it.
+     */
     credentialFields: z.array(credentialFieldSchema).optional(),
     authors: z.array(authorSchema).optional(),
     telemetry: z.array(connectorTelemetryEventSchema).optional(),
@@ -1267,6 +1321,21 @@ export const RawConnectorManifestSchema = z
           `exactly one setup step must set "showRedirectUri": true (found ${redirectSteps.length}). ` +
           "A three-legged connector cannot be configured without registering the redirect URI upstream.",
         path: ["setup", "steps"],
+      });
+    }
+
+    // A connector that declares no credential fields asks for nothing, and the
+    // platform treats it as ready as soon as it is installed — a public API.
+    // One that authenticates cannot be that: with no field there is nothing an
+    // admin could ever enter, so it could never make a call.
+    const strategy = m.auth?.strategy ?? "none";
+    if ((m.credentialFields ?? []).length === 0 && strategy !== "none") {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `auth.strategy "${strategy}" needs a credential, but credentialFields is empty. ` +
+          `Declare the fields an admin fills in; only a connector with auth.strategy "none" may omit them.`,
+        path: ["credentialFields"],
       });
     }
 
