@@ -40,6 +40,14 @@ just pulled.
   both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
   new app, and the old slug keeps the old data. Migration 0010; run
   `npm run db:local` to apply it.
+- **A deactivated app runs nothing.** None of its modules is imported while it
+  is off: its API routes, over HTTP or through `callAppRoute()`, its jobs,
+  syncs, services and `hooks.ts`. Run now refuses its jobs, which Scheduled
+  Jobs shows as **App inactive**, and a consumer calling one of its services
+  gets `PROVIDER_INACTIVE`. Activating it takes effect on the next request,
+  with no restart. Run now, a job's Enable and Disable, and Start and Stop
+  tick are now audited, as `app.job.run`, `app.job.enable`, `app.job.disable`,
+  `scheduler.start` and `scheduler.stop`.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 
