@@ -17,6 +17,12 @@
 // between the two without replaying anything. On a plain Postgres the schema is
 // simply created; the name is the CLI's, not a dependency on Supabase.
 //
+// ── One file per number ──────────────────────────────────────────────────────
+// The ledger's key is the number, not the file name, so a second file with a
+// number already recorded would be skipped as applied. The listing refuses a
+// directory where two files share a number (scripts/platform-migration-files.ts),
+// and it is read before the first query, so such a run applies nothing.
+//
 // ── Safe to run twice at once ────────────────────────────────────────────────
 // Each file is applied in its own transaction, together with its ledger row,
 // under a transaction-scoped advisory lock, and the ledger is re-read once the
@@ -31,29 +37,10 @@ import fs from "fs";
 import path from "path";
 import type { Sql } from "postgres";
 import { takeMigrationLock } from "./migration-lock";
-
-const MIGRATION_FILE = /^(\d+)_(.+)\.sql$/;
+import { listPlatformMigrations } from "./platform-migration-files";
 
 /** gen_random_uuid() is built in from 13; the schema calls it everywhere. */
 const MIN_SERVER_VERSION = 130000;
-
-export interface PlatformMigration {
-  version: string;
-  name: string;
-  file: string;
-}
-
-export function listPlatformMigrations(dir: string): PlatformMigration[] {
-  if (!fs.existsSync(dir)) {
-    throw new Error(`No platform migrations at ${dir}.`);
-  }
-  return fs
-    .readdirSync(dir)
-    .map((file) => ({ file, m: MIGRATION_FILE.exec(file) }))
-    .filter((x): x is { file: string; m: RegExpExecArray } => x.m !== null)
-    .map(({ file, m }) => ({ version: m[1], name: m[2], file }))
-    .sort((a, b) => Number(a.version) - Number(b.version) || a.file.localeCompare(b.file));
-}
 
 export interface PlatformMigrationResult {
   applied: string[];
@@ -65,6 +52,10 @@ export async function migratePlatform(
   dir: string,
   log: (line: string) => void = console.log,
 ): Promise<PlatformMigrationResult> {
+  // Before the first query: a directory where two files share a number is
+  // refused with nothing applied.
+  const migrations = listPlatformMigrations(dir);
+
   const [{ server_version_num }] = await sql<{ server_version_num: string }[]>`
     show server_version_num
   `;
@@ -73,8 +64,6 @@ export async function migratePlatform(
       `Postgres ${server_version_num} is too old. MixOS needs Postgres 13 or later.`,
     );
   }
-
-  const migrations = listPlatformMigrations(dir);
 
   await sql.begin(async (tx) => {
     await takeMigrationLock(tx);
