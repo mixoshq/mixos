@@ -1364,6 +1364,8 @@ route's own 401 is what an operator needs to see.
 no database touch. `/api/health/ready` returns `ok` or `unavailable` with a 503;
 the caught error goes to `console.error` and never into the response body.
 Neither leaks version, commit, environment, or stack. Neither is rate-limited.
+The MixOS version and commit appear on the admin pages, to admins, and nowhere
+else.
 
 ---
 
