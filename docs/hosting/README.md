@@ -14,7 +14,8 @@ A MixOS deployment is three things:
 
 Each deploy also runs **the release step** before new code takes traffic. It
 applies the database migrations and creates the first admin. Inside the image
-that is `node ops/release.cjs`; from a checkout,
+that is `node ops/release.cjs`; on Vercel, the production build runs it after
+`next build`; from a checkout,
 `DATABASE_URL='<connection string>' npm run release`. It reads its settings
 only from the environment it runs in, never from a checkout's `.env` files, so
 it stops if nothing there names a database.
@@ -131,7 +132,9 @@ platform schema the build expects and every app migration the build carries,
 so point the platform's health check there. On a host that waits for it, a
 deploy that skips the release step, or whose release step failed, does not
 serve errors. On one that doesn't, a platform schema behind the build shows
-[the maintenance page](#the-maintenance-page) instead.
+[the maintenance page](#the-maintenance-page) instead. On Vercel the release
+step is part of the production build, so a failed one fails the build and the
+previous deployment keeps serving.
 
 ### The maintenance page
 
@@ -233,7 +236,9 @@ connections and should use the provider's **pooler**: Supabase's transaction
 pooler on port 6543, or the pooled `DATABASE_URL` that Neon's Vercel
 integration sets. Transaction-mode poolers are fine. MixOS uses no prepared
 statements or session state, and the migration runner's lock is
-transaction-scoped.
+transaction-scoped. On Vercel, the production build's release step uses Neon's
+direct `DATABASE_URL_UNPOOLED` instead, when it names the same role and
+database as `DATABASE_URL`.
 
 ## Upgrading
 
