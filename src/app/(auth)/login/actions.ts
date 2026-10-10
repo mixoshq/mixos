@@ -6,25 +6,7 @@
 
 import { AuthError } from "next-auth";
 import { signIn } from "@/lib/auth";
-import { createRateLimiter } from "@/lib/rate-limit";
-import { headers } from "next/headers";
-
-const credentialsRateLimit = createRateLimiter({
-  scope: "ip",
-  name: "login-credentials",
-  maxTokens: 10,
-  refillRatePerSecond: 0.1,
-});
-
-async function rateLimitKey(): Promise<string> {
-  const h = await headers();
-  const forwardedFor = h.get("x-forwarded-for");
-  const ips = forwardedFor
-    ?.split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return ips?.at(-1) || h.get("x-real-ip") || "unknown";
-}
+import { isSignInRateLimited } from "@/lib/auth/sign-in-limit";
 
 export interface CredentialsSignInState {
   error: string | null;
@@ -44,21 +26,14 @@ export async function signInWithCredentials(
 ): Promise<CredentialsSignInState> {
   const attempt = _prev.attempt + 1;
   const email = String(formData.get("email") ?? "").trim();
-  const key = await rateLimitKey();
-  const rl = await credentialsRateLimit.consume(key);
-  if (!rl.allowed) {
-    return {
-      error: "Too many sign-in attempts. Please try again shortly.",
-      attempt,
-      email,
-    };
-  }
-
   const password = String(formData.get("password") ?? "");
   if (!email || !password) {
     return { error: "Email and password are required.", attempt, email };
   }
 
+  // The sign-in limit is charged once, inside the password check that
+  // `signIn()` reaches, so this action does not charge it again
+  // (src/lib/auth/sign-in-limit.ts).
   try {
     await signIn("credentials", {
       email,
@@ -77,6 +52,13 @@ export async function signInWithCredentials(
       (err as { digest: string }).digest.startsWith("NEXT_REDIRECT")
     ) {
       throw err;
+    }
+    if (isSignInRateLimited(err)) {
+      return {
+        error: "Too many sign-in attempts. Please try again shortly.",
+        attempt,
+        email,
+      };
     }
     if (err instanceof AuthError) {
       return { error: "Invalid email or password.", attempt, email };
