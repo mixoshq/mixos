@@ -79,7 +79,12 @@ that preview's own database by hand.
 
 The readiness probe, `/api/health/ready`, answers 503 while the database is
 behind the build, in its platform schema or its app migrations, so a monitor or
-a deployment check can catch a missed step.
+a deployment check can catch a missed step. A deployment that serves before its
+release step has run shows the
+[maintenance page](README.md#the-maintenance-page) until the step has run. That
+can happen to a preview of a branch that adds a platform migration, or to a
+deployment promoted without a rebuild after you restored the database to before
+its migrations.
 
 The admin pages show the MixOS version and the commit the deployment was built
 from, which Vercel sets as `VERCEL_GIT_COMMIT_SHA`.
@@ -96,7 +101,8 @@ once no serving deployment uses what you remove.
 
 Instant Rollback points the production domains at an earlier deployment without
 rebuilding it. No release step runs, and the database stays as the newer
-deployment left it. The rule above keeps the deployment just before the newest
+deployment left it: ahead of the earlier one, not behind, so the maintenance
+page doesn't show. The rule above keeps the deployment just before the newest
 working against it, but one further back may need something a later release
 removed. Migrations only go forward: to take the schema back too, restore the
 database from a backup taken before the migration, or with your provider's
