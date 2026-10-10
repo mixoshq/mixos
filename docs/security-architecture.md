@@ -278,6 +278,20 @@ Result: boolean --> 403 if false
 Users can only reach app API routes for apps they hold a grant for. This is
 checked on **every request**, inside `resolveAuthTier`, before any app code runs.
 
+**The app has to be active, and in the running build.** `resolveAuthTier` and
+`hasAppGrant` refuse an app an admin has deactivated, or one the running build
+doesn't carry, before they read a grant (`isAppActive()` in
+[`src/lib/apps/access.ts`](../src/lib/apps/access.ts)). The second half matters
+because the release step keeps an app's row, and the grants, installs and
+widgets that hang off it, when the app leaves the build
+([`scripts/sync-app-registry.ts`](../scripts/sync-app-registry.ts)): a rollback
+or a build that skips an app no longer deletes them. A kept row could hand an
+old activation, and with it the old grants, to different code that comes back
+under the same slug, so the release step records a hash of each app's files.
+An app that returns with different files comes back inactive and flagged on
+Admin > Apps until an admin activates it; one that returns with the same files
+comes back as it left. Both are audited (§28).
+
 **Do not confuse this with `user_apps`.** That table records which apps a user has
 *installed* on their dashboard — a layout preference, not a permission. The
 function that reads it, `hasAppAccess()`, has **no callers** and should not
@@ -1427,6 +1441,9 @@ sidecar locally.
   RETURNING id` row-locks the match, so two overlapping ticks cannot both run the
   same job. A lease older than `STALE_LEASE_MINUTES` is reclaimable, so a job
   whose process died does not stay claimed forever.
+- **Apps not in the build** keep their job rows, with each job's enabled switch,
+  for when they come back (§3.1). A tick runs only jobs of active apps the
+  running build carries.
 - The tick also performs GC: `rate_buckets` older than an hour, route telemetry,
   expired webhook replay markers, and `app_unlock_failures` older than twice the
   lockout window (§21).
@@ -1768,8 +1785,17 @@ would in fact survive, but retention that depends on a `WHERE` clause in another
 module is not a retention policy.
 
 Currently recorded: `connector.configure`, `connector.test`,
-`app.password.set`, `app.password.clear`, `user.grant.add`,
-`user.grant.revoke`, `user.role.set`.
+`app.password.set`, `app.password.clear`, `app.activate`, `app.deactivate`,
+`app.missing`, `app.returned`, `user.grant.add`, `user.grant.revoke`,
+`user.role.set`.
+
+**Rows the release step writes.** `app.missing` (an app left the build) and
+`app.returned` (it came back, with whether its files changed and both hashes)
+come from the release step's registry sync, not from a person, so `actor_id` is
+null and `actor_email` is `release-step`, which can't be an address. They are
+written in the sync's own transaction, so the change and its record commit
+together: rule 2 is about not failing an admin's action, and here a failed write
+fails the step before anything it would have recorded is committed.
 
 **The review checklist item for any new admin action**: call `recordAdminAction`
 alongside `requireAdmin`. Nothing upstream does either for you.
