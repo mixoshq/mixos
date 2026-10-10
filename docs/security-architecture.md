@@ -281,7 +281,12 @@ checked on **every request**, inside `resolveAuthTier`, before any app code runs
 **The app has to be active, and in the running build.** `resolveAuthTier` and
 `hasAppGrant` refuse an app an admin has deactivated, or one the running build
 doesn't carry, before they read a grant (`isAppActive()` in
-[`src/lib/apps/access.ts`](../src/lib/apps/access.ts)). The second half matters
+[`src/lib/apps/access.ts`](../src/lib/apps/access.ts)). The app gate
+([`src/lib/apps/app-gate.ts`](../src/lib/apps/app-gate.ts)) asks the same
+before any of the app's modules is imported, so a deactivated app's code does
+not run at all: not its routes, jobs, syncs, services or `hooks.ts` (§20, §23,
+§25). Deactivating is the incident response: from the next request or tick,
+none of the app's code is started, with no restart. The second half matters
 because the release step keeps an app's row, and the grants, installs and
 widgets that hang off it, when the app leaves the build
 ([`scripts/sync-app-registry.ts`](../scripts/sync-app-registry.ts)): a rollback
@@ -1441,6 +1446,13 @@ sidecar locally.
   RETURNING id` row-locks the match, so two overlapping ticks cannot both run the
   same job. A lease older than `STALE_LEASE_MINUTES` is reclaimable, so a job
   whose process died does not stay claimed forever.
+- **An inactive app's jobs do not run, not even by Run now.** The claim
+  requires the app to be active, for the tick and for an admin's **Run now**
+  alike, so the server refuses Run now on an inactive app, not only the
+  disabled button. The app gate (§3.1) is asked again before a job's or sync's
+  module is imported, so an app switched off after the claim runs nothing
+  either, and its job stays due. Run now, a job's Enable and Disable, and Start
+  and Stop tick are audited (§28).
 - **Apps not in the build** keep their job rows, with each job's enabled switch,
   for when they come back (§3.1). A tick runs only jobs of active apps the
   running build carries.
@@ -1794,8 +1806,15 @@ module is not a retention policy.
 
 Currently recorded: `connector.configure`, `connector.test`,
 `app.password.set`, `app.password.clear`, `app.activate`, `app.deactivate`,
-`app.missing`, `app.returned`, `user.grant.add`, `user.grant.revoke`,
-`user.role.set`.
+`app.missing`, `app.returned`, `app.job.run`, `app.job.enable`,
+`app.job.disable`, `scheduler.start`, `scheduler.stop`, `user.grant.add`,
+`user.grant.revoke`, `user.role.set`.
+
+**The Scheduled Jobs page's actions.** Run now, Enable and Disable are
+`app.job.*` rows against the app, with the job in `details`. Start and Stop
+tick are `scheduler.start` and `scheduler.stop`, with no target, since they
+switch every job at once. Run now is recorded as the run starts, so a long run
+leaves its row even if the request is cut short, and a refused one leaves none.
 
 **Rows the release step writes.** `app.missing` (an app left the build) and
 `app.returned` (it came back, with whether its files changed and both hashes)
