@@ -3,8 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { NextResponse, type NextRequest } from "next/server";
-import { maintenanceState } from "@/lib/platform/maintenance";
-import { maintenanceGate } from "@/lib/platform/maintenance-gate";
+import { isUpdatingAppPage } from "@/lib/apps/app-gate";
+import { maintenanceState, type MaintenanceState } from "@/lib/platform/maintenance";
+import { appMaintenanceGate, maintenanceGate } from "@/lib/platform/maintenance-gate";
 
 /**
  * The maintenance response, then an optimistic auth check.
@@ -14,6 +15,15 @@ import { maintenanceGate } from "@/lib/platform/maintenance-gate";
  * and query the database (src/lib/platform/maintenance.ts). That needs the
  * database, which a proxy can reach because in Next 16 it runs on the Node.js
  * runtime, always: `runtime` can't be set in this file.
+ *
+ * While one app's own migrations are behind, that app's pages get the same
+ * 503 from here, saying the app is being updated, and everything else serves.
+ * From here because a page can't set its own status. A public page gets it
+ * only where its route would serve it; a signed-in page once the cookie check
+ * has passed, which is as far as this file reads the session. The app's API
+ * routes are answered by the gateway, and the rest of its code is held back
+ * by the app gate (src/lib/apps/app-gate.ts). Every other page is decided from
+ * the answer already kept, with no query.
  *
  * Per Next.js guidance (docs/01-app/01-getting-started/16-proxy.md), proxy
  * middleware should not be used for full authorization. We only do a
@@ -176,19 +186,26 @@ function withCsp(request: NextRequest): NextResponse {
 export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // One answer per request, read only by the paths that need it: the health
+  // probes never ask, and a slow check is waited on once.
+  let asked: Promise<MaintenanceState> | undefined;
+  const state = () => (asked ??= maintenanceState());
+
   // First, ahead of the public list: a public route queries the database as
   // readily as a signed-in one, and the whole instance is waiting.
-  const maintenance = await maintenanceGate(pathname, maintenanceState);
+  const maintenance = await maintenanceGate(pathname, state);
   if (maintenance) return maintenance;
 
-  if (isPublic(pathname)) return withCsp(request);
+  if (isPublic(pathname)) {
+    return (await appMaintenanceGate(pathname, state, isUpdatingAppPage)) ?? withCsp(request);
+  }
 
   if (!hasSessionCookie(request)) {
     const url = new URL("/login", request.url);
     return NextResponse.redirect(url);
   }
 
-  return withCsp(request);
+  return (await appMaintenanceGate(pathname, state, isUpdatingAppPage)) ?? withCsp(request);
 }
 
 export const config = {
@@ -232,8 +249,8 @@ export const config = {
   // session, which is the theme-assets argument exactly — and, like
   // screenshots, only declared files are copied.
   //
-  // A path left out here is left out of the maintenance response too, so leave
-  // out only files that are served without reading the database.
+  // A path left out here is left out of both maintenance responses too, so
+  // leave out only files that are served without reading the database.
   matcher: [
     "/((?!_next/static|_next/image|themes/[^/]+/|connector-assets/|screenshots/|branding/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
   ],
