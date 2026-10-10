@@ -22,10 +22,12 @@ become components have:
 | A hand-rolled card shell | [`Card`](../../src/components/ui/card.tsx) / `SectionCard` | The 87th copy of `rounded-lg border border-border bg-card`. |
 | A status colour picked by hand | [`Badge`](../../src/components/ui/badge.tsx) | A category chip rendered in `destructive` — tones split grading from distinguishing. |
 | A `useEffect` fetch + three booleans | [`useAppQuery`](../../src/lib/apps/use-app-query.ts) + [`AsyncView`](../../src/components/ui/async-view.tsx) | Shipping a surface with no loading, empty, or error state. |
+| `dangerouslySetInnerHTML` / `innerHTML` | [`Markdown`](../../src/components/ui/markdown.tsx) | Script in text you did not write. Raw HTML in the source is dropped and `javascript:` links are blanked. |
 
 **All of these are lint-enforced for `apps/**`.** A raw `<button>`, `<input>`,
 `<select>`, `<textarea>` or `<table>` in an app is a build error, as is a literal
-copy of the card shell.
+copy of the card shell. The HTML sinks are refused twice over: by lint, and by the
+registry generator, which will not register an app that uses one.
 
 ### The async pair
 
