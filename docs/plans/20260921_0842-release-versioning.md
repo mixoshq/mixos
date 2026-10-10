@@ -1,5 +1,12 @@
 # Release versioning on Vercel
 
+> **Partly superseded.** Every build, on every host, now stamps `package.json`'s
+> version into `src/generated/build-info.ts`, and the repository-URL lock covers
+> every built deployment. Decision 4, the `next.config.ts` change and
+> `MIXOS_RELEASE` no longer apply. The commit comes from `MIXOS_COMMIT` or the
+> host's own variable: see `src/lib/platform/version.ts` and
+> [`docs/hosting/README.md`](../hosting/README.md#which-build-is-running).
+
 ## Context
 
 The platform already depends on knowing its own version, and nothing sets it.

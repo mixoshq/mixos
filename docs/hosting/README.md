@@ -91,6 +91,11 @@ lock installs down on an instance that runs from a checkout.
 [docs/security-architecture.md](../security-architecture.md#turning-it-off)
 has the detail.
 
+Those deployments browse mixos.org. `MIXOS_REPOSITORY_URL`, which points a
+development checkout at another catalogue, is ignored there unless it names the
+deployment's own machine (`localhost`, `127.0.0.1`, `[::1]` or
+`host.docker.internal`), and the server log says when it is.
+
 ### The release step
 
 [`scripts/release.ts`](../../scripts/release.ts) runs three things, in order:
