@@ -20,8 +20,9 @@ import {
  * Uses the raw `sql` tag rather than the Supabase client on purpose: every
  * query here turns on an expiry comparison combined with a conditional update
  * (claim-and-consume), which PostgREST cannot express in one round trip.
- * Platform code may reach the raw client; app code may not (enforced by
- * eslint.config.mjs). Same precedent as src/lib/analytics/queries.ts.
+ * Platform code may reach the raw client; app code may not (enforced by the
+ * app import list, src/lib/apps/import-policy.mjs). Same precedent as
+ * src/lib/analytics/queries.ts.
  *
  * Nothing in this module ever returns a raw code or token read back from the
  * database — they are not stored in a recoverable form. Raw values exist only
