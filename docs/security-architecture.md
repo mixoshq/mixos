@@ -587,6 +587,7 @@ What the platform does between those two boxes, in order:
 | Timing-safe queries  | User/app enumeration          | `.maybeSingle()` on all access checks        | `access.ts`                  |
 | Security headers     | Clickjacking, MIME sniffing   | CSP `frame-ancestors 'self'`, `nosniff`, etc | `next.config.ts`             |
 | Session cookies      | Session hijacking / forgery   | Auth.js JWT, httpOnly, secure, sameSite=lax  | `next-auth` (Auth.js v5)     |
+| Read-only image      | The server changing its own code | Image files owned by root; a read-only root filesystem under Compose (see §31) | `Dockerfile`, `deploy/docker-compose.yml` |
 
 ---
 
@@ -2044,12 +2045,13 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   (`isBuiltDeployment()`, `src/lib/platform/build.ts`).
 
   This check has to be a marker rather than a capability probe, because the
-  capability probe passes and the capability is absent.
+  capability probe can pass while the capability is absent.
   `outputFileTracingIncludes` copies `apps/` into the standalone build, and the
   tracer follows the literal paths in `install.ts` and pulls `scripts/` and
-  `node_modules/tsx` in with them — so "the directory is writable" and "the
-  generator file exists" are both **true** in a shipped image. What is missing is
-  `esbuild`, `typescript` and `zod`, so the generator is present and cannot run.
+  `node_modules/tsx` in with them — so "the generator file exists" is **true**
+  in a shipped image, and so is "the directory is writable" wherever the server
+  owns its files. What is missing is `esbuild`, `typescript` and `zod`, so the
+  generator is present and cannot run.
 
   The failure that produced was `rejected-by-registry`: verified, written,
   spawned, died, rolled back, and the admin told the extension "did not pass this
@@ -2064,6 +2066,15 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   everywhere. A non-zero exit from the generator is never its verdict on one
   extension — per-item problems are `Skipping <dir>/ — ...` warnings and the run
   still exits 0, because one bad app must not break everyone else's build.
+
+  In the Docker image, everything but Next's two cache directories belongs to
+  root, and the server runs as `node`, so it cannot change its own code on any
+  host. Compose also runs the image on a read-only root filesystem, with those
+  two directories and `/tmp` as `tmpfs` mounts (`Dockerfile`,
+  `deploy/docker-compose.yml`,
+  [docs/hosting/docker-compose.md](hosting/docker-compose.md#whats-read-only)).
+  The marker is checked first, so an admin there is told why a built deployment
+  cannot register, not that a folder is read-only.
 - **Carry the archive's file modes.** Everything is written `0644`. Nothing here
   execs a source file, and an archive that can set the mode of a file it places
   in the checkout can set the setuid bit.
