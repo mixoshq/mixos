@@ -74,8 +74,31 @@ just pulled.
   theme tokens to read in CI, where it had been inactive.
 - **The theme picker shows `assets.preview`** above the theme's swatch row,
   cropped to 16:9 from its top-left corner.
+- **More manifest rules fail the build.** A `sync` needs `"database": true`
+  and a `budgetMs` of at most 200000, because the scheduler stops a run at 240
+  seconds. Role keys must be unique. A `widgets.ts` that disagrees with
+  `app.json` now fails the build, where it used to leave the app out.
+- **`ctx.signal` for route handlers.** It aborts when the caller disconnects or
+  the route's `budget.ms` runs out. Pass it to connector calls and
+  `context.http.fetch` so the work stops, not just the wait.
+- **`signed-in` pages.** A page whose `pageVisibility` accepts `signed-in` opens
+  for any signed-in user, without the app's grant.
+- **Required widget fields.** The config modal won't save while a field marked
+  `required` is empty, and says which field.
+- **Untagged releases install.** A release published from the mixos.org website
+  has no git tag, and installs pinned to its commit like any other.
+- **Cross-app hooks are checked where they're used.** The build skips an app
+  that listens to another app's hook without `listensTo`, or fires another
+  app's hook, and the registrar refuses both at runtime. The bare `hooks` from
+  `@/lib/hooks` takes core hooks only. Listeners follow their app's activation,
+  checked each time a hook fires.
+- **App settings** are filled in on the Settings tab of an app's details in
+  Administration → Apps. `password` values are encrypted when saved and never
+  shown again.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
+- **Fix:** a deactivated app's `/p` pages return 404, as its API routes already
+  did.
 
 ## 2026-10-05
 

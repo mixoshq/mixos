@@ -60,6 +60,13 @@ export interface ServicesClient {
 /** Identity of the app that initiated a cross-app service request. */
 export interface ServiceCaller {
   appSlug: string;
+  /**
+   * True when the request comes from an MCP tool. The handler then runs
+   * read-only: `db` refuses writes at runtime (its type is unchanged) and only
+   * the connector methods declared as reads can be called. Skip a write when
+   * this is set, or the call fails with the write refused.
+   */
+  readOnly?: boolean;
 }
 
 /**
@@ -100,11 +107,15 @@ export interface McpCaller {
  *     as an API route would; the platform enforces no role policy.
  *   - `db` is READ-ONLY — the mutating verbs are absent from the type and throw
  *     at runtime. A tool reads; it does not act.
+ *   - `connectors` are narrowed to the methods each connector declares as
+ *     reads. A method declared `mutates`, and anything undeclared (the base
+ *     class's `request()` included), throws when called.
  *   - No `notifications` and no `hooks`, for the same reason.
  *   - `services` IS present when the app declares `consumes`: the broker
  *     re-authorizes the user in the provider's own terms, so a tool can reach
  *     another app's data on exactly the same footing as one of this app's own
- *     API routes — no wider.
+ *     API routes — no wider. The provider's handler runs read-only too, so a
+ *     tool cannot write by asking another app to.
  *
  * See `docs/apps/mcp.md`.
  */

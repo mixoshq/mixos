@@ -41,10 +41,23 @@ import type {
   ThemeManifest,
 } from "../src/lib/themes/types";
 import { compileTheme, ThemeError } from "./theme-css";
+import { applyWidgetConfigs } from "./widget-configs";
 import { FatalManifestError } from "./manifest-errors";
 import { readImageSize } from "./image-size";
 import { resolveThemeLogo, validateAppBranding } from "./brand-checks";
+import { listAppMigrations } from "./app-migration-files";
+import {
+  checkHookNamespaces,
+  formatHookFindings,
+  scanHooks,
+  validateHookWiring,
+} from "./hook-checks";
 import { formatFindings, scanAppContainment } from "./app-containment";
+import {
+  validateConnectorMethods,
+  validateConnectorTelemetry,
+  validateRegistryContract,
+} from "./connector-checks";
 import type { Screenshot, ScreenshotKind } from "../src/lib/screenshots";
 import {
   SCREENSHOT_EXTENSIONS,
@@ -58,7 +71,8 @@ import * as ts from "typescript";
 
 /**
  * Thrown when an app is refused for what its code does, not for a malformed
- * manifest — an undeclared escape, today. Takes the per-app `Skipping ...`
+ * manifest — an undeclared escape, or a hook call the hook rules refuse (see
+ * scripts/hook-checks.ts). Takes the per-app `Skipping ...`
  * path like any other per-app failure, but prints its own message rather than
  * "invalid manifest", which would send the author to the wrong file.
  */
@@ -174,76 +188,6 @@ function countPages(dir: string): number {
   return n;
 }
 
-// Core hook names are never slug-prefixed. Keep in sync with CORE_HOOKS in
-// src/lib/hooks/hook-system.ts.
-const CORE_HOOK_NAMES = new Set<string>([
-  "init",
-  "user-login",
-  "user-sync",
-  "user-display-name",
-  ...BRAND_HOOKS,
-]);
-
-// Mirror resolveHookName(): an app's own custom hook is qualified with its
-// slug; core hooks and already-qualified ("app:hook") names pass through.
-function qualifyHookName(name: string, slug: string): string {
-  if (CORE_HOOK_NAMES.has(name) || name.includes(":")) return name;
-  return `${slug}:${name}`;
-}
-
-interface HookScan {
-  // Emitted-hook counts, including dynamic (non-literal) calls — preserves the
-  // historical `hookCounts` semantics.
-  counts: { actions: number; filters: number };
-  // String-literal hook names this app fires / listens for, slug-qualified.
-  emits: { actions: string[]; filters: string[] };
-  listens: { actions: string[]; filters: string[] };
-}
-
-function scanHooks(appDir: string, slug: string): HookScan {
-  let actionCount = 0;
-  let filterCount = 0;
-  const emitActions = new Set<string>();
-  const emitFilters = new Set<string>();
-  const listenActions = new Set<string>();
-  const listenFilters = new Set<string>();
-
-  // First string-literal arg of a hook call, e.g. .doAction("new-deal").
-  // Dynamic (variable) names can't be captured and only show in the counts.
-  const literalCall = (method: string) =>
-    new RegExp(`\\.${method}\\s*\\(\\s*["'\\\`]([^"'\\\`]+)["'\\\`]`, "g");
-  const collect = (src: string, re: RegExp, into: Set<string>) => {
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(src)) !== null) into.add(qualifyHookName(m[1], slug));
-  };
-
-  function walk(dir: string) {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) {
-        const src = fs.readFileSync(full, "utf-8");
-        actionCount += (src.match(/\.doAction\s*\(/g) ?? []).length;
-        filterCount += (src.match(/\.applyFilters\s*\(/g) ?? []).length;
-        collect(src, literalCall("doAction"), emitActions);
-        collect(src, literalCall("applyFilters"), emitFilters);
-        collect(src, literalCall("addAction"), listenActions);
-        collect(src, literalCall("addFilter"), listenFilters);
-      }
-    }
-  }
-  walk(appDir);
-
-  const sorted = (s: Set<string>) => [...s].sort();
-  return {
-    counts: { actions: actionCount, filters: filterCount },
-    emits: { actions: sorted(emitActions), filters: sorted(emitFilters) },
-    listens: { actions: sorted(listenActions), filters: sorted(listenFilters) },
-  };
-}
-
 /**
  * Load an app manifest.
  *
@@ -256,7 +200,7 @@ function scanHooks(appDir: string, slug: string): HookScan {
  *
  * The one thing JSON cannot express is a config field built from a helper, so
  * that — and only that — moved to an optional `widgets.ts`. See
- * loadWidgetConfigs() below.
+ * applyWidgetConfigs() in ./widget-configs.ts.
  */
 async function loadAppManifest(
   appDir: string,
@@ -270,104 +214,6 @@ async function loadAppManifest(
 
   await applyWidgetConfigs(appDir, manifest);
   return manifest;
-}
-
-/**
- * Merge `widgets.ts` config fields into the manifest's widget entries.
- *
- * A widget's `config` is the one part of a manifest that repeats: four widgets
- * wanting a title, a selection and a display mode is the same four field
- * objects written out four times. Helpers in @/lib/apps/widget-config-presets
- * collapse that, and they also derive the widget's config TYPE — neither of
- * which JSON can do.
- *
- * So `widgets.ts` is optional, and narrow: it supplies config arrays and
- * nothing else. Identity, permissions, egress, roles and every other field a
- * reviewer cares about stay in `app.json`, as text.
- *
- *     // apps/my-app/widgets.ts
- *     export default {
- *       "widgets/favorites.tsx": favoritesConfigFields,
- *     };
- *
- * Keyed by `component`, which is a path and therefore already unique within an
- * app — `name` is prose and free to collide.
- *
- * ## Drift is refused, not reconciled
- *
- * Splitting one manifest across two files invents a way for them to disagree.
- * Both directions throw rather than shrug: a key naming no widget is a typo or
- * a rename that missed a file, and a widget declaring `config` in BOTH places
- * has two sources of truth and no rule for picking one. Neither is a state
- * anyone means to be in, and a generator that quietly picks a winner is how
- * someone edits the file that is being ignored.
- *
- * Worth knowing where that throw lands: the caller catches it, warns, and skips
- * the app — the same handling a malformed `app.json` gets. So the build still
- * succeeds and the app is absent from the registry rather than wrong in it.
- * That is this generator's existing severity for a broken manifest, not a
- * judgement about drift specifically.
- */
-async function applyWidgetConfigs(
-  appDir: string,
-  manifest: Record<string, unknown>,
-): Promise<void> {
-  const tsPath = path.join(appDir, "widgets.ts");
-  if (!fs.existsSync(tsPath)) return;
-
-  const slug = path.basename(appDir);
-
-  // tsx's ESM loader handles transpilation. Append a cache-busting query so
-  // repeated generator runs during `next dev` pick up edits.
-  const href = `${pathToFileURL(tsPath).href}?t=${Date.now()}`;
-  const mod = (await import(href)) as { default?: unknown };
-  const byComponent = mod.default;
-
-  if (!byComponent || typeof byComponent !== "object" || Array.isArray(byComponent)) {
-    throw new Error(
-      `apps/${slug}/widgets.ts must default-export an object keyed by each ` +
-        `widget's "component" path, e.g. { "widgets/foo.tsx": fooConfigFields }.`,
-    );
-  }
-
-  const widgets = Array.isArray(manifest.widgets)
-    ? (manifest.widgets as Record<string, unknown>[])
-    : [];
-  const declared = new Set(
-    widgets.map((w) => String(w.component ?? "")).filter(Boolean),
-  );
-
-  for (const [component, fields] of Object.entries(
-    byComponent as Record<string, unknown>,
-  )) {
-    if (!declared.has(component)) {
-      throw new Error(
-        `apps/${slug}/widgets.ts has config for "${component}", which no widget ` +
-          `in app.json declares. Known components: ${[...declared].join(", ") || "(none)"}.`,
-      );
-    }
-    if (!Array.isArray(fields)) {
-      throw new Error(
-        `apps/${slug}/widgets.ts: "${component}" must map to an array of config fields.`,
-      );
-    }
-  }
-
-  for (const widget of widgets) {
-    const component = String(widget.component ?? "");
-    const fields = (byComponent as Record<string, unknown>)[component];
-    if (fields === undefined) continue;
-    if (widget.config !== undefined) {
-      throw new Error(
-        `apps/${slug}: widget "${component}" declares config in BOTH app.json and ` +
-          `widgets.ts. Keep it in one — app.json for plain fields, widgets.ts for ` +
-          `fields built from presets.`,
-      );
-    }
-    // Plain data by the time it lands here; the registry is serialised with
-    // JSON.stringify, so anything else would not survive the write.
-    widget.config = fields;
-  }
 }
 
 /**
@@ -758,47 +604,6 @@ function validateRouteContracts(
   }
 }
 
-/**
- * Carry through the app's declared escapes, failing on a duplicate rule. Shape
- * and the closed rule set are already schema-validated; a duplicate would leave
- * two different reasons on the record for one exception.
- */
-/**
- * Two-sided consent for cross-app hooks, mirroring `validateServiceWiring`.
- *
- * A listener must declare what it listens for, and the emitter must allow that
- * listener. Either half missing is a build failure — the same default-deny App
- * Services has had all along, applied to the one channel that never had it.
- */
-function validateHookWiring(manifests: AppManifest[]): void {
-  const bySlug = new Map(manifests.map((m) => [m.slug, m]));
-
-  for (const consumer of manifests) {
-    for (const dep of consumer.listensTo ?? []) {
-      const provider = bySlug.get(dep.app);
-      if (!provider) {
-        throw new FatalManifestError(
-          `apps/${consumer.slug}/app.json: listensTo names app "${dep.app}", which does not exist.`,
-        );
-      }
-      const emit = (provider.emits ?? []).find((e) => e.name === dep.hook);
-      if (!emit) {
-        throw new FatalManifestError(
-          `apps/${consumer.slug}/app.json: listensTo "${dep.app}:${dep.hook}", but "${dep.app}" does not declare that hook under \`emits\`.`,
-        );
-      }
-      const allowed =
-        emit.consumers === "*" || emit.consumers.includes(consumer.slug);
-      if (!allowed) {
-        throw new FatalManifestError(
-          `apps/${dep.app} does not allow "${consumer.slug}" to listen to "${dep.hook}". ` +
-            `Add it to that hook's \`consumers\`, or use "*".`,
-        );
-      }
-    }
-  }
-}
-
 // ── brand hooks ──────────────────────────────────────────────────────────────
 
 /** Copy an app's declared marks to public/branding/apps/<slug>/. */
@@ -818,6 +623,11 @@ function copyBrandLogos(
   }
 }
 
+/**
+ * Carry through the app's declared escapes, failing on a duplicate rule. Shape
+ * and the closed rule set are already schema-validated; a duplicate would leave
+ * two different reasons on the record for one exception.
+ */
 function validateEscapes(
   raw: AppEscape[] | undefined,
   slug: string,
@@ -989,7 +799,7 @@ function validateProvides(
  * The export check is a source scan rather than an import, deliberately: MCP
  * handlers pull in connectors and server modules, and the generator must stay
  * runnable during a build with no DB or credentials present. Same
- * trade-off (and same regex approach) as `scanHooks`. It catches the common
+ * trade-off as `scanHooks` in ./hook-checks.ts. It catches the common
  * mistake — a handler file that forgot `inputSchema` — without the blast radius
  * of executing app code at build time.
  *
@@ -1114,27 +924,6 @@ function validateServiceWiring(manifests: AppManifest[]): void {
       }
     }
   }
-}
-
-/** As validateAppTelemetry, but for a connector's declared method list. */
-function validateConnectorTelemetry(
-  raw: { method: string; description?: string }[] | undefined,
-  name: string,
-): ConnectorTelemetryDefinition[] {
-  if (!raw || raw.length === 0) return [];
-  const seen = new Set<string>();
-  for (const e of raw) {
-    if (seen.has(e.method)) {
-      throw new Error(
-        `connectors/${name}/connector.json: duplicate telemetry method "${e.method}".`,
-      );
-    }
-    seen.add(e.method);
-  }
-  return raw.map((e) => ({
-    method: e.method,
-    ...(e.description != null ? { description: e.description } : {}),
-  }));
 }
 
 // ── screenshots ──────────────────────────────────────────────────────────────
@@ -1474,6 +1263,9 @@ async function scanApps(): Promise<AppManifest[]> {
     try {
       raw = await loadAppManifest(appDir);
     } catch (err) {
+      // A widgets.ts that disagrees with app.json is a manifest error like any
+      // other, and aborts the run rather than dropping the app.
+      if (err instanceof FatalManifestError) throw err;
       console.warn(
         `  Skipping ${entry.name}/ — failed to load manifest: ${err}`,
       );
@@ -1564,7 +1356,21 @@ async function scanApps(): Promise<AppManifest[]> {
         );
       }
 
+      // What the code fires and listens to, held to the app's own namespace and
+      // its `listensTo`. A finding skips this app, as a containment finding
+      // does. validateHookWiring, after the loop, holds each `listensTo` to the
+      // emitter's `consumers`, and a mismatch there still aborts the run.
       const hookScan = scanHooks(path.join(APPS_DIR, entry.name), entry.name);
+      const hookFindings = checkHookNamespaces(
+        entry.name,
+        hookScan.calls,
+        r.listensTo ?? [],
+      );
+      if (hookFindings.length > 0) {
+        throw new AppRejectedError(
+          `its hook calls break the cross-app hook rules:${formatHookFindings(hookFindings)}`,
+        );
+      }
 
       const manifest: AppManifest = {
         slug: entry.name,
@@ -1678,159 +1484,6 @@ interface ConnectorManifestOut {
   auth?: ConnectorAuthPolicy;
   http?: ConnectorHttpPolicy;
   webhook?: ConnectorWebhookPolicy;
-}
-
-/**
- * Base-class contract, not app-callable surface. The platform calls these; an
- * app never can, so they are not capabilities and are not declared.
- */
-const CONNECTOR_RESERVED_METHODS = new Set([
-  "initialize",
-  "testConnection",
-  "handleWebhook",
-]);
-
-/**
- * Every public method on a connector class must be declared in `telemetry`.
- *
- * WHY THIS IS A BUILD ERROR AND NOT A LINT. The Connector Registry's Access tab
- * answers "what can this reach, and can it change anything" from `telemetry`
- * plus each entry's `mutates`. That answer is only trustworthy if the list is
- * COMPLETE — and `telemetry` was designed as opt-in instrumentation, so nothing
- * made it so. A connector could ship a `sendMessage()`, leave it undeclared,
- * and the tab would report "no method changes anything upstream" about a
- * connector that sends mail.
- *
- * Under-reporting is the one failure a permissions view cannot have: the whole
- * reason an admin opens it is to find out what this thing could do to their
- * data. Over-reporting is a nuisance; under-reporting is a false assurance.
- *
- * Parsed from the AST rather than by regex, because the answer has to be right:
- * a regex cannot tell a method on the connector class from one on a helper
- * class in the same file, nor see the `private` that makes it not count.
- */
-function validateConnectorMethods(
-  name: string,
-  dir: string,
-  telemetry: ConnectorTelemetryDefinition[],
-): void {
-  const entry = path.join(dir, "index.ts");
-  if (!fs.existsSync(entry)) return;
-
-  const source = ts.createSourceFile(
-    entry,
-    fs.readFileSync(entry, "utf-8"),
-    ts.ScriptTarget.Latest,
-    true,
-  );
-
-  const declared = new Set(telemetry.map((t) => t.method));
-  const undeclared: string[] = [];
-
-  for (const statement of source.statements) {
-    if (!ts.isClassDeclaration(statement)) continue;
-    // Only a class that extends something — i.e. the connector, not a local
-    // helper or a plain data class defined alongside it.
-    const extendsClause = statement.heritageClauses?.some(
-      (h) => h.token === ts.SyntaxKind.ExtendsKeyword,
-    );
-    if (!extendsClause) continue;
-
-    for (const member of statement.members) {
-      if (!ts.isMethodDeclaration(member) || !ts.isIdentifier(member.name))
-        continue;
-      const modifiers = ts.getModifiers(member) ?? [];
-      const hidden = modifiers.some(
-        (m) =>
-          m.kind === ts.SyntaxKind.PrivateKeyword ||
-          m.kind === ts.SyntaxKind.ProtectedKeyword ||
-          m.kind === ts.SyntaxKind.StaticKeyword,
-      );
-      const methodName = member.name.text;
-      if (
-        hidden ||
-        methodName.startsWith("#") ||
-        CONNECTOR_RESERVED_METHODS.has(methodName) ||
-        declared.has(methodName)
-      ) {
-        continue;
-      }
-      undeclared.push(methodName);
-    }
-  }
-
-  if (undeclared.length > 0) {
-    throw new Error(
-      `connector.json: these public methods are not declared in "telemetry": ` +
-        `${undeclared.join(", ")}.\n` +
-        `  The Connector Registry reports what a connector can do from that list, ` +
-        `so an undeclared method is one an admin is never told about — and if it ` +
-        `writes, the registry says this connector changes nothing.\n` +
-        `  Add each with a description and, when it changes anything upstream, ` +
-        `"mutates": true. Make it private if apps should not call it.`,
-    );
-  }
-}
-
-/**
- * The Connector Registry contract: what a connector must declare for its admin
- * experience to exist at all.
- *
- * These are not stylistic preferences. Each one is a specific hole in the
- * registry when it is absent:
- *
- *   · no `icon`         — an unidentifiable tile in a grid of tiles
- *   · no `setup`        — a Configure wizard whose first step is blank, so the
- *                         admin is asked for a Client ID with no idea where to
- *                         get one
- *   · no `scopesUrl`    — a permissions list that can never be populated, and
- *                         no way to answer "what can this reach"
- *
- * Reported together rather than one per run: an author adding a connector
- * should learn everything that is missing in one build, not discover it three
- * builds in a row.
- *
- * See docs/connectors/registry-ux.md.
- */
-function validateRegistryContract(
-  name: string,
-  raw: {
-    icon?: string;
-    auth?: { scopesUrl?: string };
-    setup?: { title?: string; steps?: unknown[] };
-  },
-): void {
-  const missing: string[] = [];
-
-  if (!raw.icon) {
-    missing.push(
-      '"icon" — a square PNG/WebP/SVG of at least 512x512 in this connector\'s assets/',
-    );
-  }
-  if (!raw.auth?.scopesUrl) {
-    missing.push(
-      '"auth.scopesUrl" — the provider\'s scope reference page, which the registry parses to list permissions in plain English',
-    );
-  }
-  if (!raw.setup?.title) {
-    missing.push(
-      '"setup.title" — the label for the provider-side step, e.g. "Create a Google Cloud OAuth app"',
-    );
-  }
-  if (!raw.setup?.steps || raw.setup.steps.length === 0) {
-    missing.push(
-      '"setup.steps" — at least one step covering what the admin does in the provider\'s own console',
-    );
-  }
-
-  if (missing.length > 0) {
-    throw new Error(
-      `connector.json is missing what the Connector Registry needs:\n` +
-        missing.map((m) => `    - ${m}`).join("\n") +
-        `\n  Every connector ships a configuration experience; these are the parts ` +
-        `the platform cannot invent. See docs/connectors/registry-ux.md.`,
-    );
-  }
 }
 
 /** Smallest edge a connector icon may have, and it must be square. */
@@ -2065,7 +1718,18 @@ function expectedSchemaVersion(): number {
 }
 
 /**
- * The one build-time fact the running server cannot work out for itself.
+ * Every app migration in apps/<slug>/migrations/, as the release step's runner
+ * lists them (scripts/app-migration-files.ts), so the two agree on what "every
+ * app migration" is.
+ */
+function expectedAppMigrations(): { slug: string; file: string }[] {
+  return listAppMigrations(APPS_DIR).flatMap(({ slug, files }) =>
+    files.map((file) => ({ slug, file })),
+  );
+}
+
+/**
+ * The build-time facts the running server cannot work out for itself.
  *
  * Everything else about build identity is a RUNTIME variable, and deliberately:
  * `MIXOS_RELEASE` already carries the tag and is stamped into the runner stage
@@ -2079,6 +1743,10 @@ function expectedSchemaVersion(): number {
  * and that directory is not copied into the runner image at all, so the number
  * has to travel with the build or not exist.
  *
+ * So is the list of app migrations the readiness probe waits for. `apps/` is in
+ * the Docker image, but a serverless function sees a repository file only if
+ * output tracing put it there; a list compiled into the server needs neither.
+ *
  * NOTE: no timestamp and no commit here. Every value in this file is stable for
  * a given checkout, so re-running the generator rewrites an identical file and
  * the dev server has nothing to recompile. A timestamp — or a git SHA, which
@@ -2086,20 +1754,27 @@ function expectedSchemaVersion(): number {
  */
 function writeBuildInfo(): void {
   const schema = expectedSchemaVersion();
+  const appMigrations = expectedAppMigrations();
 
   const output = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
 //
-// Derived from supabase/migrations/ at build time, because that directory does
-// not exist in the runner image. See src/lib/platform/schema-version.ts for
+// Derived from supabase/migrations/ and apps/*/migrations/ at build time, so the
+// running server knows what it was built against without reading either. See
+// src/lib/platform/schema-version.ts and src/lib/platform/app-migrations.ts for
 // what this gates, and src/lib/platform/version.ts for the runtime half of
 // build identity.
 
 /** Highest migration number in supabase/migrations/ at build time. */
 export const EXPECTED_SCHEMA_VERSION = ${schema};
+
+/** Every app migration in apps/<slug>/migrations/ at build time. */
+export const EXPECTED_APP_MIGRATIONS: readonly { slug: string; file: string }[] = ${JSON.stringify(appMigrations, null, 2)};
 `;
 
   fs.writeFileSync(BUILD_INFO_FILE, output, "utf-8");
-  console.log(`Build stamp: expected schema version ${schema}`);
+  console.log(
+    `Build stamp: expected schema version ${schema}, ${appMigrations.length} app migration(s)`,
+  );
 }
 
 async function main() {

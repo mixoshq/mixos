@@ -138,16 +138,31 @@ export default function UserConnectionList({
                 An administrator has not finished setting this up yet.
               </span>
             ) : connected ? (
-              <Button
-                size="sm"
-                busy={pending}
-                busyLabel="Disconnecting…"
-                onClick={() =>
-                  startTransition(async () => disconnectAction(item.name))
-                }
-              >
-                Disconnect
-              </Button>
+              <span className="flex shrink-0 items-center gap-2">
+                {/*
+                  A stored grant can still be one the provider no longer
+                  renews, and then apps send the person here to connect. This
+                  page cannot tell without asking the provider, so reconnecting
+                  is always on offer: it replaces the grant in one round trip.
+                */}
+                <a
+                  href={`/api/connectors/${encodeURIComponent(item.name)}/oauth/start?return=/account/connections`}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <Link2 className="h-4 w-4" aria-hidden />
+                  Reconnect
+                </a>
+                <Button
+                  size="sm"
+                  busy={pending}
+                  busyLabel="Disconnecting…"
+                  onClick={() =>
+                    startTransition(async () => disconnectAction(item.name))
+                  }
+                >
+                  Disconnect
+                </Button>
+              </span>
             ) : (
               // A plain anchor: this is a full-page round trip out to the
               // provider and back, which is what the OAuth flow needs.

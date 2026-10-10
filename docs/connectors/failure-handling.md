@@ -34,20 +34,21 @@ rate-limit headers outrank the number.
 
 ## In an app route
 
-```ts
-import { connectorErrorResponse } from "@/lib/connectors/response";
+Let it propagate. A `defineRoute` handler does not catch a `ConnectorError`:
 
-export async function GET() {
-  const context = await getAppContext();
-  try {
-    return Response.json(await context.connectors["my-service"].listItems());
-  } catch (err) {
-    return connectorErrorResponse(err, { isAdmin: context.user?.isAdmin });
-  }
-}
+```ts
+import { z } from "zod";
+import { defineRoute } from "@/lib/apps/route";
+
+export const GET = defineRoute({
+  output: z.object({ items: z.array(Item) }),
+  handler: async (context) => ({
+    items: await context.connectors["my-service"].listItems(),
+  }),
+});
 ```
 
-That produces a stable envelope and the right HTTP status:
+The route pipeline answers with a stable envelope and the right HTTP status:
 
 ```jsonc
 { "error": {
@@ -58,11 +59,18 @@ That produces a stable envelope and the right HTTP status:
     // admins only, omitted entirely for everyone else:
     "adminHint": "Open Administration → Connector Registry and enter this connector's credentials.",
     "adminActionUrl": "/admin/connectors?connector=acme-billing"
-} }
+  },
+  // the platform's coarse code, beside the precise category
+  "code": "UNAVAILABLE"
+}
 ```
 
-**Pass `isAdmin` honestly.** The admin fields are written server-side only when
-that flag is true, which is what keeps internal detail away from ordinary users.
+The admin fields are written server-side only when the caller is an admin: the
+pipeline reads `context.user.isAdmin`, which is what keeps internal detail away
+from ordinary users. A `raw: true` route that builds its own Response uses
+`connectorErrorResponse(err, { isAdmin: context.user?.isAdmin })` from
+`@/lib/connectors/response` for the same envelope, and must pass `isAdmin`
+honestly.
 
 `unconfigured` and `auth_failed` map to **503**, not 500: a missing credential
 is a genuinely unavailable dependency. `invalid_request` maps to **502**, not
@@ -74,10 +82,16 @@ about what the message holds, so none of it is forwarded.
 
 ## In a widget
 
+`useAppQuery` with `AsyncView` renders it for you: a failed connector call shows
+`ConnectorErrorState` in place of the generic error. Handling a call yourself,
+`connectorErrorOf` from `@/lib/apps/sdk` returns the envelope from the error:
+
 ```tsx
 import ConnectorErrorState from "@/components/connectors/connector-error-state";
+import { connectorErrorOf } from "@/lib/apps/sdk";
 
-if (error) return <ConnectorErrorState envelope={error} onRetry={refetch} />;
+const envelope = connectorErrorOf(err);
+if (envelope) return <ConnectorErrorState envelope={envelope} onRetry={refetch} />;
 ```
 
 The component splits on cause, not severity. `unconfigured`, `auth_failed`, and

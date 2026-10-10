@@ -53,9 +53,18 @@ delivery is gone for good.
 2. **Freshness** — a signature stays valid forever. Without a timestamp window,
    anyone who observes one delivery can replay it indefinitely and the signature
    still checks out.
-3. **Replay** — even inside the window, the same delivery must apply once. The
-   signature digest is recorded in `connector_webhook_events`; a repeat answers
-   `200 {"duplicate": true}` without running the handler.
+3. **Replay** — even inside the window, the same delivery must apply once. A
+   digest of the MAC that verified is recorded in `connector_webhook_events`; a
+   repeat answers `200 {"duplicate": true}` without running the handler. It is
+   the MAC, not the header as sent, so re-spelling a signature (base64 for hex,
+   another prefix) does not make a captured delivery new.
+
+**Declare `timestampHeader` whenever the provider signs one.** Without it there
+is no freshness window: a signature stays valid for as long as the secret does,
+and the replay record is the only thing refusing a resend. Those records are
+kept for 90 days, so for a connector that signs no timestamp, **a delivery
+captured more than 90 days ago could be accepted once.** With a timestamp, the
+window does that work and records are swept after a day.
 
 Every verification failure returns the same bare `401`, so the endpoint cannot
 be used to probe which secret or scheme is in use.
