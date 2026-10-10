@@ -47,6 +47,7 @@ import { FatalManifestError } from "./manifest-errors";
 import { readImageSize } from "./image-size";
 import { resolveThemeLogo, validateAppBranding } from "./brand-checks";
 import { appMigrationFiles, listAppMigrations } from "./app-migration-files";
+import { listPlatformMigrations } from "./platform-migration-files";
 import { checkAppMigrationSql, describeAppTables, formatSqlProblems } from "./app-sql-policy";
 import {
   appIdentifierProblems,
@@ -1863,16 +1864,15 @@ function validateUserScopedUsage(
  * somebody has to remember to bump alongside a file they just added is a
  * constant that will disagree with the directory within a month.
  *
- * Files are `NNNN_name.sql`. Anything that does not start with digits is not a
- * migration the Supabase CLI will apply in order, so it is ignored here too.
+ * The files are listed as the runner lists them
+ * (scripts/platform-migration-files.ts), so the build expects only a number
+ * whose file the runner applies. Two files with one number fail the build: the
+ * ledger would record that number for one of them, and the runner would skip
+ * the other as already applied.
  */
 function expectedSchemaVersion(): number {
   if (!fs.existsSync(MIGRATIONS_DIR)) return 0;
-  const numbers = fs
-    .readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith(".sql"))
-    .map((f) => Number(/^(\d+)/.exec(f)?.[1] ?? NaN))
-    .filter((n) => Number.isInteger(n));
+  const numbers = listPlatformMigrations(MIGRATIONS_DIR).map((m) => Number(m.version));
   return numbers.length ? Math.max(...numbers) : 0;
 }
 
