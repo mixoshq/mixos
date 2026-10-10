@@ -146,8 +146,9 @@ async function installGlobalApps(
 /**
  * Is this app active on this instance?
  *
- * `apps.is_active` is an admin's switch, set on the Apps page and untouched by
- * the registry sync, so it survives a redeploy. Deactivating is meant to be
+ * `apps.is_active` is an admin's switch, set on the Apps page, so it survives a
+ * redeploy. The registry sync only ever turns it off, for an app that came
+ * back into the build with different code. Deactivating is meant to be
  * complete rather than cosmetic: an inactive app is filtered out of every list
  * AND refused by every gate — `hasAppGrant` (pages, MCP, OAuth) and
  * `resolveAuthTier` (every API route and public page) both call this. Hiding
@@ -158,12 +159,19 @@ async function installGlobalApps(
  * its absence means an app the platform does not know about; defaulting that
  * to "serve it" would make a failed sync an availability decision.
  *
+ * So does an app this build doesn't carry, whatever its row says. The release
+ * step keeps the row of an app that left the build, switch included, so the
+ * app can come back as it was (scripts/sync-app-registry.ts). Until it does,
+ * its widgets, installs and grants stay in the database, and off every user's
+ * dashboard and menus.
+ *
  * Deduped per request: a single page render asks this for every widget on the
  * dashboard, and they are all the same question. `cache` is React's
  * request-scoped memo, so it never outlives the request that made it and an
  * admin's activation takes effect on the next one.
  */
 export const isAppActive = cache(async (slug: string): Promise<boolean> => {
+  if (!appRegistry.some((a) => a.slug === slug)) return false;
   const supabase = createServiceClient();
   const { data } = await supabase
     .from("apps")
@@ -201,6 +209,10 @@ export async function setAppActive(
       description: manifest?.description ?? null,
       icon: manifest?.icon ?? null,
       is_active: isActive,
+      // Activating is the admin's answer to an app that came back into the
+      // build with different code, so it clears that flag. Deactivating leaves
+      // the question open.
+      ...(isActive ? { returned_changed_at: null } : {}),
     },
     { onConflict: "slug" },
   );
@@ -216,6 +228,64 @@ export async function getAppActiveMap(): Promise<Record<string, boolean>> {
     out[row.slug] = row.is_active;
   }
   return out;
+}
+
+/** An app this database keeps that the running build doesn't carry. */
+export interface AppNotInBuild {
+  slug: string;
+  name: string;
+  icon: string | null;
+  /** When a release step first ran without it. Null when none has since. */
+  missingSince: string | null;
+}
+
+export interface AppBuildStatus {
+  /** Apps in this build that came back with different code: slug to when. */
+  returnedChanged: Record<string, string>;
+  /** Apps whose rows, and data, are kept although this build lacks them. */
+  notInBuild: AppNotInBuild[];
+}
+
+/**
+ * What the Apps page says about apps that left the build or came back, read
+ * from the rows the release step keeps (scripts/sync-app-registry.ts).
+ *
+ * "Not in this build" means the build serving this request, which is what an
+ * admin is looking at. It usually agrees with `missing_since`, which the last
+ * release step wrote, but not always: a host can roll back to an older build
+ * without running one.
+ *
+ * Empty when the read fails. These are notices beside the list, and the list
+ * should still render without them.
+ */
+export async function getAppBuildStatus(): Promise<AppBuildStatus> {
+  const inBuild = new Set(appRegistry.map((a) => a.slug));
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from("apps")
+    .select("slug, name, icon, missing_since, returned_changed_at")
+    .order("name");
+
+  const status: AppBuildStatus = { returnedChanged: {}, notInBuild: [] };
+  for (const row of (data ?? []) as {
+    slug: string;
+    name: string;
+    icon: string | null;
+    missing_since: string | null;
+    returned_changed_at: string | null;
+  }[]) {
+    if (!inBuild.has(row.slug)) {
+      status.notInBuild.push({
+        slug: row.slug,
+        name: row.name,
+        icon: row.icon,
+        missingSince: row.missing_since,
+      });
+    } else if (row.returned_changed_at) {
+      status.returnedChanged[row.slug] = row.returned_changed_at;
+    }
+  }
+  return status;
 }
 
 export async function getUserApps(userId: string): Promise<string[]> {

@@ -51,6 +51,7 @@ import {
 } from "@/lib/apps/types";
 import type { BaseConnector } from "@/lib/connectors/types";
 import { isConnectorError } from "@/lib/connectors/errors";
+import { connectorErrorResponse } from "@/lib/connectors/response";
 import { AppError, toErrorResponse } from "@/lib/apps/errors";
 import { withTimeout } from "@/lib/timeout";
 import { recordRouteCall } from "@/lib/apps/telemetry";
@@ -142,6 +143,27 @@ export interface RouteRuntime {
    * so there only the budget aborts it.
    */
   signal: AbortSignal;
+  /**
+   * A failed connector call as the Response the pipeline would send for it:
+   * the connector's envelope, with its status and headers. For a `raw: true`
+   * route, which owns its Response; any other route lets the ConnectorError
+   * propagate and gets the same answer.
+   *
+   * Whether the admin-only fields (the hint, the Registry link, the upstream
+   * request id) go in is the caller's, not the app's: a signed-in admin gets
+   * them, and a password, key or public caller never does.
+   */
+  connectorErrorResponse(err: unknown): Response;
+}
+
+/**
+ * Whether the caller is a platform admin, which decides if a connector
+ * failure's admin-only fields reach them. Only a session or signed-in caller
+ * has a user to ask; a password, key or public caller never is one. Read before
+ * the handler runs, so nothing it does to `ctx.user` changes the answer.
+ */
+function callerIsAdmin(context: ResolvedContext): boolean {
+  return context.user?.isAdmin === true;
 }
 
 /**
@@ -652,6 +674,7 @@ async function executeRoute(
   // time budget running out. The timeout below only rejects the caller's
   // promise; this is what lets a handler stop the work as well.
   const outOfTime = new AbortController();
+  const isAdmin = callerIsAdmin(context);
 
   // Always wrapped. A cap of 0 means "no connector calls", and the counter
   // rejects the first one; skipping the proxy at 0 would make the strictest
@@ -664,6 +687,7 @@ async function executeRoute(
       label,
     ),
     signal: AbortSignal.any([request.signal, outOfTime.signal]),
+    connectorErrorResponse: (err: unknown) => connectorErrorResponse(err, { isAdmin }),
   };
 
   const handler = def.handler as (
@@ -801,6 +825,7 @@ export async function runRoute(
 ): Promise<Response> {
   const label = labelFor(appSlug, method, routePattern);
   const record = routeRecorder(appSlug, method, routePattern, context);
+  const isAdmin = callerIsAdmin(context);
 
   try {
     const out = await executeRoute(
@@ -850,9 +875,7 @@ export async function runRoute(
     // A connector failure the handler let propagate comes back as that
     // connector's envelope, with its own status and headers; `isAdmin` is what
     // decides whether its admin-only fields are in it.
-    const { status, body, headers } = toErrorResponse(err, `${label} failed.`, {
-      isAdmin: context.user?.isAdmin === true,
-    });
+    const { status, body, headers } = toErrorResponse(err, `${label} failed.`, { isAdmin });
     record(status, budgetFrom(err));
     try {
       return NextResponse.json(body, { status, headers });

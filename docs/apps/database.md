@@ -29,6 +29,8 @@ The schema belongs to a role of its own, `mixos_app_<slug>`, which cannot log in
 
 **One MixOS database per Postgres server.** Roles belong to the whole server, not to one database, so two MixOS databases on the same server would share each app's role. The release step refuses an app role that another database on the server already uses. Give each MixOS install a Postgres server of its own.
 
+**Your schema outlives your folder.** When the app leaves the build, because its folder is removed or renamed or the build skips it, the release step keeps its schema, its tables and the record of which migrations ran, and the app finds them all again when it comes back. Renaming the folder makes a new slug, and so a new, empty schema; the old one stays under the old name. See [docs/hosting](../hosting/README.md#when-an-app-leaves-the-build).
+
 ## Creating Migrations
 
 Migrations are SQL files in your app's `migrations/` directory. They run in alphabetical order and are tracked so each migration only runs once. Use a numbered prefix to control order.
