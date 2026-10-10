@@ -1349,7 +1349,7 @@ operator needs to be able to see what a model has been reading.
 ## 18. The Unauthenticated Surface
 
 `src/proxy.ts` redirects to `/login` when no session cookie is present, except on
-`PUBLIC_ROUTE_PREFIXES`. That list is **fourteen entries**, and each one is a
+`PUBLIC_ROUTE_PREFIXES`. That list is **twelve entries**, and each one is a
 place where "no cookie" is the expected state and the route's own gate is the
 real control. Listing them here because the proxy is the wrong place to look for
 that control, and a reader who assumes a cookie check happened will misread every
@@ -1367,8 +1367,25 @@ one of these.
 | `/api/webhooks` | HMAC signature over the raw body (§19) |
 | `/api/cron` | timing-safe `CRON_SECRET` bearer compare (§20) |
 
-The matcher additionally exempts `themes/`, `favicon.ico` and the `icon*` /
-`apple-icon*` file-convention paths from middleware entirely.
+The matcher additionally exempts `_next/static`, `_next/image`,
+`themes/<id>/`, `connector-assets/`, `screenshots/`, `branding/`,
+`favicon.ico` and the `icon*` / `apple-icon*` file-convention paths from the
+proxy entirely, so neither the cookie check nor the maintenance response below
+applies to them.
+
+**Maintenance response.** Before the public list or the cookie check, the proxy
+asks whether the platform schema is behind this build
+(`src/lib/platform/maintenance.ts`, answer kept for 15 seconds). It can,
+because in Next 16 the proxy always runs on the Node.js runtime. While the
+schema is behind, every path except `/api/health/live` and `/api/health/ready`
+gets a 503 with `Retry-After: 30`: a static page for a page, and
+`{ "error": "This instance is being updated. Try again shortly." }` for
+`/api/*` and `/.well-known/*`. That includes `/api/cron` (the tick waits),
+`/api/webhooks` (senders retry) and `/api/mcp`. The page comes from the proxy
+with no app code and no query, under its own CSP, which allows no script.
+Neither body names a version or says what to run; the server log does both. A
+check that fails, or doesn't answer within 2 seconds, counts as not behind, as
+it does in readiness. App migrations behind don't trigger it.
 
 **Why removing an entry does not harden it.** For `/api/cron` and `/api/webhooks`
 the proxy would answer `307 → /login`, which is a perfectly successful HTTP
@@ -1378,11 +1395,14 @@ event. Nothing throws, nothing retries, and the scheduler simply stops. The
 route's own 401 is what an operator needs to see.
 
 **Health endpoints.** `/api/health/live` returns a static `{ status: "ok" }` with
-no database touch. `/api/health/ready` returns `ok` or `unavailable` with a 503;
-the caught error goes to `console.error` and never into the response body.
-Neither leaks version, commit, environment, or stack. Neither is rate-limited.
-The MixOS version and commit appear on the admin pages, to admins, and nowhere
-else.
+no database touch. `/api/health/ready` returns `{ status: "ok" }`, or a 503 with
+`{ status: "unavailable" }` and, when the database is behind, a `reason`:
+`schema-behind` or `app-migrations-behind`. It carries no number: not the
+schema versions, not a count of migrations. The server log names the versions
+and files, and a caught error goes to `console.error` and never into the
+response body. Neither leaks version, commit, environment, or stack. Neither is
+rate-limited. Both answer during the maintenance response. The MixOS version
+and commit appear on the admin pages, to admins, and nowhere else.
 
 ---
 

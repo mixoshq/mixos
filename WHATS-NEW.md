@@ -66,6 +66,22 @@ just pulled.
   which a person runs. To upgrade a deployment, merge the newest release tag
   into your fork rather than `upstream/main`
   (`docs/hosting/README.md#upgrading`). Prereleases are `vX.Y.Z-rc.N`.
+- **Two platform migrations can't share a number.** The ledger records a
+  migration by its number, so the release step and `npm run db:migrate` applied
+  one of two files with the same number and silently skipped the other. Now
+  they apply nothing, the build and `npm run dev:docker` stop, and Danger fails
+  a PR that adds a number already on `main`, each naming both files and the
+  next free number. If a merge brings in a migration with your number, rename
+  yours to the next free number and change its `platform_schema_version` value
+  to match.
+- **A maintenance page while the database is behind.** When the platform
+  schema is behind the build, every page shows a plain maintenance page and
+  every API route, `/api/cron`, `/api/webhooks` and `/api/mcp` included,
+  answers 503 with `Retry-After: 30` until the release step runs. Only
+  `/api/health/live` and `/api/health/ready` answer as usual. Locally,
+  `npm run db:local` brings it back. **Breaking:** `/api/health/ready` returns
+  only `status` and `reason`. The schema versions, the count of pending app
+  migrations and the message are gone; the server log has them.
 - **Vercel production builds run the release step.** `vercel.json` makes
   `npm run vercel-build` the build command: `npm run build`, then the release
   step when `VERCEL_ENV` is `production`, over Neon's `DATABASE_URL_UNPOOLED`
