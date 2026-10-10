@@ -11,6 +11,7 @@ export type { ScopedClient, ReadOnlyScopedClient };
 import type { TelemetryClient } from "@/lib/apps/telemetry";
 import type { AppEnv } from "@/lib/apps/env";
 import type { AppHttpClient } from "@/lib/apps/http";
+import type { BrandLogo, BrandLogoFilterResult } from "@/lib/branding/types";
 
 // ============================================================
 // AppContext — the runtime bag passed to apps, widgets, and hooks
@@ -300,6 +301,17 @@ export interface ActionHookMap {
 
 export interface FilterHookMap {
   "user-display-name": (displayName: string, user: { id: string; email: string }) => Promise<string> | string;
+  // The brand hooks are BOUNDED: the platform re-validates every result and
+  // keeps the previous value when one is not acceptable. They count only when
+  // registered from the app's `hooks.ts` and declared under `branding.hooks`
+  // in app.json, and never run for a slot the active theme claims. See
+  // `src/lib/branding/types.ts` and docs/apps/hooks.md.
+  /** The product name on the menu bar, the sign-in page, the tab title and the PWA. Plain text, at most 40 characters. */
+  "brand-name": (name: string) => Promise<string> | string;
+  /** The mark beside the name in the menu bar. */
+  "menu-bar-logo": (logo: BrandLogo | null) => Promise<BrandLogoFilterResult> | BrandLogoFilterResult;
+  /** The mark above the name on the sign-in page. */
+  "login-logo": (logo: BrandLogo | null) => Promise<BrandLogoFilterResult> | BrandLogoFilterResult;
 }
 
 // ============================================================

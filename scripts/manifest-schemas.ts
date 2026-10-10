@@ -8,6 +8,13 @@ import {
   SCREENSHOT_DIR,
   SCREENSHOT_MAX_COUNT,
 } from "../src/lib/screenshots";
+import {
+  BRAND_HOOKS,
+  BRAND_LOGO_DIR,
+  BRAND_LOGO_MAX_COUNT,
+  BRAND_NAME_MAX_LENGTH,
+  sanitizeBrandName,
+} from "../src/lib/branding/types";
 
 /**
  * Zod schemas for the *on-disk* manifest shapes — `apps/<slug>/app.json`
@@ -166,7 +173,7 @@ const escapeSchema = z.strictObject({
  *
  * This is what makes banning `process.env` in app code possible. An app reading
  * the raw environment can read `CONNECTOR_ENCRYPTION_KEY` and
- * `SUPABASE_SERVICE_ROLE_KEY`; an app reading `context.env` sees only what it
+ * `DATABASE_URL`; an app reading `context.env` sees only what it
  * declared here. `password` is the signal for the encrypt-at-rest path — the
  * same one connector credentials use.
  */
@@ -390,6 +397,48 @@ const hookEmitSchema = z.strictObject({
 const hookListenSchema = z.strictObject({
   app: z.string().min(1),
   hook: z.string().min(1),
+});
+
+/**
+ * An app's declaration that it filters the brand: which of the three brand
+ * hooks, why, and the marks it ships for them.
+ *
+ * Shape only. That `hooks` matches what `hooks.ts` actually registers, and that
+ * each logo exists and is an image the build can measure, is the generator's
+ * business.
+ */
+const appBrandingSchema = z.strictObject({
+  hooks: z
+    .array(
+      z.enum(BRAND_HOOKS, {
+        error: (iss) =>
+          `unknown brand hook ${JSON.stringify(iss.input)} — must be one of: ${BRAND_HOOKS.join(", ")}`,
+      }),
+    )
+    .min(1, "declare at least one brand hook, or omit `branding`")
+    .refine((h) => new Set(h).size === h.length, {
+      message: "duplicate brand hook",
+    }),
+  // The same bar as an escape: the admin reads this at activation, and it has
+  // to tell them what will change on the sign-in page without reading code.
+  reason: z
+    .string()
+    .min(
+      20,
+      "give a reason an admin can act on — this is shown before they activate the app",
+    ),
+  logos: z
+    .array(
+      z
+        .string()
+        .refine(
+          (v) => new RegExp(`^${BRAND_LOGO_DIR}/[^/]+$`).test(v) && !v.includes(".."),
+          `must be a file directly inside the app's own ${BRAND_LOGO_DIR}/ directory, written out in full — e.g. "${BRAND_LOGO_DIR}/mark.png"`,
+        ),
+    )
+    .max(BRAND_LOGO_MAX_COUNT, `at most ${BRAND_LOGO_MAX_COUNT} logos`)
+    .refine((l) => new Set(l).size === l.length, { message: "duplicate logo" })
+    .optional(),
 });
 
 const appTelemetryEventSchema = z.strictObject({
@@ -670,6 +719,9 @@ export const RawAppManifestSchema = z
     // `listensTo` is the consumer's declaration; the generator enforces both.
     emits: z.array(hookEmitSchema).optional(),
     listensTo: z.array(hookListenSchema).optional(),
+    // The brand hooks this app filters. Cross-checked against `hooks.ts` by the
+    // generator in both directions; each logo is verified and measured there.
+    branding: appBrandingSchema.optional(),
     // Declarative incremental syncs. Each name is additionally verified on disk
     // by the generator (apps/<slug>/sync/<name>.ts, a `defineSync` default
     // export), and `source` is cross-checked against the declared connectors.
@@ -1216,6 +1268,26 @@ const themeAssetsSchema = z.strictObject({
 });
 
 /**
+ * The brand slots a theme claims. Each one declared is final — no app filter
+ * runs for it — so a theme that only wants a default mark uses `assets.logo`,
+ * which apps may replace, rather than this.
+ *
+ * Logo paths are relative to `assets/`, like every other theme asset. Whether
+ * they exist and can be measured is checked by the generator.
+ */
+const themeBrandingSchema = z.strictObject({
+  name: z
+    .string()
+    .refine(
+      (v) => sanitizeBrandName(v) === v,
+      `a single line of 1–${BRAND_NAME_MAX_LENGTH} characters, without leading or trailing spaces`,
+    )
+    .optional(),
+  menuBarLogo: z.string().min(1).optional(),
+  loginLogo: z.string().min(1).optional(),
+});
+
+/**
  * Escaping the contrast gate is possible, declared, and visible — never silent,
  * and never a flag that merely turns the check off. The theme must name the
  * exact pair, so the escape stays scoped to the one decision that was actually
@@ -1258,6 +1330,8 @@ export const RawThemeManifestSchema = z.strictObject({
   lastUpdated: z.iso.datetime().optional(),
   fonts: z.array(themeFontFaceSchema).optional(),
   assets: themeAssetsSchema.optional(),
+  /** Brand slots this theme claims outright. See `themeBrandingSchema`. */
+  branding: themeBrandingSchema.optional(),
   /**
    * Listing gallery, under `themes/<slug>/screenshots/`.
    *

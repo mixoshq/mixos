@@ -60,33 +60,24 @@ interface SubscriptionRow {
   auth: string;
 }
 
-/**
- * All subscriptions for the given users. The DB shim has no `.in()`, so we
- * fan out one query per user id (recipient lists are small — a team/office).
- */
+/** All subscriptions for the given users, in one query. */
 export async function getSubscriptionsForUsers(
   userIds: string[],
 ): Promise<StoredSubscription[]> {
   if (userIds.length === 0) return [];
   const supabase = createServiceClient();
 
-  const results = await Promise.all(
-    userIds.map((id) =>
-      supabase
-        .from("push_subscriptions")
-        .select("endpoint, p256dh, auth")
-        .eq("user_id", id),
-    ),
-  );
+  const { data } = await supabase
+    .from("push_subscriptions")
+    .select("endpoint, p256dh, auth")
+    .in("user_id", userIds);
 
   const subs: StoredSubscription[] = [];
-  for (const res of results) {
-    for (const row of (res.data ?? []) as SubscriptionRow[]) {
-      subs.push({
-        endpoint: row.endpoint,
-        keys: { p256dh: row.p256dh, auth: row.auth },
-      });
-    }
+  for (const row of (data ?? []) as SubscriptionRow[]) {
+    subs.push({
+      endpoint: row.endpoint,
+      keys: { p256dh: row.p256dh, auth: row.auth },
+    });
   }
   return subs;
 }

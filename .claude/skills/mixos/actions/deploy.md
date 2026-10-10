@@ -1,10 +1,10 @@
 # /mixos deploy
 
 Gets the current work onto GitHub as a PR against `main`. Deployment itself
-is done by Vercel: every PR gets a Preview deployment, and merging into
-`main` deploys Production. `.github/workflows/ci.yml` gates the PR (lint,
-audit, repository-URL check, typecheck, build). This action stops at the PR —
-merging is a human decision.
+is done by whatever hosts the install (docs/hosting/): on Vercel every PR gets
+a Preview deployment, and on any host merging into `main` deploys Production.
+`.github/workflows/ci.yml` gates the PR (lint, audit, repository-URL check,
+typecheck, build). This action stops at the PR — merging is a human decision.
 
 ## Flags
 
@@ -23,10 +23,11 @@ merging is a human decision.
   action ships what is there. The two exceptions are the manifest review and
   the `WHATS-NEW.md` entry in step 3, and both are confirmed with the user
   before they are written.
-- Never run `npm run db:push` here. It targets the *linked hosted* project,
-  so on a feature branch it would push unreviewed schema straight at
-  production. Applying schema to production is a deploy step a human does
-  (README, "Deploying").
+- Never run `npm run db:push`, `npm run db:migrate` or `npm run release`
+  here. Each can target a production database — the linked hosted project, or
+  whatever `DATABASE_URL` names — so on a feature branch it would push
+  unreviewed schema straight at production. Applying schema to production is
+  the deploy's release step (docs/hosting/README.md).
 - Every commit message ends with the attribution trailer this session was
   given (the `Co-Authored-By: Claude …` line). If the session has none, omit it
   rather than invent one.
@@ -318,10 +319,10 @@ merge (OS-UPDATES.md)." Omit the section otherwise.>
 
 ## Migrations
 
-<list any new **/migrations/*.sql. Note that they do NOT apply on deploy: after
-merging, a human runs `npm run db:push` (platform) and/or `npm run migrate:apps`
-(per-app) against production, per the README's "Deploying" section. Omit the
-section if there are none.>
+<list any new **/migrations/*.sql. Note how they reach production: on Docker
+Compose, Render and Railway the release step applies them as part of the
+deploy; on Vercel a human runs `npm run release` against production before
+promoting it (docs/hosting/vercel.md). Omit the section if there are none.>
 
 ## Verify on the preview
 
@@ -334,10 +335,10 @@ changes. Skip if there is nothing user-visible.>
 
 ## Notes
 
-<anything the merger must know: a Vercel env var to set, a secret to add, a
-Supabase setting to flip. Omit the section if none.>
+<anything the merger must know: an environment variable to set on the host, a
+secret to add, a database setting to change. Omit the section if none.>
 
-Merging into `main` deploys Production on Vercel. Don't merge until reviewed.
+Merging into `main` deploys Production. Don't merge until reviewed.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ```

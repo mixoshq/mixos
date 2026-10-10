@@ -210,7 +210,12 @@ export const config = {
   // the auth redirect is a gallery with no audience. Only manifest-declared
   // files are copied here, so an undeclared draft sitting in the source
   // directory never reaches this path.
+  //
+  // `branding/` is the marks an app ships for the brand hooks, copied out of
+  // apps/<slug>/branding/. The sign-in page draws them before anyone has a
+  // session, which is the theme-assets argument exactly — and, like
+  // screenshots, only declared files are copied.
   matcher: [
-    "/((?!_next/static|_next/image|themes/|connector-assets/|screenshots/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
+    "/((?!_next/static|_next/image|themes/|connector-assets/|screenshots/|branding/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
   ],
 };

@@ -8,6 +8,8 @@ Create a new directory under `/apps` with the following structure:
 apps/my-app/
   app.json          # App manifest — the only manifest form
   widgets.ts        # Widget config built from presets (optional, see below)
+  hooks.ts          # Hook entrypoint, loaded by the platform (optional, see Hooks)
+  branding/         # Marks for the brand hooks, declared in app.json (optional)
   README.md         # Long-form description, published on the public listing (optional)
   pages/
     Main.tsx        # Root page at /apps/my-app
@@ -116,6 +118,7 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
 | `sync` |  | Declarative incremental syncs. Each `name` maps to `sync/<name>.ts`. The app writes only the fetch and the mapper; the platform owns the watermark, the window tuning, the budget and the invalidation — and owns the pagination cursor, which is what makes the expired-cursor outage unrepresentable. See [Data Freshness](./data-freshness.md). | `"sync": [{ "name": "calls", "schedule": { "everyMinutes": 60 }, "source": "gong", "window": { "coldStartDays": 30, "defaultDays": 7, "minDays": 1 }, "budgetMs": 200000 }]` |
 | `emits` |  | Hooks this app fires and who may listen: `[{ name, description?, consumers }]`. `consumers` is an allowlist of app slugs or `"*"`. Cross-app hook listening is two-sided consent, default-deny, build-enforced — see [Hooks](./hooks.md#cross-app-hooks-two-sided-consent). | `"emits": [{ "name": "deal-won", "consumers": ["reporting"] }]` |
 | `listensTo` |  | Hooks from other apps this app listens for: `[{ app, hook }]`. The emitter must allow you, or the build fails. | `"listensTo": [{ "app": "sales", "hook": "deal-won" }]` |
+| `branding` |  | The brand hooks this app filters: `{ hooks, reason, logos? }`. `hooks` is any of `brand-name`, `menu-bar-logo`, `login-logo`, and must match what `hooks.ts` registers, in both directions. `reason` is shown to an admin before activation. `logos` are files directly under `branding/`, `.png`/`.jpg`/`.webp`, max 4, max 512 KB each. See [Hooks](./hooks.md#brand-hooks). | `"branding": { "hooks": ["brand-name"], "reason": "Brands this install as Acme for the Acme rollout." }` |
 | `mcp` |  | Array of read-only tools this app exposes to the MixOS MCP server, so Claude can answer questions using its data. Each `name` maps to a handler at `mcp/<name>.ts` exporting `inputSchema` (Zod) and a default handler; `description` is written for a model and is the only thing it sees when deciding to call the tool. Max 5 per app. Reachable only when the connecting user consented to this app *and* holds a grant for it. See [MCP Tools](./mcp.md). | `"mcp": [{ "name": "quarter-summary", "description": "Closed-won ARR for the current quarter." }]` |
 
 > **Tool-written:** `lastUpdated` lives in `app.json` as an ISO 8601 date-time (e.g. `"2026-08-24T03:21:40.694Z"`) and is stamped automatically: `.githooks/pre-commit` runs [`scripts/stamp-updated.ts`](../../scripts/stamp-updated.ts), which rewrites the date on every app with a file in the commit and re-stages the manifest. It records when the app last changed, so a dependency bump or a formatting pass inside the app moves it too. A commit that touches only `lastUpdated` never re-stamps. Don't edit it by hand; an invalid value fails the build.

@@ -23,10 +23,12 @@ a folder inside it. Drop a directory under `apps/`, declare a manifest, and it
 shows up in the launcher with authentication, permissions, its own database
 tables, scheduled jobs, notifications, and an MCP surface already wired up.
 
-It is built with [Next.js](https://nextjs.org) and backed by
-[Supabase](https://supabase.com) Postgres. **Locally the whole system — app,
-Postgres, PostgREST, and the scheduler tick — runs in Docker on your machine**,
-so you don't need a cloud project to get started.
+It is built with [Next.js](https://nextjs.org) and backed by Postgres — any
+Postgres 13 or later, from a container on your own server to Supabase, Neon or
+RDS. **Locally the whole system — app, Postgres, and the scheduler tick — runs
+in Docker on your machine**, so you don't need a cloud project to get started,
+and [hosting it](docs/hosting/) is one Compose file, one Render Blueprint, or a
+Railway template.
 
 Three extension points, in increasing order of scope:
 
@@ -74,7 +76,7 @@ skill actually does? The same steps by hand are under
 - [Prerequisites](#prerequisites)
 - [Manual setup](#manual-setup)
 - [Running locally](#running-locally)
-- [Alternative: hosted Supabase](#alternative-hosted-supabase)
+- [Alternative: your own Postgres](#alternative-your-own-postgres)
 - [Extending MixOS](#extending-mixos)
 - [Authentication](#authentication)
 - [Connectors](#connectors)
@@ -256,15 +258,11 @@ containerized backend is supported. See
 where, the port map, and why containers address the database as
 `host.docker.internal` while your terminal uses `127.0.0.1`.
 
-## Alternative: hosted Supabase
+## Alternative: your own Postgres
 
-The original workflow — Node on the host, database in a Supabase cloud project —
-is still supported and is the closest match to production. Use it if you can't
+Node on the host and a database you choose: a Supabase or Neon project, a
+Postgres on your machine, or a shared development database. Use it if you can't
 run Docker, or if you need to work against shared data.
-
-You need a [Supabase](https://supabase.com) project (the free tier is enough).
-The Supabase CLI ships as a dev dependency, so `npm run db:push` works without a
-global install.
 
 1. Configure environment variables:
 
@@ -273,35 +271,33 @@ global install.
    npm run keys:generate        # prints a fresh value for every platform key
    ```
 
-   Populate `.env.local`. From the Supabase dashboard you need `SUPABASE_URL`
-   and `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API) plus `DATABASE_URL`
-   (Project Settings → Database → **Transaction pooler**, port 6543 — not the
-   direct 5432 endpoint). The cryptographic keys — `AUTH_SECRET`, `CRON_SECRET`,
-   and the six independent keys inventoried in
-   [`src/lib/env/keys.ts`](src/lib/env/keys.ts) — come from `npm run keys:generate`;
-   `npm run keys:check` exits non-zero if any is missing or malformed. Each key
-   protects exactly one thing, so rotating one has a bounded blast radius; see
+   Populate `.env.local`. The database is one variable, `DATABASE_URL` — for a
+   hosted project, its pooled connection string (Supabase: the **transaction
+   pooler**, port 6543). Add `PGSSLMODE=disable` for a Postgres that speaks
+   plaintext, such as one on your own machine. The cryptographic keys —
+   `AUTH_SECRET`, `CRON_SECRET`, and the six independent keys inventoried in
+   [`src/lib/env/keys.ts`](src/lib/env/keys.ts) — come from
+   `npm run keys:generate`; `npm run keys:check` exits non-zero if any is
+   missing or malformed. Each key protects exactly one thing, so rotating one has
+   a bounded blast radius; see
    [docs/security-architecture.md](docs/security-architecture.md).
 
 2. Apply the schema:
 
    ```bash
-   npx supabase link --project-ref <your-project-ref>
-   npm run db:push          # applies supabase/migrations/*.sql
+   npm run db:migrate       # applies supabase/migrations/*.sql to DATABASE_URL
+   npm run migrate:apps     # per-app tables
    ```
 
-   The platform schema is one file, `supabase/migrations/0001_initial.sql`.
-   Schema changes append a new `supabase/migrations/0002_*.sql`.
+   `db:migrate` records what it applied in the same ledger the Supabase CLI
+   keeps, so against a linked Supabase project `npm run db:push` does the same
+   job, and the two can be mixed. Schema changes append a new
+   `supabase/migrations/NNNN_*.sql`.
 
    Apps that declare their own tables are separate — their migrations live in
-   `apps/<slug>/migrations/` and are applied by:
-
-   ```bash
-   npm run migrate:apps
-   ```
-
-   That runner prefixes every table with `_app_<slug>_` (which is what keeps one
-   app out of another's data) and records applied files in `_migrations`, so
+   `apps/<slug>/migrations/` and are applied by `npm run migrate:apps`. That
+   runner prefixes every table with `_app_<slug>_` (which is what keeps one app
+   out of another's data) and records applied files in `_migrations`, so
    re-running it is a no-op. See [docs/apps/database.md](docs/apps/database.md).
 
 3. Seed the first admin:
@@ -508,13 +504,12 @@ Deeper Docker-specific symptoms are in
 
   Starting _another_ `npm run dev` is not a way out of this: it collides on the
   same port, and on the Docker path there is no `.env.local` and no database
-  running outside the stack, so a host server has no `SUPABASE_URL`, no
-  `SUPABASE_SERVICE_ROLE_KEY` and no `DATABASE_URL` — every request fails with
-  `Missing required Supabase env vars`. If you deliberately want the host to own
-  port 3000, that is a supported workflow, but it needs the containerized
-  backend behind it: boot with `npm run dev:docker -- --detach`, free the port
-  with `docker compose -p mixos stop app-dev`, and point a host `.env.local` at
-  `127.0.0.1` following
+  running outside the stack, so a host server has no `DATABASE_URL` — every
+  request fails with `No Postgres connection configured`. If you deliberately
+  want the host to own port 3000, that is a supported workflow, but it needs the
+  containerized backend behind it: boot with `npm run dev:docker -- --detach`,
+  free the port with `docker compose -p mixos stop app-dev`, and point a host
+  `.env.local` at `127.0.0.1` following
   [docs/local-docker.md](docs/local-docker.md#running-nextjs-on-the-host-against-the-container-backend).
 
 - **The first `npm run dev:docker` looks hung** — the Supabase CLI is pulling
@@ -527,19 +522,17 @@ Deeper Docker-specific symptoms are in
   internet, but the local container speaks plaintext. `.env.docker` sets
   `PGSSLMODE=disable` for the Docker path; add it to `.env.local` yourself if
   you point a host process at a local Postgres.
-- **`Missing required Supabase env vars`** — `SUPABASE_URL` and
-  `SUPABASE_SERVICE_ROLE_KEY` are unset. On the Docker path they're generated
-  into `.env.docker.local` by `npm run dev:docker`; if that file is missing or
-  stale, re-run it. On the hosted path both are in Project Settings → API.
-- **`No Postgres connection configured`** — set `DATABASE_URL` to the Supabase
-  pooler string (or the discrete `PG*` fields for a local Postgres).
+- **`No Postgres connection configured`** — `DATABASE_URL` is unset. On the
+  Docker path it's generated into `.env.docker.local` by `npm run dev:docker`;
+  if that file is missing or stale, re-run it. Otherwise set it to your
+  database's connection string (or the discrete `PG*` fields).
 - **Connection timeouts / "too many clients"** — you are probably on the direct
   port-5432 endpoint of a hosted project. Switch `DATABASE_URL` to the
   **transaction pooler** (port 6543); serverless functions open far more
   connections than a long-lived server does.
 - **`public._migrations does not exist`** — the platform schema has not been
-  applied. Run `npm run db:local` (Docker) or `npm run db:push` (hosted) before
-  `npm run migrate:apps`.
+  applied. Run `npm run db:local` (Docker) or `npm run db:migrate` (any other
+  database) before `npm run migrate:apps`.
 - **Nothing works and you want a clean slate** — `npm run docker:reset` stops
   every container and **deletes the local database volume**, so the next
   `npm run dev:docker` starts from an empty database, re-migrates, and re-seeds
@@ -548,92 +541,32 @@ Deeper Docker-specific symptoms are in
 - **Scheduled jobs** — they _do_ fire on the Docker path. A `cron` sidecar calls
   `GET /api/cron` with `Authorization: Bearer $CRON_SECRET` every 5 minutes,
   which is byte-for-byte what Vercel Cron does in production. Watch it with
-  `docker compose -p mixos logs -f cron`. On the hosted-Supabase path (bare
+  `docker compose -p mixos logs -f cron`. On the own-Postgres path (bare
   `npm run dev`) there is no ticker; run one manually with
   `npx tsx scripts/run-scheduled-jobs.ts`.
 
 ## Hosting MixOS
 
-A MixOS deployment is two things: a Next.js server and a Postgres database.
-The path this repo is set up for is **Vercel + Supabase** — a Preview deployment
-per pull request, Production on merge to `main`.
+A deployment is the server, a Postgres 13+ database from any provider, and a
+5-minute tick against `/api/cron`. MixOS connects to the database with one
+`DATABASE_URL` and needs nothing from it but Postgres — no PostgREST, no
+Supabase API keys. Every path runs the same release step before new code takes
+traffic: the platform schema, the app migrations, and the first admin.
 
-Docker is a local development tool here: no image is built or pushed by CI, and
-there is no build or deploy step in this repo's CI —
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) only gates pull requests
-(see [Developing](#developing)). Deployment is Vercel watching the repository.
+| Path | Guide |
+| --- | --- |
+| Docker Compose on your own server — Postgres, the app, HTTPS and the tick on one machine | [docs/hosting/docker-compose.md](docs/hosting/docker-compose.md) |
+| Coolify or Dokploy, from the same Compose file | [docs/hosting/docker-compose.md](docs/hosting/docker-compose.md#coolify) |
+| Render — a Blueprint with every secret generated ([`render.yaml`](render.yaml)) | [docs/hosting/render.md](docs/hosting/render.md) |
+| Railway — publishable as a one-click template ([`railway.json`](railway.json)) | [docs/hosting/railway.md](docs/hosting/railway.md) |
+| Vercel with Neon, Supabase, or any Postgres | [docs/hosting/vercel.md](docs/hosting/vercel.md) |
 
-### Vercel + Supabase
-
-1. **Create a Supabase project** for the deployment — separate from anything you
-   develop against. Note `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`
-   (Project Settings → API) and the **transaction pooler** connection string,
-   port 6543 (Project Settings → Database).
-
-2. **Import the repo into Vercel.** The framework preset and build command are
-   detected automatically.
-
-3. **Set the environment variables** from
-   [`.env.local.example`](.env.local.example) in the Vercel project
-   (Settings → Environment Variables):
-   - `NEXTAUTH_URL` — the production domain. It is what OAuth redirect URIs and
-     the MCP resource identifier are built from, and it is deliberately never
-     derived from a request header.
-   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` — from step 1.
-     The service role key bypasses Row-Level Security; treat it as a full
-     database credential and never expose it to the browser.
-   - The cryptographic keys — generate a fresh set with `npm run keys:generate`
-     and paste them in. `CRON_SECRET` is required or `/api/cron` refuses to run.
-     Never reuse a local value.
-   - Optional: `ALLOWED_EMAIL_DOMAINS` to restrict who may sign in, and the
-     `VAPID_*` keys if any app uses web push notifications.
-
-   **Nothing from [`.env.docker`](.env.docker) belongs here** — those values are
-   public.
-
-4. **Apply the schema** against the production database:
-
-   ```bash
-   npx supabase link --project-ref <production-project-ref>
-   npm run db:push        # platform schema
-   npm run migrate:apps   # per-app tables, with DATABASE_URL pointed at production
-   ```
-
-5. **Seed the first admin** — set `INITIAL_ADMIN_EMAIL` and
-   `INITIAL_ADMIN_PASSWORD`, run `npm run seed-admin` against the production
-   `DATABASE_URL`, then remove both variables.
-
-6. **Configure connectors** in the running deployment at `/admin/connectors`.
-   Connector credentials are entered in the UI and encrypted in the database —
-   they are not environment variables, and do not need to be set on Vercel.
-
-[`vercel.json`](vercel.json) registers the scheduler cron (`/api/cron`, every 5
-minutes). Note that Vercel's Hobby plan only permits **daily** cron schedules —
-the 5-minute cadence needs a Pro plan, and Hobby also caps function duration at
-60s, which truncates a long scheduler tick (harmlessly: each job is claimed with
-an atomic Postgres update, so the next tick resumes).
-
-### Hosting it somewhere else
-
-Nothing in the platform requires Vercel specifically. It is a standard Next.js
-server: `npm ci && npm run build && npm start` behind the same environment
-variables works on any Node 22+ host (24 is what the repo pins and the image
-runs). The repo's [`Dockerfile`](Dockerfile) is a
-real production build of the same thing — a multi-stage image running Next.js
-standalone output as `node server.js`, with a `/api/health/live` healthcheck.
-`npm run docker:prod` runs it locally against the Docker Postgres, which is how
-to reproduce a deploy before you trust it. Postgres does not have to be
-Supabase-hosted either, as long as PostgREST is reachable at `SUPABASE_URL` and
-the connection string points at the same database.
-
-Two things you have to replace yourself off Vercel:
-
-- **The scheduler tick.** `vercel.json` is Vercel-specific. Anything that can
-  make an authenticated HTTP request on a schedule will do —
-  `GET /api/cron` with `Authorization: Bearer $CRON_SECRET`. That is exactly
-  what the local `cron` sidecar in [`docker-compose.yml`](docker-compose.yml)
-  does, and it is a working reference.
-- **Preview deployments per pull request**, if you want them.
+[docs/hosting/README.md](docs/hosting/README.md) lists the environment every
+path needs and explains the release step. Deploy your fork, so the apps you add
+are in the build. To make an instance run only what it was deployed with, set
+`INSTALL_APPS`, `INSTALL_CONNECTORS` or `INSTALL_THEMES` to `false`: the
+catalogue's Browse pages and its install actions go away for that kind
+([details](docs/hosting/README.md#fixing-what-an-instance-runs)).
 
 Before exposing a deployment publicly, read
 [docs/security-architecture.md](docs/security-architecture.md) — the trust

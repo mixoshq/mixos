@@ -1,0 +1,169 @@
+# MixOS on one machine: Postgres, the release step, the app, and the scheduler
+# tick, built from this repository's Dockerfile. No Supabase, nothing hosted.
+# The walkthrough — a VPS, Coolify, Dokploy — is docs/hosting/docker-compose.md.
+#
+#   sh deploy/new-env.sh https://mixos.example.com you@example.com
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#
+# and, on a bare server that should terminate HTTPS itself:
+#
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.https.yml up -d --build
+#
+# Every `${...}` below is read from deploy/.env — beside this file, NOT the
+# repository root's .env, which `next dev` and the scripts would also load.
+# deploy/new-env.sh writes it with freshly generated keys; .env.example in this
+# directory says what each one is. A `:?` reference is required: compose stops
+# with that message rather than starting an app that cannot sign anyone in.
+#
+# This is not the local development stack. docker-compose.yml at the root runs
+# against the Supabase CLI with committed dev-only secrets, published on
+# loopback only; this file has its own database and secrets nobody else holds.
+
+name: mixos-selfhost
+
+# One image for the release step and the app, built once. The release step runs
+# in the image that is about to serve, which is the point: the migrations it
+# applies are the ones that image was built with.
+x-image: &image
+  image: mixos-selfhost:latest
+  build:
+    context: ..
+    dockerfile: Dockerfile
+
+x-app-env: &app-env
+  # The database below, over the compose network. Plaintext is right here — the
+  # connection never leaves this machine's bridge network — and
+  # src/lib/db/pg-options.ts defaults to requiring TLS, so it has to be said.
+  DATABASE_URL: postgres://mixos:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env (sh deploy/new-env.sh writes one)}@db:5432/mixos
+  PGSSLMODE: disable
+  # The public URL people sign in at. OAuth redirect URIs and the MCP resource
+  # identifier are built from it, so it must be what the browser shows.
+  NEXTAUTH_URL: ${MIXOS_URL:?Set MIXOS_URL in deploy/.env to the public URL, e.g. https://mixos.example.com}
+  AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET in deploy/.env}
+  # The platform key inventory, src/lib/env/keys.ts: 32 random bytes each, as
+  # hex or base64. Each protects one thing; rotating one costs what that file
+  # says it costs, and losing one loses what it encrypted. Back deploy/.env up.
+  CONNECTOR_ENCRYPTION_KEY: ${CONNECTOR_ENCRYPTION_KEY:?Set CONNECTOR_ENCRYPTION_KEY in deploy/.env}
+  USER_OAUTH_ENCRYPTION_KEY: ${USER_OAUTH_ENCRYPTION_KEY:?Set USER_OAUTH_ENCRYPTION_KEY in deploy/.env}
+  APP_SETTINGS_ENCRYPTION_KEY: ${APP_SETTINGS_ENCRYPTION_KEY:?Set APP_SETTINGS_ENCRYPTION_KEY in deploy/.env}
+  MCP_TOKEN_KEY: ${MCP_TOKEN_KEY:?Set MCP_TOKEN_KEY in deploy/.env}
+  APP_API_KEY_SECRET: ${APP_API_KEY_SECRET:?Set APP_API_KEY_SECRET in deploy/.env}
+  APP_UNLOCK_SECRET: ${APP_UNLOCK_SECRET:?Set APP_UNLOCK_SECRET in deploy/.env}
+  CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in deploy/.env}
+  # Optional. Blank means what it means in .env.local.example: any domain may
+  # sign in; no Web Push.
+  ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+  # Whether admins can browse the catalogue for each kind. This image cannot
+  # install from it either way (src/lib/repository/policy.ts).
+  INSTALL_APPS: ${INSTALL_APPS:-true}
+  INSTALL_CONNECTORS: ${INSTALL_CONNECTORS:-true}
+  INSTALL_THEMES: ${INSTALL_THEMES:-true}
+  VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+  VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+  VAPID_SUBJECT: ${VAPID_SUBJECT:-}
+
+services:
+  # ---------------------------------------------------------------------------
+  # db — Postgres 17. Any 13 or later works; this is simply the current one.
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mixos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: mixos
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # No `ports:`. Nothing outside this compose network has any business
+    # connecting; `docker compose exec db psql -U mixos` is the way in.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mixos -d mixos"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # ---------------------------------------------------------------------------
+  # migrate — the release step, once per `up`, before the app starts.
+  # ---------------------------------------------------------------------------
+  # scripts/release.ts: the platform schema, the app registry and app
+  # migrations, then the first admin from INITIAL_ADMIN_* if that account does
+  # not exist yet. Safe to run on every deploy, and it does. It connects as the
+  # same role as the app, which matters: every table has row-level security on
+  # and no policies, so the role that owns the tables is the one that can use
+  # them.
+  migrate:
+    <<: *image
+    command: ["node", "ops/release.cjs"]
+    environment:
+      <<: *app-env
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    # The image's HEALTHCHECK probes the web server, which this container never
+    # starts. It exits 0 when it is done; on Coolify, see docs/hosting for
+    # keeping that exit out of the deployment's health.
+    healthcheck:
+      disable: true
+
+  # ---------------------------------------------------------------------------
+  # app — the production server.
+  # ---------------------------------------------------------------------------
+  app:
+    <<: *image
+    restart: unless-stopped
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      # Loopback, for a reverse proxy on this machine — deploy/docker-compose.https.yml,
+      # nginx, or a host like Coolify that routes to the container itself and
+      # needs no published port at all. Change MIXOS_PORT if 3000 is taken.
+      - "127.0.0.1:${MIXOS_PORT:-3000}:3000"
+    healthcheck:
+      # /ready, not the image's /live: it checks the database is reachable and
+      # on the schema this build expects, which is what the cron service below
+      # waits for. See src/app/api/health/ready/route.ts.
+      test:
+        - CMD
+        - node
+        - "-e"
+        - "fetch('http://127.0.0.1:3000/api/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # cron — the 5-minute scheduler tick, as Vercel Cron delivers it.
+  # ---------------------------------------------------------------------------
+  # GET /api/cron with `Authorization: Bearer $CRON_SECRET`, every 300 seconds.
+  # The tick has to come from outside the app: the scheduler is driven by that
+  # route rather than an in-process timer (see src/instrumentation.ts).
+  cron:
+    image: curlimages/curl:8.21.0
+    restart: unless-stopped
+    environment:
+      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in deploy/.env}
+    depends_on:
+      app:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    # $$ is a literal $ for the shell; compose would substitute a single one.
+    # A failed tick is logged and the loop carries on — the next tick recovers
+    # on its own, but only if there is a next tick.
+    command:
+      - |
+        while :; do
+          code=$$(curl -sS -o /dev/null -w '%{http_code}' --max-time 290 \
+            -H "Authorization: Bearer $${CRON_SECRET}" http://app:3000/api/cron) || code=000
+          echo "[cron] $$(date -u '+%Y-%m-%dT%H:%M:%SZ') GET /api/cron -> $$code"
+          sleep 300
+        done
+
+volumes:
+  db-data:

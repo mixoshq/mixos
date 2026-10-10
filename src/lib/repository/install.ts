@@ -55,6 +55,7 @@ import { withPlatformLock } from "../platform/lock";
 import { satisfiesMinimum } from "../platform/version";
 import type { TarEntry } from "./tar";
 import { isVerifiableHash, type ExtensionKind, type InstallManifest } from "./types";
+import { installDisabledMessage, installEnabled } from "./policy";
 import {
   RawAppManifestSchema,
   RawConnectorManifestSchema,
@@ -176,6 +177,7 @@ export class InstallError extends Error {
     message: string,
     /** A stable code the UI can branch on without matching prose. */
     readonly code:
+      | "disabled"
       | "unsupported-environment"
       | "already-installed"
       | "no-release"
@@ -273,6 +275,13 @@ export interface Installability {
  * something and waiting for a download.
  */
 export async function checkInstallable(kind: ExtensionKind): Promise<Installability> {
+  // Turned off for this kind (INSTALL_APPS and friends, ./policy.ts). First,
+  // because it is a decision rather than a property of the environment, and it
+  // holds whatever the environment could do.
+  if (!installEnabled(kind)) {
+    return { ok: false, reason: installDisabledMessage(kind) };
+  }
+
   /*
     A BUILT DEPLOYMENT CANNOT REGISTER, and has to be told so up front.
 
@@ -667,6 +676,11 @@ export async function installExtension(
   slug: string,
   options: InstallOptions = {},
 ): Promise<InstallResult> {
+  // Before the lock: a kind this instance does not install should not hold up
+  // anyone else's registration while it is refused.
+  if (!installEnabled(kind)) {
+    throw new InstallError(installDisabledMessage(kind), "disabled");
+  }
   return withPlatformLock("repository.register", () =>
     runInstall(kind, slug, options),
   );

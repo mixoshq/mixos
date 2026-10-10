@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import type { Screenshot } from "../screenshots";
+import type { BrandHook, BrandLogoAsset } from "../branding/types";
 
 /**
  * How a caller may authenticate to a page or API route.
@@ -261,6 +262,16 @@ export interface AppManifest {
   /** Hooks from other apps this app listens for. Defaults to `[]`. */
   listensTo: HookListen[];
   /**
+   * The brand hooks this app filters, and why. `null` when it filters none.
+   *
+   * Declared because changing the name and mark on the sign-in page is a
+   * capability an admin should see before activating the app. The generator
+   * holds the declaration to the code in both directions: every hook listed
+   * here is registered in `hooks.ts`, and every brand-hook registration is in
+   * `hooks.ts` and listed here. See `docs/apps/hooks.md#brand-hooks`.
+   */
+  branding: AppBranding | null;
+  /**
    * Read-only tools this app contributes to the MixOS MCP server. Each entry's
    * `name` maps to a handler at `apps/<slug>/mcp/<name>.ts` (default export
    * `async (ctx: McpToolContext, input) => result`, plus a named `inputSchema`
@@ -317,7 +328,7 @@ export interface AppEscape {
  *
  * This exists so that `process.env` can be banned outright in app code. An app
  * that reads the raw environment can read `CONNECTOR_ENCRYPTION_KEY` and
- * `SUPABASE_SERVICE_ROLE_KEY`; an app that reads `context.env` can only see
+ * `DATABASE_URL`; an app that reads `context.env` can only see
  * what it declared here. `password`-typed values are encrypted at rest on the
  * same AES-256-GCM path connector credentials use.
  */
@@ -554,6 +565,21 @@ export interface McpToolDefinition {
  * The push counterpart of `provides`. Before this, cross-app hook listening was
  * the only channel between two apps with no consent on either side.
  */
+/**
+ * An app's declaration that it filters the brand. See `AppManifest.branding`.
+ */
+export interface AppBranding {
+  hooks: BrandHook[];
+  /** A sentence an admin can act on, shown in the app's details dialog. */
+  reason: string;
+  /**
+   * Marks the app ships under `apps/<slug>/branding/`, published to
+   * `/branding/apps/<slug>/`. A logo filter selects one by returning its
+   * `file`. Measured by the generator.
+   */
+  logos: BrandLogoAsset[];
+}
+
 export interface HookEmit {
   name: string;
   description?: string;

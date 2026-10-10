@@ -297,7 +297,7 @@ straight before you conclude a job "isn't running":**
   here. Details in
   [docs/local-docker.md](../local-docker.md#the-cron-sidecar).
 
-- **On the hosted-Supabase path — nothing.** A bare `npm run dev` on the host is
+- **On the own-Postgres path — nothing.** A bare `npm run dev` on the host is
   just the Next.js server; there is no sidecar and no timer, so no job will ever
   become due on its own. Fire ticks by hand (below).
 
@@ -312,7 +312,7 @@ the sidecar above is already ticking every 5 minutes. When you don't want to
 wait for the next tick, **Run now** on the admin page fires a single job
 immediately.
 
-The manual tick is for the hosted-Supabase path, where nothing is ticking at
+The manual tick is for the own-Postgres path, where nothing is ticking at
 all, and for driving a tick from a terminal:
 
 ```bash

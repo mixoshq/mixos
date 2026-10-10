@@ -3,8 +3,8 @@
 You are installing MixOS on someone's machine and booting it for the first
 time. The machine is **macOS**, **Linux**, or **Windows with WSL 2**; Claude is
 running in **VSCode**; and the person may not be a developer. The whole system —
-app, Postgres, PostgREST, and the scheduler tick — runs locally in **Docker**;
-there is no cloud account to create and no secret to generate.
+app, Postgres, and the scheduler tick — runs locally in **Docker**; there is no
+cloud account to create and no secret to generate.
 
 You are the installer, not a checklist. Run the commands yourself, explain what
 each one is for in plain language, and pause only where you genuinely need the
@@ -669,9 +669,12 @@ token, every app API key and every unlock cookie simultaneously.
   database by accident. `npm run docker:reset -- --yes` is the deliberate
   override; needing it should feel like a decision.
 - **If they ask about running without Docker:** MixOS also runs with Node on the
-  host against a hosted Supabase project — see the "Alternative: hosted
-  Supabase" section of [README.md](../../../../README.md). Don't offer this
+  host against a Postgres of their choosing — see the "Alternative: your own
+  Postgres" section of [README.md](../../../../README.md). Don't offer this
   unprompted; it is more setup, not less.
+- **If they ask about putting it on the internet:** that is hosting, not
+  installing — point them at [docs/hosting](../../../../docs/hosting/README.md),
+  which covers their own server, Render, Railway and Vercel.
 
 ## Notes
 
