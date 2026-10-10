@@ -166,7 +166,7 @@ When a user-scoped connector is absent from `context.connectors`, the user has n
 ```ts
 // apps/<slug>/api/<thing>/route.ts
 import type { AppContext } from "@/lib/hooks/types";
-import type SlackConnector from "@/../connectors/slack";
+import type SlackConnector from "@connectors/slack";
 
 export async function GET(_req: Request, { context }: { context: AppContext }) {
   const slack = context.connectors.slack as unknown as

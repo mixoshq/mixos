@@ -110,8 +110,11 @@ bytes to an unauthenticated viewer the consumer has already authorized.
 - **Provider-scoped execution** — the handler runs with the provider's db /
   connectors; the consumer never receives a handle to the provider's data layer.
 - **No privilege escalation** by default (`audience: "user"`).
-- **Isolation** — apps may not import the raw DB client (`@/lib/db`) or the
-  broker itself; the ESLint config blocks it. `context.services` is the only path.
+- **Isolation** — apps may not import the raw DB client (`@/lib/db`), the
+  broker itself, or another app's code at runtime; the build refuses all three
+  (see [What an app can import](./architecture.md#what-an-app-can-import)).
+  `context.services` is the only path. A type from another app's
+  `services/types.ts` is fine.
 - **Error isolation, timeout, and a payload cap** — a failing or slow provider
   yields a `ServiceRequestError` to the consumer, never a crash. Provider
   handlers are leaves: a `ServiceContext` has no `services` client, so they can't
