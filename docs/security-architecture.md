@@ -1349,7 +1349,7 @@ operator needs to be able to see what a model has been reading.
 ## 18. The Unauthenticated Surface
 
 `src/proxy.ts` redirects to `/login` when no session cookie is present, except on
-`PUBLIC_ROUTE_PREFIXES`. That list is **fourteen entries**, and each one is a
+`PUBLIC_ROUTE_PREFIXES`. That list is **twelve entries**, and each one is a
 place where "no cookie" is the expected state and the route's own gate is the
 real control. Listing them here because the proxy is the wrong place to look for
 that control, and a reader who assumes a cookie check happened will misread every
@@ -1367,8 +1367,10 @@ one of these.
 | `/api/webhooks` | HMAC signature over the raw body (§19) |
 | `/api/cron` | timing-safe `CRON_SECRET` bearer compare (§20) |
 
-The matcher additionally exempts `themes/`, `favicon.ico` and the `icon*` /
-`apple-icon*` file-convention paths from middleware entirely.
+The matcher additionally exempts `_next/static`, `_next/image`,
+`themes/<id>/`, `connector-assets/`, `screenshots/`, `branding/`,
+`favicon.ico` and the `icon*` / `apple-icon*` file-convention paths from the
+proxy entirely.
 
 **Why removing an entry does not harden it.** For `/api/cron` and `/api/webhooks`
 the proxy would answer `307 → /login`, which is a perfectly successful HTTP
