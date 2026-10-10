@@ -62,8 +62,9 @@ and the next tick picks up where the last one stopped.
 
 ## Upgrades
 
-Push to the production branch. The production build runs the release step
-once `next build` has succeeded, before Vercel moves traffic to the new
+Merge the new release tag into your production branch, as in
+[Upgrading](README.md#upgrading). The production build then runs the release
+step once `next build` has succeeded, before Vercel moves traffic to the new
 deployment:
 
 - A build that doesn't compile leaves the database untouched.
@@ -79,6 +80,9 @@ that preview's own database by hand.
 The readiness probe, `/api/health/ready`, answers 503 while the database is
 behind the build, in its platform schema or its app migrations, so a monitor or
 a deployment check can catch a missed step.
+
+The admin pages show the MixOS version and the commit the deployment was built
+from, which Vercel sets as `VERCEL_GIT_COMMIT_SHA`.
 
 ### Migrations must work with the deployment that's serving
 

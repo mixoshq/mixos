@@ -40,6 +40,32 @@ just pulled.
   both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
   new app, and the old slug keeps the old data. Migration 0010; run
   `npm run db:local` to apply it.
+- **Registry installs take turns safely.** While another install is running,
+  the dialog says so and offers **Try again**. If an install is paused for more
+  than 15 minutes (a laptop asleep mid-download) and another starts meanwhile,
+  the paused one stops before its next write and says what it left on disk.
+- **Every build knows its version.** The admin pages show it with the commit,
+  e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
+  into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
+  from Vercel, Render and Railway's own variables; on Docker Compose, build with
+  `MIXOS_COMMIT=$(git rev-parse HEAD)`, and on Coolify set
+  `MIXOS_COMMIT=$SOURCE_COMMIT`. See `docs/hosting/README.md`. **Breaking:** an
+  extension's `requiresMixOS` is now checked in a checkout too, against
+  `package.json`; bump it locally to try an extension that needs a newer MixOS.
+- **A built deployment browses mixos.org.** The Docker image on any host, and
+  Vercel, ignore `MIXOS_REPOSITORY_URL` unless it names their own machine
+  (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), and log it.
+  **Breaking:** a deployment pointed at another catalogue now browses
+  mixos.org; a source checkout still honours the override.
+- **Releases.** A version of MixOS is an annotated tag `vX.Y.Z` on `main` with
+  a GitHub Release, whose notes are its section of `CHANGELOG.md`.
+  `/mixos deploy release` opens the release PR, which sets the version in
+  `package.json` and writes that section from the Conventional Commits since
+  the last release (`scripts/release-prep.ts`). Once it merges, run it again
+  for the commands that tag the merge commit and publish the GitHub Release,
+  which a person runs. To upgrade a deployment, merge the newest release tag
+  into your fork rather than `upstream/main`
+  (`docs/hosting/README.md#upgrading`). Prereleases are `vX.Y.Z-rc.N`.
 - **Vercel production builds run the release step.** `vercel.json` makes
   `npm run vercel-build` the build command: `npm run build`, then the release
   step when `VERCEL_ENV` is `production`, over Neon's `DATABASE_URL_UNPOOLED`
