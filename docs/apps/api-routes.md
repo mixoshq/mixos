@@ -116,6 +116,12 @@ Where the values come from:
 Path segments win over body and query keys of the same name — the URL is the
 more specific statement.
 
+**A request body can be up to 27 MB**, on both mounts. A larger declared
+`content-length` gets a 413 before any of your code runs. A body sent without
+one (chunked) is counted as it is read: past 27 MB the read fails, and the
+caller gets the same 413 whatever your handler does with the error. Under the
+cap, the body arrives exactly as it was sent.
+
 **Query strings are coerced from your schema.** `?limit=20` arrives as the number
 `20` because you declared `z.number()`; `?active=false` arrives as `false`;
 `?ids=3&ids=4` arrives as `[3, 4]`. You do not need `z.coerce`. A value that
@@ -172,8 +178,8 @@ You do not declare it in two places; if you also set `apiVisibility` in
   but forbidden" from "no such route".
 - `password` and `key` are not reachable on `/api/apps/…` at all. The unlock
   cookies are path-scoped to `/p/` and `/api/p/`, so a browser would never send
-  one there; and `/api/apps` sits behind the proxy's cookie check, which
-  redirects a machine-to-machine caller to `/login` before any of this runs.
+  one there; and `/api/p` is the mount for a machine-to-machine caller, which
+  has no session cookie.
 
 ### Machine-to-machine: scoped API keys
 
@@ -260,7 +266,8 @@ in the app's details. Auth, roles, CSRF and the rate limit apply as usual.
 **A raw route parses its own body.** Its `input` schema covers the query string
 and path params only — the pipeline deliberately does not read the body, because
 reading it would drain the stream and hand your handler an already-consumed
-`Request`, which is the one thing a raw route exists to read.
+`Request`, which is the one thing a raw route exists to read. The 27 MB cap
+still applies to it ([see `input`](#input-declared-or-unavailable)).
 
 **A raw route answers its own connector failures.** Catch the error and return
 `ctx.connectorErrorResponse(err)`: the connector's envelope with its status and
