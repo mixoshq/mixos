@@ -6,7 +6,11 @@ import { AuthProvider } from "@/components/auth-provider";
 import { DashboardEditProvider } from "@/components/dashboard/edit-mode-context";
 import { PreferencesProvider } from "@/components/preferences-context";
 import HeaderShell from "@/components/header-shell";
-import { getActiveTheme } from "@/lib/themes/active";
+import {
+  getBrandName,
+  getLoginLogo,
+  getMenuBarLogo,
+} from "@/lib/branding/resolve";
 import { getOnboardingCompletedAt } from "@/lib/onboarding/actions";
 import { TourProvider } from "@/components/onboarding/tour-context";
 import WelcomeTour from "@/components/onboarding/welcome-tour";
@@ -32,15 +36,19 @@ export default async function MainLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Resolved on the server: the menu bar is a client component, and sniffing
-  // the theme there would either flash the wrong mark or mismatch on hydration.
-  const [{ theme }, onboardingCompletedAt] = await Promise.all([
-    getActiveTheme(),
+  // Resolved on the server: the menu bar is a client component, and resolving
+  // the brand there would either flash the wrong mark or mismatch on hydration
+  // — and the app filters that may change it are server code.
+  const [name, menuBarLogo, onboardingCompletedAt] = await Promise.all([
+    getBrandName(),
+    getMenuBarLogo(),
     getOnboardingCompletedAt(),
   ]);
-  const logo = theme.assets.logo
-    ? `${theme.assetBase}/${theme.assets.logo}`
-    : null;
+  // The sign-in mark only matters while the welcome tour is showing it, so
+  // every other page skips its filters. Replaying the tour refreshes from the
+  // server, which lands back here with the stamp cleared.
+  const loginLogo =
+    onboardingCompletedAt === null ? await getLoginLogo() : null;
 
   return (
     <AuthProvider>
@@ -48,10 +56,10 @@ export default async function MainLayout({
         <TourProvider active={onboardingCompletedAt === null}>
           <DashboardEditProvider>
             <div className="flex h-screen flex-col">
-              <HeaderShell logo={logo} />
+              <HeaderShell logo={menuBarLogo} name={name} />
               <main className="flex-1 overflow-auto bg-muted">{children}</main>
             </div>
-            <WelcomeTour logo={logo} />
+            <WelcomeTour branding={{ name, menuBarLogo, loginLogo }} />
             <Guide />
             <Confetti />
             <RegisterServiceWorker />

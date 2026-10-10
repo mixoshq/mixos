@@ -14,7 +14,7 @@ themes/
     theme.css                tokens + allowlisted .mix-* surfaces
     assets/
       fonts/*.woff2
-      logo.svg               optional
+      logo.svg               optional — or .png, .jpg, .webp
       favicon.svg            optional
       preview.png            optional
 ```
@@ -32,7 +32,8 @@ themes/
 | `themeSupportUrl` |  | Where a user takes a problem with the theme — an issue tracker, a support page. Same `https://` rule. Kept separate from `themeUrl` because "read about it" and "something is broken" are different destinations, and collapsing them sends bug reports to a marketing page. | `"themeSupportUrl": "https://example.com/x/issues"` |
 | `authors` |  | Array of `{ name, email }`. Only the name is published on mixos.org. | `"authors": [{ "name": "Jane Doe" }]` |
 | `fonts` |  | Font faces the theme ships, each `{ family, file, weight, style, display }`. See [Assets](assets.md). | |
-| `assets` |  | `{ logo?, favicon?, appIcon192?, appIcon512? }` — paths inside `assets/`. | |
+| `assets` |  | `{ logo?, favicon?, appIcon192?, appIcon512? }` — paths inside `assets/`. `logo` is the default mark, which apps may replace. See [Assets](assets.md#logo-and-wordmark). | |
+| `branding` |  | `{ name?, menuBarLogo?, loginLogo? }` — the brand slots this theme **claims**. A claimed slot is final: no app's brand filter runs for it. Logos are paths inside `assets/`; `name` is one line, up to 40 characters. See [Assets](assets.md#claiming-the-brand). | `"branding": { "name": "Acme Workspace" }` |
 | `surfaces` |  | Allowlisted `.mix-*` surfaces this theme styles. Cross-checked against `theme.css` in both directions, so it can neither under-report a theme's reach nor carry a stale entry. | |
 | `escapes` |  | Declared exceptions to platform guarantees. | |
 | `lastUpdated` |  | Tool-written by the pre-commit stamp. Never hand-edited. | |
@@ -43,7 +44,8 @@ themes/
 |---|---|
 | Token **values** — colour, radius, type stacks | the theme |
 | Styling of the ten `.mix-*` surfaces | the theme |
-| Fonts, logo, favicon | the theme |
+| Fonts, favicon | the theme |
+| Product name and marks | the theme where it claims them under `branding`, otherwise active apps' brand filters, otherwise `assets.logo` and "MixOS" |
 | The utility → variable mapping (`@theme inline`) | the platform |
 | Which token a component uses | the platform |
 | Layout, spacing scale, component structure | the platform |

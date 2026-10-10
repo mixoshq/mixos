@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { getActiveTheme } from "@/lib/themes/active";
+import { getBrandName, getLoginLogo } from "@/lib/branding/resolve";
 import LoginCard from "./login-card";
 
 /**
@@ -17,15 +17,14 @@ import LoginCard from "./login-card";
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage() {
-  const { theme } = await getActiveTheme();
+  // The name and mark come from the install's brand — the active theme, and
+  // the brand filters of active apps where the theme leaves room — never from
+  // public/. This page is the first thing a user sees, and it should carry
+  // whatever brand the install is actually running. With no mark the wordmark
+  // stands alone, which is a legitimate treatment rather than a broken state.
+  // Never the menu-bar mark: this page does not draw it, so it does not wait
+  // on its filters either.
+  const [name, loginLogo] = await Promise.all([getBrandName(), getLoginLogo()]);
 
-  // The mark comes from the active theme, not from public/ — this page is the
-  // first thing a user sees, and it should carry whatever brand the install is
-  // actually running. When a theme ships no logo the wordmark stands alone,
-  // which is a legitimate treatment rather than a broken state.
-  const logo = theme.assets.logo
-    ? `${theme.assetBase}/${theme.assets.logo}`
-    : null;
-
-  return <LoginCard logo={logo} />;
+  return <LoginCard logo={loginLogo} name={name} />;
 }

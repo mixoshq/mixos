@@ -3,11 +3,13 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
 import { repositoryBaseUrl } from "@/lib/repository/client";
 import { checkInstallable } from "@/lib/repository/install";
+import { installEnabled } from "@/lib/repository/policy";
 import { KIND_LABEL, type ExtensionKind } from "@/lib/repository/types";
 import ExtensionBrowser from "./extension-browser";
 
@@ -23,6 +25,11 @@ import ExtensionBrowser from "./extension-browser";
  * ADMIN GATE HERE AND IN EVERY ACTION. This one guards the render. It is not
  * what protects the search or the install: those are server actions, reachable
  * without ever loading this page, and each re-authorises itself.
+ *
+ * The same holds for the kind's install flag (INSTALL_APPS and friends,
+ * lib/repository/policy.ts). Turned off, this page does not exist — a 404,
+ * not a page explaining that it is switched off — and the actions refuse the
+ * kind on their own.
  */
 export default async function BrowsePage({
   kind,
@@ -35,6 +42,8 @@ export default async function BrowsePage({
 }) {
   const session = await requireReadOnlySession();
   await requireAdmin(session);
+
+  if (!installEnabled(kind)) notFound();
 
   // Answered on the server so a deployment that cannot write to its own
   // checkout says so at the top of the page, rather than after an admin has

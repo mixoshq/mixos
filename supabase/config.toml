@@ -201,22 +201,15 @@ max_indexes = 5
 # [storage.vector.buckets.documents-openai]
 
 [auth]
-# Counter-intuitive, and the one service here that is enabled despite being
-# unused: NextAuth owns authentication end to end (src/lib/auth/, and see
-# src/lib/db/supabase.ts, which builds the service client with
-# `persistSession: false` precisely because no Supabase session ever exists).
+# Unused: NextAuth owns authentication end to end (src/lib/auth/), and MixOS no
+# longer talks to the Supabase API at all — every query goes over DATABASE_URL
+# (src/lib/db/query.ts).
 #
-# It stays on because CLI 2.115.0 gates key emission on it. With
-# `enabled = false`, `supabase status -o json` omits SERVICE_ROLE_KEY, ANON_KEY,
-# and JWT_SECRET entirely — the emission block is guarded by
-# `authEnabled = authSectionEnabled && !excluded(gotrue)` — and scripts/docker-up.ts
-# reads SUPABASE_SERVICE_ROLE_KEY from exactly that output. Setting
-# `[auth] enabled = false` and hardcoding the key instead is the trade we refuse
-# to make; a stale copied key fails as an opaque 401 from PostgREST.
-#
-# Cost is one extra container (gotrue). PostgREST validates the service_role JWT
-# on its own — it never calls gotrue — so this really is only about key delivery.
-# If a future CLI decouples the two, flip this to false and drop this comment.
+# It was kept on because CLI 2.115.0 only emits SERVICE_ROLE_KEY from
+# `supabase status -o json` while auth is enabled, and scripts/docker-up.ts used
+# to read that key. Nothing reads it now. Turning this off saves a container
+# (gotrue); check that `supabase status -o json` still reports API_URL, DB_URL
+# and STUDIO_URL with it off, since docker-up.ts reads those, before you do.
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.

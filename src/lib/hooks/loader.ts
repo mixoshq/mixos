@@ -1,0 +1,71 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+import { hookLoaders } from "@/generated/app-hook-loaders";
+import { hooks } from "./hook-system";
+import type { HookRegistrar } from "./types";
+
+/**
+ * Load every app's declared hook entrypoint, `apps/<slug>/hooks.ts`.
+ *
+ * WHY THIS EXISTS. Listeners used to register as an import side effect, which
+ * meant a hook was live only on a request that happened to import the app's
+ * module. Nothing imports app code on `/login` or in the main layout, so a
+ * filter on the brand would never have run where the brand renders. A declared
+ * entrypoint, imported here before any dispatch that needs it, is what makes a
+ * registration a fact about the install rather than about the request.
+ *
+ * Each entrypoint is called with a registrar attributed to its app and marked
+ * `entrypoint`, which is the only kind of registration a bounded core filter
+ * counts.
+ *
+ * Called on every dispatch, deliberately. `import()` of an already-loaded
+ * module is a resolved promise, and an entrypoint is only re-run when the
+ * module's default export is a different function than last time — which in
+ * production is never, and in development is exactly when the file was edited.
+ * Before re-running, the app's previous entrypoint registrations are dropped,
+ * so a reload replaces rather than doubles them. The compare-and-register step
+ * runs synchronously after the import resolves, so two concurrent requests
+ * cannot both register the same new module.
+ *
+ * Activation is NOT decided here. Every installed app's entrypoint is loaded;
+ * a dispatcher checks `isAppActive` per request, because that switch can flip
+ * at any time and a process outlives many flips.
+ */
+
+type Entrypoint = (hooks: HookRegistrar) => void;
+
+const registered = new Map<string, Entrypoint>();
+
+export async function ensureHooksLoaded(): Promise<void> {
+  await Promise.all(
+    Object.entries(hookLoaders).map(async ([slug, load]) => {
+      let entry: unknown;
+      try {
+        entry = (await load()).default;
+      } catch (err) {
+        console.error(`[hooks] apps/${slug}/hooks.ts failed to import:`, err);
+        return;
+      }
+      if (typeof entry !== "function") {
+        console.error(
+          `[hooks] apps/${slug}/hooks.ts must default-export a function (hooks) => void; skipping it.`,
+        );
+        return;
+      }
+      if (registered.get(slug) === entry) return;
+
+      registered.set(slug, entry as Entrypoint);
+      hooks.clearEntrypoint(slug);
+      try {
+        (entry as Entrypoint)(hooks.createRegistrar(slug, { entrypoint: true }));
+      } catch (err) {
+        // Whatever it registered before throwing is dropped too: half an
+        // entrypoint is not what anyone reviewed.
+        hooks.clearEntrypoint(slug);
+        console.error(`[hooks] apps/${slug}/hooks.ts threw while registering:`, err);
+      }
+    }),
+  );
+}

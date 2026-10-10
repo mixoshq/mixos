@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { createServiceClient } from "@/lib/db/supabase";
+import { createServiceClient } from "@/lib/db/server";
 import { decrypt, encrypt } from "@/lib/connectors/encryption";
 import type { AppEnvField } from "@/lib/apps/types";
 import { platformKey } from "@/lib/env/keys";
@@ -12,7 +12,7 @@ import { platformKey } from "@/lib/env/keys";
  *
  * This exists so `process.env` can be banned outright in app code. An app that
  * reads the raw environment can read `CONNECTOR_ENCRYPTION_KEY` and
- * `SUPABASE_SERVICE_ROLE_KEY`; an app that reads `context.env` sees only the
+ * `DATABASE_URL`; an app that reads `context.env` sees only the
  * keys it declared in its manifest, filled in by an admin.
  *
  * `password`-typed values are encrypted at rest on the same AES-256-GCM path

@@ -3,6 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import Image from "next/image";
+import { fitLogo, LOGIN_LOGO_BOX } from "@/lib/branding/fit";
+import type { BrandLogo } from "@/lib/branding/types";
 
 /**
  * The mark over the wordmark, as the sign-in page shows it.
@@ -11,18 +13,28 @@ import Image from "next/image";
  * what lets the tour begin with the logo not moving: the same markup at the
  * same sizes in the same card layout lands at the same pixel on both pages.
  * The `data-tour` hooks are what the reveal animates from.
+ *
+ * Both values come from `getBranding()`, resolved on the server: the theme,
+ * then the apps' brand filters, then whatever the theme claims outright.
  */
-export default function LoginLockup({ logo }: { logo: string | null }) {
+export default function LoginLockup({
+  logo,
+  name,
+}: {
+  logo: BrandLogo | null;
+  name: string;
+}) {
+  const mark = logo ? fitLogo(logo, LOGIN_LOGO_BOX) : null;
   return (
     <>
-      {logo && (
+      {mark && (
         <Image
-          src={logo}
+          src={mark.src}
           // Decorative: the <h1> below carries the name, so announcing the
           // mark as well would just read the product twice.
           alt=""
-          width={72}
-          height={69}
+          width={mark.width}
+          height={mark.height}
           priority
           data-tour="login-mark"
           className="mx-auto mb-4"
@@ -32,10 +44,15 @@ export default function LoginLockup({ logo }: { logo: string | null }) {
         {/*
           inline-block + leading-none so the measured rect is the glyph box,
           exactly like the menu bar's wordmark span. The h1 keeps its own
-          line-height, so nothing moves on the sign-in page.
+          line-height, so nothing moves on the sign-in page. The 4px of
+          padding mirrors the bar wordmark's 3px at this size (24/18), so the
+          two rects still differ by a pure scale.
         */}
-        <span data-tour="login-wordmark" className="inline-block leading-none">
-          MixOS
+        <span
+          data-tour="login-wordmark"
+          className="-my-1 inline-block py-1 leading-none"
+        >
+          {name}
         </span>
       </h1>
     </>

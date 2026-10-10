@@ -35,20 +35,20 @@ change, exactly as changing `AppManifest` is.
 
 - **Backwards compatibility.** Will this break existing apps, connectors, or themes? Check how `AppManifest`, `WidgetProps`, `BaseConnector`, `AppContext`, and `ThemeManifest` are used across all apps and themes. A token removed from the contract in `src/lib/themes/tokens.ts` breaks **every** theme at once.
 - **Registry generation.** If you change `AppManifest`, `ConnectorManifest`, or `ThemeManifest` types, update `scripts/generate-project-registry.ts` to match and run `npm run dev` to regenerate.
-- **Database migrations.** New migrations in `supabase/migrations/` run in alphabetical order. Use a numbered prefix (e.g., `0008_my_change.sql`) and test against a local Supabase instance first.
+- **Database migrations.** New migrations in `supabase/migrations/` run in alphabetical order. Use a numbered prefix (e.g., `0009_my_change.sql`) and test against the local Docker stack (`npm run db:local`) and a plain Postgres (`npm run db:migrate`) first. Keep them portable: MixOS runs on any Postgres 13+, so a statement that names a Supabase-only role or schema (`anon`, `authenticated`, `service_role`, `auth.*`) has to be skipped where those do not exist — see the guarded grants in `0005_app_schema_columns.sql`.
 
   **Every new migration must bump `platform_schema_version` to its own number, as its last statement:**
 
   ```sql
   insert into public.platform_settings (key, value)
-  values ('platform_schema_version', '8')
+  values ('platform_schema_version', '9')
   on conflict (key) do update set value = excluded.value, updated_at = now();
   ```
 
   That row is how a running instance knows whether the database has caught up with the code. The build derives what it *expects* from the highest-numbered file in `supabase/migrations/`; `/api/health/ready` compares the two and returns 503 while the database is behind, so an orchestrator holds a new revision out of service rather than routing to an image that will fail on the first request touching a column that isn't there yet. A migration that changes the schema without bumping the row is invisible to that check — Danger fails the PR if you forget.
 
   The comparison is `<`, not `≠`: a database *ahead* of the image is the normal ordering (migrate, then deploy), and only the reverse is refused.
-- **ESLint rules.** The `eslint.config.mjs` enforces security boundaries — apps cannot import Supabase or connector modules directly. If you modify these rules, understand why they exist (see `docs/secure-edge-gateway-architecture.md`).
+- **ESLint rules.** The `eslint.config.mjs` enforces security boundaries — apps cannot import the database client or connector modules directly. If you modify these rules, understand why they exist (see `docs/secure-edge-gateway-architecture.md`).
 - **Guide documentation.** If you add a new manifest field, hook, or developer-facing feature, update the relevant guide page (`src/components/apps/guide-tabs.tsx` or `src/components/connectors/connector-guide-tabs.tsx`) — or, for a theme-system change, the matching file under `docs/themes/`.
 
 ## Key files

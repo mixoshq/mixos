@@ -90,8 +90,26 @@ as $$
   order by c.table_name, c.ordinal_position
 $$;
 
-revoke all on function public.get_app_schema(text) from public, anon, authenticated;
-grant execute on function public.get_app_schema(text) to service_role;
+-- `anon`, `authenticated` and `service_role` are Supabase's API roles. They
+-- exist only where Supabase (or a hand-run PostgREST) created them, so the
+-- grants below are made only where the roles are. On a plain Postgres there is
+-- no API to publish the function through, and the owner — the role MixOS
+-- connects as — keeps EXECUTE either way.
+revoke all on function public.get_app_schema(text) from public;
+do $$
+declare
+  api_role text;
+begin
+  foreach api_role in array array['anon', 'authenticated'] loop
+    if exists (select 1 from pg_roles where rolname = api_role) then
+      execute format('revoke all on function public.get_app_schema(text) from %I', api_role);
+    end if;
+  end loop;
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function public.get_app_schema(text) to service_role;
+  end if;
+end
+$$;
 
 -- The schema version this file brings the database to. See 0007 and OS-UPDATES.md.
 insert into public.platform_settings (key, value)
