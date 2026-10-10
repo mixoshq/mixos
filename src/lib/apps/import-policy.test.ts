@@ -64,8 +64,12 @@ function runtimeExports(file: string): string[] {
 /** What a UI primitive may import at runtime: rendering, and nothing it could hand on. */
 const PRESENTATIONAL = new Set(["react", "lucide-react", "next/link", "react-markdown", "remark-gfm", "@/lib/utils"]);
 
-/** The card `AsyncView` renders for a failed connector call. It lives outside ui/. */
-const CONNECTOR_ERROR_STATE = "@/components/connectors/connector-error-state";
+/**
+ * Pure functions a primitive may read off a non-UI module to render something:
+ * the connector error card asks the envelope module which causes are an
+ * admin's to fix. The module's other exports stay off the app import list.
+ */
+const RENDERING_HELPERS = new Map([["@/lib/connectors/response", ["isAdminActionable"]]]);
 
 /** A module's runtime imports and re-exports, with the names each takes; type-only ones left out. */
 function runtimeImports(file: string): { specifier: string; names: string[] }[] {
@@ -131,6 +135,7 @@ const STAR_EXPORTS: Record<string, string[]> = {
     "CardHeader",
   ],
   "@/components/ui/configure-shell": ["default"],
+  "@/components/ui/connector-error-state": ["default"],
   "@/components/ui/data-table": ["DataTable", "TableSkeleton"],
   "@/components/ui/dialog": ["Dialog"],
   "@/components/ui/field": ["Field"],
@@ -175,28 +180,18 @@ describe("the list", () => {
 
   test("every UI primitive imports only presentational modules, or types", () => {
     for (const file of fs.readdirSync(UI).filter((f) => /\.tsx?$/.test(f))) {
-      for (const { specifier } of runtimeImports(path.join(UI, file))) {
+      for (const { specifier, names } of runtimeImports(path.join(UI, file))) {
+        const helpers = RENDERING_HELPERS.get(specifier);
         const ok =
           PRESENTATIONAL.has(specifier) ||
           specifier.startsWith("@/components/ui/") ||
           (specifier.startsWith("./") && !specifier.slice(2).includes("/")) ||
-          specifier === CONNECTOR_ERROR_STATE;
-        assert.ok(ok, `src/components/ui/${file} imports "${specifier}", which every app would get through it`);
+          (helpers !== undefined && names.every((name) => helpers.includes(name)));
+        assert.ok(
+          ok,
+          `src/components/ui/${file} imports ${names.join(", ")} from "${specifier}", which every app would get through it`,
+        );
       }
-    }
-  });
-
-  test("the connector error card AsyncView renders is presentational too", () => {
-    // An app cannot import it, but every app renders it through AsyncView, so
-    // what it reaches reaches them. Beside the UI's own imports it may read one
-    // pure function off the connector envelope module.
-    const file = path.join(ROOT, "src/components/connectors/connector-error-state.tsx");
-    for (const { specifier, names } of runtimeImports(file)) {
-      const ok =
-        PRESENTATIONAL.has(specifier) ||
-        specifier.startsWith("@/components/ui/") ||
-        (specifier === "@/lib/connectors/response" && names.every((n) => n === "isAdminActionable"));
-      assert.ok(ok, `connector-error-state.tsx imports ${names.join(", ")} from "${specifier}", which every app would render`);
     }
   });
 

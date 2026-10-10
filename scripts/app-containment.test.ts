@@ -733,6 +733,42 @@ describe("allowed", () => {
     );
   });
 
+  test("the connector helpers the docs teach: the card from @/components/ui, and ctx.connectorErrorResponse", () => {
+    const files = {
+      "widgets/deals.tsx": [
+        '"use client";',
+        'import { useState } from "react";',
+        'import ConnectorErrorState from "@/components/ui/connector-error-state";',
+        'import { connectorErrorOf, createAppClient } from "@/lib/apps/sdk";',
+        "export default function Deals({ appSlug }: { appSlug: string }) {",
+        "  const [err, setErr] = useState<unknown>(null);",
+        '  const load = () => createAppClient(appSlug).call("GET /export").catch(setErr);',
+        "  const envelope = connectorErrorOf(err);",
+        "  return envelope ? <ConnectorErrorState envelope={envelope} onRetry={load} /> : null;",
+        "}",
+      ].join("\n"),
+      "api/export/route.ts": [
+        'import { defineRoute } from "@/lib/apps/route";',
+        "export const GET = defineRoute({",
+        "  raw: true,",
+        "  handler: async (ctx) => {",
+        "    try {",
+        "      return Response.json(await (ctx.connectors.acme as never as { listThings(o: object): Promise<unknown> }).listThings({ signal: ctx.signal }));",
+        "    } catch (err) {",
+        "      return ctx.connectorErrorResponse(err);",
+        "    }",
+        "  },",
+        "});",
+      ].join("\n"),
+    };
+    expect(scan(files));
+    // The envelope module stays off the list: the admin flag is the pipeline's to pass.
+    expect(
+      route('import { connectorErrorResponse } from "@/lib/connectors/response";\nexport const r = connectorErrorResponse;'),
+      /^1 import "@\/lib\/connectors\/response" builds a connector outside context\.connectors/,
+    );
+  });
+
   test("apps/_template, which every scaffolded app starts from, and wall-e", () => {
     for (const app of ["_template", "wall-e"]) {
       const dir = path.join(ROOT, "apps", app);
