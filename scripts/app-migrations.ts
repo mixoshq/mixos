@@ -8,62 +8,64 @@
 // in supabase/migrations/ and is applied first, by scripts/platform-migrations.ts
 // (`npm run db:migrate`) or the Supabase CLI.
 //
-// App tables are automatically prefixed `_app_<slug>_` so one app can never
-// read or write another's data, and applied files are recorded in
-// public._migrations so each runs exactly once. See docs/apps/database.md.
+// EACH APP'S SQL RUNS AS THE APP, IN A SCHEMA OF ITS OWN. An app that declares
+// `"database": true` gets a schema, app_<slug>, owned by a role,
+// mixos_app_<slug>, that cannot log in and holds nothing else
+// (src/lib/apps/app-identifiers.ts). Its files run through a SECURITY DEFINER
+// function owned by that role, with the schema first on the function's search
+// path. `create table notes` lands in app_<slug>.notes with nothing rewritten,
+// and Postgres refuses a statement that reaches past the schema. Postgres also
+// refuses SET ROLE and SET SESSION AUTHORIZATION inside such a function, which
+// is why the role switch happens there and not on the connection.
+//
+// Before any of that, every statement is checked against what an app migration
+// may say (scripts/app-sql-policy.ts). The role bounds what a migration does
+// while it runs; the check bounds what it leaves behind, such as a default or a
+// view, for the platform's own role to run later.
+//
+// Which apps: those in this build's registry with `"database": true`. A folder
+// the registry generator did not accept never has its SQL run, and an app that
+// ships migrations/ without declaring a database is refused. Applied files are
+// recorded in public._migrations, so each runs exactly once.
 //
 // Safe to run twice at once, like the platform migrations: every write below
 // happens in a transaction that first takes the release step's lock
-// (scripts/migration-lock.ts), and a migration re-reads the ledger once the
-// lock is held, so a second runner finds the file applied instead of applying
-// it again.
+// (scripts/migration-lock.ts), and each step re-reads what it is about to
+// change once the lock is held, so a second runner finds the work done.
 //
 // Library only: scripts/migrate.ts (`npm run migrate:apps`) and
 // scripts/release.ts are the entry points.
 
 import fs from "fs";
 import path from "path";
-import { type Sql } from "postgres";
-import { listAppMigrations } from "./app-migration-files";
+import type { Sql, TransactionSql } from "postgres";
+import { appRegistry } from "../src/generated/app-registry";
+import { appIdentifierProblems, appRoleName, appSchemaName } from "../src/lib/apps/app-identifiers";
+import type { AppManifest } from "../src/lib/apps/types";
+import { listAppMigrations, undeclaredMigrations } from "./app-migration-files";
+import { checkAppMigrationSql, formatSqlProblems, lineAtCharacter } from "./app-sql-policy";
 import { takeMigrationLock } from "./migration-lock";
-import { syncAppRegistry } from "./sync-app-registry";
+import { syncAppRegistry, type MirroredApp } from "./sync-app-registry";
 
 const ROOT = path.resolve(__dirname, "..");
 const APPS_DIR = path.join(ROOT, "apps");
 
+/** What the runner reads of each app the registry accepted. */
+export type MigratedApp = MirroredApp & Pick<AppManifest, "database" | "updatedAt" | "sync">;
+
+export interface MigrateAppsOptions {
+  /** The apps this build accepted. Defaults to the generated registry. */
+  apps?: readonly MigratedApp[];
+  /** Where their folders are. Defaults to this checkout's apps/. */
+  appsDir?: string;
+}
+
 /**
- * Prefixes bare table names in SQL with the app-scoped prefix.
- * Matches CREATE TABLE, ALTER TABLE, DROP TABLE, INSERT INTO,
- * UPDATE, DELETE FROM, CREATE INDEX ... ON, and REFERENCES.
+ * A name for SQL text. Everything passed here is an app's schema or role, or a
+ * table or column the build checked is a plain identifier.
  */
-function addTablePrefix(sql: string, prefix: string): string {
-  return (
-    sql
-      // CREATE TABLE [IF NOT EXISTS] <name>
-      .replace(
-        /\b(create\s+table\s+(?:if\s+not\s+exists\s+)?)(\w+)/gi,
-        `$1${prefix}$2`,
-      )
-      // ALTER TABLE <name>
-      .replace(/\b(alter\s+table\s+)(\w+)/gi, `$1${prefix}$2`)
-      // DROP TABLE [IF EXISTS] <name>
-      .replace(/\b(drop\s+table\s+(?:if\s+exists\s+)?)(\w+)/gi, `$1${prefix}$2`)
-      // CREATE [UNIQUE] INDEX ... ON <name>
-      .replace(/\b(on\s+)(\w+)(\s*\()/gi, `$1${prefix}$2$3`)
-      // CREATE INDEX <name> — prefix the index name too
-      .replace(
-        /\b(create\s+(?:unique\s+)?index\s+(?:if\s+not\s+exists\s+)?)(\w+)/gi,
-        `$1${prefix}$2`,
-      )
-      // INSERT INTO <name>
-      .replace(/\b(insert\s+into\s+)(\w+)/gi, `$1${prefix}$2`)
-      // UPDATE <name>
-      .replace(/\b(update\s+)(\w+)(\s+set\b)/gi, `$1${prefix}$2$3`)
-      // DELETE FROM <name>
-      .replace(/\b(delete\s+from\s+)(\w+)/gi, `$1${prefix}$2`)
-      // REFERENCES <name>
-      .replace(/\b(references\s+)(\w+)(\s*\()/gi, `$1${prefix}$2$3`)
-  );
+function ident(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`;
 }
 
 /**
@@ -98,34 +100,236 @@ async function getAppliedMigrations(
   }
 }
 
+interface RoleRow {
+  oid: number;
+  rolsuper: boolean;
+  rolcanlogin: boolean;
+  rolcreaterole: boolean;
+  rolcreatedb: boolean;
+  rolreplication: boolean;
+  rolbypassrls: boolean;
+}
+
 /**
- * Apply one migration file transactionally: the DDL and the ledger INSERT
- * commit together, so a partial apply rolls back cleanly.
+ * An app role that already exists has to be one this file could have created:
+ * no attribute beyond NOLOGIN, a member of no other role, and used in no other
+ * database. Its migrations run with whatever it holds, so anything more is
+ * refused rather than inherited.
+ *
+ * The last check is there because roles belong to the server, not to one
+ * database. Two MixOS databases on one server would share mixos_app_<slug>, and
+ * each database's own role, being a member of it, would reach the other's app
+ * data.
+ */
+async function assertRoleContained(tx: TransactionSql, role: string, row: RoleRow): Promise<void> {
+  const powers = (
+    [
+      ["SUPERUSER", row.rolsuper],
+      ["LOGIN", row.rolcanlogin],
+      ["CREATEROLE", row.rolcreaterole],
+      ["CREATEDB", row.rolcreatedb],
+      ["REPLICATION", row.rolreplication],
+      ["BYPASSRLS", row.rolbypassrls],
+    ] as const
+  )
+    .filter(([, has]) => has)
+    .map(([name]) => name);
+  if (powers.length > 0) {
+    throw new Error(
+      `The role ${role} has ${powers.join(", ")}. An app's migrations run as its role, ` +
+        `so it must have none of these. Remove them (ALTER ROLE ${role} NO...) and run this again.`,
+    );
+  }
+
+  const memberOf = await tx<{ rolname: string }[]>`
+    select r.rolname
+    from pg_auth_members m
+    join pg_roles r on r.oid = m.roleid
+    where m.member = ${row.oid}::oid
+  `;
+  if (memberOf.length > 0) {
+    throw new Error(
+      `The role ${role} is a member of ${memberOf.map((r) => r.rolname).join(", ")}. ` +
+        `An app's migrations run as its role and would hold that role's privileges too. ` +
+        `Revoke the membership and run this again.`,
+    );
+  }
+
+  const elsewhere = await tx<{ name: string }[]>`
+    select distinct coalesce(d.datname, 'a shared object') as name
+    from pg_shdepend s
+    left join pg_database d on d.oid = s.dbid
+    where s.refclassid = 'pg_authid'::regclass
+      and s.refobjid = ${row.oid}::oid
+      and s.dbid <> (select oid from pg_database where datname = current_database())
+  `;
+  if (elsewhere.length > 0) {
+    throw new Error(
+      `The role ${role} is also used in ${elsewhere.map((r) => r.name).join(", ")}. ` +
+        `Roles are shared by every database on a server, so two MixOS databases there would ` +
+        `share this app's role and reach each other's app data through it. Give each MixOS ` +
+        `database its own server.`,
+    );
+  }
+}
+
+/**
+ * Make the role running this a member of the app's role, so it can read and
+ * write the app's tables as `context.db` and hand the role what it creates.
+ *
+ * Postgres 16 split membership into options. Before it, a member uses a role's
+ * privileges whenever the member itself has INHERIT, the default; from it, the
+ * grant has to say so, and has to allow SET ROLE for ownership to be given to
+ * the role. A superuser holds every role already.
+ */
+async function joinAppRole(tx: TransactionSql, role: string): Promise<void> {
+  const [{ version }] = await tx<{ version: number }[]>`
+    select current_setting('server_version_num')::int as version
+  `;
+  const options = version >= 160000;
+  const held = async () => {
+    const [row] = options
+      ? await tx<{ ok: boolean }[]>`
+          select pg_has_role(current_user, ${role}, 'USAGE')
+             and pg_has_role(current_user, ${role}, 'SET') as ok
+        `
+      : await tx<{ ok: boolean }[]>`select pg_has_role(current_user, ${role}, 'USAGE') as ok`;
+    return row.ok;
+  };
+  if (await held()) return;
+
+  await tx.unsafe(`grant ${ident(role)} to current_user${options ? " with inherit true, set true" : ""}`);
+  if (!(await held())) {
+    throw new Error(
+      `This database role was granted ${role} but cannot use its privileges. ` +
+        `It needs INHERIT (ALTER ROLE <this role> INHERIT) to read the app's tables.`,
+    );
+  }
+}
+
+/**
+ * The app's role and schema: created where missing, checked where present.
+ * The catalog is the record of what exists, so there is no marker to fall out
+ * of step with it. Roles are not in a database dump, for one: a restored
+ * database has the schema and no role, and this creates the role again.
+ */
+export async function ensureAppDatabase(sql: Sql, slug: string): Promise<void> {
+  const schema = appSchemaName(slug);
+  const role = appRoleName(slug);
+
+  await sql.begin(async (tx) => {
+    await takeMigrationLock(tx);
+
+    const [existing] = await tx<RoleRow[]>`
+      select oid, rolsuper, rolcanlogin, rolcreaterole, rolcreatedb, rolreplication, rolbypassrls
+      from pg_roles
+      where rolname = ${role}
+    `;
+    if (!existing) {
+      // NOLOGIN: nothing ever connects as it, so no host's password rules apply.
+      await tx.unsafe(`create role ${ident(role)} nologin`);
+      console.log(`  ${slug}: created role ${role}`);
+    } else {
+      await assertRoleContained(tx, role, existing);
+    }
+
+    await joinAppRole(tx, role);
+
+    const [namespace] = await tx<{ owner: string }[]>`
+      select pg_get_userbyid(nspowner) as owner from pg_namespace where nspname = ${schema}
+    `;
+    if (!namespace) {
+      await tx.unsafe(`create schema ${ident(schema)} authorization ${ident(role)}`);
+      console.log(`  ${slug}: created schema ${schema}`);
+    } else if (namespace.owner !== role) {
+      throw new Error(
+        `The schema ${schema} already exists and belongs to ${namespace.owner}, not ${role}. ` +
+          `It is not this app's, so its migrations will not run in it.`,
+      );
+    }
+  });
+}
+
+/** The function an app's migration file runs through. It exists only while that file runs. */
+const APPLY_FUNCTION = "mixos_apply_migration";
+
+/**
+ * An error from applying `file`, prefixed with where it happened. A statement
+ * Postgres rejected while parsing carries its position in the file, which
+ * becomes a line number.
+ */
+function located(err: unknown, file: string, sqlText: string): unknown {
+  const e = err as { message?: unknown; internal_position?: unknown; internal_query?: unknown };
+  if (typeof e?.message !== "string") return err;
+  const position = Number(e.internal_position);
+  const line =
+    e.internal_query === sqlText && Number.isInteger(position) && position > 0
+      ? `:${lineAtCharacter(sqlText, position - 1)}`
+      : "";
+  return new Error(`${file}${line}: ${e.message}`, { cause: err });
+}
+
+/**
+ * Apply one migration file as the app's role, in one transaction with its
+ * ledger row, so a partial apply rolls back cleanly.
+ *
+ * The function the file runs through is created, given to the app's role,
+ * called and dropped inside that transaction. It is made afresh for every
+ * file: the app's role owns it while it runs, and nothing a file did to it can
+ * carry over to the next one. Its search path puts the app's schema first and
+ * pg_temp last, and it fixes standard_conforming_strings to what the checking
+ * parser assumed, the one setting that moves where a string literal ends.
  *
  * The ledger is read again under the lock, because the caller's read happened
  * before it: another runner may have applied this file in between.
+ *
+ * It does not check the SQL: migrateApps does that, for every pending file,
+ * before it applies any. Exported for the test that shows what the role alone
+ * holds back when that check is skipped.
  */
-async function applyMigration(
+export async function applyMigration(
   sql: Sql,
-  appSlug: string,
+  slug: string,
   file: string,
   sqlText: string,
 ): Promise<"applied" | "already"> {
-  return sql.begin(async (tx) => {
-    await takeMigrationLock(tx);
-    const done = await tx`
-      SELECT 1 FROM public._migrations
-      WHERE app_slug = ${appSlug} AND migration_file = ${file}
-    `;
-    if (done.length > 0) return "already" as const;
+  const schema = ident(appSchemaName(slug));
+  const fn = `${schema}.${APPLY_FUNCTION}`;
+  try {
+    return await sql.begin(async (tx) => {
+      await takeMigrationLock(tx);
+      const done = await tx`
+        SELECT 1 FROM public._migrations
+        WHERE app_slug = ${slug} AND migration_file = ${file}
+      `;
+      if (done.length > 0) return "already" as const;
 
-    await tx.unsafe(sqlText);
-    await tx`
-      INSERT INTO public._migrations (app_slug, migration_file)
-      VALUES (${appSlug}, ${file})
-    `;
-    return "applied" as const;
-  });
+      await tx.unsafe(`
+        create or replace function ${fn}(migration text)
+        returns void
+        language plpgsql
+        security definer
+        set search_path = ${schema}, pg_temp
+        set standard_conforming_strings = on
+        as $mixos$
+        begin
+          execute migration;
+        end
+        $mixos$
+      `);
+      await tx.unsafe(`alter function ${fn}(text) owner to ${ident(appRoleName(slug))}`);
+      await tx.unsafe(`select ${fn}($1)`, [sqlText]);
+      await tx.unsafe(`drop function ${fn}(text)`);
+
+      await tx`
+        INSERT INTO public._migrations (app_slug, migration_file)
+        VALUES (${slug}, ${file})
+      `;
+      return "applied" as const;
+    });
+  } catch (err) {
+    throw located(err, `apps/${slug}/migrations/${file}`, sqlText);
+  }
 }
 
 /**
@@ -136,28 +340,26 @@ async function applyMigration(
  * "persisting a provider cursor in your state table" as the single most
  * expensive mistake in this codebase. There is deliberately no cursor column: a
  * cursor lives inside one run and there is nowhere here to put it.
+ *
+ * It sits in the app's schema, where `context.db.table("_sync_state")` finds
+ * it, and belongs to the platform's role, so the app's migrations cannot alter
+ * or drop it.
  */
-async function ensureSyncState(sql: Sql, slug: string): Promise<void> {
-  const manifestPath = path.join(APPS_DIR, slug, "app.json");
-  if (!fs.existsSync(manifestPath)) return;
-  let declaresSync = false;
-  try {
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as {
-      sync?: unknown[];
-    };
-    declaresSync = Array.isArray(manifest.sync) && manifest.sync.length > 0;
-  } catch {
-    return;
-  }
-  if (!declaresSync) return;
+async function ensureSyncState(sql: Sql, app: MigratedApp): Promise<void> {
+  if (!app.sync || app.sync.length === 0) return;
+  const schema = appSchemaName(app.slug);
+  const table = `${ident(schema)}."_sync_state"`;
 
-  const table = `_app_${slug.replace(/-/g, "_")}__sync_state`;
-  // Under the lock: two `create table if not exists` at once can still collide
-  // on the type the table creates, rather than one of them skipping.
+  // Under the lock: two `create table` at once can still collide on the type
+  // the table creates, rather than one of them skipping.
   await sql.begin(async (tx) => {
     await takeMigrationLock(tx);
+    const [{ exists }] = await tx<{ exists: boolean }[]>`
+      select to_regclass(${`${schema}._sync_state`}) is not null as exists
+    `;
+    if (exists) return;
     await tx.unsafe(`
-      create table if not exists public."${table}" (
+      create table ${table} (
         name           text primary key,
         synced_through timestamptz,
         window_days    int,
@@ -165,38 +367,125 @@ async function ensureSyncState(sql: Sql, slug: string): Promise<void> {
         last_run_at    timestamptz
       )
     `);
-    await tx.unsafe(`alter table public."${table}" enable row level security`);
+    await tx.unsafe(`alter table ${table} enable row level security`);
+    console.log(`  ${app.slug}: sync state ready`);
   });
-  console.log(`  ${slug}: sync state ready`);
+}
+
+/** The trigger mixos_touch_updated_at() is installed as, for one column. */
+function updatedAtTrigger(column: string): string {
+  return `mixos_updated_at_${column}`.slice(0, 63);
 }
 
 /**
- * Enable RLS on every table in `public` that lacks it, and report what changed.
+ * Put the platform's updated_at trigger (supabase/migrations/0009) on each
+ * column the app lists under `updatedAt`, and take it off any it no longer
+ * lists. After the app's migrations, so the tables exist.
+ *
+ * Each column is checked against the database itself: the build only read the
+ * migration files. An app's own SQL cannot create, drop or rename a trigger,
+ * so every trigger running this function in the app's schema is one this put
+ * there.
+ */
+async function syncUpdatedAtTriggers(sql: Sql, app: MigratedApp): Promise<void> {
+  const schema = appSchemaName(app.slug);
+  const wanted = new Map(
+    (app.updatedAt ?? []).map((c) => [`${c.table}.${updatedAtTrigger(c.column)}`, c]),
+  );
+
+  await sql.begin(async (tx) => {
+    await takeMigrationLock(tx);
+    const [{ touch }] = await tx<{ touch: string | null }[]>`
+      select to_regprocedure('public.mixos_touch_updated_at()')::oid::text as touch
+    `;
+    if (!touch) {
+      if (wanted.size === 0) return;
+      throw new Error(
+        "public.mixos_touch_updated_at() does not exist. Apply the platform schema first (`npm run db:migrate`).",
+      );
+    }
+
+    for (const c of wanted.values()) {
+      const [column] = await tx<{ relkind: string; timestamp: boolean }[]>`
+        select c.relkind, a.atttypid in ('timestamptz'::regtype, 'timestamp'::regtype) as timestamp
+        from pg_class c
+        join pg_namespace n on n.oid = c.relnamespace
+        join pg_attribute a on a.attrelid = c.oid
+        where n.nspname = ${schema}
+          and c.relname = ${c.table}
+          and a.attname = ${c.column}
+          and a.attnum > 0
+          and not a.attisdropped
+      `;
+      if (!column || column.relkind !== "r") {
+        throw new Error(
+          `apps/${app.slug}/app.json lists ${c.table}.${c.column} under "updatedAt", ` +
+            `but the app's migrations leave no such column on a table.`,
+        );
+      }
+      if (!column.timestamp) {
+        throw new Error(
+          `apps/${app.slug}/app.json lists ${c.table}.${c.column} under "updatedAt", ` +
+            `but it is not a timestamptz or timestamp column.`,
+        );
+      }
+    }
+
+    const existing = await tx<{ table: string; trigger: string }[]>`
+      select c.relname as table, t.tgname as trigger
+      from pg_trigger t
+      join pg_class c on c.oid = t.tgrelid
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = ${schema}
+        and not t.tgisinternal
+        and t.tgfoid = ${touch}::oid
+    `;
+    const present = new Set(existing.map((e) => `${e.table}.${e.trigger}`));
+
+    for (const e of existing) {
+      if (wanted.has(`${e.table}.${e.trigger}`)) continue;
+      await tx.unsafe(`drop trigger ${ident(e.trigger)} on ${ident(schema)}.${ident(e.table)}`);
+      console.log(`  ${app.slug}: no longer keeping ${e.table} current (${e.trigger})`);
+    }
+    for (const [key, c] of wanted) {
+      if (present.has(key)) continue;
+      await tx.unsafe(
+        `create trigger ${ident(updatedAtTrigger(c.column))} ` +
+          `before update on ${ident(schema)}.${ident(c.table)} ` +
+          `for each row execute function public.mixos_touch_updated_at('${c.column.replace(/'/g, "''")}')`,
+      );
+      console.log(`  ${app.slug}: ${c.table}.${c.column} set on every update`);
+    }
+  });
+}
+
+/**
+ * Enable RLS on every table in `public` and in the apps' schemas that lacks it,
+ * and report what changed.
  *
  * The platform schema states the rule in its own header: RLS on, zero policies,
  * because Supabase publishes `public` through PostgREST to the `anon` role and
  * the anon key is publishable rather than secret. A table with RLS off is
  * readable by anyone holding it.
  *
- * App tables were never covered. `applyMigration` runs an app's own SQL with the
- * table names rewritten, so whatever `create table` it contains lands in
- * `public` exactly as written — with no RLS. `_app_<slug>_*` tables have been
- * reachable through PostgREST for as long as apps have had migrations. The only
- * `enable row level security` this script used to emit was for `__sync_state`,
- * which the platform creates itself.
+ * App tables are swept too. An app's own schema is not one PostgREST publishes
+ * unless someone configures it to, and the role that owns its tables is not
+ * the one the app connects as; the platform's role reaches them as a member of
+ * the owner, which RLS treats as the owner. With RLS on and no policies, any
+ * other role that could see them, by any route, reads nothing.
  *
  * Sweeping the catalog rather than tracking names is deliberate: the platform
  * schema tried the hand-kept list and the list is what rotted. Idempotent, so
  * running migrations twice hardens nothing the second time.
  */
-async function hardenRowLevelSecurity(sql: Sql) {
+async function hardenRowLevelSecurity(sql: Sql, appSchemas: readonly string[]) {
   return sql.begin(async (tx) => {
     await takeMigrationLock(tx);
-    const rows = await tx<{ relname: string }[]>`
-      select c.relname
+    const rows = await tx<{ schema: string; relname: string }[]>`
+      select n.nspname as schema, c.relname
       from pg_class c
       join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = 'public'
+      where n.nspname = any(${["public", ...appSchemas]})
         and c.relkind = 'r'
         and not c.relrowsecurity
         and not exists (
@@ -205,53 +494,98 @@ async function hardenRowLevelSecurity(sql: Sql) {
           where d.objid = c.oid
             and d.deptype = 'e'
         )
-      order by c.relname
+      order by n.nspname, c.relname
     `;
 
-    for (const { relname } of rows) {
-      await tx.unsafe(
-        `alter table public."${relname}" enable row level security`,
-      );
-      console.log(`  RLS enabled: ${relname}`);
+    for (const { schema, relname } of rows) {
+      await tx.unsafe(`alter table ${ident(schema)}.${ident(relname)} enable row level security`);
+      console.log(`  RLS enabled: ${schema === "public" ? relname : `${schema}.${relname}`}`);
     }
 
     return rows.length;
   });
 }
 
-async function migrateApps(sql: Sql) {
+async function migrateApps(
+  sql: Sql,
+  apps: readonly MigratedApp[],
+  appsDir: string,
+): Promise<void> {
+  // Every refusal comes before anything is applied, so a release that cannot
+  // run all of its app SQL runs none of it.
+  const undeclared = undeclaredMigrations(appsDir, apps);
+  if (undeclared.length > 0) {
+    throw new Error(
+      undeclared
+        .map(
+          ({ slug, files }) =>
+            `apps/${slug}/migrations/ holds ${files.join(", ")}, but apps/${slug}/app.json ` +
+            `does not set "database": true. An app without a database has no schema to migrate.`,
+        )
+        .join("\n"),
+    );
+  }
+
   // The same listing the build stamps for the readiness probe, so what this
   // applies and what a deployment waits for are one set of files.
-  for (const { slug, files } of listAppMigrations(APPS_DIR)) {
+  const listed = listAppMigrations(appsDir, apps);
+  const identifiers = appIdentifierProblems(listed.map((a) => a.slug));
+  if (identifiers.length > 0) throw new Error(identifiers.join("\n"));
+
+  const bySlug = new Map(apps.map((a) => [a.slug, a]));
+  const plan: {
+    app: MigratedApp;
+    files: { file: string; text: string | null }[];
+  }[] = [];
+  const refused: string[] = [];
+
+  for (const { slug, files } of listed) {
+    const applied = files.length > 0 ? await getAppliedMigrations(sql, slug) : new Set<string>();
+    const entries: { file: string; text: string | null }[] = [];
+    for (const file of files) {
+      if (applied.has(file)) {
+        entries.push({ file, text: null });
+        continue;
+      }
+      const text = fs.readFileSync(path.join(appsDir, slug, "migrations", file), "utf-8");
+      const problems = await checkAppMigrationSql(text, appSchemaName(slug));
+      if (problems.length > 0) refused.push(formatSqlProblems(`apps/${slug}/migrations/${file}`, problems));
+      entries.push({ file, text });
+    }
+    plan.push({ app: bySlug.get(slug)!, files: entries });
+  }
+
+  if (refused.length > 0) {
+    throw new Error(
+      `App migrations refused, and none applied:\n${refused.join("\n")}\n` +
+        "docs/apps/database.md lists what an app migration may contain.",
+    );
+  }
+
+  for (const { app, files } of plan) {
+    await ensureAppDatabase(sql, app.slug);
+
     // The platform owns the sync watermark table, so an app that declares a
     // `sync` never writes a migration for it — and never gets the chance to
     // shape it wrongly. Created before the app's own migrations so one of them
     // could reference it.
-    await ensureSyncState(sql, slug);
+    await ensureSyncState(sql, app);
 
-    if (files.length === 0) continue;
-
-    const applied = await getAppliedMigrations(sql, slug);
-
-    for (const file of files) {
-      if (applied.has(file)) {
-        console.log(`  ${slug}/${file}: already applied`);
+    for (const { file, text } of files) {
+      if (text === null) {
+        console.log(`  ${app.slug}/${file}: already applied`);
         continue;
       }
-      const raw = fs.readFileSync(
-        path.join(APPS_DIR, slug, "migrations", file),
-        "utf-8",
-      );
-      const prefix = `_app_${slug.replace(/-/g, "_")}_`;
-      const sqlText = addTablePrefix(raw, prefix);
-      console.log(`  ${slug}/${file}: applying...`);
-      const outcome = await applyMigration(sql, slug, file, sqlText);
+      console.log(`  ${app.slug}/${file}: applying...`);
+      const outcome = await applyMigration(sql, app.slug, file, text);
       console.log(
         outcome === "applied"
-          ? `  ${slug}/${file}: applied`
-          : `  ${slug}/${file}: already applied by another run`,
+          ? `  ${app.slug}/${file}: applied`
+          : `  ${app.slug}/${file}: already applied by another run`,
       );
     }
+
+    await syncUpdatedAtTriggers(sql, app);
   }
 }
 
@@ -259,13 +593,19 @@ async function migrateApps(sql: Sql) {
  * Everything `npm run migrate:apps` does, in order: mirror the app registry
  * into public.apps, apply each app's pending migrations, then harden RLS on
  * whatever those migrations created.
+ *
+ * `options` is for tests: a release runs this build's registry against this
+ * checkout's apps/.
  */
-export async function migrateAppSchemas(sql: Sql): Promise<void> {
-  // Before the per-app SQL, because an app's own migration may insert seed
-  // rows into a table that references public.apps — and the parent row has to
-  // exist by then.
+export async function migrateAppSchemas(
+  sql: Sql,
+  options: MigrateAppsOptions = {},
+): Promise<void> {
+  const apps = options.apps ?? appRegistry;
+  const appsDir = options.appsDir ?? APPS_DIR;
+
   console.log("Syncing the app registry into public.apps...");
-  const sync = await syncAppRegistry(sql);
+  const sync = await syncAppRegistry(sql, apps);
   console.log(`  ${sync.upserted} app(s) in the registry`);
   for (const slug of sync.removed) {
     // Loud, because the cascade behind this line deletes that app's grants,
@@ -276,12 +616,15 @@ export async function migrateAppSchemas(sql: Sql): Promise<void> {
   }
 
   console.log("\nApplying app migrations...");
-  await migrateApps(sql);
+  await migrateApps(sql, apps, appsDir);
 
   // After the app SQL, never before: a table created by this run has to be
   // hardened by this run. See hardenRowLevelSecurity for why it sweeps.
   console.log("\nChecking row-level security...");
-  const hardened = await hardenRowLevelSecurity(sql);
+  const hardened = await hardenRowLevelSecurity(
+    sql,
+    apps.filter((a) => a.database).map((a) => appSchemaName(a.slug)),
+  );
   console.log(
     hardened === 0
       ? "  all tables already protected"

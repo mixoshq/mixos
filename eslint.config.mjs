@@ -134,7 +134,7 @@ const eslintConfig = defineConfig([
               // reachable.
               importNames: ["createScopedClient", "createReadOnlyScopedClient"],
               message:
-                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
+                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for that app's schema, so an app could name another app and read or write its tables. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
             },
           ],
         },
@@ -197,7 +197,7 @@ const eslintConfig = defineConfig([
               // reachable.
               importNames: ["createScopedClient", "createReadOnlyScopedClient"],
               message:
-                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
+                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for that app's schema, so an app could name another app and read or write its tables. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
             },
           ],
         },
@@ -248,7 +248,7 @@ const eslintConfig = defineConfig([
               // reachable.
               importNames: ["createScopedClient", "createReadOnlyScopedClient"],
               message:
-                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for it, so an app could name another app's prefix and read or write its tables — the `_app_<slug>_` prefix only bounds the table name, never the app. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
+                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for that app's schema, so an app could name another app and read or write its tables. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
             },
           ],
         },
