@@ -15,6 +15,9 @@ import type { ConnectorWebhookPolicy } from "./types";
  *  2. **Timestamp** — a signature is valid forever, so without a freshness
  *     window an attacker who captured one delivery can replay it indefinitely.
  *  3. **Replay** — even inside the window, the same delivery must apply once.
+ *     Without a timestamp there is no window, and this is the only check that
+ *     refuses a replay, so its record is kept for 90 days rather than one
+ *     (`pruneWebhookEvents`).
  *
  * The signed payload is `${timestamp}.${rawBody}` when the policy declares a
  * timestamp header, and the raw body alone otherwise. That covers the common
@@ -37,6 +40,16 @@ export type WebhookVerification =
   | { ok: false; reason: WebhookRejection };
 
 const DEFAULT_TOLERANCE_SECONDS = 300;
+
+/**
+ * How long a delivery marker is kept, in days. With a signed timestamp the
+ * freshness window (at most an hour either side) refuses a replay well inside
+ * a day. Without one the marker is the only thing refusing it, so it is kept
+ * far longer — though not forever, which is the trade the 90 days make: a
+ * delivery captured longer ago than that could be accepted once more.
+ */
+const TIMED_RETENTION_DAYS = 1;
+const UNTIMED_RETENTION_DAYS = 90;
 
 function constantTimeEquals(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -102,12 +115,16 @@ export function verifyWebhookSignature(opts: {
   );
   if (!matches) return { ok: false, reason: "bad-signature" };
 
-  // The signature is unique per delivery, so its digest is the dedupe key.
-  return { ok: true, eventKey: createHash("sha256").update(presented).digest("hex") };
+  // The dedupe key is a digest of the MAC that verified, not of the header as
+  // sent. One MAC has many accepted spellings — hex or base64, bare or behind
+  // any `prefix=` — so a key taken from the header let a captured delivery
+  // replay under a fresh key just by being re-spelled. The MAC is one value per
+  // signed payload (timestamp and body), however it is written.
+  return { ok: true, eventKey: createHash("sha256").update(mac).digest("hex") };
 }
 
 /**
- * Claim a delivery. Returns false when this exact signature has been seen
+ * Claim a delivery. Returns false when this signed payload has been seen
  * before — the insert itself is the check, so two concurrent deliveries of the
  * same event cannot both win.
  */
@@ -125,23 +142,47 @@ export async function claimWebhookDelivery(
 }
 
 /**
- * Drop delivery markers older than a day. Past the signature's freshness
- * window the timestamp check already refuses a replay, so the row stops
- * carrying weight. Called from the cron tick.
+ * Drop delivery markers that no longer carry weight. Called from the cron tick,
+ * which passes `timestamped`: the connectors whose policy signs a timestamp,
+ * read off the registry.
+ *
+ *   - A timestamped connector's markers go after a day. Past the freshness
+ *     window the timestamp check already refuses a replay.
+ *   - Every other marker goes after 90 days. Without a signed timestamp a
+ *     signature stays valid for as long as the secret does, so the marker is
+ *     the only thing refusing a replay. Ninety days bounds the table at a
+ *     stated cost: for a connector that signs no timestamp, a delivery
+ *     captured more than 90 days ago could be accepted once.
+ *
+ * Returns how many markers went.
  */
-export async function pruneWebhookEvents(): Promise<number> {
+export async function pruneWebhookEvents(
+  timestamped: readonly string[],
+): Promise<number> {
+  let pruned = 0;
   // Swallows its own errors, matching pruneRateBuckets: this runs after the
   // scheduler tick and a failed sweep must not report the tick as failed.
   try {
-    const rows = await sql<{ event_key: string }[]>`
+    const expired = await sql<{ event_key: string }[]>`
       delete from public.connector_webhook_events
-       where received_at < now() - interval '1 day'
+       where received_at < now() - ${UNTIMED_RETENTION_DAYS} * interval '1 day'
       returning event_key
     `;
-    return rows.length;
+    pruned += expired.length;
+
+    // `in ()` is not SQL, and with no timestamped policy there is nothing to do.
+    if (timestamped.length === 0) return pruned;
+    const stale = await sql<{ event_key: string }[]>`
+      delete from public.connector_webhook_events
+       where received_at < now() - ${TIMED_RETENTION_DAYS} * interval '1 day'
+         and connector_name in ${sql([...timestamped])}
+      returning event_key
+    `;
+    pruned += stale.length;
   } catch {
-    return 0;
+    // Best-effort: report what did go.
   }
+  return pruned;
 }
 
 /**

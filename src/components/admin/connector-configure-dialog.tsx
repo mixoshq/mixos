@@ -622,7 +622,7 @@ export default function ConnectorConfigureDialog({
     });
   }
 
-  steps.push({
+  const credentialsStep: Step = {
     id: "credentials",
     title: `Save your ${credentialNames}`,
     done: credentialsSaved,
@@ -689,21 +689,39 @@ export default function ConnectorConfigureDialog({
         {credentialsSaved ? "Update credentials" : "Save credentials"}
       </Button>
     ),
-  });
+  };
+  // A connector that declares no credential fields — a public API — has
+  // nothing to save, so the wizard goes from the provider's steps to Verify.
+  const hasCredentials = connector.credentialFields.length > 0;
+  if (hasCredentials) steps.push(credentialsStep);
 
   if (isOAuth) {
     steps.push({
       id: "authorize",
-      title: "Authorize access",
+      title: connector.userScoped ? "Connect your account" : "Authorize access",
       done: authorized,
       mustComplete: true,
       body: (
         <>
-          <p className="text-sm text-muted-foreground">
-            You will be sent to the provider to sign in and approve. The token
-            comes back encrypted and refreshes itself; there is one credential
-            set for the whole deployment, not one per person.
-          </p>
+          {/*
+            A user-scoped connector has no deployment-wide grant: each person
+            connects their own. The admin connects theirs here, which proves
+            the app registration works and gives Verify a grant to test with.
+          */}
+          {connector.userScoped ? (
+            <p className="text-sm text-muted-foreground">
+              Each person signs in with their own account, from My
+              Connections. Connect yours here to prove the app registration
+              works; Verify then tests with your account. The token comes back
+              encrypted and refreshes itself.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              You will be sent to the provider to sign in and approve. The
+              token comes back encrypted and refreshes itself; there is one
+              credential set for the whole deployment, not one per person.
+            </p>
+          )}
           {setup?.notes?.authorize && (
             <StepNote>{setup.notes.authorize}</StepNote>
           )}
@@ -852,6 +870,8 @@ export default function ConnectorConfigureDialog({
 
   /** The provider's scope reference page, cited under the capability list. */
   const scopesUrl = connector.auth?.scopesUrl;
+  /** A public API: no credential, so no permissions and no scope page. */
+  const authenticates = (connector.auth?.strategy ?? "none") !== "none";
   const dependentsText = describeDependents(connector.dependents);
   const hasDependents =
     connector.dependents.required.length > 0 ||
@@ -1095,9 +1115,10 @@ export default function ConnectorConfigureDialog({
               */}
               {catalogue.length > 0 && !connector.access.grantedKnown && (
                 <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground">
-                  Nobody has connected this yet, so there is no grant to check
-                  against. Every scope reads as unknown until someone does —
-                  which is not the same as having been refused.
+                  {connector.userScoped
+                    ? "Each person holds their own grant, and these verdicts are for yours. You have not connected your own account yet, so every scope reads as unknown until you do"
+                    : "Nobody has connected this yet, so there is no grant to check against. Every scope reads as unknown until someone does"}{" "}
+                  — which is not the same as having been refused.
                 </p>
               )}
 
@@ -1139,9 +1160,9 @@ export default function ConnectorConfigureDialog({
 
               {catalogue.length === 0 ? (
                 <p className="mt-1 text-sm text-muted-foreground">
-                  This connector declares no scopes. A developer adds them by
-                  running the scopes refresh against the provider&apos;s own
-                  documentation.
+                  {authenticates
+                    ? "This connector declares no scopes. A developer adds them by running the scopes refresh against the provider's own documentation."
+                    : "This connector reaches a public API and authenticates with nothing, so there are no permissions to grant or check."}
                 </p>
               ) : (
                 /* Striped rather than spaced: fourteen two-line rows read as one
@@ -1224,7 +1245,7 @@ export default function ConnectorConfigureDialog({
                 </p>
               )}
 
-              {!isOAuth && (
+              {!isOAuth && authenticates && (
                 <p className="mt-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">
                   This connector authenticates with an API key. What that key is
                   permitted to do was decided in the provider&apos;s own console
@@ -1408,9 +1429,11 @@ export default function ConnectorConfigureDialog({
               controls. */}
           {allDone && (
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => jumpTo("credentials")}>
-                Update credentials
-              </Button>
+              {hasCredentials && (
+                <Button size="sm" onClick={() => jumpTo("credentials")}>
+                  Update credentials
+                </Button>
+              )}
               {isOAuth && (
                 <Button size="sm" onClick={() => jumpTo("authorize")}>
                   Reconnect
@@ -1420,6 +1443,34 @@ export default function ConnectorConfigureDialog({
                 Verify again
               </Button>
             </div>
+          )}
+
+          {/*
+            Reference material, below the checklist rather than inside a step:
+            a scope table under "Create a Google Cloud OAuth app" reads as part
+            of that step and gets done or skipped accordingly. A link here has
+            no sentence around it, so its "?" says when to open it.
+          */}
+          {setup?.docs && setup.docs.length > 0 && (
+            <section className="mt-5 border-t border-border pt-3">
+              <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Reference
+              </h3>
+              <ul className="mt-2 space-y-1.5">
+                {setup.docs.map((doc) => (
+                  <li key={doc.url} className="text-sm">
+                    <DocLink link={doc} />{" "}
+                    <InfoTooltip tip={doc.why} className="align-text-bottom">
+                      <HelpCircle
+                        aria-label={`When to open ${doc.label}`}
+                        role="img"
+                        className="h-4 w-4 text-muted-foreground hover:text-foreground"
+                      />
+                    </InfoTooltip>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
         </section>
       </div>

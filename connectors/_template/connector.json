@@ -28,7 +28,8 @@
     "docs": [
       {
         "label": "API reference",
-        "url": "https://docs.provider.example.com/"
+        "url": "https://docs.provider.example.com/",
+        "why": "Say when an admin would open this — e.g. to check which endpoints a key with the smallest scope can reach. A link you cannot say that about is one to leave out."
       }
     ]
   },
