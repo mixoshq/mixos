@@ -11,7 +11,8 @@ without the watermark advancing once.
 That shape is now the platform's, and the cursor never leaves the run:
 
 ```jsonc
-// app.json
+// app.json — a sync needs "database": true, where its watermark is kept
+"database": true,
 "sync": [{
   "name": "calls",
   "schedule": { "everyMinutes": 60 },
@@ -44,7 +45,7 @@ That is the whole app. The platform owns:
 | The watermark | Advances **only** on a window that actually drained. An interrupted run costs nothing, because the writes are upserts. |
 | The budget | Checked at every page boundary against both the clock and `ctx.signal` — the deadline alone misses an admin abort, the signal alone fires only once you have overrun. |
 | Window tuning | Halved when a window does not drain, relaxed back toward the default when it does, and the size persisted so a shrink survives the tick boundary. Relaxing matters as much as shrinking. |
-| The empty guard | A drained window that returned nothing does **not** advance the watermark — an upstream outage returns zero rows, not an error, and writing that through blanks every card. |
+| The empty guard | A drained window that reaches the present and returned nothing does **not** advance the watermark — an upstream outage returns zero rows, not an error, and writing that through blanks every card. The next tick reads it again, grown by the time since. An empty window that ends in the past does advance: it can never grow, so holding it would stop the sync for good. |
 | The state table | `_sync_state` is created for you by `npm run migrate:apps`. You never write a migration for it, and it has **no cursor column**. |
 
 A sync appears at **Administration → Scheduled Jobs** like any other job — same
@@ -415,7 +416,7 @@ proxy timeout with no way to resume. Slice it and let the client drive:
   guard from that one module, and have both sides import them.
 - One short request per `(entity, slice)`, run sequentially by the client, with
   real progress rather than a guessed bar.
-- Thread `request.signal` into the connector, so a caller navigating away stops
+- Thread `context.signal` into the connector, so a caller navigating away stops
   the pull instead of leaving it running unattended.
 - Go **oldest-first**, and stamp the watermark only on the slice that reaches the
   present — an old slice landing must not make a stale entity look freshly synced.
