@@ -109,6 +109,36 @@ export const PLATFORM_KEYS = {
 export type PlatformKeyName = keyof typeof PLATFORM_KEYS;
 
 /**
+ * The two other secrets every deployment needs. Not platform keys, because
+ * nothing here decodes them: Auth.js reads AUTH_SECRET itself, and /api/cron
+ * compares CRON_SECRET as an opaque string, so any value works and only an
+ * unset one is an error. `scripts/generate-keys.ts` generates and checks them
+ * alongside the platform keys, so one command covers a whole deployment.
+ */
+export const DEPLOYMENT_SECRETS = {
+  authSecret: {
+    env: "AUTH_SECRET",
+    purpose: "Signs sessions and CSRF tokens (Auth.js).",
+    rotationEffect: "Everyone is signed out and signs in again.",
+  },
+  cronSecret: {
+    env: "CRON_SECRET",
+    purpose: "The bearer token the scheduler tick sends to /api/cron.",
+    rotationEffect:
+      "Ticks are refused until whatever sends them (Vercel Cron, the cron service) has the new value.",
+  },
+} as const satisfies Record<string, PlatformKeySpec>;
+
+export type DeploymentSecretName = keyof typeof DEPLOYMENT_SECRETS;
+
+/** Which of DEPLOYMENT_SECRETS are unset, in the shape `missingPlatformKeys()` uses. */
+export function missingDeploymentSecrets(): { env: string; reason: string }[] {
+  return Object.values(DEPLOYMENT_SECRETS)
+    .filter((spec) => !process.env[spec.env])
+    .map((spec) => ({ env: spec.env, reason: `${spec.env} is not set. ${spec.purpose}` }));
+}
+
+/**
  * Read and validate one platform key.
  *
  * Throws with an actionable message rather than returning a weak or wrong-length
