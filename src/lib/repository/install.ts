@@ -554,15 +554,36 @@ function escapeRe(s: string): string {
 /** Generator runs are seconds; a minute is a hang, not a slow machine. */
 const GENERATOR_TIMEOUT_MS = 120_000;
 
-function spawnCapture(
+/**
+ * Whether a run gets a process group of its own, so the timeout can end all of
+ * it.
+ *
+ * tsx's CLI runs the script in a child process of its own. A kill aimed at the
+ * CLI alone leaves that child running with these pipes open, so the run never
+ * settles. Signalling the group ends the CLI, the script and anything either
+ * started. One consequence: a Ctrl-C to the dev server does not reach a run
+ * already in progress, which finishes on its own.
+ *
+ * Not on Windows, which has no process groups to signal and where `detached`
+ * opens a console window. MixOS runs there only inside WSL.
+ */
+const OWN_PROCESS_GROUP = process.platform !== "win32";
+
+/** Exported for its tests; `timeoutMs` is theirs to shorten. */
+export function spawnCapture(
   command: string,
   args: string[],
   cwd: string,
+  timeoutMs: number = GENERATOR_TIMEOUT_MS,
 ): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn(command, args, {
+        cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: OWN_PROCESS_GROUP,
+      });
     } catch (err) {
       resolve({ code: null, output: err instanceof Error ? err.message : String(err) });
       return;
@@ -577,9 +598,9 @@ function spawnCapture(
     child.stderr?.on("data", append);
 
     const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      output += `\nThe registry generator did not finish within ${GENERATOR_TIMEOUT_MS / 1000}s.`;
-    }, GENERATOR_TIMEOUT_MS);
+      killRun(child);
+      output += `\nThe registry generator did not finish within ${timeoutMs / 1000}s.`;
+    }, timeoutMs);
 
     child.on("error", (err) => {
       clearTimeout(timer);
@@ -590,6 +611,20 @@ function spawnCapture(
       resolve({ code, output: output.trim() });
     });
   });
+}
+
+/** SIGKILL a run: its whole process group where it has one, else the child. */
+function killRun(child: ReturnType<typeof spawn>): void {
+  if (OWN_PROCESS_GROUP && child.pid !== undefined) {
+    try {
+      // A negative pid signals every process in the group.
+      process.kill(-child.pid, "SIGKILL");
+      return;
+    } catch {
+      // The group is already gone; the child below is a no-op then too.
+    }
+  }
+  child.kill("SIGKILL");
 }
 
 /* -------------------------------------------------------------------------- */
