@@ -1678,6 +1678,13 @@ them.
 
 ### The order of operations is the control
 
+Two refusals come first and need no lock: the kind's install flag (see
+**Turning it off**), then `checkInstallable()`, which refuses a built deployment
+(see **What it deliberately will not do**), a folder that is not writable and a
+missing generator. A registration refused there neither waits behind another
+admin's nor holds one up. Then the register lock is taken (below), the target
+directory must not exist, and:
+
 ```
 1. GET /api/v1/<kind>/<slug>/install     the commit, the URL, the hash
 2. Refuse a yanked release unless the admin was shown why and insisted
@@ -1685,12 +1692,13 @@ them.
 4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
 5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
 6. Pre-flight the manifest: it exists, it parses, it is for this slug
-7. Write to `.installing-<slug>` beside the target, never to the target
-8. Rename into place — the first moment the tree is live
+7. Check the lock, then write to `.installing-<slug>` beside the target,
+   never to the target
+8. Check the lock, then rename into place — the first moment the tree is live
 9. Run scripts/generate-project-registry.ts — the authoritative validation,
    containment scan included (§24)
-10. If it was rejected, remove the directory and regenerate, so a failed
-    registration leaves the instance exactly as it was
+10. If it was rejected, check the lock, then remove the directory and
+    regenerate, so a failed registration leaves the instance exactly as it was
 ```
 
 **Nothing untrusted touches the filesystem before step 5.** That is why the tar
@@ -1699,6 +1707,43 @@ extract-then-verify pipeline has a window where a tampered tree is on disk, and
 then depends on its cleanup being correct for that not to matter. It also means
 the path rules are ours rather than differing between GNU tar and bsdtar, which
 is what this project runs on in Docker and in development respectively.
+
+### The register lock is a lease, renewed and fenced
+
+Two registrations at once would run two generators over the same
+`src/generated/*.ts` files, and one's rollback could land on top of the other's
+success. So steps 1 to 10 run under one instance-wide lock, `repository.register`
+([`src/lib/platform/lock.ts`](../src/lib/platform/lock.ts)): a row in
+`_platform_locks` rather than a Postgres advisory lock, because a session
+advisory lock does not survive a transaction pooler. An admin who registers
+while it is held is told another registration is running and offered **Try
+again**, and the attempt is audited as `<kind>.register.rejected` with
+`reason: "locked"`.
+
+The row is a lease. Anyone may take it once it has gone 15 minutes without
+renewal, so a crashed registration cannot wedge the feature. But a registration
+can also be paused for longer than that, by a laptop going to sleep
+mid-download, and carry on when it wakes, by which time another may hold the
+lock. Three rules cover that:
+
+- **The holder renews the lease every minute** while it works, so a slow but
+  live registration never loses it, the generator run in step 9 included. That
+  makes its own time limits the lock's: the repository and GitHub requests time
+  out, and a generator run is ended after 120 seconds, the processes it started
+  included.
+- **The lock is checked before the disk changes.** Steps 7, 8 and 10 begin with
+  `assertHeld()`, `update _platform_locks set acquired_at = now() where name =
+  $1 and holder = $2 returning 1`, which renews the lease only while the row
+  still holds this acquisition's random token. Step 9 runs straight after step
+  8's check.
+- **A holder that has lost the lock stops without touching the disk**, cleanup
+  included: by then the staging directory, or the registry it would regenerate,
+  may be the new holder's. The admin is told what was left on disk, and the
+  audit row records `reason: "lock-lost"`. A check that cannot reach the
+  database stops it the same way, as `"lock-unconfirmed"`.
+
+The release is scoped to the same token, so a holder that lost the lock cannot
+delete the new holder's row on its way out.
 
 ### Why a host allowlist and not resolve-and-recheck
 
