@@ -16,6 +16,7 @@
  */
 
 import type { Screenshot } from "../screenshots";
+import type { BrandLogo } from "../branding/types";
 
 export interface ThemeAuthor {
   name: string;
@@ -47,9 +48,15 @@ export interface ThemeFontFace {
  */
 export interface ThemeAssets {
   /**
-   * Wordmark/symbol for the menu bar. There is no dark variant: a theme has one
-   * palette, so it knows what ground its own menu bar is. A dark look is a
-   * separate theme shipping its own dark-ground mark.
+   * The mark drawn beside the name in the menu bar and above it on the sign-in
+   * page. There is no dark variant: a theme has one palette, so it knows what
+   * ground its own menu bar is. A dark look is a separate theme shipping its
+   * own dark-ground mark.
+   *
+   * A DEFAULT, not a claim: an app's brand filters start from it and may
+   * replace it. To fix a mark so no app can change it, use `branding` instead.
+   * Measured by the build: an SVG by its root's `width`/`height` or `viewBox`,
+   * anything else must be a `.png`, `.jpg` or `.webp`.
    */
   logo?: string;
   favicon?: string;
@@ -100,6 +107,17 @@ export interface ThemeTypeface {
   stack: string;
 }
 
+/**
+ * The brand slots a theme CLAIMS. Each declared slot is final: the app filters
+ * for it are never run. An undeclared slot is `null` here and stays open to
+ * apps. See `src/lib/branding/types.ts` for the full precedence.
+ */
+export interface ThemeBranding {
+  name: string | null;
+  menuBarLogo: BrandLogo | null;
+  loginLogo: BrandLogo | null;
+}
+
 export interface ThemeManifest {
   /** Derived from the folder name. Never declared in theme.json. */
   slug: string;
@@ -127,6 +145,10 @@ export interface ThemeManifest {
   escapes: ThemeEscape[];
   /** Public URL prefix for this theme's copied assets: `/themes/<slug>`. */
   assetBase: string;
+  /** `assets.logo`, resolved and measured. The seed app brand filters start from. */
+  logo: BrandLogo | null;
+  /** From `theme.json` `branding`, resolved and measured. */
+  branding: ThemeBranding;
   swatches: ThemeSwatch[];
   typefaces: ThemeTypeface[];
   lastUpdated: number | null;

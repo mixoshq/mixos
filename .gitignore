@@ -71,3 +71,8 @@ supabase/.branches/
 # themes/<slug>/screenshots by the same generator. Same reasoning, and the
 # source files are the committed ones.
 /public/screenshots/
+# Apps' declared brand marks, copied out of apps/<slug>/branding. Same again.
+/public/branding/
+
+# The bundled release step (`npm run build:ops`), built into the Docker image.
+/ops/

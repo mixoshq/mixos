@@ -60,7 +60,7 @@ flowchart TD
 
     HANDLER["APP HANDLER — apps/{slug}/api/{path}/route.ts<br/>a DECLARATION, not a bare function<br/>export const GET = defineRoute({ auth, input, output, handler })"]
 
-    HANDLER -- "context.db.table(…)" --> PG["POSTGRES<br/>prefixed tables · Supabase + pool"]
+    HANDLER -- "context.db.table(…)" --> PG["POSTGRES<br/>prefixed tables · query builder + pool"]
     HANDLER -- "context.connectors<br/>.name.search(…)" --> EXT["EXTERNAL API<br/>whatever the connector wraps"]
 ```
 
@@ -532,8 +532,7 @@ What the platform does between those two boxes, in order:
 | Variable                    | Purpose                              | Exposure risk if leaked                          |
 |-----------------------------|--------------------------------------|--------------------------------------------------|
 | `AUTH_SECRET`               | Signs/encrypts Auth.js session JWTs  | Attacker can forge a session for any user        |
-| `SUPABASE_SERVICE_ROLE_KEY` | Full database access; bypasses RLS   | Full read/write to every table                   |
-| `DATABASE_URL`              | Postgres connection (full DB access) | Full read/write to every table                   |
+| `DATABASE_URL`              | Postgres connection; owns every table, so RLS does not apply | Full read/write to every table |
 | `CONNECTOR_ENCRYPTION_KEY`  | AES-256-GCM for **tenant** connector credentials and the connector OAuth flow-state cookie | Exposes every shared third-party API key |
 | `USER_OAUTH_ENCRYPTION_KEY` | AES-256-GCM for **per-user** OAuth grants (`user_connector_oauth`) | Exposes every person's third-party account tokens |
 | `MCP_TOKEN_KEY`             | HMAC digests for MCP tokens and authorization codes | Lets an attacker mint MCP tokens |
@@ -712,23 +711,33 @@ handler stays reachable cross-site.
 
 ## 8. Database Access Model
 
-The platform reaches Postgres two ways, both server-side only:
+The platform reaches Postgres two ways, both server-side only and both over
+the one pool configured from `DATABASE_URL`:
 
 | Client | Module | Used for |
 |--------|--------|----------|
-| Supabase JS (`createServiceClient()`) | [`src/lib/db/supabase.ts`](../src/lib/db/supabase.ts) | Essentially everything, including the app-facing `context.db` |
-| Raw `postgres.js` pool (`sql`) | [`src/lib/db/client.ts`](../src/lib/db/client.ts), options in [`src/lib/db/pg-options.ts`](../src/lib/db/pg-options.ts) | The few queries PostgREST cannot express: analytics aggregates, telemetry rollups, and the scheduler's atomic job claim |
+| The query builder (`createServiceClient()`) | [`src/lib/db/query.ts`](../src/lib/db/query.ts), from [`src/lib/db/server.ts`](../src/lib/db/server.ts) | Essentially everything, including the app-facing `context.db` |
+| Raw `postgres.js` pool (`sql`) | [`src/lib/db/client.ts`](../src/lib/db/client.ts), options in [`src/lib/db/pg-options.ts`](../src/lib/db/pg-options.ts) | The few queries the builder cannot express: analytics aggregates, telemetry rollups, the scheduler's atomic job claim, and the schema's own functions |
 
-**Both connect with the Supabase service role, which bypasses Row-Level
-Security.** That is the single most important fact in this section, and
-everything below follows from it.
+**Both connect as the role that owns every table, and Row-Level Security does
+not apply to a table's owner.** That is the single most important fact in this
+section, and everything below follows from it. (On Supabase this role is
+`postgres`; until the builder replaced supabase-js the app also went through
+the `service_role`, which bypasses RLS outright. The consequence is the same.)
+
+The builder is also where SQL injection would live if it lived anywhere, so it
+is built not to have any: every table, column, alias and conflict target must be
+a plain identifier and is quoted, and every value is a bind parameter. A name
+that is not a plain identifier is refused before any SQL is written. That rule
+is what keeps the `_app_<slug>_` prefix below a boundary: an app's table name
+cannot carry a quote, a dot or a schema out of it.
 
 ### What RLS does and does not do here
 
 RLS is **enabled on every table, with zero policies** (see the header of
 [`supabase/migrations/0001_initial.sql`](../supabase/migrations/0001_initial.sql)).
 That combination is deny-all for the `anon` and `authenticated` roles while the
-service role passes straight through.
+owning role — the one MixOS connects as — passes straight through.
 
 **How that is enforced matters, because it failed once already.** It used to be a
 hand-maintained `foreach t in array array['users', 'apps', ...]` list. A list has
@@ -751,11 +760,18 @@ as long as apps have had migrations. `migrate.ts` now runs the same sweep after
 applying app migrations, so an app's tables are hardened by the run that creates
 them.
 
-This is load-bearing on Supabase and would not have been on a plain Postgres
-instance. Supabase publishes the `public` schema through PostgREST, reachable
-with the project's publishable (anon) key. A table with RLS switched off is
-therefore readable by anyone who has that key — which is not a secret. Enabling
-RLS with no policies is what closes that door.
+This is load-bearing on Supabase and would not be on a plain Postgres instance.
+Every Supabase project publishes the `public` schema through PostgREST,
+reachable with the project's publishable (anon) key — whether or not MixOS uses
+that API, and it no longer does. A table with RLS switched off is therefore
+readable by anyone who has that key, which is not a secret. Enabling RLS with no
+policies is what closes that door. Off Supabase there is no such API, the lock
+costs nothing, and it is kept so that moving a database onto Supabase never
+opens one.
+
+The flip side is a deployment rule: **migrations must run as the role the
+application connects as.** A table owned by some other role is invisible to the
+app — RLS with no policies denies everyone but the owner.
 
 What it is **not**:
 
@@ -764,7 +780,7 @@ What it is **not**:
   another.
 - It is **not** an isolation boundary between apps. See below.
 - It is **not** defence-in-depth behind the application's own checks. A bug that
-  makes the platform query the wrong row will be served, because the service role
+  makes the platform query the wrong row will be served, because the owning role
   is permitted to read every row.
 
 **A table added in a future migration is covered automatically** by the sweep at
@@ -793,7 +809,7 @@ Entirely at the application layer:
   not by the database.
 
   **The prefix bounds the table name, not the app.** `createScopedClient(slug)`
-  accepts *any* slug and builds its own service-role client for it, so the
+  accepts *any* slug and builds its own full-access client for it, so the
   guarantee rests entirely on app code never calling it — `context.db` is the
   client the dispatcher pins to the calling app. That factory used to be
   importable from every app tier, including widgets, with no lint error; an app
@@ -806,13 +822,12 @@ Entirely at the application layer:
   importing the raw client at all, so an app cannot hand-write SQL that would
   sidestep the prefix.
 
-### Reachability of the service-role key
+### Reachability of the database credential
 
-`SUPABASE_SERVICE_ROLE_KEY` and `DATABASE_URL` carry no `NEXT_PUBLIC_` prefix,
-which is what prevents Next.js inlining them into a client bundle. Both clients
-are constructed lazily and only inside server modules. Adding a `NEXT_PUBLIC_`
-prefix to either, or importing `@/lib/db/*` from a `"use client"` component,
-would be a full database compromise.
+`DATABASE_URL` carries no `NEXT_PUBLIC_` prefix, which is what prevents Next.js
+inlining it into a client bundle. The pool connects lazily and only inside
+server modules. Adding a `NEXT_PUBLIC_` prefix to it, or importing `@/lib/db/*`
+from a `"use client"` component, would be a full database compromise.
 
 ---
 
@@ -922,7 +937,8 @@ The increment is a `security invoker` RPC (`bump_session_version`) doing
 `set session_version = session_version + 1` against the locked row, so two
 concurrent revocations cannot both read the same value and collapse into one.
 `EXECUTE` is revoked from `anon` and `authenticated` and granted only to
-`service_role`.
+`service_role` where those Supabase roles exist; MixOS itself calls it as the
+function's owner.
 
 **The cost, stated plainly.** This is one indexed read per session resolution
 where the token was previously trusted for its whole lifetime. The same read
@@ -1426,7 +1442,7 @@ reachable — a public consumer route must do its own authorization first.
 
 Apps do not read `process.env`. It is an ESLint error in `apps/**`, for the
 obvious reason: the raw environment holds `CONNECTOR_ENCRYPTION_KEY`,
-`SUPABASE_SERVICE_ROLE_KEY`, and `AUTH_SECRET`.
+`DATABASE_URL`, and `AUTH_SECRET`.
 
 `context.env` (`src/lib/apps/env.ts`) is what apps get instead. Only the keys the
 manifest declared under `env` are resolved, from `app_settings` keyed
@@ -1691,6 +1707,42 @@ the version, commit, verified hash and file count; `app.register.rejected`
 records the reason. A rejection is the more interesting row —
 `reason: "checksum"` says someone was served bytes that did not match what the
 catalogue published.
+
+### Turning it off
+
+`INSTALL_APPS`, `INSTALL_CONNECTORS` and `INSTALL_THEMES` decide, per kind,
+whether this path exists at all ([`src/lib/repository/policy.ts`](../src/lib/repository/policy.ts)).
+All three default to `true`. Set to `false`, a kind's catalogue is gone, not
+merely hidden:
+
+| Layer | With the kind turned off |
+| --- | --- |
+| The admin page | No Browse button |
+| `/admin/<kind>/browse` | A 404, after the admin gate |
+| `searchRepositoryAction`, `resolveInstallAction` | Refused, before the repository is contacted |
+| `registerExtensionAction` → `installExtension()` | Refused before the platform lock is taken, and audited as `<kind>.register.rejected` with `reason: "disabled"` — a row no page can produce |
+| `checkInstallable()` | Reports the kind as not installable |
+
+Every layer checks for itself, for the reason the admin gate does (§9): the
+actions are directly invocable, so a check on the page alone would leave them
+open. The flag is read per request, so changing it takes a restart, not a
+rebuild.
+
+**The parser fails closed.** Unset or empty is on; `true`/`1`/`yes`/`on` and
+`false`/`0`/`no`/`off` mean what they say, in any case; **anything else is off**,
+with a warning in the log and in the release step's report. Whoever sets the
+variable is restricting something, and `INSTALL_APPS=flase` must not leave
+installs quietly open. A `kind` that is not one of the three is refused outright
+rather than looked up as a flag that does not exist.
+
+What the flags do **not** do: remove or deactivate anything already installed,
+or affect activating, configuring and applying what is there. Nor do they stop
+someone with write access to the repository adding code and deploying it. That
+is the change-control path, and it belongs to code review. The flags close the
+in-product path, the one an admin account can reach.
+
+A built deployment — the Docker image, Vercel — cannot install in any case (see
+below), so on those the flags decide only whether the catalogue can be browsed.
 
 ### What it deliberately will not do
 

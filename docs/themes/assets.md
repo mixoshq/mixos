@@ -37,9 +37,45 @@ Declare each family in `theme.json` **and** `@font-face` it in `theme.css`. The 
 "assets": { "logo": "logo.svg" }
 ```
 
-SVG, ideally. The mark renders at 32px in the menu bar and again as a favicon, and a raster that looks right at one size rarely does at the other.
+SVG, ideally: the same mark is drawn 23px high in the menu bar and 69px high on
+the sign-in page, and a vector is sharp at both. Each time it keeps its own
+aspect ratio, capped at 160px and 240px wide.
+
+The build measures the file to know that ratio. For an SVG, it reads the root
+element's absolute `width` and `height`, or failing those its `viewBox`. An SVG
+that states neither fails the build, so give the mark a `viewBox`. A `.png`,
+`.jpg` or `.webp` also works; export it at least 138px high, so it stays sharp at
+2x on the sign-in page.
 
 When `assets.logo` is absent, the menu bar falls back to the text wordmark in `--type-heading`. That is a legitimate shipping state, not a broken one — most brand books specify a text wordmark treatment precisely for this.
+
+`assets.logo` is a **default**. An active app with a brand filter may replace it,
+in the menu bar, on the sign-in page, or both. To stop that, claim the slot.
+
+## Claiming the brand
+
+```jsonc
+"branding": {
+  "name": "Acme Workspace",
+  "menuBarLogo": "acme-bar.png",
+  "loginLogo": "acme-login.png"
+}
+```
+
+All three fields are optional, and each one you set is final. The platform uses
+it as is and never runs an app's brand filter for that slot. Slots you leave out
+stay open to apps, which start from "MixOS" and `assets.logo`.
+
+- `name` replaces "MixOS" in the menu bar, on the sign-in page, in the welcome
+  tour, in the tab title and as the installed PWA's name. One line, up to 40
+  characters.
+- `menuBarLogo` and `loginLogo` are paths inside `assets/`, under the same rules
+  as `assets.logo`. They let the two places use different marks, for example a
+  symbol in the bar and a full lockup on the sign-in page. When they differ, the
+  welcome tour fades the sign-in mark rather than flying it into the bar.
+
+Claim only what the theme genuinely owns. A palette theme that claims the name
+takes that choice away from every install that selects it.
 
 Usage restrictions a brand book states ("never on violet") cannot be enforced by CSS. Record them in a comment beside the asset so the next author sees them.
 

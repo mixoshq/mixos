@@ -4,9 +4,10 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import LoginLockup from "@/components/login-lockup";
 import CredentialsFields from "@/app/(auth)/login/credentials-fields";
+import type { Branding } from "@/lib/branding/types";
 import { useTour } from "./tour-context";
 
 /**
@@ -38,6 +39,11 @@ import { useTour } from "./tour-context";
  * `bg-brand`, so the overlay's last frame is the bar and it unmounts without
  * a seam. Reduced motion replaces all of it with one fade.
  *
+ * Unless the two marks differ. The sign-in and menu-bar marks are separate
+ * brand slots, and a mark that flew into a different image would land and then
+ * swap. So when they are not the same file the sign-in mark fades where it is,
+ * over the flight's length, and only the wordmark flies.
+ *
  * SERVER-RENDERED. Whether the tour is active is a server fact (see
  * TourProvider), so this overlay is in the HTML from the first byte and the
  * dashboard never paints underneath it first.
@@ -58,16 +64,17 @@ type Beat =
   | { kind: "next"; delay: number }
   | { kind: "begin"; delay: number };
 
-const SCREENS: Beat[][] = [
+/** The copy names the brand, so a rebranded install does not welcome you to MixOS. */
+const screens = (name: string): Beat[][] => [
   [
     {
       kind: "title",
-      text: "Welcome to MixOS, your new home base.",
+      text: `Welcome to ${name}, your new home base.`,
       delay: 400,
     },
     {
       kind: "body",
-      text: "MixOS is a workspace of apps that connect your favorite tools (Google Sheets, Slack, GitHub, Trello, etc.) into a single place, shaped around how you actually work.",
+      text: `${name} is a workspace of apps that connect your favorite tools (Google Sheets, Slack, GitHub, Trello, etc.) into a single place, shaped around how you actually work.`,
       delay: 1000,
     },
     { kind: "next", delay: 500 },
@@ -86,13 +93,18 @@ const SCREENS: Beat[][] = [
  * Mounted only while the takeover is up. Unmounting between plays is what
  * resets the choreography: a replay always starts at the first beat.
  */
-export default function WelcomeTour({ logo }: { logo?: string | null }) {
+export default function WelcomeTour({ branding }: { branding: Branding }) {
   const { phase } = useTour();
   if (phase !== "welcome" && phase !== "reveal") return null;
-  return <Takeover logo={logo ?? null} />;
+  return <Takeover branding={branding} />;
 }
 
-function Takeover({ logo }: { logo: string | null }) {
+function Takeover({ branding }: { branding: Branding }) {
+  const { name, loginLogo, menuBarLogo } = branding;
+  const sameMark = loginLogo?.src === menuBarLogo?.src;
+  // Memoized: `beats` is an effect dependency, and a fresh array every render
+  // would restart the current beat's delay on any unrelated re-render.
+  const SCREENS = useMemo(() => screens(name), [name]);
   const { phase, begin, revealed } = useTour();
   const [screen, setScreen] = useState(0);
   const [shown, setShown] = useState(0);
@@ -152,16 +164,21 @@ function Takeover({ logo }: { logo: string | null }) {
     // belongs. The pin matters because the card is centred in an overlay
     // about to shrink to 40px, and left in flow the pieces would ride up
     // with it.
+    //
+    // A sign-in mark that differs from the bar's is pinned too but does not
+    // fly — it fades where it is. Pinning it still matters: left in flow it
+    // would jump as the wordmark leaves and the centred card re-centres.
+    const loginMark = card.querySelector<HTMLElement>('[data-tour="login-mark"]');
     const pairs: [HTMLElement | null, HTMLElement | null][] = [
-      [
-        card.querySelector('[data-tour="login-mark"]'),
-        barLockup.querySelector("img"),
-      ],
+      ...(sameMark
+        ? [[loginMark, barLockup.querySelector("img")] as [HTMLElement | null, HTMLElement | null]]
+        : []),
       [
         card.querySelector('[data-tour="login-wordmark"]'),
         barLockup.querySelector("span"),
       ],
     ];
+    const fading = sameMark ? null : loginMark;
     // The copy fades out first (COPY_FADE_MS, driven by `revealing` in
     // render); nothing moves until the screen is empty, so the two motions
     // are read one after the other rather than fighting for attention.
@@ -182,7 +199,11 @@ function Takeover({ logo }: { logo: string | null }) {
             },
           ];
         });
-        for (const { el, a } of moves) {
+        // Measured with the rest, before anything is pinned.
+        const fade = fading
+          ? { el: fading, a: fading.getBoundingClientRect() }
+          : null;
+        for (const { el, a } of fade ? [...moves, fade] : moves) {
           el.style.position = "fixed";
           el.style.top = `${a.top}px`;
           el.style.left = `${a.left}px`;
@@ -200,6 +221,10 @@ function Takeover({ logo }: { logo: string | null }) {
           el.style.transition = `transform ${FLY_MS}ms cubic-bezier(0.32, 0, 0.2, 1)`;
           el.style.transform = `translate(${b.left - a.left}px, ${b.top - a.top}px) scale(${b.width / a.width})`;
         }
+        if (fade) {
+          fade.el.style.transition = `opacity ${FLY_MS}ms ease-out`;
+          fade.el.style.opacity = "0";
+        }
         timers.push(
           window.setTimeout(() => {
             // The bar's bottom edge, not its height: the overlay is anchored
@@ -215,7 +240,7 @@ function Takeover({ logo }: { logo: string | null }) {
     );
 
     return () => timers.forEach(clearTimeout);
-  }, [revealing, revealed]);
+  }, [revealing, revealed, sameMark]);
 
   const visible = (i: number) => i < shown && !exiting && !revealing;
   const fade = (i: number) =>
@@ -226,13 +251,13 @@ function Takeover({ logo }: { logo: string | null }) {
       ref={overlayRef}
       role="dialog"
       aria-modal="true"
-      aria-label="Welcome to MixOS"
+      aria-label={`Welcome to ${name}`}
       className="fixed left-0 right-0 top-0 z-[100] h-full overflow-hidden bg-brand text-brand-foreground"
     >
       {/* The sign-in page's layout, so the logo is where sign-in left it. */}
       <div className="flex min-h-screen flex-col items-center justify-center px-4">
         <div ref={cardRef} className="w-full max-w-sm p-8 text-center">
-          <LoginLockup logo={logo} />
+          <LoginLockup logo={loginLogo} name={name} />
 
           <div className="relative mt-8">
             <div className="invisible" aria-hidden>

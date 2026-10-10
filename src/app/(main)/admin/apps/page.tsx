@@ -8,10 +8,13 @@ import { appRegistry } from "@/generated/app-registry";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { docsUrl } from "@/lib/docs";
 import { requireAdmin } from "@/lib/apps/access";
+import { installEnabled } from "@/lib/repository/policy";
 import { getAppGrantCounts, getAppTableCounts } from "@/lib/apps/admin-actions";
 import { getAppActiveMap } from "@/lib/apps/access";
 import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
 import AppRegistryList from "@/components/admin/app-registry-list";
+import BrandConflicts from "@/components/admin/brand-conflicts";
+import { getActiveTheme } from "@/lib/themes/active";
 
 export default async function AppsAdminPage() {
   const session = await requireReadOnlySession();
@@ -24,6 +27,7 @@ export default async function AppsAdminPage() {
   // getAppTableCounts.
   const tableCountsBySlug = await getAppTableCounts();
   const activeBySlug = await getAppActiveMap();
+  const { theme } = await getActiveTheme();
 
   // Precompute the missing-connector map once per page load. Shown here as a
   // warning only — it is not a gate on this page any more. An app that needs an
@@ -59,15 +63,20 @@ export default async function AppsAdminPage() {
           competing with the action most visits to this page want. They open on
           mixos.org in a new tab: the in-app copy at /apps/guide still exists but
           is no longer linked, so the site is the one place the guide is current.
+
+          Browse is absent when installing this kind is turned off
+          (lib/repository/policy.ts); the page it leads to is a 404 then anyway.
         */}
         <div className="flex shrink-0 items-center gap-2">
-          <Link
-            href="/admin/apps/browse"
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted"
-          >
-            <Store className="h-4 w-4" aria-hidden />
-            Browse Apps
-          </Link>
+          {installEnabled("app") && (
+            <Link
+              href="/admin/apps/browse"
+              className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted"
+            >
+              <Store className="h-4 w-4" aria-hidden />
+              Browse Apps
+            </Link>
+          )}
           <a
             href={docsUrl("extending/apps")}
             target="_blank"
@@ -80,6 +89,11 @@ export default async function AppsAdminPage() {
           </a>
         </div>
       </div>
+      <BrandConflicts
+        apps={appRegistry}
+        activeBySlug={activeBySlug}
+        themeBranding={theme.branding}
+      />
       <AppRegistryList
         apps={appRegistry}
         missingConnectorsBySlug={missingConnectorsBySlug}

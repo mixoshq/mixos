@@ -21,6 +21,18 @@ interface WidgetWrapperProps {
   definition: WidgetDefinition | null;
   appSlug: string;
   onRemove: () => void;
+  /**
+   * Whether this widget's config modal is open. Owned by the grid, so both the
+   * edit bar's gear and the dashboard's right-click menu can open it.
+   */
+  configOpen: boolean;
+  onOpenConfig: () => void;
+  onCloseConfig: () => void;
+}
+
+/** True when the widget declares settings a user can change. */
+export function isConfigurable(definition: WidgetDefinition | null): boolean {
+  return !!definition?.config && definition.config.length > 0;
 }
 
 /**
@@ -44,9 +56,11 @@ export default function WidgetWrapper({
   definition,
   appSlug,
   onRemove,
+  configOpen,
+  onOpenConfig,
+  onCloseConfig,
 }: WidgetWrapperProps) {
   const { isEditing } = useDashboardEdit();
-  const [configOpen, setConfigOpen] = useState(false);
   const [currentConfig, setCurrentConfig] = useState(widget.config);
 
   // Looked up, never created. `lazy()` runs once per widget at module load
@@ -115,9 +129,9 @@ export default function WidgetWrapper({
           </span>
         </div>
         <div className="flex items-center gap-1">
-          {definition.config && definition.config.length > 0 && (
+          {isConfigurable(definition) && (
             <button
-              onClick={() => setConfigOpen(true)}
+              onClick={onOpenConfig}
               title="Configure"
               className="widget-bar-action cursor-pointer rounded p-0.5 text-white/70 hover:bg-white/10 hover:text-white"
             >
@@ -155,10 +169,10 @@ export default function WidgetWrapper({
           widget={definition}
           initialConfig={currentConfig}
           submitLabel="Save"
-          onClose={() => setConfigOpen(false)}
+          onClose={onCloseConfig}
           onSave={async (next) => {
             setCurrentConfig(next);
-            setConfigOpen(false);
+            onCloseConfig();
             await updateWidgetConfig(widget.id, next);
           }}
         />

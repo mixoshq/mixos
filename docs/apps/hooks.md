@@ -37,6 +37,35 @@ This applies to **cross-app** hooks only. An app firing and listening to its own
 hooks, and any app listening to a **core** hook (`init`, `user-login`), needs no
 declaration.
 
+## The hook entrypoint: `hooks.ts`
+
+An app may ship `apps/<slug>/hooks.ts`, default-exporting a function that takes
+a registrar:
+
+```ts
+// apps/my-app/hooks.ts
+import type { HookRegistrar } from "@/lib/hooks";
+
+export default function register(hooks: HookRegistrar) {
+  hooks.addFilter("brand-name", () => "Acme Workspace");
+}
+```
+
+The platform imports every app's entrypoint before it dispatches a hook that
+needs one, and calls it with a registrar attributed to your app. Registering in
+a page or route instead only works on requests that happen to import that file.
+On `/login`, for one, nothing imports app code, so a listener registered there
+never runs. In development, saving an existing `hooks.ts` replaces your
+registrations on the next request. Adding `hooks.ts` for the first time, or
+changing `branding` in `app.json`, changes the generated registry, so restart
+`npm run dev`, which regenerates it.
+
+`hooks.ts` runs server-side and is held to the same import rules as the rest of
+`apps/**`: no connectors, no database.
+
+**Brand hooks must be registered here.** The other hooks can still be
+registered elsewhere for now.
+
 ## Using Hooks in Your App
 
 Import the hook system from anywhere in your app — pages, widgets, API routes, or utility files. There are four methods:
@@ -84,6 +113,81 @@ hooks.addAction("other-app:data-updated", async (data) => {
 | Name | Description | Args |
 | --- | --- | --- |
 | `user-display-name` | Transform how a user's name is displayed across the platform. | `displayName: string, user: { id, email }` |
+| `brand-name` | The product name in the menu bar, on the sign-in page, in the tab title and as the installed PWA's name. **Bounded**, see [Brand hooks](#brand-hooks). | `name: string` |
+| `menu-bar-logo` | The mark beside the name in the menu bar. **Bounded.** | `logo: { src, width, height } \| null` |
+| `login-logo` | The mark above the name on the sign-in page. **Bounded.** | `logo: { src, width, height } \| null` |
+
+## Brand hooks
+
+`brand-name`, `menu-bar-logo` and `login-logo` let an app change what the
+install calls itself and the marks beside that name. They reach every user,
+signed in or not, so they are tighter than an ordinary filter.
+
+**Declare them.** List the hooks in `app.json` with a reason. The admin sees it
+on the app's details dialog before activating it:
+
+```jsonc
+"branding": {
+  "hooks": ["brand-name", "menu-bar-logo"],
+  "reason": "Brands this install as Acme for the Acme rollout.",
+  "logos": ["branding/acme-mark.png"]
+}
+```
+
+The build fails on any of these:
+- a brand hook registered anywhere but `hooks.ts`;
+- a brand hook registered there but not declared;
+- a hook declared but never registered;
+- a logo that is not a `.png`, `.jpg` or `.webp` directly under `branding/`.
+
+**Return what the platform accepts.** After each filter the platform
+re-validates the result. If the result is not acceptable, the platform keeps the
+previous value and logs a warning:
+
+| Hook | You may return |
+| --- | --- |
+| `brand-name` | A string of 1–40 characters on one line. |
+| `menu-bar-logo`, `login-logo` | `null` to show no mark; the value you were given, to pass; or the `file` of one of **your own** declared logos, e.g. `"branding/acme-mark.png"`. |
+
+There is no way to return a URL. Every mark on the sign-in page is a file the
+build published, at its measured size.
+
+**Every slot has one second, shared.** All of a slot's filters together get one
+second per request. A filter that throws, or is still running when the second
+runs out, is skipped. So is any filter after it. The platform logs each distinct
+problem once per process, and again after a `hooks.ts` is reloaded.
+
+**One bad request does not change the brand.** If any filter for a slot failed
+on a request, the platform serves the last value that slot resolved to without
+a failure, as long as the theme and the active apps are the same. A filter that
+fails every time never sets that value, so its result is at least consistent.
+The same applies when the database can't be reached to check which apps are
+active.
+
+**Each page runs only the filters it needs.** The sign-in page never runs a
+`menu-bar-logo` filter. Signed-in pages run `login-logo` only while the welcome
+tour is showing.
+
+```ts
+// apps/my-app/hooks.ts
+export default function register(hooks: HookRegistrar) {
+  hooks.addFilter("brand-name", () => "Acme Workspace");
+  hooks.addFilter("menu-bar-logo", () => "branding/acme-mark.png");
+}
+```
+
+**The theme comes first.** Each slot resolves on its own:
+
+1. If the active theme's `theme.json` claims the slot under `branding`, the
+   theme's value is used and no app filter runs for that slot.
+2. Otherwise the filters of **active** apps run in a fixed order: by priority,
+   then by app slug. They start from "MixOS" for the name and from the theme's
+   `assets.logo` for both marks. Each filter gets the previous one's value, so
+   when two apps filter the same slot, the last one's value is shown. The Apps
+   admin page warns when more than one active app filters a slot.
+
+A mark keeps its own aspect ratio. It is drawn 23px high in the menu bar (at most
+160px wide) and 69px high on the sign-in page (at most 240px wide).
 
 ## App Hooks
 

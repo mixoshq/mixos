@@ -17,21 +17,42 @@ import {
   type LayoutItem as RGLLayoutItem,
   type Layout as RGLLayout,
 } from "react-grid-layout";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Settings } from "lucide-react";
 import type { LayoutItem, DashboardWidget } from "@/lib/dashboard/actions";
 import { saveLayout, removeWidget } from "@/lib/dashboard/actions";
 import type { AppManifest, WidgetDefinition } from "@/lib/apps/types";
-import WidgetWrapper from "./widget-wrapper";
+import WidgetWrapper, { isConfigurable } from "./widget-wrapper";
 import WidgetCatalog from "./widget-catalog";
 import { useDashboardEdit } from "./edit-mode-context";
 import { useTour } from "@/components/onboarding/tour-context";
 import { DASHBOARD_STEP } from "@/components/onboarding/steps";
 
 import "react-grid-layout/css/styles.css";
-import { CARD_SURFACE } from "@/components/ui/card";
+import { ContextMenu, type MenuItem } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";
 
 type Breakpoint = "lg" | "md" | "sm";
+
+/**
+ * Inside a widget, where the browser's own menu is what the user is reaching
+ * for: "Open in new tab" on a link, "Paste" in a field, "Copy" on a selection.
+ */
+const NATIVE_MENU_TARGETS =
+  'a[href], input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+
+/**
+ * Whether a right-click on a widget should be left to the browser — or to the
+ * widget, if its own code already handled it.
+ */
+function leaveContextMenuAlone(e: React.MouseEvent): boolean {
+  if (e.nativeEvent.defaultPrevented) return true;
+  const target = e.target as Element;
+  if (target.closest(NATIVE_MENU_TARGETS)) return true;
+  const selection = window.getSelection();
+  return (
+    !!selection && !selection.isCollapsed && selection.containsNode(target, true)
+  );
+}
 
 interface DashboardGridProps {
   initialLayout: LayoutItem[];
@@ -65,11 +86,17 @@ export default function DashboardGrid({
   const [isCollapsing, setIsCollapsing] = useState(false);
   const [isExpanding, setIsExpanding] = useState(false);
   const pillRef = useRef<HTMLDivElement>(null);
+  // `widgetId` is set when the menu was opened on a widget rather than on
+  // empty dashboard space.
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
+    widgetId?: string;
   } | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  // The widget whose config modal is open. Held here rather than in each
+  // widget so the right-click menu can open it as well as the edit bar's gear.
+  const [configuringId, setConfiguringId] = useState<string | null>(null);
 
   const handleBreakpointChange = useCallback((newBreakpoint: Breakpoint) => {
     currentBreakpointRef.current = newBreakpoint;
@@ -110,38 +137,25 @@ export default function DashboardGrid({
     };
   }, [isEditing, widgetList.length, containerRef, armKey]);
 
-  // Dismiss the right-click context menu on outside click, Escape, or scroll.
-  useEffect(() => {
-    if (!contextMenu) return;
-    const close = () => setContextMenu(null);
-    // Ignore mousedowns inside the menu itself — closing on a menu-item's own
-    // mousedown would unmount the button before its click fires, so the item
-    // would never activate.
-    const onDown = (e: MouseEvent) => {
-      if (contextMenuRef.current?.contains(e.target as Node)) return;
-      close();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", close, true);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
-    };
-  }, [contextMenu]);
-
+  // Empty dashboard space. Widgets have their own handler (below), and the
+  // event bubbles here after it, so a right-click on one is left alone.
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
       if (isEditing) return;
-      // Only hijack the native menu on empty dashboard space — right-clicking
-      // inside a widget's content should still yield the browser's own menu.
       if ((e.target as HTMLElement).closest(".react-grid-item")) return;
       e.preventDefault();
       setContextMenu({ x: e.clientX, y: e.clientY });
+    },
+    [isEditing],
+  );
+
+  // In edit mode the edit bar already offers Configure, and "Edit Dashboard"
+  // means nothing, so the browser keeps its menu there.
+  const handleWidgetContextMenu = useCallback(
+    (e: React.MouseEvent, widgetId: string) => {
+      if (isEditing || leaveContextMenuAlone(e)) return;
+      e.preventDefault();
+      setContextMenu({ x: e.clientX, y: e.clientY, widgetId });
     },
     [isEditing],
   );
@@ -343,6 +357,30 @@ export default function DashboardGrid({
     return { app, def };
   };
 
+  // Configure is left out, not disabled, for a widget with nothing to configure.
+  const contextMenuItems = (widgetId?: string): MenuItem[] => {
+    const items: MenuItem[] = [];
+    const widget = widgetId
+      ? widgetList.find((w) => w.id === widgetId)
+      : undefined;
+    const definition = widget
+      ? (resolveWidgetDef(widget.app_slug, widget.widget_id)?.def ?? null)
+      : null;
+    if (widget && isConfigurable(definition)) {
+      items.push({
+        label: "Configure widget",
+        icon: <Settings className="h-4 w-4 text-muted-foreground" />,
+        onClick: () => setConfiguringId(widget.id),
+      });
+    }
+    items.push({
+      label: "Edit Dashboard",
+      icon: <Pencil className="h-4 w-4 text-muted-foreground" />,
+      onClick: handleEnterEdit,
+    });
+    return items;
+  };
+
   return (
     <div
       className="relative h-full"
@@ -410,12 +448,16 @@ export default function DashboardGrid({
                   onDoubleClick={() => {
                     if (!isEditing) handleEnterEdit();
                   }}
+                  onContextMenu={(e) => handleWidgetContextMenu(e, widget.id)}
                 >
                   <WidgetWrapper
                     widget={widget}
                     definition={resolved?.def ?? null}
                     appSlug={widget.app_slug}
                     onRemove={() => handleRemoveWidget(widget.id)}
+                    configOpen={configuringId === widget.id}
+                    onOpenConfig={() => setConfiguringId(widget.id)}
+                    onCloseConfig={() => setConfiguringId(null)}
                   />
                 </div>
               );
@@ -477,28 +519,13 @@ export default function DashboardGrid({
       )}
 
       {contextMenu && (
-        <div
-          ref={contextMenuRef}
-          role="menu"
-          className={cn(
-            "mix-popover",
-            CARD_SURFACE,
-            "fixed z-50 min-w-[160px] py-1 shadow-lg",
-          )}
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-        >
-          <button
-            role="menuitem"
-            onClick={() => {
-              setContextMenu(null);
-              handleEnterEdit();
-            }}
-            className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-accent"
-          >
-            <Pencil className="h-4 w-4" />
-            Edit Dashboard
-          </button>
-        </div>
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          label={contextMenu.widgetId ? "Widget" : "Dashboard"}
+          items={contextMenuItems(contextMenu.widgetId)}
+          onClose={closeContextMenu}
+        />
       )}
 
       {catalogOpen && (

@@ -4,6 +4,7 @@
 
 import type { MetadataRoute } from "next";
 import { getActiveTheme } from "@/lib/themes/active";
+import { getBrandName } from "@/lib/branding/resolve";
 
 /**
  * The PWA manifest, generated from the active theme.
@@ -16,9 +17,20 @@ import { getActiveTheme } from "@/lib/themes/active";
  * `purpose: "any maskable"` is why the source icons are full-bleed with the
  * mark inset to ~60%: the platform applies its own mask, so a pre-rounded icon
  * gets clipped twice and content near the edge is cropped away.
+ *
+ * Per request, like the sign-in page and for the same reason. A manifest is a
+ * special route handler and is cached by default, and nothing here reads a
+ * request-time API — so without this it was prerendered at build time, with
+ * no database, and served the fallback theme's icons and the default name
+ * whatever the install had selected.
  */
+export const dynamic = "force-dynamic";
+
 export default async function manifest(): Promise<MetadataRoute.Manifest> {
-  const { theme } = await getActiveTheme();
+  const [{ theme }, name] = await Promise.all([
+    getActiveTheme(),
+    getBrandName(),
+  ]);
 
   const icons: MetadataRoute.Manifest["icons"] = [];
 
@@ -53,8 +65,11 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
   const background = theme.swatches.find((s) => s.token === "background")?.value;
 
   return {
-    name: "MixOS",
-    short_name: "MixOS",
+    // The brand name is what the installed app is called. `short_name` is the
+    // same string: an OS truncates it under the icon if it must, which is
+    // better than inventing an abbreviation nobody chose.
+    name,
+    short_name: name,
     icons,
     ...(brand ? { theme_color: brand } : {}),
     ...(background ? { background_color: background } : {}),

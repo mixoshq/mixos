@@ -55,3 +55,9 @@ Dockerfile
 Dockerfile.dev
 docker-compose.yml
 .dockerignore
+
+# A host-side `npm run build:ops` output. The image builds its own.
+ops
+
+# Self-hosting secrets live beside deploy/docker-compose.yml, never in an image.
+deploy/.env

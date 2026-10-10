@@ -5,6 +5,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { getActiveTheme } from "@/lib/themes/active";
+import { getBrandName } from "@/lib/branding/resolve";
 
 /*
  * There is no mode-resolution script here, and that is the point.
@@ -18,7 +19,10 @@ import { getActiveTheme } from "@/lib/themes/active";
  */
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { theme } = await getActiveTheme();
+  const [{ theme }, name] = await Promise.all([
+    getActiveTheme(),
+    getBrandName(),
+  ]);
   // File-convention icons (src/app/icon.*, apple-icon.*) would take precedence
   // over these, which is why there are none — the tab icon is a theme decision.
   const icons: Metadata["icons"] = [];
@@ -34,9 +38,10 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 
   return {
+    // The brand name, so a rebrand does not leave "MixOS" in every tab.
     title: {
-      default: "MixOS",
-      template: "%s | MixOS",
+      default: name,
+      template: `%s | ${name}`,
     },
     description: "Internal tools for the commercial team",
     // An empty array would override Next's default favicon discovery with

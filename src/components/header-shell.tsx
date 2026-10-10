@@ -8,8 +8,15 @@ import { useState } from "react";
 import Header from "./header";
 import { usePreferences } from "./preferences-context";
 import { useTour } from "./onboarding/tour-context";
+import type { BrandLogo } from "@/lib/branding/types";
 
-export default function HeaderShell({ logo }: { logo?: string | null }) {
+export default function HeaderShell({
+  logo,
+  name,
+}: {
+  logo: BrandLogo | null;
+  name: string;
+}) {
   const { menuBar } = usePreferences();
   const { phase } = useTour();
   const [peek, setPeek] = useState(false);
@@ -21,7 +28,7 @@ export default function HeaderShell({ logo }: { logo?: string | null }) {
   const visible = !hidden || peek;
 
   if (!hidden) {
-    return <Header logo={logo} />;
+    return <Header logo={logo} name={name} />;
   }
 
   return (
@@ -38,7 +45,7 @@ export default function HeaderShell({ logo }: { logo?: string | null }) {
         onMouseEnter={() => setPeek(true)}
         onMouseLeave={() => setPeek(false)}
       >
-        <Header logo={logo} />
+        <Header logo={logo} name={name} />
       </div>
     </>
   );

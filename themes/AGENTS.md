@@ -35,6 +35,8 @@ A theme repaints every app in the install at once. That is why it is the most co
 
 21. **Listing screenshots live in `screenshots/`, not in `assets/`, and do not replace `preview`.** Declare them in `theme.json` as `screenshots: [{ file, alt?, caption? }]` with files under `themes/<slug>/screenshots/`. Keeping them out of `assets/` is load-bearing — `assets/` is copied wholesale to `/themes/<slug>/`, so a screenshot filed there gets two public URLs. `assets.preview` stays what it is: the admin picker's thumbnail, shown beside a live swatch row and a type specimen. `screenshots` is the catalogue gallery, seen by someone who has not installed the theme and for whom none of those swatches exist. Limits are the same as an app's: `.png`/`.jpg`/`.webp` (no SVG), max 8, max 2 MB, min 640px wide, all build-enforced; `url`, `width` and `height` are measured, never hand-written. See [`docs/themes/assets.md`](../docs/themes/assets.md#screenshots).
 
+22. **`assets.logo` is a default; `branding` is a claim.** Apps may replace `assets.logo` through the brand hooks. A slot declared under `branding: { name?, menuBarLogo?, loginLogo? }` is final, and no app filter runs for it. Every logo is measured so it can be drawn at its own aspect ratio: an SVG needs a `viewBox` (or an absolute `width` and `height`) on its root, and anything else must be a `.png`, `.jpg` or `.webp`. Claim only what the theme owns: a claimed name follows every install that selects the theme. See [`docs/themes/assets.md`](../docs/themes/assets.md#claiming-the-brand).
+
 Authoritative types: [`src/lib/themes/types.ts`](../src/lib/themes/types.ts). Token contract: [`src/lib/themes/tokens.ts`](../src/lib/themes/tokens.ts). Canonical template: [`themes/_template/`](_template/).
 
 ---
