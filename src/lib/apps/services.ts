@@ -5,12 +5,16 @@
 import type {
   AppContext,
   AppContextUser,
+  ScopedClient,
   ServiceContext,
   ServicesClient,
   SystemAppContext,
 } from "@/lib/hooks/types";
 import { appRegistry } from "@/generated/app-registry";
+import { connectorRegistry } from "@/generated/connector-registry";
 import { hasAppGrant } from "./access";
+import { ReadOnlyError, readOnlyConnectors } from "./read-only";
+import { createReadOnlyScopedClient } from "./scoped-db";
 import { recordServiceCall } from "./telemetry";
 import { safeErrorMessage } from "@/lib/safe-error";
 
@@ -25,6 +29,7 @@ import { safeErrorMessage } from "@/lib/safe-error";
  * execution, error isolation, a timeout, and a payload cap. Provider handlers
  * are leaves — the `ServiceContext` intentionally carries no `services` client,
  * so a handler cannot chain to another provider (no cycles, no impersonation).
+ * A request from an MCP tool runs the provider read-only, because the tool is.
  *
  * Keep this the ONLY cross-app data path: an ESLint rule blocks apps from
  * importing the raw DB client or this module directly.
@@ -60,6 +65,12 @@ interface ServicesClientDeps {
   callerSlug: string;
   /** Acting user — non-null in a request context, null in a job/public context. */
   actingUser: AppContextUser | null;
+  /**
+   * The caller is read-only: an MCP tool. The provider's handler then gets a
+   * read-only `db` and connectors narrowed to their declared reads, so a tool
+   * cannot write by asking another app to.
+   */
+  readOnly?: boolean;
 }
 
 export function createServicesClient(deps: ServicesClientDeps): ServicesClient {
@@ -159,13 +170,23 @@ async function runServiceRequest(
     providerCtx = await buildSystemAppContext(providerSlug);
   }
 
+  // From an MCP tool, the provider runs read-only like the tool itself. `db`
+  // keeps its full-access type, which is what every other caller gets; here it
+  // is the read-only client at runtime, so a write throws ReadOnlyError, and
+  // `caller.readOnly` lets the handler skip a write rather than fail on it.
+  const readOnly = deps.readOnly === true;
   const serviceCtx: ServiceContext = {
     user: providerCtx.user,
-    connectors: providerCtx.connectors,
-    db: providerCtx.db,
+    connectors: readOnly
+      ? readOnlyConnectors(providerCtx.connectors, connectorRegistry)
+      : providerCtx.connectors,
+    db:
+      readOnly && providerCtx.db
+        ? (createReadOnlyScopedClient(providerSlug) as unknown as ScopedClient)
+        : providerCtx.db,
     telemetry: providerCtx.telemetry,
     manifest: providerCtx.manifest,
-    caller: { appSlug: callerSlug },
+    caller: { appSlug: callerSlug, readOnly },
   };
 
   const handler = await loadServiceHandler(providerSlug, serviceName);
@@ -188,7 +209,10 @@ async function runServiceRequest(
     if (err instanceof ServiceRequestError) throw err;
     throw new ServiceRequestError(
       "PROVIDER_ERROR",
-      safeErrorMessage(err, `"${providerSlug}:${serviceName}" failed.`),
+      // A refused write is the platform's own message and names no internals.
+      err instanceof ReadOnlyError
+        ? err.message
+        : safeErrorMessage(err, `"${providerSlug}:${serviceName}" failed.`),
     );
   }
 

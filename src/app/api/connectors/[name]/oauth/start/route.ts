@@ -11,6 +11,7 @@ import {
   OAUTH_STATE_COOKIE,
   buildAuthorizeUrl,
   newFlowState,
+  oauthReturnUrl,
   safeReturnPath,
   sealFlowState,
 } from "@/lib/connectors/oauth";
@@ -38,10 +39,7 @@ export async function GET(
   const returnTo = safeReturnPath(request.nextUrl.searchParams.get("return"));
   const back = (status: string) =>
     NextResponse.redirect(
-      new URL(
-        `${returnTo}?connector=${encodeURIComponent(name)}&oauth=${status}`,
-        request.nextUrl.origin,
-      ),
+      oauthReturnUrl(returnTo, request.nextUrl.origin, name, status),
     );
 
   const connector = connectorRegistry.find((c) => c.name === name);
