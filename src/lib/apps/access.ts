@@ -230,6 +230,64 @@ export async function getAppActiveMap(): Promise<Record<string, boolean>> {
   return out;
 }
 
+/** An app this database keeps that the running build doesn't carry. */
+export interface AppNotInBuild {
+  slug: string;
+  name: string;
+  icon: string | null;
+  /** When a release step first ran without it. Null when none has since. */
+  missingSince: string | null;
+}
+
+export interface AppBuildStatus {
+  /** Apps in this build that came back with different code: slug to when. */
+  returnedChanged: Record<string, string>;
+  /** Apps whose rows, and data, are kept although this build lacks them. */
+  notInBuild: AppNotInBuild[];
+}
+
+/**
+ * What the Apps page says about apps that left the build or came back, read
+ * from the rows the release step keeps (scripts/sync-app-registry.ts).
+ *
+ * "Not in this build" means the build serving this request, which is what an
+ * admin is looking at. It usually agrees with `missing_since`, which the last
+ * release step wrote, but not always: a host can roll back to an older build
+ * without running one.
+ *
+ * Empty when the read fails. These are notices beside the list, and the list
+ * should still render without them.
+ */
+export async function getAppBuildStatus(): Promise<AppBuildStatus> {
+  const inBuild = new Set(appRegistry.map((a) => a.slug));
+  const supabase = createServiceClient();
+  const { data } = await supabase
+    .from("apps")
+    .select("slug, name, icon, missing_since, returned_changed_at")
+    .order("name");
+
+  const status: AppBuildStatus = { returnedChanged: {}, notInBuild: [] };
+  for (const row of (data ?? []) as {
+    slug: string;
+    name: string;
+    icon: string | null;
+    missing_since: string | null;
+    returned_changed_at: string | null;
+  }[]) {
+    if (!inBuild.has(row.slug)) {
+      status.notInBuild.push({
+        slug: row.slug,
+        name: row.name,
+        icon: row.icon,
+        missingSince: row.missing_since,
+      });
+    } else if (row.returned_changed_at) {
+      status.returnedChanged[row.slug] = row.returned_changed_at;
+    }
+  }
+  return status;
+}
+
 export async function getUserApps(userId: string): Promise<string[]> {
   const supabase = createServiceClient();
   const { data, error } = await supabase
