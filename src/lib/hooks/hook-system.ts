@@ -24,8 +24,9 @@ export interface HookRegistration {
 }
 
 /**
- * Whether an app is active right now. The platform installs `isAppActive`, the
- * admin's switch, read per request (see `./loader.ts`).
+ * Whether an app's code may run right now. The platform installs the app gate
+ * (src/lib/apps/app-gate.ts), which reads the admin's switch per request (see
+ * `./loader.ts`).
  */
 export type ActivationCheck = (appSlug: string) => Promise<boolean>;
 

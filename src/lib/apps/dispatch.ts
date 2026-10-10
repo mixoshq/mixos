@@ -19,7 +19,8 @@
  *   3. Per-IP rate limit, before any authentication work.
  *   4. Resolve the URL to an on-disk route pattern.   → 404
  *   5. Pre-import eligibility, from the REGISTRY.     → 404
- *   6. Import the module and find the declaration.    → 404 / 405 / 500
+ *   6. The app gate, then import the module and find
+ *      the declaration.                               → 404 / 405 / 500
  *   7. Live declaration must agree with the registry. → 404
  *   8. Resolve the auth tier the caller presents.     → 401 / 403 / 404
  *   9. Per-user and per-route rate limits, now that we know who is calling.
@@ -27,14 +28,18 @@
  *  11. Run the route (which enforces roles).
  *
  * Step 5 exists so a route that does not serve this mount never gets the chance
- * to run its module-scope code for a caller it would have refused. Step 7 exists
- * because step 5 trusted the generated registry, and a gate decided from one
- * source and enforced from another is not a gate.
+ * to run its module-scope code for a caller it would have refused. The app gate
+ * that opens step 6 does the same for a whole app: one an admin switched off
+ * never runs its module-scope code, for anyone. Step 8 checks activation again,
+ * as a second line. Step 7 exists because step 5 trusted the generated
+ * registry, and a gate decided from one source and enforced from another is
+ * not a gate.
  */
 
 import { NextResponse } from "next/server";
 import { appRegistry } from "@/generated/app-registry";
 import { resolveRoutePath } from "@/lib/apps/api-router";
+import { checkAppGate } from "@/lib/apps/app-gate";
 import { buildAppContext, buildPublicAppContext } from "@/lib/apps/context";
 import { getClientIp } from "@/lib/apps/public-access";
 import {
@@ -162,8 +167,13 @@ export async function dispatchAppRoute({
     methodContract?.auth ?? manifest.apiVisibility?.[routeKey];
   if (registryAuth && !servedHere(registryAuth, mount)) return notFound();
 
-  // 6 — import and dispatch are separated so a route that throws at module scope
-  // is not reported as missing. That distinction cost real debugging time.
+  // 6 — the app gate, before the import, because importing runs the module's
+  // top-level code. An app that is off is a 404, like a route that was never
+  // here, which is also what step 8 answers for it.
+  if (!(await checkAppGate(appSlug)).open) return notFound();
+
+  // Import and dispatch are separated so a route that throws at module scope is
+  // not reported as missing. That distinction cost real debugging time.
   let mod: Record<string, unknown>;
   try {
     mod = await import(`@apps/${appSlug}/api/${routePath}/route`);
