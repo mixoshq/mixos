@@ -4,10 +4,10 @@
 
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db/client";
-import { schemaVersionStatus } from "@/lib/platform/schema-version";
+import { appMigrationStatus, schemaVersionStatus } from "@/lib/platform/schema-version";
 
-// Readiness probe: can this pod serve traffic right now? Two questions, in
-// order, because the second is only meaningful if the first passes:
+// Readiness probe: can this pod serve traffic right now? Three questions, in
+// order, because each is only meaningful if the one before it passes:
 //
 //   1. Is the database reachable? Pings with a 2s cap. Unreachable returns 503
 //      so an external monitor removes this pod from the Service until it
@@ -17,9 +17,12 @@ import { schemaVersionStatus } from "@/lib/platform/schema-version";
 //      whichever request first touches a missing column, so it must not be
 //      routed to. See src/lib/platform/schema-version.ts for why the check
 //      lives here rather than at boot.
+//   3. Has it applied every app migration this build carries? The same failure,
+//      for an app's own tables: a release step whose app migrations failed
+//      leaves them missing. See src/lib/platform/app-migrations.ts.
 //
 // The Docker HEALTHCHECK deliberately points at /api/health/live, not here, so
-// neither answer can put a container into a restart loop.
+// no answer can put a container into a restart loop.
 export const dynamic = "force-dynamic";
 
 const READY_TIMEOUT_MS = 2000;
@@ -55,6 +58,24 @@ export async function GET() {
         expectedSchemaVersion: schema.expected,
         actualSchemaVersion: schema.actual,
         message: schema.message,
+      },
+      { status: 503 }
+    );
+  }
+
+  const apps = await appMigrationStatus();
+  if (!apps.ok) {
+    // The log names the files. The response only counts them: this endpoint is
+    // public, and the file names would list the apps this instance runs.
+    console.error(`readiness probe failed: ${apps.message}`);
+    return NextResponse.json(
+      {
+        status: "unavailable",
+        reason: "app-migrations-behind",
+        pendingAppMigrations: apps.pending.length,
+        message:
+          `${apps.pending.length} app migration(s) in this build have not been applied. ` +
+          `Run the release step against this database; the server log names them.`,
       },
       { status: 503 }
     );

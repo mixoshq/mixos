@@ -624,8 +624,9 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
 Only when setting up a deployment that is not the local Docker stack. MixOS has
 **six** independent cryptographic keys, each protecting exactly one thing so that
 rotating one has a bounded blast radius rather than breaking everything at once.
+A deployment also needs `AUTH_SECRET` and `CRON_SECRET`.
 
-Generate all six, paste into the deployment's environment:
+Generate all eight, paste into the deployment's environment:
 
 ```bash
 npm run keys:generate

@@ -20,6 +20,7 @@ import type {
   ServiceDependency,
   SyncDefinition,
   TelemetryEventDefinition,
+  UpdatedAtColumn,
 } from "../src/lib/apps/types";
 import { MIXOS_SOURCE } from "../src/lib/apps/types";
 import type {
@@ -45,7 +46,25 @@ import { applyWidgetConfigs } from "./widget-configs";
 import { FatalManifestError } from "./manifest-errors";
 import { readImageSize } from "./image-size";
 import { resolveThemeLogo, validateAppBranding } from "./brand-checks";
+import { appMigrationFiles, listAppMigrations } from "./app-migration-files";
+import { checkAppMigrationSql, describeAppTables, formatSqlProblems } from "./app-sql-policy";
+import {
+  appIdentifierProblems,
+  appSchemaName,
+  appSlugProblem,
+} from "../src/lib/apps/app-identifiers";
+import {
+  checkHookNamespaces,
+  formatHookFindings,
+  scanHooks,
+  validateHookWiring,
+} from "./hook-checks";
 import { formatFindings, scanAppContainment } from "./app-containment";
+import {
+  validateConnectorMethods,
+  validateConnectorTelemetry,
+  validateRegistryContract,
+} from "./connector-checks";
 import type { Screenshot, ScreenshotKind } from "../src/lib/screenshots";
 import {
   SCREENSHOT_EXTENSIONS,
@@ -59,7 +78,8 @@ import * as ts from "typescript";
 
 /**
  * Thrown when an app is refused for what its code does, not for a malformed
- * manifest — an undeclared escape, today. Takes the per-app `Skipping ...`
+ * manifest — an undeclared escape, or a hook call the hook rules refuse (see
+ * scripts/hook-checks.ts). Takes the per-app `Skipping ...`
  * path like any other per-app failure, but prints its own message rather than
  * "invalid manifest", which would send the author to the wrong file.
  */
@@ -173,76 +193,6 @@ function countPages(dir: string): number {
     }
   }
   return n;
-}
-
-// Core hook names are never slug-prefixed. Keep in sync with CORE_HOOKS in
-// src/lib/hooks/hook-system.ts.
-const CORE_HOOK_NAMES = new Set<string>([
-  "init",
-  "user-login",
-  "user-sync",
-  "user-display-name",
-  ...BRAND_HOOKS,
-]);
-
-// Mirror resolveHookName(): an app's own custom hook is qualified with its
-// slug; core hooks and already-qualified ("app:hook") names pass through.
-function qualifyHookName(name: string, slug: string): string {
-  if (CORE_HOOK_NAMES.has(name) || name.includes(":")) return name;
-  return `${slug}:${name}`;
-}
-
-interface HookScan {
-  // Emitted-hook counts, including dynamic (non-literal) calls — preserves the
-  // historical `hookCounts` semantics.
-  counts: { actions: number; filters: number };
-  // String-literal hook names this app fires / listens for, slug-qualified.
-  emits: { actions: string[]; filters: string[] };
-  listens: { actions: string[]; filters: string[] };
-}
-
-function scanHooks(appDir: string, slug: string): HookScan {
-  let actionCount = 0;
-  let filterCount = 0;
-  const emitActions = new Set<string>();
-  const emitFilters = new Set<string>();
-  const listenActions = new Set<string>();
-  const listenFilters = new Set<string>();
-
-  // First string-literal arg of a hook call, e.g. .doAction("new-deal").
-  // Dynamic (variable) names can't be captured and only show in the counts.
-  const literalCall = (method: string) =>
-    new RegExp(`\\.${method}\\s*\\(\\s*["'\\\`]([^"'\\\`]+)["'\\\`]`, "g");
-  const collect = (src: string, re: RegExp, into: Set<string>) => {
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(src)) !== null) into.add(qualifyHookName(m[1], slug));
-  };
-
-  function walk(dir: string) {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full);
-      } else if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) {
-        const src = fs.readFileSync(full, "utf-8");
-        actionCount += (src.match(/\.doAction\s*\(/g) ?? []).length;
-        filterCount += (src.match(/\.applyFilters\s*\(/g) ?? []).length;
-        collect(src, literalCall("doAction"), emitActions);
-        collect(src, literalCall("applyFilters"), emitFilters);
-        collect(src, literalCall("addAction"), listenActions);
-        collect(src, literalCall("addFilter"), listenFilters);
-      }
-    }
-  }
-  walk(appDir);
-
-  const sorted = (s: Set<string>) => [...s].sort();
-  return {
-    counts: { actions: actionCount, filters: filterCount },
-    emits: { actions: sorted(emitActions), filters: sorted(emitFilters) },
-    listens: { actions: sorted(listenActions), filters: sorted(listenFilters) },
-  };
 }
 
 /**
@@ -661,47 +611,6 @@ function validateRouteContracts(
   }
 }
 
-/**
- * Carry through the app's declared escapes, failing on a duplicate rule. Shape
- * and the closed rule set are already schema-validated; a duplicate would leave
- * two different reasons on the record for one exception.
- */
-/**
- * Two-sided consent for cross-app hooks, mirroring `validateServiceWiring`.
- *
- * A listener must declare what it listens for, and the emitter must allow that
- * listener. Either half missing is a build failure — the same default-deny App
- * Services has had all along, applied to the one channel that never had it.
- */
-function validateHookWiring(manifests: AppManifest[]): void {
-  const bySlug = new Map(manifests.map((m) => [m.slug, m]));
-
-  for (const consumer of manifests) {
-    for (const dep of consumer.listensTo ?? []) {
-      const provider = bySlug.get(dep.app);
-      if (!provider) {
-        throw new FatalManifestError(
-          `apps/${consumer.slug}/app.json: listensTo names app "${dep.app}", which does not exist.`,
-        );
-      }
-      const emit = (provider.emits ?? []).find((e) => e.name === dep.hook);
-      if (!emit) {
-        throw new FatalManifestError(
-          `apps/${consumer.slug}/app.json: listensTo "${dep.app}:${dep.hook}", but "${dep.app}" does not declare that hook under \`emits\`.`,
-        );
-      }
-      const allowed =
-        emit.consumers === "*" || emit.consumers.includes(consumer.slug);
-      if (!allowed) {
-        throw new FatalManifestError(
-          `apps/${dep.app} does not allow "${consumer.slug}" to listen to "${dep.hook}". ` +
-            `Add it to that hook's \`consumers\`, or use "*".`,
-        );
-      }
-    }
-  }
-}
-
 // ── brand hooks ──────────────────────────────────────────────────────────────
 
 /** Copy an app's declared marks to public/branding/apps/<slug>/. */
@@ -721,6 +630,11 @@ function copyBrandLogos(
   }
 }
 
+/**
+ * Carry through the app's declared escapes, failing on a duplicate rule. Shape
+ * and the closed rule set are already schema-validated; a duplicate would leave
+ * two different reasons on the record for one exception.
+ */
 function validateEscapes(
   raw: AppEscape[] | undefined,
   slug: string,
@@ -892,7 +806,7 @@ function validateProvides(
  * The export check is a source scan rather than an import, deliberately: MCP
  * handlers pull in connectors and server modules, and the generator must stay
  * runnable during a build with no DB or credentials present. Same
- * trade-off (and same regex approach) as `scanHooks`. It catches the common
+ * trade-off as `scanHooks` in ./hook-checks.ts. It catches the common
  * mistake — a handler file that forgot `inputSchema` — without the blast radius
  * of executing app code at build time.
  *
@@ -1017,27 +931,6 @@ function validateServiceWiring(manifests: AppManifest[]): void {
       }
     }
   }
-}
-
-/** As validateAppTelemetry, but for a connector's declared method list. */
-function validateConnectorTelemetry(
-  raw: { method: string; description?: string }[] | undefined,
-  name: string,
-): ConnectorTelemetryDefinition[] {
-  if (!raw || raw.length === 0) return [];
-  const seen = new Set<string>();
-  for (const e of raw) {
-    if (seen.has(e.method)) {
-      throw new Error(
-        `connectors/${name}/connector.json: duplicate telemetry method "${e.method}".`,
-      );
-    }
-    seen.add(e.method);
-  }
-  return raw.map((e) => ({
-    method: e.method,
-    ...(e.description != null ? { description: e.description } : {}),
-  }));
 }
 
 // ── screenshots ──────────────────────────────────────────────────────────────
@@ -1211,27 +1104,22 @@ function validateThemeAssets(
 }
 
 /**
- * A declared font must exist AND be referenced by an @font-face in theme.css.
- * A manifest font nobody @font-faces is a file shipped to every user for
- * nothing; an @font-face with no manifest entry hides a dependency from review.
+ * A declared font must exist. Whether theme.css loads it — and whether every
+ * font theme.css loads is declared — is checked by compileTheme, which has the
+ * parsed @font-face rules: a manifest font nobody @font-faces is a file shipped
+ * to every user for nothing; an @font-face with no manifest entry hides a
+ * dependency from review.
  */
 function validateThemeFonts(
   fonts: ThemeFontFace[],
   slug: string,
   dir: string,
-  css: string,
 ): ThemeFontFace[] {
   for (const font of fonts) {
     if (!fs.existsSync(path.join(dir, "assets", font.file))) {
       throw new ThemeError(
         `themes/${slug}/theme.json: fonts[] names "${font.file}", which does not exist. ` +
           `Expected it at themes/${slug}/assets/${font.file}.`,
-      );
-    }
-    if (!css.includes(font.file)) {
-      throw new ThemeError(
-        `themes/${slug}/theme.json: fonts[] declares "${font.file}", but no @font-face in ` +
-          `theme.css loads it. A font file shipped to every user and never used is pure weight.`,
       );
     }
   }
@@ -1293,10 +1181,10 @@ async function scanThemes(): Promise<{
       dir,
       escapes: r.escapes ?? [],
       declaredSurfaces: r.surfaces ?? [],
+      declaredFonts: (r.fonts ?? []).map((f) => f.file),
     });
 
-    const rawCss = fs.readFileSync(path.join(dir, "theme.css"), "utf-8");
-    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir, rawCss);
+    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir);
     const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
     const screenshots = validateScreenshots(r.screenshots, "themes", slug, dir);
     const logo = assets.logo
@@ -1347,6 +1235,88 @@ async function scanThemes(): Promise<{
   }
 
   return { themes, css: cssParts.join("\n\n"), tokens };
+}
+
+/**
+ * An app's database declarations, checked against its migrations/.
+ *
+ * Only an app with `"database": true` has a schema, so only it may ship
+ * migrations or list `updatedAt` columns. (A `sync`, whose state the platform
+ * keeps in that schema, needs it too; the manifest schema refuses that one.)
+ * Every statement in its migrations must be one an app may run
+ * (scripts/app-sql-policy.ts): the release step checks again before it applies
+ * anything, and this is the same check, on the next build instead of at deploy
+ * time. Each `updatedAt` column must be one the migrations create, as a
+ * timestamp.
+ *
+ * Returns the `updatedAt` columns with their defaults filled in.
+ */
+async function validateAppDatabase(
+  raw: {
+    database?: boolean;
+    updatedAt?: { table: string; column?: string }[];
+  },
+  slug: string,
+): Promise<UpdatedAtColumn[]> {
+  const files = appMigrationFiles(APPS_DIR, slug);
+  const updatedAt = (raw.updatedAt ?? []).map((c) => ({
+    table: c.table,
+    column: c.column ?? "updated_at",
+  }));
+
+  if (!raw.database) {
+    if (files.length > 0) {
+      throw new FatalManifestError(
+        `apps/${slug}/migrations/ holds ${files.length} SQL file(s), but app.json does not set ` +
+          `"database": true. Migrations apply to the schema a database gives the app: set ` +
+          `"database": true, or remove migrations/.`,
+      );
+    }
+    if (updatedAt.length > 0) {
+      throw new FatalManifestError(
+        `apps/${slug}/app.json lists "updatedAt" columns but does not set "database": true.`,
+      );
+    }
+    return [];
+  }
+
+  const schema = appSchemaName(slug);
+  const texts: string[] = [];
+  const problems: string[] = [];
+  for (const file of files) {
+    const text = fs.readFileSync(path.join(APPS_DIR, slug, "migrations", file), "utf-8");
+    texts.push(text);
+    const found = await checkAppMigrationSql(text, schema);
+    if (found.length > 0) {
+      problems.push(formatSqlProblems(`apps/${slug}/migrations/${file}`, found));
+    }
+  }
+  if (problems.length > 0) {
+    throw new FatalManifestError(
+      `${problems.join("\n")}\nAn app migration may create, change and fill the app's own ` +
+        `tables, and nothing else. See docs/apps/database.md.`,
+    );
+  }
+
+  if (updatedAt.length > 0) {
+    const tables = await describeAppTables(texts, schema);
+    for (const c of updatedAt) {
+      const type = tables.get(c.table)?.get(c.column);
+      if (type === undefined) {
+        throw new FatalManifestError(
+          `apps/${slug}/app.json lists ${c.table}.${c.column} under "updatedAt", but no ` +
+            `migration in apps/${slug}/migrations/ creates that column.`,
+        );
+      }
+      if (type !== "timestamptz" && type !== "timestamp") {
+        throw new FatalManifestError(
+          `apps/${slug}/app.json lists ${c.table}.${c.column} under "updatedAt", but its ` +
+            `migrations make it ${type}. It must be timestamptz or timestamp.`,
+        );
+      }
+    }
+  }
+  return updatedAt;
 }
 
 async function scanApps(): Promise<AppManifest[]> {
@@ -1405,6 +1375,14 @@ async function scanApps(): Promise<AppManifest[]> {
     }
 
     try {
+      // The folder name is the slug, and it names the app's schema and role
+      // (src/lib/apps/app-identifiers.ts), its URLs and its hooks. A slug that
+      // could not name a schema unambiguously never gets as far as having one.
+      const slugProblem = appSlugProblem(entry.name);
+      if (slugProblem) {
+        throw new FatalManifestError(`apps/${entry.name}: ${slugProblem}`);
+      }
+
       const pagesDir = path.join(APPS_DIR, entry.name, "pages");
       const hasPages =
         fs.existsSync(pagesDir) && fs.readdirSync(pagesDir).length > 0;
@@ -1475,7 +1453,23 @@ async function scanApps(): Promise<AppManifest[]> {
         );
       }
 
+      // What the code fires and listens to, held to the app's own namespace and
+      // its `listensTo`. A finding skips this app, as a containment finding
+      // does. validateHookWiring, after the loop, holds each `listensTo` to the
+      // emitter's `consumers`, and a mismatch there still aborts the run.
       const hookScan = scanHooks(path.join(APPS_DIR, entry.name), entry.name);
+      const hookFindings = checkHookNamespaces(
+        entry.name,
+        hookScan.calls,
+        r.listensTo ?? [],
+      );
+      if (hookFindings.length > 0) {
+        throw new AppRejectedError(
+          `its hook calls break the cross-app hook rules:${formatHookFindings(hookFindings)}`,
+        );
+      }
+
+      const updatedAt = await validateAppDatabase(r, entry.name);
 
       const manifest: AppManifest = {
         slug: entry.name,
@@ -1486,6 +1480,7 @@ async function scanApps(): Promise<AppManifest[]> {
         connectors: r.connectors ?? [],
         optionalConnectors: r.optionalConnectors ?? [],
         database: r.database ?? false,
+        updatedAt,
         notifications: r.notifications ?? false,
         hasPages,
         pageCount,
@@ -1571,6 +1566,11 @@ async function scanApps(): Promise<AppManifest[]> {
   validateServiceWiring(manifests);
   validateHookWiring(manifests);
 
+  // No two apps may share a schema or a role. With valid slugs the encoding
+  // cannot produce a clash; this is what would catch a change that let one.
+  const clashes = appIdentifierProblems(manifests.filter((m) => m.database).map((m) => m.slug));
+  if (clashes.length > 0) throw new FatalManifestError(clashes.join("\n"));
+
   return manifests;
 }
 
@@ -1589,159 +1589,6 @@ interface ConnectorManifestOut {
   auth?: ConnectorAuthPolicy;
   http?: ConnectorHttpPolicy;
   webhook?: ConnectorWebhookPolicy;
-}
-
-/**
- * Base-class contract, not app-callable surface. The platform calls these; an
- * app never can, so they are not capabilities and are not declared.
- */
-const CONNECTOR_RESERVED_METHODS = new Set([
-  "initialize",
-  "testConnection",
-  "handleWebhook",
-]);
-
-/**
- * Every public method on a connector class must be declared in `telemetry`.
- *
- * WHY THIS IS A BUILD ERROR AND NOT A LINT. The Connector Registry's Access tab
- * answers "what can this reach, and can it change anything" from `telemetry`
- * plus each entry's `mutates`. That answer is only trustworthy if the list is
- * COMPLETE — and `telemetry` was designed as opt-in instrumentation, so nothing
- * made it so. A connector could ship a `sendMessage()`, leave it undeclared,
- * and the tab would report "no method changes anything upstream" about a
- * connector that sends mail.
- *
- * Under-reporting is the one failure a permissions view cannot have: the whole
- * reason an admin opens it is to find out what this thing could do to their
- * data. Over-reporting is a nuisance; under-reporting is a false assurance.
- *
- * Parsed from the AST rather than by regex, because the answer has to be right:
- * a regex cannot tell a method on the connector class from one on a helper
- * class in the same file, nor see the `private` that makes it not count.
- */
-function validateConnectorMethods(
-  name: string,
-  dir: string,
-  telemetry: ConnectorTelemetryDefinition[],
-): void {
-  const entry = path.join(dir, "index.ts");
-  if (!fs.existsSync(entry)) return;
-
-  const source = ts.createSourceFile(
-    entry,
-    fs.readFileSync(entry, "utf-8"),
-    ts.ScriptTarget.Latest,
-    true,
-  );
-
-  const declared = new Set(telemetry.map((t) => t.method));
-  const undeclared: string[] = [];
-
-  for (const statement of source.statements) {
-    if (!ts.isClassDeclaration(statement)) continue;
-    // Only a class that extends something — i.e. the connector, not a local
-    // helper or a plain data class defined alongside it.
-    const extendsClause = statement.heritageClauses?.some(
-      (h) => h.token === ts.SyntaxKind.ExtendsKeyword,
-    );
-    if (!extendsClause) continue;
-
-    for (const member of statement.members) {
-      if (!ts.isMethodDeclaration(member) || !ts.isIdentifier(member.name))
-        continue;
-      const modifiers = ts.getModifiers(member) ?? [];
-      const hidden = modifiers.some(
-        (m) =>
-          m.kind === ts.SyntaxKind.PrivateKeyword ||
-          m.kind === ts.SyntaxKind.ProtectedKeyword ||
-          m.kind === ts.SyntaxKind.StaticKeyword,
-      );
-      const methodName = member.name.text;
-      if (
-        hidden ||
-        methodName.startsWith("#") ||
-        CONNECTOR_RESERVED_METHODS.has(methodName) ||
-        declared.has(methodName)
-      ) {
-        continue;
-      }
-      undeclared.push(methodName);
-    }
-  }
-
-  if (undeclared.length > 0) {
-    throw new Error(
-      `connector.json: these public methods are not declared in "telemetry": ` +
-        `${undeclared.join(", ")}.\n` +
-        `  The Connector Registry reports what a connector can do from that list, ` +
-        `so an undeclared method is one an admin is never told about — and if it ` +
-        `writes, the registry says this connector changes nothing.\n` +
-        `  Add each with a description and, when it changes anything upstream, ` +
-        `"mutates": true. Make it private if apps should not call it.`,
-    );
-  }
-}
-
-/**
- * The Connector Registry contract: what a connector must declare for its admin
- * experience to exist at all.
- *
- * These are not stylistic preferences. Each one is a specific hole in the
- * registry when it is absent:
- *
- *   · no `icon`         — an unidentifiable tile in a grid of tiles
- *   · no `setup`        — a Configure wizard whose first step is blank, so the
- *                         admin is asked for a Client ID with no idea where to
- *                         get one
- *   · no `scopesUrl`    — a permissions list that can never be populated, and
- *                         no way to answer "what can this reach"
- *
- * Reported together rather than one per run: an author adding a connector
- * should learn everything that is missing in one build, not discover it three
- * builds in a row.
- *
- * See docs/connectors/registry-ux.md.
- */
-function validateRegistryContract(
-  name: string,
-  raw: {
-    icon?: string;
-    auth?: { scopesUrl?: string };
-    setup?: { title?: string; steps?: unknown[] };
-  },
-): void {
-  const missing: string[] = [];
-
-  if (!raw.icon) {
-    missing.push(
-      '"icon" — a square PNG/WebP/SVG of at least 512x512 in this connector\'s assets/',
-    );
-  }
-  if (!raw.auth?.scopesUrl) {
-    missing.push(
-      '"auth.scopesUrl" — the provider\'s scope reference page, which the registry parses to list permissions in plain English',
-    );
-  }
-  if (!raw.setup?.title) {
-    missing.push(
-      '"setup.title" — the label for the provider-side step, e.g. "Create a Google Cloud OAuth app"',
-    );
-  }
-  if (!raw.setup?.steps || raw.setup.steps.length === 0) {
-    missing.push(
-      '"setup.steps" — at least one step covering what the admin does in the provider\'s own console',
-    );
-  }
-
-  if (missing.length > 0) {
-    throw new Error(
-      `connector.json is missing what the Connector Registry needs:\n` +
-        missing.map((m) => `    - ${m}`).join("\n") +
-        `\n  Every connector ships a configuration experience; these are the parts ` +
-        `the platform cannot invent. See docs/connectors/registry-ux.md.`,
-    );
-  }
 }
 
 /** Smallest edge a connector icon may have, and it must be square. */
@@ -1976,7 +1823,19 @@ function expectedSchemaVersion(): number {
 }
 
 /**
- * The one build-time fact the running server cannot work out for itself.
+ * Every app migration the release step will run: the files of each app this
+ * build accepted with `"database": true`, listed as the runner lists them
+ * (scripts/app-migration-files.ts), so the two agree on what "every app
+ * migration" is.
+ */
+function expectedAppMigrations(apps: readonly AppManifest[]): { slug: string; file: string }[] {
+  return listAppMigrations(APPS_DIR, apps).flatMap(({ slug, files }) =>
+    files.map((file) => ({ slug, file })),
+  );
+}
+
+/**
+ * The build-time facts the running server cannot work out for itself.
  *
  * Everything else about build identity is a RUNTIME variable, and deliberately:
  * `MIXOS_RELEASE` already carries the tag and is stamped into the runner stage
@@ -1990,27 +1849,40 @@ function expectedSchemaVersion(): number {
  * and that directory is not copied into the runner image at all, so the number
  * has to travel with the build or not exist.
  *
+ * So is the list of app migrations the readiness probe waits for. `apps/` is in
+ * the Docker image, but a serverless function sees a repository file only if
+ * output tracing put it there; a list compiled into the server needs neither.
+ *
  * NOTE: no timestamp and no commit here. Every value in this file is stable for
  * a given checkout, so re-running the generator rewrites an identical file and
  * the dev server has nothing to recompile. A timestamp — or a git SHA, which
  * moves on every commit — would invalidate that on every `predev`.
  */
-function writeBuildInfo(): void {
+function writeBuildInfo(apps: readonly AppManifest[], report = true): void {
   const schema = expectedSchemaVersion();
+  const appMigrations = expectedAppMigrations(apps);
 
   const output = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
 //
-// Derived from supabase/migrations/ at build time, because that directory does
-// not exist in the runner image. See src/lib/platform/schema-version.ts for
+// Derived from supabase/migrations/ and apps/*/migrations/ at build time, so the
+// running server knows what it was built against without reading either. See
+// src/lib/platform/schema-version.ts and src/lib/platform/app-migrations.ts for
 // what this gates, and src/lib/platform/version.ts for the runtime half of
 // build identity.
 
 /** Highest migration number in supabase/migrations/ at build time. */
 export const EXPECTED_SCHEMA_VERSION = ${schema};
+
+/** Every app migration the release step runs, at build time. */
+export const EXPECTED_APP_MIGRATIONS: readonly { slug: string; file: string }[] = ${JSON.stringify(appMigrations, null, 2)};
 `;
 
   fs.writeFileSync(BUILD_INFO_FILE, output, "utf-8");
-  console.log(`Build stamp: expected schema version ${schema}`);
+  if (report) {
+    console.log(
+      `Build stamp: expected schema version ${schema}, ${appMigrations.length} app migration(s)`,
+    );
+  }
 }
 
 async function main() {
@@ -2018,10 +1890,14 @@ async function main() {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
   }
 
-  writeBuildInfo();
+  // The stamp lists only the migrations of apps the scan accepts, so it is
+  // written after the scan. A fresh checkout still gets one first, in case a
+  // module the scan imports reads it.
+  if (!fs.existsSync(BUILD_INFO_FILE)) writeBuildInfo([], false);
 
   console.log("Scanning apps...");
   const apps = await scanApps();
+  writeBuildInfo(apps);
   const slugs = apps.map((m) => `"${m.slug}"`).join(", ");
 
   // Build static import maps for pages and widgets
@@ -2249,8 +2125,9 @@ export function getTheme(slug: string): ThemeManifest {
   fs.writeFileSync(THEME_REGISTRY_FILE, themeOutput, "utf-8");
 
   // Read by eslint-rules/no-low-contrast-token-pairs.mjs, which cannot import
-  // TypeScript and must not re-parse CSS. It lints against the fallback theme:
-  // which theme is *active* is a runtime database value the build cannot know.
+  // TypeScript and must not re-parse CSS. It lints against every installed
+  // theme: which one is *active* is a runtime database value the build cannot
+  // know, so an element has to clear the floor under each of them.
   fs.writeFileSync(
     THEME_TOKENS_FILE,
     JSON.stringify({ fallback: fallbackTheme, tokens: themeTokens }, null, 2),
