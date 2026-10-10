@@ -205,6 +205,44 @@ integration sets. Transaction-mode poolers are fine. MixOS uses no prepared
 statements or session state, and the migration runner's lock is
 transaction-scoped.
 
+## Upgrading
+
+Each version of MixOS is a release: a tag on this repository's `main`, such
+as `v0.2.0`, listed on the [releases page](https://github.com/mixoshq/mixos/releases)
+with notes that put breaking changes first. Upgrade by merging the newest
+release tag into your fork. Don't merge `upstream/main`: between releases it
+holds work that hasn't been released yet.
+
+1. **Back up the database.** Migrations only go forward, so a backup is the
+   way back. `pg_dump` works on every path; for the database in the Compose
+   file, see [Backups and access](docker-compose.md#backups-and-access).
+2. **Merge the release on a branch.** Add this repository as `upstream` once
+   (`git remote add upstream https://github.com/mixoshq/mixos.git`), then:
+
+   ```bash
+   git fetch upstream --tags
+   git describe --abbrev=0 --exclude '*-*' upstream/main   # the newest release, e.g. v0.2.0
+   git switch -c upgrade-v0.2.0
+   git merge --no-edit v0.2.0
+   ```
+
+3. **Check it.** Read the release's breaking changes against your apps. Then
+   run `npm ci && npm run build`, and start it locally with
+   `npm run dev:docker`, which applies its migrations to your local database
+   first.
+4. **Push the branch and open a pull request** against your fork's `main`,
+   not this repository's. Once it merges, your host's guide says what happens
+   next: [Docker Compose](docker-compose.md#upgrading),
+   [Render](render.md#upgrades), [Railway](railway.md#upgrades) or
+   [Vercel](vercel.md#upgrades). When the deploy is done, the admin pages
+   show the new version and its commit
+   ([Which build is running](#which-build-is-running)).
+
+Skipping releases is fine. Merge the newest tag, and the release step applies
+every migration in between; read the notes of each release you skipped.
+Prereleases, tags with a suffix such as `v0.3.0-rc.1`, are for trying a
+version before it's final, and `--exclude '*-*'` leaves them out.
+
 ## Before going public
 
 Read [docs/security-architecture.md](../security-architecture.md): the trust
