@@ -30,6 +30,10 @@ just pulled.
 - **`updatedAt` in `app.json`** lists columns the platform sets to `now()` on
   every update, with its own trigger, since an app migration can no longer
   create one.
+- **Registry installs take turns safely.** While another install is running,
+  the dialog says so and offers **Try again**. If an install is paused for more
+  than 15 minutes (a laptop asleep mid-download) and another starts meanwhile,
+  the paused one stops before its next write and says what it left on disk.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 
