@@ -27,6 +27,7 @@
 
 import { sql } from "@/lib/db/client";
 import { appRegistry } from "@/generated/app-registry";
+import { checkAppGate } from "@/lib/apps/app-gate";
 import { isDefinedSync, runSync } from "@/lib/apps/sync";
 
 /**
@@ -208,9 +209,10 @@ async function syncSchedules(): Promise<void> {
  * Atomically claim a job if its app is active, the job is enabled, it is due
  * (`next_run_at <= now()`, with NULL meaning due now), and it is not currently
  * held (or its hold is stale). The app check is inside the claim, not before
- * it, so "Run now" on a deactivated app cannot race past it either. Returns true
- * iff this pod won the claim. The UPDATE row-locks the matched row, so
- * concurrent claimers serialize and only the first sees the row as due+free.
+ * it, so a deactivation cannot race past it; `forceClaim` carries the same
+ * condition for "Run now". Returns true iff this pod won the claim. The UPDATE
+ * row-locks the matched row, so concurrent claimers serialize and only the
+ * first sees the row as due+free.
  */
 async function claim(slug: string, job: string): Promise<boolean> {
   const rows = (await sql`
@@ -252,18 +254,45 @@ export async function setSchedulerEnabled(on: boolean): Promise<void> {
   `;
 }
 
+/**
+ * Run a job this pod has claimed, record the run and release the claim.
+ *
+ * Returns false, having run and recorded nothing, when the app gate refuses.
+ * The claim already required the app to be active, so that means it was
+ * switched off since. `next_run_at` stays as it was, so the job is due again
+ * once the app is back, as it would be had the tick never claimed it.
+ *
+ * `onStart` runs once the gate has passed, before the handler: Run now records
+ * who started the run there, because a run can take minutes and a request cut
+ * short must still leave that record.
+ */
 async function runClaimed(
   slug: string,
   job: string,
   cadence: Cadence,
   trigger: "scheduled" | "manual",
-): Promise<void> {
+  onStart?: () => Promise<void>,
+): Promise<boolean> {
+  // The app gate, before the job's or sync's module is imported, because
+  // importing runs its top-level code.
+  const gate = await checkAppGate(slug);
+  if (!gate.open) {
+    await sql`
+      update public.app_scheduled_jobs
+      set running_since = null, updated_at = now()
+      where app_slug = ${slug} and job_name = ${job}
+    `;
+    console.warn(`[scheduler] ${slug}/${job} not run: the app is ${gate.reason}`);
+    return false;
+  }
+
   const startedAt = new Date();
   let status: "ok" | "error" | "timeout" = "ok";
   let error: string | null = null;
 
   const abort = new AbortController();
   try {
+    await onStart?.();
     const ctx = await buildSystemAppContext(slug, abort.signal);
     if (job.startsWith(SYNC_JOB_PREFIX)) {
       const syncName = job.slice(SYNC_JOB_PREFIX.length);
@@ -333,12 +362,15 @@ async function runClaimed(
     values (${slug}, ${job}, ${startedAt}, now(), ${status}, ${error}, ${durationMs},
             ${trigger})
   `;
+  return true;
 }
 
 /**
  * Claim a job for an out-of-band manual run, ignoring due-ness and the enabled
- * flag (an admin "Run now" is explicit). The concurrency guard is preserved:
- * we still refuse if the job is currently held by a live claim, so a manual run
+ * flag (an admin "Run now" is explicit). Not the app's activation: like
+ * `claim`, it requires the app to be active, inside the claim, so a
+ * deactivation cannot race past it. The concurrency guard is preserved too: we
+ * still refuse if the job is currently held by a live claim, so a manual run
  * never overlaps a scheduled one.
  */
 async function forceClaim(slug: string, job: string): Promise<boolean> {
@@ -347,6 +379,10 @@ async function forceClaim(slug: string, job: string): Promise<boolean> {
     set running_since = now()
     where app_slug = ${slug}
       and job_name = ${job}
+      and exists (
+        select 1 from public.apps a
+        where a.slug = app_slug and a.is_active
+      )
       and (running_since is null
            or running_since <= now() - make_interval(mins => ${STALE_LEASE_MINUTES}))
     returning id
@@ -361,10 +397,15 @@ async function forceClaim(slug: string, job: string): Promise<boolean> {
  * next wall-clock slot, so a manual run never disturbs the cron cadence). Safe
  * against a concurrent scheduled run via the claim. Returns whether it ran and,
  * if not, why.
+ *
+ * Refused for an app that is not active: an admin's Run now is explicit about
+ * the job, not about the app, and deactivating is how an admin stops
+ * everything an app runs. `onStart` runs when the run starts; see `runClaimed`.
  */
 export async function runJobNow(
   slug: string,
   job: string,
+  { onStart }: { onStart?: () => Promise<void> } = {},
 ): Promise<{ ran: boolean; reason?: string }> {
   const app = appRegistry.find((a) => a.slug === slug);
   const schedule = job.startsWith(SYNC_JOB_PREFIX)
@@ -383,10 +424,15 @@ export async function runJobNow(
     on conflict (app_slug, job_name) do nothing
   `;
 
+  // The claim requires the app to be active, as the tick's does. When it is
+  // refused, the app gate says whether that was why.
   if (!(await forceClaim(slug, job))) {
-    return { ran: false, reason: "already running" };
+    const gate = await checkAppGate(slug);
+    return { ran: false, reason: gate.open ? "already running" : "app inactive" };
   }
-  await runClaimed(slug, job, cad, "manual");
+  if (!(await runClaimed(slug, job, cad, "manual", onStart))) {
+    return { ran: false, reason: "app inactive" };
+  }
   return { ran: true };
 }
 
