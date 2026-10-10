@@ -11,6 +11,10 @@
 // the runner never applies, which holds every deploy out of service, or the
 // reverse, which lets one serve without a table it needs.
 //
+// Both pass the apps the registry accepted, and only those with
+// `"database": true` have migrations that run. A folder the generator skipped,
+// or one with no manifest, has none: its SQL never reaches the database.
+//
 // Library only. No imports from src/generated: the registry generator reads
 // this before it has written anything.
 
@@ -23,25 +27,50 @@ export interface AppMigrationFiles {
   files: string[];
 }
 
-/**
- * Every app directory, with its migration files. `_`-prefixed directories are
- * templates, not apps, and are left out — as the registry generator does.
- */
-export function listAppMigrations(appsDir: string): AppMigrationFiles[] {
-  if (!fs.existsSync(appsDir)) return [];
+/** What the listing needs to know about an app the registry accepted. */
+export interface RegisteredApp {
+  slug: string;
+  database: boolean;
+}
+
+/** The .sql files in apps/<slug>/migrations/, sorted: the order they apply in. */
+export function appMigrationFiles(appsDir: string, slug: string): string[] {
+  const dir = path.join(appsDir, slug, "migrations");
+  if (!fs.existsSync(dir)) return [];
   return fs
-    .readdirSync(appsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
-    .map((entry) => entry.name)
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+}
+
+/**
+ * Every accepted app with `"database": true`, in slug order, with its migration
+ * files. An app with a database and no migrations is listed with none: it still
+ * gets its schema.
+ */
+export function listAppMigrations(
+  appsDir: string,
+  apps: readonly RegisteredApp[],
+): AppMigrationFiles[] {
+  return apps
+    .filter((app) => app.database)
+    .map((app) => app.slug)
     .sort()
-    .map((slug) => {
-      const dir = path.join(appsDir, slug, "migrations");
-      const files = fs.existsSync(dir)
-        ? fs
-            .readdirSync(dir)
-            .filter((f) => f.endsWith(".sql"))
-            .sort()
-        : [];
-      return { slug, files };
-    });
+    .map((slug) => ({ slug, files: appMigrationFiles(appsDir, slug) }));
+}
+
+/**
+ * Accepted apps that carry migration files without declaring a database. The
+ * build refuses them, and so does the release step, rather than leave SQL on
+ * disk that an app expects to have run.
+ */
+export function undeclaredMigrations(
+  appsDir: string,
+  apps: readonly RegisteredApp[],
+): AppMigrationFiles[] {
+  return apps
+    .filter((app) => !app.database)
+    .map((app) => ({ slug: app.slug, files: appMigrationFiles(appsDir, app.slug) }))
+    .filter((app) => app.files.length > 0)
+    .sort((a, b) => a.slug.localeCompare(b.slug));
 }

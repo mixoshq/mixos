@@ -25,9 +25,10 @@
 // ./pg-options. That is the only database setting there is: any Postgres 13 or
 // later works, Supabase included.
 //
-// The client has full access to every table in `public`. It must never be
-// constructed in code that reaches the browser — it lives behind server
-// components, server actions and route handlers, and the ESLint rules in
+// The client has full access to every table in `public`, and its role is a
+// member of every app's role, so `.schema()` reaches any app's tables too. It
+// must never be constructed in code that reaches the browser — it lives behind
+// server components, server actions and route handlers, and the ESLint rules in
 // eslint.config.mjs keep app code from importing it at all.
 import { sql } from "./client";
 import { DbClient } from "./query";
