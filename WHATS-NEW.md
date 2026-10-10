@@ -42,6 +42,8 @@ just pulled.
   `npm run db:local` to apply it.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
+- **Fix:** a connection string that doesn't parse is reported by its variable's
+  name, and the release step and the app no longer print it, password included.
 
 ## 2026-10-07
 
