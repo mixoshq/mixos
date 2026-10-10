@@ -61,6 +61,35 @@ function runtimeExports(file: string): string[] {
   return [...names].sort();
 }
 
+/** What a UI primitive may import at runtime: rendering, and nothing it could hand on. */
+const PRESENTATIONAL = new Set(["react", "lucide-react", "next/link", "react-markdown", "remark-gfm", "@/lib/utils"]);
+
+/** The card `AsyncView` renders for a failed connector call. It lives outside ui/. */
+const CONNECTOR_ERROR_STATE = "@/components/connectors/connector-error-state";
+
+/** A module's runtime imports and re-exports, with the names each takes; type-only ones left out. */
+function runtimeImports(file: string): { specifier: string; names: string[] }[] {
+  const out: { specifier: string; names: string[] }[] = [];
+  for (const statement of parse(file).statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const clause = statement.importClause;
+      if (clause?.isTypeOnly) continue;
+      const names: string[] = [];
+      if (clause?.name) names.push("default");
+      const bindings = clause?.namedBindings;
+      if (bindings && ts.isNamespaceImport(bindings)) names.push("*");
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const el of bindings.elements) if (!el.isTypeOnly) names.push((el.propertyName ?? el.name).text);
+      }
+      if (clause && names.length === 0) continue; // every name was a type
+      out.push({ specifier: (statement.moduleSpecifier as ts.StringLiteral).text, names });
+    } else if (ts.isExportDeclaration(statement) && statement.moduleSpecifier && !statement.isTypeOnly) {
+      out.push({ specifier: (statement.moduleSpecifier as ts.StringLiteral).text, names: ["*"] });
+    }
+  }
+  return out;
+}
+
 /**
  * Everything a "*" entry hands every app, as of this commit. A new export from
  * one of these modules is app API the moment it lands, so it shows up here as
@@ -70,6 +99,7 @@ function runtimeExports(file: string): string[] {
 const STAR_EXPORTS: Record<string, string[]> = {
   "@/lib/apps/sdk": [
     "AppClientError",
+    "connectorErrorOf",
     "createAppClient",
     "disablePushNotifications",
     "enablePushNotifications",
@@ -144,22 +174,29 @@ describe("the list", () => {
   });
 
   test("every UI primitive imports only presentational modules, or types", () => {
-    const allowed = new Set(["react", "lucide-react", "next/link", "react-markdown", "remark-gfm", "@/lib/utils"]);
     for (const file of fs.readdirSync(UI).filter((f) => /\.tsx?$/.test(f))) {
-      for (const statement of parse(path.join(UI, file)).statements) {
-        const isImport = ts.isImportDeclaration(statement);
-        if (!isImport && !(ts.isExportDeclaration(statement) && statement.moduleSpecifier)) continue;
-        const typeOnly = isImport
-          ? !!statement.importClause?.isTypeOnly
-          : (statement as ts.ExportDeclaration).isTypeOnly;
-        const specifier = (statement.moduleSpecifier as ts.StringLiteral).text;
-        if (typeOnly) continue;
+      for (const { specifier } of runtimeImports(path.join(UI, file))) {
         const ok =
-          allowed.has(specifier) ||
+          PRESENTATIONAL.has(specifier) ||
           specifier.startsWith("@/components/ui/") ||
-          (specifier.startsWith("./") && !specifier.slice(2).includes("/"));
+          (specifier.startsWith("./") && !specifier.slice(2).includes("/")) ||
+          specifier === CONNECTOR_ERROR_STATE;
         assert.ok(ok, `src/components/ui/${file} imports "${specifier}", which every app would get through it`);
       }
+    }
+  });
+
+  test("the connector error card AsyncView renders is presentational too", () => {
+    // An app cannot import it, but every app renders it through AsyncView, so
+    // what it reaches reaches them. Beside the UI's own imports it may read one
+    // pure function off the connector envelope module.
+    const file = path.join(ROOT, "src/components/connectors/connector-error-state.tsx");
+    for (const { specifier, names } of runtimeImports(file)) {
+      const ok =
+        PRESENTATIONAL.has(specifier) ||
+        specifier.startsWith("@/components/ui/") ||
+        (specifier === "@/lib/connectors/response" && names.every((n) => n === "isAdminActionable"));
+      assert.ok(ok, `connector-error-state.tsx imports ${names.join(", ")} from "${specifier}", which every app would render`);
     }
   });
 

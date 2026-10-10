@@ -251,10 +251,13 @@ export default function RegisterDialog({
             </p>
             <dl className="mt-3 grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-sm">
               <Row label="Version">
-                {manifest.version}{" "}
-                <span className="text-muted-foreground">
-                  ({manifest.gitTag})
-                </span>
+                {manifest.version}
+                {manifest.gitTag && (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    ({manifest.gitTag})
+                  </span>
+                )}
               </Row>
               {listing && (
                 <Row label="Source">
@@ -425,7 +428,8 @@ function OutcomePanel({
             <code className="font-mono text-xs">{r.installPath}</code>
           </Row>
           <Row label="Version">
-            {r.version} ({r.gitTag})
+            {r.version}
+            {r.gitTag && ` (${r.gitTag})`}
           </Row>
           <Row label="Commit">
             <code className="break-all font-mono text-xs">{r.commitSha}</code>

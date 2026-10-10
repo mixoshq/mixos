@@ -44,9 +44,9 @@ Report the measured table to the user before writing the theme. A brand owner wi
 
 - **A theme change is not an OS change.** `themes/` sits on the authoring side of the boundary with `apps/` and `connectors/`, so it takes no `os-change` label and no admin review. Commit it as `theme:<slug>`, never `os`. Changing the theme *system* — the token contract, the allowlisted `.mix-*` surfaces, the compiler — **is** an OS change. See [`OS-UPDATES.md`](OS-UPDATES.md).
 - Folder name is the slug (lowercase, digits, hyphens). No leading underscore on a shipped theme.
-- Tokens only in `:root` and `:root[data-mode="dark"]`. The token set is closed; unknown names fail the build.
+- Tokens only in one top-level `:root` — not in a `.mix-*` rule, and not in a `:root` inside `@media` or `@supports`. The token set is closed; unknown names fail the build.
 - Every required token present. Dark mode is all-or-nothing.
-- Colour values must be hex / `rgb()` / `hsl()` literals or a `var()` chain ending in one. No `color-mix()` or `oklch()` in token values.
+- Colour values must be opaque hex / `rgb()` / `hsl()` literals or a `var()` chain ending in one, for every colour token, gated or not. No `color-mix()` or `oklch()` in token values, and no alpha except on `--border`, which the build composites over `--background`.
 - Beyond tokens, only the ten `.mix-*` surfaces. `surfaces` in `theme.json` must match `theme.css` in both directions.
 - No `@import`, no `url()` to another host. Ship fonts and images under `assets/`.
 - Never declare a token listed in `FORBIDDEN_TOKENS` (empty today).

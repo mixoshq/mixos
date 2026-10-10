@@ -24,6 +24,7 @@ import type { AddressInfo } from "node:net";
 // redirect URI is built from the configured origin, so give both a value when
 // the environment has none. Never overrides a real one.
 process.env.CONNECTOR_ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
+process.env.USER_OAUTH_ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
 process.env.NEXTAUTH_URL ??= "https://mixos.test";
 import { HttpConnector } from "../src/lib/connectors/http-connector";
 import { ConnectorError } from "../src/lib/connectors/errors";
@@ -61,7 +62,13 @@ import type {
 let hits: Record<string, number> = {};
 let seen: Record<string, { auth?: string; body?: string; url?: string }> = {};
 let tokenMode:
-  "ok" | "reject400" | "throttle" | "shortlived" | "nojson" | "notoken" = "ok";
+  | "ok"
+  | "reject400"
+  | "throttle"
+  | "shortlived"
+  | "nojson"
+  | "notoken"
+  | "noscope" = "ok";
 let apiMode: "ok" | "expire-once" | "always401" = "ok";
 
 const bump = (k: string) => (hits[k] = (hits[k] ?? 0) + 1);
@@ -142,6 +149,31 @@ const server = http.createServer((req, res) => {
           meta: { next: page < 2 ? String(page + 1) : null },
         });
       }
+      // link-header pagination: three pages of two, the next one named in
+      // `Link`, and none after the last.
+      case "/linked": {
+        const page = Number(url.searchParams.get("page") ?? "1");
+        const self = `http://${req.headers.host}/linked`;
+        return json(
+          200,
+          [{ i: (page - 1) * 2 }, { i: (page - 1) * 2 + 1 }],
+          page < 3
+            ? { link: `<${self}?page=${page + 1}>; rel="next", <${self}?page=3>; rel="last"` }
+            : {},
+        );
+      }
+      // The same server under another origin: a Link the walk must not follow.
+      case "/linked-away": {
+        const port = (req.headers.host ?? "").split(":")[1];
+        return json(200, [{ i: 0 }], {
+          link: `<http://localhost:${port}/linked?page=2>; rel="next"`,
+        });
+      }
+      // A Link back to the page just read.
+      case "/linked-loop":
+        return json(200, [{ i: 0 }], {
+          link: `<http://${req.headers.host}/linked-loop>; rel="next"`,
+        });
       // auth
       case "/token": {
         if (tokenMode === "reject400")
@@ -172,7 +204,9 @@ const server = http.createServer((req, res) => {
             refresh_token: `refresh-${grant === "refresh_token" ? seq + 1 : 1}`,
             token_type: "Bearer",
             expires_in: ttl,
-            scope: "read:things",
+            // RFC 6749 §5.1 lets a provider omit scope when it granted what
+            // was asked for.
+            ...(tokenMode === "noscope" ? {} : { scope: "read:things" }),
           });
         }
 
@@ -427,6 +461,52 @@ async function main() {
     "maxPages caps a runaway cursor",
     cappedItems.length === 4,
     `${cappedItems.length} items across 2 pages`,
+  );
+
+  reset();
+  const linked = await mk(
+    { strategy: "none" },
+    { pagination: { style: "link-header", pageSize: 2 } },
+  );
+  const linkedItems: { i: number }[] = [];
+  for await (const item of linked.pages<{ i: number }>("/linked"))
+    linkedItems.push(item);
+  check(
+    "link-header pagination follows rel=next to the last page",
+    linkedItems.map((x) => x.i).join(",") === "0,1,2,3,4,5",
+    linkedItems.map((x) => x.i).join(","),
+  );
+  check(
+    "link-header pagination requests each page once",
+    hits["GET /linked"] === 3,
+    `${hits["GET /linked"]} request(s)`,
+  );
+
+  reset();
+  const away = await mk(
+    { strategy: "apiKey", credentialKeys: ["apiKey"] },
+    { pagination: { style: "link-header" } },
+  );
+  const awayErr = await expectError(async () => {
+    for await (const item of away.pages("/linked-away")) void item;
+  });
+  check(
+    "a Link to another origin is refused, never sent the credential",
+    awayErr.category === "unexpected_response" &&
+      (hits["GET /linked"] ?? 0) === 0,
+    awayErr.category,
+  );
+
+  reset();
+  const loop = await mk(
+    { strategy: "none" },
+    { pagination: { style: "link-header" } },
+  );
+  for await (const item of loop.pages("/linked-loop")) void item;
+  check(
+    "a Link back to a page already read ends the walk",
+    hits["GET /linked-loop"] === 1,
+    `${hits["GET /linked-loop"]} request(s)`,
   );
 
   check("testConnection returns ok", (await c.testConnection()).ok === true);
@@ -693,6 +773,23 @@ async function main() {
     tokensToCredentials(granted)[TOKEN_KEYS.refresh] === "refresh-1",
   );
 
+  reset();
+  tokenMode = "noscope";
+  const unscoped = await exchangeAuthorizationCode({
+    policy: authCode(),
+    connectorName: "acme",
+    subject: "Acme",
+    clientId: "cid",
+    clientSecret: "sec",
+    code: "the-code",
+    codeVerifier: flow.codeVerifier,
+  });
+  check(
+    "a token response that omits scope granted what was requested",
+    unscoped.scope === "read:things",
+    `scope=${unscoped.scope}`,
+  );
+
   // ── a connector holding a grant ──────────────────────────────────────────
   class GrantedProbe extends Probe {
     refreshes = 0;
@@ -765,6 +862,51 @@ async function main() {
     `${g.refreshes} refresh(es)`,
   );
 
+  // ── a token refused before its stored expiry ─────────────────────────────
+  // The real refresh re-reads the grant under a lock and hands back a stored
+  // token that has not expired, taking it for another invocation's fresh one.
+  // This probe keeps that rule, so the replay after a 401 succeeds only if the
+  // base class says which token was refused.
+  class LockedGrantProbe extends Probe {
+    stored: Record<string, string> = {};
+    refreshes = 0;
+    protected async refreshStoredTokens(
+      rejected?: string,
+    ): Promise<Record<string, string>> {
+      const expiresAt = Number(this.stored[TOKEN_KEYS.expiresAt] ?? 0);
+      const token = this.stored[TOKEN_KEYS.access];
+      if (token && token !== rejected && expiresAt - 60_000 > Date.now()) {
+        return this.stored;
+      }
+      this.refreshes++;
+      const t = await refreshWithToken({
+        policy: this.authOverride,
+        connectorName: this.name,
+        subject: this.name,
+        clientId: "cid",
+        clientSecret: "sec",
+        refreshToken: this.stored[TOKEN_KEYS.refresh] ?? "",
+      });
+      this.stored = { ...this.stored, ...tokensToCredentials(t) };
+      return this.stored;
+    }
+  }
+  reset();
+  apiMode = "expire-once";
+  const locked = new LockedGrantProbe();
+  locked.authOverride = authCode();
+  locked.httpOverride = { baseUrl: base };
+  locked.stored = { ...live, [TOKEN_KEYS.access]: "granted-1" };
+  await locked.initialize({ clientId: "cid", clientSecret: "sec", ...locked.stored });
+  const relocked = await locked
+    .call<{ token: string }>("/data")
+    .catch((err: ConnectorError) => ({ token: `threw ${err.category}` }));
+  check(
+    "a token refused before its stored expiry is renewed, not read back",
+    relocked?.token === "granted-2" && locked.refreshes === 1,
+    `token=${relocked?.token} refreshes=${locked.refreshes}`,
+  );
+
   // ── configured reflects the grant, not just the client credentials ───────
   const noGrant = new GrantedProbe();
   noGrant.authOverride = authCode();
@@ -779,6 +921,47 @@ async function main() {
     "client credentials plus a grant IS configured",
     withGrant.configured === true,
   );
+
+  // ── a user-scoped grant renews against its owner ─────────────────────────
+  // The platform binds the caller's own grant before initialize(). Unbound,
+  // the base class would refresh the tenant row — which for a user-scoped
+  // connector never holds a refresh token.
+  reset();
+  const mine = new Probe();
+  mine.authOverride = authCode();
+  mine.httpOverride = { baseUrl: base };
+  let ownRefreshes = 0;
+  HttpConnector.bindUserGrant(mine, async () => {
+    ownRefreshes++;
+    const t = await refreshWithToken({
+      policy: mine.authOverride,
+      connectorName: mine.name,
+      subject: mine.name,
+      clientId: "cid",
+      clientSecret: "sec",
+      refreshToken: "refresh-9",
+    });
+    return tokensToCredentials(t);
+  });
+  await mine.initialize({
+    clientId: "cid",
+    clientSecret: "sec",
+    ...live,
+    [TOKEN_KEYS.expiresAt]: "0",
+  });
+  const ownToken = await mine.call<{ token: string }>("/data");
+  check(
+    "an expired user-scoped token is renewed through the user's own grant",
+    ownRefreshes === 1 && (ownToken?.token ?? "").startsWith("granted-"),
+    `token=${ownToken?.token} refreshes=${ownRefreshes}`,
+  );
+  let reboundRefused = false;
+  try {
+    HttpConnector.bindUserGrant(mine, async () => ({}));
+  } catch {
+    reboundRefused = true;
+  }
+  check("a bound grant cannot be re-pointed", reboundRefused);
 
   // A refresh token the provider has revoked. This is the state an admin has
   // to fix by reconnecting, so it must surface as auth_failed and must not be
@@ -1026,6 +1209,18 @@ async function main() {
   check(
     "the same delivery yields a stable dedupe key",
     okA.ok && okHex.ok && okA.eventKey === okHex.eventKey,
+  );
+
+  const respelled = verifyWebhookSignature({
+    policy: policy(),
+    secret: SECRET,
+    rawBody: bodyText,
+    headers: hdrs({ "x-signature": `x=${macOf(bodyText).toString("base64")}` }),
+  });
+  check(
+    "a re-spelled signature is the same delivery",
+    respelled.ok && okHex.ok && respelled.eventKey === okHex.eventKey,
+    "otherwise a captured delivery replays under a new key",
   );
 
   // ══ Failure envelope ═════════════════════════════════════════════════════
@@ -1297,8 +1492,34 @@ async function main() {
       await sql`delete from public.connector_webhook_events where connector_name = '__probe__'`;
       check(
         "the prune sweep runs without throwing",
-        typeof (await pruneWebhookEvents()) === "number",
+        typeof (await pruneWebhookEvents(["__probe__"])) === "number",
       );
+
+      // A timestamped policy's marker goes after a day. Without a timestamp the
+      // marker is the only thing refusing a replay, so it is kept for 90 days.
+      const timed = `old-timed-${evKey}`;
+      const untimed = `old-untimed-${evKey}`;
+      const expired = `expired-untimed-${evKey}`;
+      await sql`
+        insert into public.connector_webhook_events (event_key, connector_name, received_at)
+        values (${timed}, '__probe__', now() - interval '2 days'),
+               (${untimed}, '__probe_untimed__', now() - interval '2 days'),
+               (${expired}, '__probe_untimed__', now() - interval '91 days')
+      `;
+      await pruneWebhookEvents(["__probe__"]);
+      const left = await sql<{ event_key: string }[]>`
+        select event_key from public.connector_webhook_events
+         where event_key in (${timed}, ${untimed}, ${expired})
+      `;
+      check(
+        "the sweep drops a timestamped marker after a day and an untimed one after 90",
+        left.length === 1 && left[0].event_key === untimed,
+        `left: ${left.map((r) => r.event_key).join(", ") || "none"}`,
+      );
+      await sql`
+        delete from public.connector_webhook_events
+         where connector_name in ('__probe__', '__probe_untimed__')
+      `;
 
       // 4. Credentials an admin typed must survive a token write-back.
       await sql`delete from public.connector_configs where connector_name = ${probeName}`;
@@ -1319,6 +1540,137 @@ async function main() {
           merged.clientSecret === "sec" &&
           merged[TOKEN_KEYS.access] === "a",
       );
+
+      // 5. A user-scoped grant, end to end against the user's own row: an
+      //    expired token is renewed before the connector is handed over, and a
+      //    grant the provider will no longer renew means no connector at all.
+      const { initializeWithUserGrant } =
+        await import("../src/lib/connectors/user-grant");
+      const { saveUserTokens, getUserTokens } =
+        await import("../src/lib/connectors/user-config");
+      const email = `verify-${randomBytes(6).toString("hex")}@mixos.test`;
+      const [person] = await sql<{ id: string }[]>`
+        insert into public.users (email, display_name)
+        values (${email}, 'Verify probe') returning id
+      `;
+      const grantPolicy = authCode();
+      const userManifest = {
+        name: "__verify_user_probe__",
+        displayName: "Verify probe",
+        auth: grantPolicy,
+      };
+      const handOver = async () => {
+        const p = new Probe();
+        p.authOverride = grantPolicy;
+        p.httpOverride = { baseUrl: base };
+        const connected = await initializeWithUserGrant(p, {
+          userId: person.id,
+          manifest: userManifest,
+          tenantCredentials: { clientId: "cid", clientSecret: "sec" },
+        });
+        return { p, connected };
+      };
+      try {
+        check(
+          "someone who never connected is handed no connector",
+          (await handOver()).connected === false,
+        );
+
+        reset();
+        await saveUserTokens(person.id, userManifest.name, {
+          accessToken: "granted-stale",
+          refreshToken: "refresh-9",
+          expiresAt: Date.now() - 1_000,
+        });
+        const renewed = await handOver();
+        const stored = await getUserTokens(person.id, userManifest.name);
+        check(
+          "an expired user grant is renewed before the request, on that user's row",
+          renewed.connected &&
+            renewed.p.configured &&
+            hits["grant:refresh_token"] === 1 &&
+            (stored?.[TOKEN_KEYS.access] ?? "granted-stale") !== "granted-stale",
+          `stored=${stored?.[TOKEN_KEYS.access]}`,
+        );
+        check(
+          "the connector calls with the renewed token",
+          (await renewed.p.call<{ token: string }>("/data"))?.token ===
+            stored?.[TOKEN_KEYS.access],
+        );
+
+        reset();
+        await saveUserTokens(person.id, userManifest.name, {
+          accessToken: "granted-stale",
+          refreshToken: "refresh-revoked",
+          expiresAt: Date.now() - 1_000,
+        });
+        tokenMode = "reject400";
+        check(
+          "a grant the provider will no longer renew is handed no connector",
+          (await handOver()).connected === false,
+        );
+
+        // A live user token the upstream refuses is renewed on that row.
+        reset();
+        apiMode = "expire-once";
+        await saveUserTokens(person.id, userManifest.name, {
+          accessToken: "granted-1",
+          refreshToken: "refresh-9",
+          expiresAt: Date.now() + 3_600_000,
+        });
+        const refusedUser = await handOver();
+        const afterUser = await refusedUser.p
+          .call<{ token: string }>("/data")
+          .catch((err: ConnectorError) => ({ token: `threw ${err.category}` }));
+        check(
+          "a user token refused before its stored expiry is renewed on that user's row",
+          afterUser?.token === "granted-2" &&
+            hits["grant:refresh_token"] === 1 &&
+            (await getUserTokens(person.id, userManifest.name))?.[
+              TOKEN_KEYS.access
+            ] === afterUser?.token,
+          `token=${afterUser?.token}`,
+        );
+        reset();
+      } finally {
+        // Cascades to the user's grant.
+        await sql`delete from public.users where id = ${person.id}`;
+      }
+
+      // 6. The tenant grant, the same way: a live token the upstream refuses
+      //    is renewed under the lock and saved, not read back.
+      const tenantName = "verify-probe";
+      await sql`delete from public.connector_configs where connector_name = ${tenantName}`;
+      try {
+        const seeded = await mutateConnectorCredentials(tenantName, () => ({
+          clientId: "cid",
+          clientSecret: "sec",
+          [TOKEN_KEYS.access]: "granted-1",
+          [TOKEN_KEYS.refresh]: "refresh-9",
+          [TOKEN_KEYS.expiresAt]: String(Date.now() + 3_600_000),
+        }));
+        reset();
+        apiMode = "expire-once";
+        const tenant = new Probe();
+        tenant.authOverride = authCode();
+        tenant.httpOverride = { baseUrl: base };
+        await tenant.initialize(seeded);
+        const afterTenant = await tenant
+          .call<{ token: string }>("/data")
+          .catch((err: ConnectorError) => ({ token: `threw ${err.category}` }));
+        const savedTenant = await mutateConnectorCredentials(tenantName, () => null);
+        check(
+          "a tenant token refused before its stored expiry is renewed under the lock",
+          afterTenant?.token === "granted-2" &&
+            hits["grant:refresh_token"] === 1 &&
+            savedTenant[TOKEN_KEYS.access] === afterTenant?.token &&
+            savedTenant.clientSecret === "sec",
+          `token=${afterTenant?.token}`,
+        );
+        reset();
+      } finally {
+        await sql`delete from public.connector_configs where connector_name = ${tenantName}`;
+      }
     } finally {
       await sql`delete from public.connector_configs where connector_name = ${probeName}`;
       await sql.end({ timeout: 5 });

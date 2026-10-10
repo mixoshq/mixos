@@ -6,6 +6,7 @@ import { connectorRegistry } from "@/generated/connector-registry";
 import { getDecryptedConfig } from "./config";
 import { connectorErrorEnvelope } from "./response";
 import type { EnvelopeCategory } from "./response";
+import { initializeWithUserGrant } from "./user-grant";
 import type { BaseConnector, ConnectorTestResult } from "./types";
 
 /**
@@ -40,6 +41,13 @@ function supportsTesting(instance: BaseConnector): instance is TestableConnector
 
 export async function runConnectorTest(
   connectorName: string,
+  opts: {
+    /**
+     * Who is running the test. A user-scoped connector has no deployment-wide
+     * grant to test with, so it is tested with this person's own.
+     */
+    userId?: string;
+  } = {},
 ): Promise<ConnectorTestOutcome> {
   const manifest = connectorRegistry.find((c) => c.name === connectorName);
   if (!manifest) {
@@ -71,7 +79,29 @@ export async function runConnectorTest(
     }
 
     const credentials = await getDecryptedConfig(connectorName);
-    if (credentials) await instance.initialize(credentials);
+    if (manifest.userScoped) {
+      // The tenant row holds the application, never a grant, so testing it
+      // alone could only ever fail. The admin's own grant — from Connect in
+      // the Authorize step — proves the registration works end to end.
+      const connected = opts.userId
+        ? await initializeWithUserGrant(instance, {
+            userId: opts.userId,
+            manifest,
+            tenantCredentials: credentials,
+          })
+        : false;
+      if (!connected) {
+        return {
+          ok: false,
+          category: "unconfigured",
+          message: `Connect your own ${manifest.displayName} account in the step before this one, or reconnect it if its access has lapsed. Each person signs in with their own account, so the test runs with yours.`,
+          adminHint: null,
+          upstreamRequestId: null,
+        };
+      }
+    } else if (credentials) {
+      await instance.initialize(credentials);
+    }
 
     const result = await instance.testConnection();
     return { ok: true, detail: result.detail ?? null };

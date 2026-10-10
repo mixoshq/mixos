@@ -17,7 +17,10 @@
  *     the theme breaks in a way nobody attributes to the refactor.
  *  3. **Verified contrast.** Every pair in the token contract is measured. A
  *     palette that fails AA cannot ship unless the theme names the exact pair
- *     and says why.
+ *     and says why. That only holds if the values measured are the values
+ *     rendered: tokens are set in one top-level `:root` and nowhere else, and
+ *     every colour token is parsed, gated or not, so a value the build cannot
+ *     read fails the build rather than dropping out of the check.
  *
  * Parsing uses postcss, already present via @tailwindcss/postcss — no new
  * dependency. The same pass that validates also rewrites `:root` to
@@ -43,7 +46,10 @@ import {
   resolveVar,
   contrastRatio,
   ratioText,
+  composite,
+  toHex,
 } from "../src/lib/themes/color";
+import type { Color, Rgb } from "../src/lib/themes/color";
 import type {
   ThemeEscape,
   ThemeSwatch,
@@ -141,7 +147,12 @@ export interface CompiledTheme {
   surfaces: string[];
   swatches: ThemeSwatch[];
   typefaces: ThemeTypeface[];
-  /** Every resolved token. Consumed by the contrast lint rule. */
+  /**
+   * Every resolved token, colours spelled `#rrggbb` whatever the theme wrote,
+   * and a translucent `--border` as the colour it renders over `--background`.
+   * Consumed by the contrast lint rule, which then needs to read only one
+   * format to see every colour the build accepted.
+   */
   tokens: Record<string, string>;
   /** Human-readable ratio lines, echoed by the generator so CI shows the maths. */
   report: string[];
@@ -149,6 +160,26 @@ export interface CompiledTheme {
 
 function norm(selector: string): string {
   return selector.replace(/\s+/g, " ").trim();
+}
+
+const URL_REF = /url\(\s*['"]?([^'")]+)['"]?\s*\)/g;
+
+/** A `url()` reference as a path inside `assets/`, the way theme.json spells one. */
+function assetPath(ref: string): string {
+  return ref.trim().replace(/^\.?\//, "");
+}
+
+/**
+ * The one place a token may be set: a `:root` rule at the top level of the
+ * file. Nested in `@media` or `@supports`, the same selector is a second
+ * palette that applies only some of the time.
+ */
+function isTokenBlock(node: postcss.Container | undefined): boolean {
+  return (
+    node?.type === "rule" &&
+    node.parent?.type === "root" &&
+    norm((node as Rule).selector) === TOKEN_SELECTOR
+  );
 }
 
 /**
@@ -210,7 +241,7 @@ function assertSurfaceSelector(selector: string, slug: string): string {
  * allowed because it is self-contained.
  */
 function assertLocalUrls(decl: Declaration, slug: string, dir: string): void {
-  for (const m of decl.value.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)) {
+  for (const m of decl.value.matchAll(URL_REF)) {
     const ref = m[1].trim();
     if (ref.startsWith("data:")) continue;
     if (/^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("//")) {
@@ -220,7 +251,7 @@ function assertLocalUrls(decl: Declaration, slug: string, dir: string): void {
           `image or icon with the theme instead.`,
       );
     }
-    const cleaned = ref.replace(/^\.?\//, "");
+    const cleaned = assetPath(ref);
     const onDisk = path.join(dir, "assets", cleaned);
     if (!fs.existsSync(onDisk)) {
       throw new ThemeError(
@@ -232,27 +263,119 @@ function assertLocalUrls(decl: Declaration, slug: string, dir: string): void {
 }
 
 function rewriteUrls(value: string, slug: string): string {
-  return value.replace(
-    /url\(\s*['"]?([^'")]+)['"]?\s*\)/g,
-    (whole, ref: string) => {
-      const r = ref.trim();
-      if (r.startsWith("data:")) return whole;
-      return `url("/themes/${slug}/${r.replace(/^\.?\//, "")}")`;
-    },
-  );
+  return value.replace(URL_REF, (whole, ref: string) => {
+    const r = ref.trim();
+    if (r.startsWith("data:")) return whole;
+    return `url("/themes/${slug}/${assetPath(r)}")`;
+  });
 }
 
-/** Resolve a block's declarations to concrete values, following `var()` chains. */
-function resolveBlock(raw: Map<string, string>): Map<string, string> {
+/**
+ * Resolve a block's declarations to concrete values, following `var()` chains.
+ *
+ * A chain that ends in nothing fails the build. It used to drop the token from
+ * the result, and every check after this one reads the result: a
+ * `--primary: var(--brand-cyan)` with no `--brand-cyan` passed the completeness
+ * check (`--primary` IS declared) and then skipped both primary pairs.
+ */
+function resolveBlock(
+  raw: Map<string, string>,
+  slug: string,
+): Map<string, string> {
   const out = new Map<string, string>();
   for (const [name, value] of raw) {
-    const resolved = resolveVar(value, raw);
-    if (resolved != null) out.set(name, resolved);
+    const r = resolveVar(value, raw, [name]);
+    if ("value" in r) {
+      out.set(name, r.value);
+    } else if ("missing" in r) {
+      const via = r.chain.slice(1).map((t) => ` through --${t}`).join("");
+      throw new ThemeError(
+        `themes/${slug}/theme.css: --${name} resolves${via} to var(--${r.missing}), but :root never ` +
+          `sets --${r.missing}. An unresolved var() is unset in the browser — a transparent surface ` +
+          `or invisible text — and the build cannot measure it. Set --${r.missing} in :root, or give ` +
+          `--${name} a literal value.`,
+      );
+    } else {
+      throw new ThemeError(
+        `themes/${slug}/theme.css: --${name} never resolves: ` +
+          `${r.loop.map((t) => `--${t}`).join(" → ")} is a loop. A var() chain must end in a literal value.`,
+      );
+    }
+  }
+  return out;
+}
+
+/**
+ * Parse every colour token, not only the ones a contrast pair names.
+ *
+ * Parsing only the paired tokens let `--muted`, `--border` and the `--brand-*`
+ * literals take `oklch()` or `color-mix()` and pass. Those are tokens the lint
+ * rule measures per element (`bg-muted` is in its most common finding), so a
+ * value nobody can read is coverage lost, whichever check was going to use it.
+ *
+ * A translucent colour is refused for the same reason: what it looks like
+ * depends on what is painted behind it, so it has no one colour to measure,
+ * and measuring its RGB as though it were opaque overstates its contrast.
+ *
+ * `--border` is the one exception. It is ungated, and a translucent hairline
+ * that takes on the surface it divides is a common idiom, so it may carry
+ * alpha. It is composited over `--background` here, so every later check and
+ * the token table the lint rule reads see the colour it renders as on the page.
+ */
+function parseColours(
+  resolved: Map<string, string>,
+  slug: string,
+): Map<string, Rgb> {
+  const parsed = new Map<string, Color>();
+  for (const [name, value] of resolved) {
+    if (KIND_OF.get(name) !== "color") continue;
+    const color = parseColor(value);
+    if (color == null) {
+      throw new ThemeError(
+        `themes/${slug}/theme.css: --${name} is "${value}", which the build cannot evaluate. ` +
+          `Contrast is verified at build time and per element by the lint rule, so every colour ` +
+          `token must be a hex, rgb() or hsl() literal — or a var() chain ending in one. A value ` +
+          `neither can read is a token the contrast checks silently stop covering.`,
+      );
+    }
+    parsed.set(name, color);
+  }
+
+  // The ground is known — a theme is one palette — so it is what a
+  // translucent --border is composited over, and what the message for any
+  // other translucent token names the colour it renders as on. It has to be
+  // opaque itself, so it is checked first.
+  const ground = parsed.get("background");
+  const refuse = (name: string, color: Color) => {
+    const over =
+      ground && ground.alpha === 1 && name !== "background"
+        ? ` Over this theme's --background that is ` +
+          `${toHex(composite(color.rgb, ground.rgb, color.alpha))}.`
+        : "";
+    return new ThemeError(
+      `themes/${slug}/theme.css: --${name} is "${resolved.get(name)}", which is translucent. Its ` +
+        `colour depends on whatever is painted behind it, so the build cannot measure its contrast — ` +
+        `and measured as if opaque, it would pass when it should not. Use the opaque colour it ` +
+        `should render as.${over}`,
+    );
+  };
+  if (ground && ground.alpha < 1) throw refuse("background", ground);
+
+  const out = new Map<string, Rgb>();
+  for (const [name, color] of parsed) {
+    if (color.alpha === 1) {
+      out.set(name, color.rgb);
+    } else if (name === "border" && ground) {
+      out.set(name, composite(color.rgb, ground.rgb, color.alpha));
+    } else {
+      throw refuse(name, color);
+    }
   }
   return out;
 }
 
 function checkContrast(
+  colours: Map<string, Rgb>,
   resolved: Map<string, string>,
   slug: string,
   escapes: ThemeEscape[],
@@ -261,21 +384,14 @@ function checkContrast(
   const used = new Set<string>();
 
   for (const pair of CONTRAST_PAIRS) {
+    const fg = colours.get(pair.fg);
+    const bg = colours.get(pair.bg);
+    // Only an optional token can be absent here: required ones are checked
+    // for completeness, and every declared colour was resolved and parsed or
+    // the build has already failed.
+    if (fg == null || bg == null) continue;
     const fgRaw = resolved.get(pair.fg);
     const bgRaw = resolved.get(pair.bg);
-    if (fgRaw == null || bgRaw == null) continue; // completeness is checked separately
-
-    const fg = parseColor(fgRaw);
-    const bg = parseColor(bgRaw);
-    if (fg == null || bg == null) {
-      const bad = fg == null ? pair.fg : pair.bg;
-      throw new ThemeError(
-        `themes/${slug}/theme.css: --${bad} is "${fg == null ? fgRaw : bgRaw}", which the ` +
-          `build cannot evaluate. Contrast is verified at build time, so every colour token must be a ` +
-          `hex, rgb() or hsl() literal — or a var() chain ending in one. A value the build cannot read ` +
-          `is a token the contrast gate silently stops covering.`,
-      );
-    }
 
     const ratio = contrastRatio(fg, bg);
     const required = RATIO_FOR[pair.kind];
@@ -312,13 +428,22 @@ function checkContrast(
   return used;
 }
 
+/** Where a declaration sits, for an error message: a selector or an at-rule. */
+function describeParent(node: postcss.Container | undefined): string {
+  if (node?.type === "rule") return `"${norm((node as Rule).selector)}"`;
+  if (node?.type === "atrule") return `@${(node as AtRule).name}`;
+  return "the top level";
+}
+
 export function compileTheme(args: {
   slug: string;
   dir: string;
   escapes: ThemeEscape[];
   declaredSurfaces: string[];
+  /** `fonts[].file` from theme.json, cross-checked against every `@font-face`. */
+  declaredFonts: string[];
 }): CompiledTheme {
-  const { slug, dir, escapes, declaredSurfaces } = args;
+  const { slug, dir, escapes, declaredSurfaces, declaredFonts } = args;
   const file = path.join(dir, "theme.css");
 
   if (!fs.existsSync(file)) {
@@ -394,6 +519,26 @@ export function compileTheme(args: {
           );
         }
 
+        // A :root inside @media or @supports is a palette that applies only
+        // some of the time. It used to be read like the top-level block, each
+        // value overwriting the last, so a prefers-color-scheme dark palette
+        // built cleanly with only its final value of each token measured.
+        if (!isTokenBlock(rule)) {
+          const at = rule.parent?.type === "atrule" ? (rule.parent as AtRule) : null;
+          const where = at ? `@${at.name} ${at.params}`.trim() : "another rule";
+          throw new ThemeError(
+            `themes/${slug}/theme.css: ":root" inside ${where} sets tokens a second time. A theme ` +
+              `declares one palette, in a top-level :root — a token block that applies only some of ` +
+              `the time is a second palette, and the build cannot measure the one the browser ` +
+              `renders. ` +
+              (at?.params.includes("prefers-color-scheme")
+                ? `A dark look is its own theme: move this block to themes/${slug}-dark/theme.css, ` +
+                  `as its :root. See docs/themes/architecture.md.`
+                : `Styling that varies by viewport or feature belongs in a .mix-* surface rule, which ` +
+                  `may sit inside @media or @supports.`),
+          );
+        }
+
         rule.walkDecls((decl) => {
           if (!decl.prop.startsWith("--")) {
             throw new ThemeError(
@@ -423,6 +568,21 @@ export function compileTheme(args: {
     }
   });
 
+  // ── tokens live in :root and nowhere else ─────────────────────────────────
+  // Only :root's declarations used to be inspected; a surface rule had its
+  // selector checked and its body ignored. So `.mix-button { --primary: … }`
+  // built cleanly and repainted every button in a colour the contrast gate
+  // never saw.
+  root.walkDecls((decl: Declaration) => {
+    if (!decl.prop.startsWith("--") || isTokenBlock(decl.parent)) return;
+    throw new ThemeError(
+      `themes/${slug}/theme.css: ${describeParent(decl.parent)} sets ${decl.prop}. Custom ` +
+        `properties are set in :root and nowhere else: anywhere else, one either overrides the ` +
+        `palette where the contrast gate never measured it, or is a value nothing reads. Set the ` +
+        `token in :root, or style the surface with ordinary properties.`,
+    );
+  });
+
   // ── completeness ──────────────────────────────────────────────────────────
   const missing = REQUIRED_TOKENS.filter((t) => !tokens.has(t.name));
   if (missing.length > 0) {
@@ -436,8 +596,9 @@ export function compileTheme(args: {
 
   // ── contrast ──────────────────────────────────────────────────────────────
   const report: string[] = [];
-  const resolved = resolveBlock(tokens);
-  const usedEscapes = checkContrast(resolved, slug, escapes, report);
+  const resolved = resolveBlock(tokens, slug);
+  const colours = parseColours(resolved, slug);
+  const usedEscapes = checkContrast(colours, resolved, slug, escapes, report);
 
   for (const e of escapes) {
     if (!usedEscapes.has(e.pair)) {
@@ -465,6 +626,37 @@ export function compileTheme(args: {
         `\nThe manifest is how a reviewer sees a theme's reach without reading its CSS; it has to be ` +
         `accurate to be worth anything.`,
     );
+  }
+
+  // ── …and about the fonts it ships, in both directions ─────────────────────
+  // Read from each @font-face's `src`, not by searching the file for the name,
+  // which a comment satisfies. `data:` sources carry no file to declare.
+  const loaded = new Set<string>();
+  root.walkAtRules("font-face", (at: AtRule) => {
+    at.walkDecls("src", (decl: Declaration) => {
+      for (const m of decl.value.matchAll(URL_REF)) {
+        if (!m[1].trim().startsWith("data:")) loaded.add(assetPath(m[1]));
+      }
+    });
+  });
+  const manifestFonts = new Set(declaredFonts.map(assetPath));
+  for (const file of manifestFonts) {
+    if (!loaded.has(file)) {
+      throw new ThemeError(
+        `themes/${slug}/theme.json: fonts[] declares "${file}", but no @font-face in ` +
+          `theme.css loads it. A font file shipped to every user and never used is pure weight.`,
+      );
+    }
+  }
+  for (const file of loaded) {
+    if (!manifestFonts.has(file)) {
+      throw new ThemeError(
+        `themes/${slug}/theme.css: an @font-face loads "${file}", which fonts[] in theme.json ` +
+          `does not declare. The manifest is how a reviewer sees what a theme ships; a font ` +
+          `missing from it is a dependency hidden from review. Add an entry with its family, ` +
+          `file, weight and style.`,
+      );
+    }
   }
 
   // ── rewrite ───────────────────────────────────────────────────────────────
@@ -498,7 +690,12 @@ export function compileTheme(args: {
   });
 
   return {
-    tokens: Object.fromEntries(resolved),
+    tokens: Object.fromEntries(
+      [...resolved].map(([name, value]) => {
+        const rgb = colours.get(name);
+        return [name, rgb ? toHex(rgb) : value];
+      }),
+    ),
     css: root.toString(),
     surfaces: styled,
     swatches,
