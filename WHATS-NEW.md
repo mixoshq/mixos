@@ -40,6 +40,74 @@ just pulled.
   both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
   new app, and the old slug keeps the old data. Migration 0010; run
   `npm run db:local` to apply it.
+- **Registry installs take turns safely.** While another install is running,
+  the dialog says so and offers **Try again**. If an install is paused for more
+  than 15 minutes (a laptop asleep mid-download) and another starts meanwhile,
+  the paused one stops before its next write and says what it left on disk.
+- **Every build knows its version.** The admin pages show it with the commit,
+  e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
+  into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
+  from Vercel, Render and Railway's own variables; on Docker Compose, build with
+  `MIXOS_COMMIT=$(git rev-parse HEAD)`, and on Coolify set
+  `MIXOS_COMMIT=$SOURCE_COMMIT`. See `docs/hosting/README.md`. **Breaking:** an
+  extension's `requiresMixOS` is now checked in a checkout too, against
+  `package.json`; bump it locally to try an extension that needs a newer MixOS.
+- **A built deployment browses mixos.org.** The Docker image on any host, and
+  Vercel, ignore `MIXOS_REPOSITORY_URL` unless it names their own machine
+  (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), and log it.
+  **Breaking:** a deployment pointed at another catalogue now browses
+  mixos.org; a source checkout still honours the override.
+- **Releases.** A version of MixOS is an annotated tag `vX.Y.Z` on `main` with
+  a GitHub Release, whose notes are its section of `CHANGELOG.md`.
+  `/mixos deploy release` opens the release PR, which sets the version in
+  `package.json` and writes that section from the Conventional Commits since
+  the last release (`scripts/release-prep.ts`). Once it merges, run it again
+  for the commands that tag the merge commit and publish the GitHub Release,
+  which a person runs. To upgrade a deployment, merge the newest release tag
+  into your fork rather than `upstream/main`
+  (`docs/hosting/README.md#upgrading`). Prereleases are `vX.Y.Z-rc.N`.
+- **Two platform migrations can't share a number.** The ledger records a
+  migration by its number, so the release step and `npm run db:migrate` applied
+  one of two files with the same number and silently skipped the other. Now
+  they apply nothing, the build and `npm run dev:docker` stop, and Danger fails
+  a PR that adds a number already on `main`, each naming both files and the
+  next free number. If a merge brings in a migration with your number, rename
+  yours to the next free number and change its `platform_schema_version` value
+  to match.
+- **A maintenance page while the database is behind.** When the platform
+  schema is behind the build, every page shows a plain maintenance page and
+  every API route, `/api/cron`, `/api/webhooks` and `/api/mcp` included,
+  answers 503 with `Retry-After: 30` until the release step runs. Only
+  `/api/health/live` and `/api/health/ready` answer as usual. Locally,
+  `npm run db:local` brings it back. **Breaking:** `/api/health/ready` returns
+  only `status` and `reason`. The schema versions, the count of pending app
+  migrations and the message are gone; the server log has them.
+- **Vercel production builds run the release step.** `vercel.json` makes
+  `npm run vercel-build` the build command: `npm run build`, then the release
+  step when `VERCEL_ENV` is `production`, over Neon's `DATABASE_URL_UNPOOLED`
+  when it names the same database. Preview builds never run it. A build that
+  doesn't compile leaves the database alone, and a failed release step fails
+  the build, so the previous deployment keeps serving. Set
+  `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` on the project and the
+  first deploy creates the admin. Migrations have to work with the deployment
+  still serving: add in one release, remove in a later one. See
+  `docs/hosting/vercel.md`.
+- **`scripts/smoke-test-app.ts` tests real routes.** It looked for routes
+  with a pattern no `defineRoute` route matches, so it sent no requests, and
+  it skipped apps without connectors. It now reads routes from the generated
+  registry and tests every app, or the slugs you name, with GET and HEAD
+  only. Sign in with `SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`;
+  `--base-url` points it at another server. Activate and grant an app first:
+  one that isn't is reported, not worked around. It exits 1 when a route
+  fails or can't be reached, and its last line is a JSON verdict.
+- **A deactivated app runs nothing.** None of its modules is imported while it
+  is off: its API routes, over HTTP or through `callAppRoute()`, its jobs,
+  syncs, services and `hooks.ts`. Run now refuses its jobs, which Scheduled
+  Jobs shows as **App inactive**, and a consumer calling one of its services
+  gets `PROVIDER_INACTIVE`. Activating it takes effect on the next request,
+  with no restart. Run now, a job's Enable and Disable, and Start and Stop
+  tick are now audited, as `app.job.run`, `app.job.enable`, `app.job.disable`,
+  `scheduler.start` and `scheduler.stop`.
 - **Disable a connector.** Admin > Connectors has Disable and Enable on each
   connector. Disabling names the apps that use it and asks first. While it is
   off, apps' calls to it fail with "disabled by an administrator", and its
@@ -48,6 +116,8 @@ just pulled.
   `theme.apply` too. See `docs/connectors/credentials.md`.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
+- **Fix:** a connection string that doesn't parse is reported by its variable's
+  name, and the release step and the app no longer print it, password included.
 
 ## 2026-10-07
 

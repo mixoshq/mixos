@@ -481,6 +481,14 @@ Docker Desktop's Resource Saver pauses the VM after ~5 minutes idle. Turn it off
 in Settings → Resources if the 5-minute cron cadence keeps landing on the
 boundary.
 
+**Preflight fails on `supabase/migrations`.** Two platform migrations share a
+number, usually because a merge brought in someone else's migration with the
+number yours took. `npm run dev:docker` stops before starting anything and
+names both files and the next free number: rename yours to it and change its
+`platform_schema_version` value to match. Running the Supabase CLI directly
+(`npm run db:local`, `npm run db:push`) reports the same problem only as
+`duplicate key value violates unique constraint "schema_migrations_pkey"`.
+
 **`supabase start` fails or containers are in a weird state.**
 `npm run docker:reset`, then `npm run dev:docker`. Reset **deletes the local
 database volume** — the seeded admin, connector credentials, and any app data
