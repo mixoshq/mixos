@@ -6,11 +6,21 @@ a Preview deployment, and on any host merging into `main` deploys Production.
 `.github/workflows/ci.yml` gates the PR (lint, audit, repository-URL check,
 typecheck, build). This action stops at the PR — merging is a human decision.
 
-## Flags
+## Modes
+
+`/mixos deploy` on its own runs steps 0 to 7 below. One word after it does
+something else instead:
 
 - `--reset` — do none of the above. Instead, return to `main`, bring it up
   to date, and clean out branches that are finished. See **Reset** at the
-  end of this file. Anything else after `deploy` is ignored.
+  end of this file.
+- `release` — do none of the above. Instead, cut a version of MixOS: open
+  the release PR, or, once it has merged, hand a person the commands that
+  tag it and publish its GitHub Release. `--pre` after it makes a
+  prerelease. For maintainers of the core repository. See **Release** at
+  the end of this file.
+
+Anything else is ignored.
 
 ## 0. Ground rules
 
@@ -27,7 +37,8 @@ typecheck, build). This action stops at the PR — merging is a human decision.
   here. Each can target a production database — the linked hosted project, or
   whatever `DATABASE_URL` names — so on a feature branch it would push
   unreviewed schema straight at production. Applying schema to production is
-  the deploy's release step (docs/hosting/README.md).
+  the deploy's release step (docs/hosting/README.md). That release step has
+  nothing to do with `/mixos deploy release`, which makes versions.
 - Every commit message ends with the attribution trailer this session was
   given (the `Co-Authored-By: Claude …` line). If the session has none, omit it
   rather than invent one.
@@ -148,9 +159,9 @@ look at `git log --format=%s -15` for the register:
   about the *what*. If a change needs explaining, a short body saying **why**,
   wrapped at 72 columns.
 
-The type and scope are what a future release derives its version bump and
-changelog from (see `docs/plans/20260921_0842-release-versioning.md`), so a
-mislabeled commit costs more later than it saves now.
+The type and scope are what a release derives its version bump and
+changelog from (**Release**, at the end of this file), so a mislabeled
+commit costs more later than it saves now.
 
 If everything belongs to one logical change, one commit is correct. Do not
 split for the sake of splitting.
@@ -471,3 +482,292 @@ If nothing is dead, say "Nothing to clean up" and stop.
 
 Three lines: `main` is at `<short sha>` (`<subject>`), which branches were
 deleted, which were kept and why. Nothing else.
+
+## Release: `/mixos deploy release`
+
+For maintainers of the core repository. Cuts a version of MixOS, which is
+three things, in this order:
+
+1. **The release PR.** It sets `package.json`'s version and adds that
+   version's section to `CHANGELOG.md`, both worked out from the
+   Conventional Commits since the last release. This action opens it.
+2. **The tag.** An annotated `vX.Y.Z` on the commit the PR put on `main`,
+   created and pushed by a person after the merge.
+3. **The GitHub Release** for that tag, published by the same person, with
+   the `CHANGELOG.md` section as its notes.
+
+Run it on `main`. Before there is a release PR it opens one (V1 to V5).
+Once the PR has merged, it gives a person the commands for the tag and the
+GitHub Release (V6), and checks the result (V7). Add `--pre` for a
+prerelease, `vX.Y.Z-rc.N`, which GitHub marks as a prerelease.
+
+`scripts/release-prep.ts` does the arithmetic, so the version and the notes
+come out the same whoever runs it. The design is in
+`docs/plans/20260921_0842-release-versioning.md`.
+
+### V0. Ground rules
+
+Section 0's rules hold, and:
+
+- **Never merge the release PR, create or push a tag, or create a GitHub
+  Release.** Merging ships the version to every host that deploys `main`,
+  and the tag and the GitHub Release publish it to everyone who upgrades.
+  Print the commands; a person runs them.
+- **Never run `npm run release`.** It is the database release step and has
+  nothing to do with versions.
+- **Only in the core repository.** A fork takes its versions from the core's
+  tags, and a `v*` tag of its own would collide with them.
+- **The release commit's subject is exactly `chore(os): release vX.Y.Z`.**
+  That is how a later release knows not to count it.
+
+### V1. Read the situation
+
+Run, together:
+
+```bash
+git remote get-url origin
+git branch --show-current
+git status --porcelain
+git fetch origin main --tags --quiet
+git rev-list --left-right --count origin/main...HEAD
+gh pr list --state open --json number,headRefName,url --jq '.[] | select(.headRefName | startswith("release/"))'
+```
+
+Stop, and say why, unless all of these hold:
+
+- `origin` is `github.com/mixoshq/mixos`, over https or ssh.
+- The branch is `main`.
+- `git status --porcelain` printed nothing.
+- The fetch succeeded. One that says a tag `would clobber existing tag`
+  means a local tag differs from `origin`'s.
+- The second count is 0: `main` has no commits that `origin/main` lacks.
+  Local commits on `main` are a mistake, as in R2.
+- No release PR is open. If one is, give its URL: merge it and run this
+  again, or close it to start over.
+
+If the first count is not 0, `main` is behind. Bring it up to date with
+`git pull --ff-only origin main`.
+
+Then make sure every release tag here is the one on `origin`:
+
+```bash
+git ls-remote --tags --refs origin 'v*'
+git for-each-ref --format='%(objectname)%09%(refname)' 'refs/tags/v*'
+```
+
+Each local line must appear in the remote list with the same object name. A
+tag that exists only here, or differs from `origin`'s, would decide the next
+version from a release nobody published. Stop and show it: whether to push
+it or delete it (`git tag -d <tag>`) is the person's call.
+
+Then CI on this commit, and the check that matters most to a release:
+
+```bash
+gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)" --json status,conclusion,url --jq '.[0]'
+npm run verify:repository-url
+```
+
+The CI run must be `completed`, with conclusion `success`. If it is still
+running, give its URL and stop until it finishes. Failed, cancelled or
+missing: stop. `verify:repository-url` must pass. CI runs it too, but a
+release is the last moment a catalogue URL pinned away from mixos.org can be
+fixed with an edit rather than another release
+(`docs/security-architecture.md` §31).
+
+Without an authenticated `gh` (`gh auth status` fails), skip the PR and CI
+commands. Give `https://github.com/mixoshq/mixos/commit/<sha>` and wait for
+the person to confirm that no release PR is open and the commit's checks
+are green.
+
+### V2. Ask where the release stands
+
+```bash
+npx tsx scripts/release-prep.ts            # add --pre for a prerelease
+```
+
+It reads git and the working tree, writes nothing, and answers one of three
+ways:
+
+- **`vX.Y.Z has merged and is not tagged yet.`** The release PR is in. Go to
+  V6.
+- **`Next release: vX.Y.Z, …`** Go to V3.
+- **`Nothing to release: …`** Say so, and stop.
+
+Before going to V3, or stopping on "Nothing to release", check the last
+release if there has been one. When `package.json`'s version
+(`node -p "require('./package.json').version"`) has a tag, run V7's checks
+for it. If any fails, report it and stop: a release is finished before the
+next one starts.
+
+An error means `package.json`, `CHANGELOG.md` and the tags disagree, which
+needs a person: print it and stop.
+
+### V3. Show the plan and wait
+
+Print, then **stop and wait for a yes**:
+
+```
+Release: v0.2.0, a minor release since v0.1.0          (or: the first release)
+  <why it is a minor or a patch, as the helper put it>  (omit for the first release)
+  Check: <the helper's warnings, one per line>          (omit if none)
+
+Branch: release/v0.2.0  (new, from main)
+Commit: chore(os): release v0.2.0
+  package.json, package-lock.json, CHANGELOG.md         (the first release: CHANGELOG.md)
+
+The notes:
+
+<the section, exactly as the helper printed it>
+
+Then: push, and open the release PR against main. After it merges, run
+/mixos deploy release again, on main, for the tag and the GitHub Release.
+```
+
+How the version is worked out, for when the person asks:
+
+| Since the last stable release | Version | Example |
+| --- | --- | --- |
+| Any commit is breaking (`!` or `BREAKING CHANGE:`), is scoped `os`, or changes a file outside `apps/`, `connectors/` and `themes/` (build plans aside) | minor | `v0.1.3` → `v0.2.0` |
+| Anything else | patch | `v0.1.3` → `v0.1.4` |
+| No stable release yet | `package.json`'s version | `v0.1.0` |
+| With `--pre` | one of the above, plus `-rc.N` | `v0.2.0-rc.1`, then `v0.2.0-rc.2` |
+
+Major stays 0 until MixOS is declared 1.0. A commit that changes platform
+files under another scope counts as `os`, and the helper says which. A
+stable release's notes cover everything since the last stable release, and a
+prerelease's notes cover everything since the prerelease before it.
+
+The person may choose another version, as long as it is above the current
+one; the helper refuses anything else. They may also reword the notes, as
+long as each entry keeps its short SHA: that is how V6 finds commits the
+notes miss. Do not proceed on silence, a question or a partial answer. After
+any change, show the plan again.
+
+### V4. Write the release commit, on a branch
+
+If `release/v0.2.0` already exists (`git branch -a --list '*release/v0.2.0'`),
+an earlier attempt is still around: stop and show it. Otherwise:
+
+```bash
+git switch -c release/v0.2.0
+npx tsx scripts/release-prep.ts --write 0.2.0
+git status --porcelain
+```
+
+`--write` refuses a version that is not above `package.json`'s, is already
+tagged, or already has a section; print its error and stop. `git status
+--porcelain` must list `package.json`, `package-lock.json` and
+`CHANGELOG.md`, and nothing else. The first release lists `CHANGELOG.md`
+alone, since `package.json` already holds its version.
+
+Apply any rewording the person asked for in V3. Then commit as in step 5,
+with the session's trailer, and push:
+
+```bash
+git add package.json package-lock.json CHANGELOG.md
+git commit -m "$(cat <<'MSG'
+chore(os): release v0.2.0
+
+Co-Authored-By: …
+MSG
+)"
+git push -u origin HEAD
+```
+
+### V5. Open the release PR
+
+Title: `chore(os): release v0.2.0`. Body:
+
+```
+## Release v0.2.0
+
+<one line: a minor release since v0.1.0, or the first release>
+
+<the CHANGELOG.md section, without its heading line>
+
+## After merging
+
+Merge this before anything else merges, so the release holds exactly the
+commits in its notes. Then run `/mixos deploy release` on an up-to-date
+`main`. It finds the merge commit and gives the commands that tag it and
+publish the GitHub Release, for a person to run.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+```
+
+Open it as in step 6: `gh pr create --base main …`, or the compare link and
+the body to paste. Danger labels it `os-change`, since it changes root
+files, so it needs admin review like any OS change.
+
+Final message: the version, the PR URL, and that once it merges,
+`/mixos deploy release` on `main` gives the commands for the tag and the
+GitHub Release. Nothing else.
+
+### V6. After the merge: the tag and the GitHub Release
+
+V2 said `vX.Y.Z has merged and is not tagged yet`. The helper named the
+release commit, which is the first commit on `main` with the version's
+`CHANGELOG.md` section (the release PR's merge commit), and printed three
+commands.
+
+Before handing them over:
+
+- CI must be green on the release commit. Check it as in V1, with its SHA in
+  place of `HEAD`.
+- `git ls-remote --tags origin v0.2.0` must print nothing.
+- If the helper listed commits **in the release but not in its notes**,
+  show them and wait. They merged between the release PR's branch and its
+  merge. The person may go ahead, adding them to the GitHub Release's notes
+  and later to `CHANGELOG.md`, or stop.
+
+Print, and stop:
+
+```
+v0.2.0 is ready to tag: <short sha> <subject>
+CI: ✓ <run URL>
+
+For you to run, from this checkout:
+
+  <the helper's three commands, exactly>
+
+Then say "done", or run /mixos deploy release again, and I'll check them.
+```
+
+For a prerelease, the helper ends the last command with `--prerelease`.
+Without `gh`, the GitHub Release is made at
+`https://github.com/mixoshq/mixos/releases/new?tag=v0.2.0`: title `v0.2.0`,
+the output of `npx tsx scripts/release-prep.ts --notes 0.2.0` as its
+description, and **Set as a pre-release** ticked for a prerelease.
+
+Never run the three commands yourself.
+
+### V7. Check a finished release
+
+When the person says it's done, and from V2:
+
+```bash
+git fetch origin --tags --quiet
+git ls-remote --tags --refs origin v0.2.0
+git rev-parse v0.2.0
+git cat-file -t v0.2.0
+git merge-base --is-ancestor v0.2.0 origin/main && echo on-main
+git show v0.2.0:package.json | grep -m1 '"version"'
+gh release view v0.2.0 --json url,isDraft,isPrerelease
+```
+
+- The tag on `origin` is the same object as the one here.
+- `cat-file -t` prints `tag`: the tag is annotated. `commit` means a
+  lightweight tag.
+- It is on `main`, and `package.json` there holds its version. Straight
+  after V6, it also names the release commit V6 gave
+  (`git rev-parse 'v0.2.0^{commit}'`).
+- The GitHub Release exists, is not a draft, and is a prerelease exactly
+  when the version has a suffix.
+
+A failed check is the person's to fix. A pushed tag may already have been
+fetched by others, so moving or deleting it is their decision.
+
+From V2, when every check passes, carry on with V2's answer. Otherwise, and
+when the person said it's done, the final message is three lines: the tag and
+the commit it names, the GitHub Release's URL, and any check that failed.
+Nothing else.

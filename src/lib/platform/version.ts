@@ -20,49 +20,78 @@
  * means, and any pre-release or build suffix dropped. Anything else is
  * unparseable and is treated as unknown — see `satisfiesMinimum`.
  *
- * ── UNKNOWN IS NOT A FAILURE ────────────────────────────────────────────────
+ * ── THE VERSION IS STAMPED, FROM ONE SOURCE ─────────────────────────────────
  *
- * The version is null outside a tagged build, which is every developer checkout
- * and every non-release CI run. Refusing installs there would make the gate's
- * first effect "nothing can be installed in development", which is how a safety
- * check gets an escape hatch bolted on and then left open. Unknown resolves to
- * `allowed: true` with a reason the caller can surface.
+ * The version is `package.json`'s. The registry generator stamps it into
+ * `src/generated/build-info.ts` as `MIXOS_VERSION`, and every build runs the
+ * generator (`prebuild`; the Dockerfile runs `npm run build`), so every host
+ * and every checkout knows its version. It is stable for a given checkout, so
+ * `predev` rewrites an identical file.
  *
- * ── WHY THIS READS THE ENVIRONMENT AND NOT A GENERATED CONSTANT ─────────────
+ * No environment variable overrides it. Two sources for one fact drift apart,
+ * and `package.json` is the one that is in every build context.
  *
- * `MIXOS_RELEASE` already exists, already carries the tag, and is already the
- * thing `src/lib/repository/client.ts` uses to decide whether this is a release
- * build. It is stamped into the RUNNER stage of the image. Generating a second
- * copy at build time would put the authoritative value and a stale duplicate of
- * it in two files — and the duplicate would be the stale one, because the
- * builder stage never sees the runner stage's ARG.
+ * A checkout of unreleased work carries the last release's number, so an
+ * extension whose floor is newer is refused there too. To try one, bump
+ * `package.json` locally.
+ *
+ * ── THE COMMIT IS READ AT RUNTIME ───────────────────────────────────────────
+ *
+ * The build cannot reliably know it: .dockerignore keeps .git out of the image's
+ * build context, and a SHA in the generated file would change on every commit
+ * and make `predev` rewrite it each time. So it comes from the environment,
+ * where each host names it differently — see `mixosCommit`.
  *
  * Read inside functions rather than at module scope: `next build` loads server
  * modules to collect page data, and nothing in this project may require an
  * environment variable to be present for that to work.
  */
 
-import { EXPECTED_SCHEMA_VERSION } from "@/generated/build-info";
+import { EXPECTED_SCHEMA_VERSION, MIXOS_VERSION } from "@/generated/build-info";
 
 export { EXPECTED_SCHEMA_VERSION };
 
-/**
- * The release this instance is running, e.g. `"0.4.2"`, or null when this is
- * not a tagged build.
- *
- * Normalised off the `vX.Y.Z` tag form that `MIXOS_RELEASE` carries, because
- * every manifest and every comparison in the codebase speaks `X.Y.Z`.
- */
-export function mixosVersion(): string | null {
-  const raw = (process.env.MIXOS_RELEASE ?? "").trim();
-  if (!raw) return null;
-  return raw.replace(/^v/i, "");
+/** The release this code is, e.g. `"0.4.2"`: `package.json`'s version, stamped at build time. */
+export function mixosVersion(): string {
+  return MIXOS_VERSION;
 }
 
-/** The commit this image was built from, when the build supplied one. */
-export function mixosCommit(): string | null {
-  const raw = (process.env.MIXOS_COMMIT ?? "").trim();
-  return /^[0-9a-f]{7,40}$/i.test(raw) ? raw.toLowerCase() : null;
+/**
+ * Where the commit can come from, in order.
+ *
+ *   - `MIXOS_COMMIT`: the Docker image's build argument, which
+ *     deploy/docker-compose.yml passes from the shell (Coolify maps its own
+ *     `SOURCE_COMMIT` to it). The image sets it to an empty string when the
+ *     build passed none.
+ *   - `VERCEL_GIT_COMMIT_SHA`, `RENDER_GIT_COMMIT`, `RAILWAY_GIT_COMMIT_SHA`:
+ *     what those hosts set on a deployment built from git.
+ */
+const COMMIT_VARIABLES = [
+  "MIXOS_COMMIT",
+  "VERCEL_GIT_COMMIT_SHA",
+  "RENDER_GIT_COMMIT",
+  "RAILWAY_GIT_COMMIT_SHA",
+] as const;
+
+/** A full SHA-1, or an abbreviation of one. */
+const COMMIT_SHA = /^[0-9a-f]{7,40}$/i;
+
+/**
+ * The commit this deployment was built from, or null when nothing names one.
+ *
+ * The first variable that holds a commit SHA, not the first that is set. Render
+ * and Railway build the image without an argument, so it carries an empty
+ * `MIXOS_COMMIT`, and stopping at the first value that is set would never reach
+ * their own variables. A value that is not a SHA is passed over the same way.
+ */
+export function mixosCommit(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+  for (const name of COMMIT_VARIABLES) {
+    const raw = (env[name] ?? "").trim();
+    if (COMMIT_SHA.test(raw)) return raw.toLowerCase();
+  }
+  return null;
 }
 
 /** A parsed `X.Y.Z`. Missing minor/patch read as 0, so "1" is "1.0.0". */
@@ -106,7 +135,7 @@ function compare(a: Parsed, b: Parsed): number {
 }
 
 export interface MinimumCheck {
-  /** Whether the caller may proceed. Unknown versions allow. */
+  /** Whether the caller may proceed. A floor that cannot be compared allows. */
   allowed: boolean;
   /** True only when both sides parsed and the comparison actually happened. */
   checked: boolean;
@@ -117,11 +146,12 @@ export interface MinimumCheck {
 /**
  * Is this instance at or above `required`?
  *
- * Three outcomes, and the middle one is the interesting one:
+ * Three outcomes:
  *
  *   - Both sides parse and the instance is new enough → allowed, checked.
- *   - Either side is unknown or unparseable → allowed, NOT checked, with a
- *     reason. The caller decides whether to surface it; nothing is blocked.
+ *   - The floor is not a version → allowed, NOT checked, with a reason. The
+ *     caller decides whether to surface it; nothing is blocked over a field
+ *     this code cannot read.
  *   - Both sides parse and the instance is too old → refused, with a message
  *     naming both versions, because "incompatible" without the numbers sends
  *     the reader to the changelog to work out what this function already knew.
@@ -130,9 +160,8 @@ export function satisfiesMinimum(
   // Nullable because the repository sends an absent requirement as an explicit
   // `null`, the same way it does for `subpath`.
   required: string | null | undefined,
-  // A default expression, not a module constant: it must be evaluated per call
-  // so that the environment is read at request time rather than at import time.
-  current: string | null = mixosVersion(),
+  // This build's stamped version unless a caller compares another.
+  current: string = mixosVersion(),
 ): MinimumCheck {
   if (!required || !required.trim()) {
     return { allowed: true, checked: false };
@@ -149,17 +178,8 @@ export function satisfiesMinimum(
     };
   }
 
-  if (!current) {
-    return {
-      allowed: true,
-      checked: false,
-      reason:
-        `The listing requires MixOS ${required} or newer. This build is not a ` +
-        `tagged release, so it has no version to compare and the requirement ` +
-        `was not enforced.`,
-    };
-  }
-
+  // The generator refuses a `package.json` version it cannot parse, so a build's
+  // own version always gets past this; a caller's argument might not.
   const have = parseVersion(current);
   if (!have) {
     return {
@@ -187,9 +207,16 @@ export function satisfiesMinimum(
   return { allowed: true, checked: true };
 }
 
-/** Short, human-facing build identity. Used in admin surfaces and diagnostics. */
-export function describeBuild(): string {
-  const version = mixosVersion() ?? "untagged build";
-  const commit = mixosCommit();
-  return commit ? `${version} (${commit.slice(0, 12)})` : version;
+/**
+ * The build as admins see it: `MixOS 0.4.2 · commit 3e1f0a2`, or
+ * `commit unknown` when no source names one.
+ *
+ * Admin pages only. Nothing unauthenticated reports the version or the commit
+ * (docs/security-architecture.md §18).
+ */
+export function describeBuild(
+  version: string = mixosVersion(),
+  commit: string | null = mixosCommit(),
+): string {
+  return `MixOS ${version} · commit ${commit ? commit.slice(0, 7) : "unknown"}`;
 }

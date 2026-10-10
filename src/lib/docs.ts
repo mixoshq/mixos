@@ -7,7 +7,7 @@
  *
  * Deliberately NOT derived from `repositoryBaseUrl()`. That override exists so
  * the platform and the catalogue can be developed against each other, and it
- * carries a release-build lock because the catalogue decides what "verified"
+ * carries a built-deployment lock because the catalogue decides what "verified"
  * means for every install. Documentation decides nothing; a docs link that
  * followed the catalogue override would drag a security control into a place
  * it has no business being, to solve a problem nobody has (reading the docs
