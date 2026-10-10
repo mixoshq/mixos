@@ -11,6 +11,7 @@ import {
   isBodyless,
   isRateLimitExhausted,
   isSuccess,
+  nextPageLink,
   parseRetryAfter,
 } from "./status-map";
 import { TOKEN_KEYS, requestToken, requestedScopes } from "./oauth";
@@ -51,9 +52,19 @@ const DEFAULTS = {
 /**
  * Treat a token expiring within this window as already expired. A token that
  * dies mid-flight is indistinguishable from a rejected one and costs a wasted
- * round trip to discover.
+ * round trip to discover. Exported so the user-scoped grant check before a
+ * request (./user-grant.ts) draws the line in the same place.
  */
-const TOKEN_SKEW_MS = 60_000;
+export const TOKEN_SKEW_MS = 60_000;
+
+/**
+ * Renews a three-legged grant under its lock and returns the stored tokens
+ * afterwards — the shape `refreshConnectorTokens` and `refreshUserTokens`
+ * share. `rejected` is the access token the upstream just refused, if any.
+ */
+export type GrantRefresher = (
+  rejected?: string,
+) => Promise<Record<string, string>>;
 
 /** Verbs that are safe to replay. Anything else needs an explicit opt-in. */
 const IDEMPOTENT_VERBS = new Set(["GET", "HEAD", "OPTIONS", "PUT", "DELETE"]);
@@ -112,7 +123,13 @@ export abstract class HttpConnector implements BaseConnector {
    * instantiated. Two copies of it drifted once already — see that file.
    */
   get configured(): boolean {
-    return connectorConfigState(this.auth, this.credentials) === "ready";
+    return (
+      connectorConfigState(
+        this.auth,
+        this.credentials,
+        this.manifest?.credentialFields,
+      ) === "ready"
+    );
   }
 
   /**
@@ -126,6 +143,34 @@ export abstract class HttpConnector implements BaseConnector {
   abstract testConnection(): Promise<ConnectorTestResult>;
 
   protected credentials: Record<string, string> = {};
+
+  /**
+   * Whose grant a refresh renews. Null is the tenant's, in connector_configs.
+   *
+   * A user-scoped connector's tenant row holds the client id and secret and
+   * never a grant — each person's lives in user_connector_oauth — so a refresh
+   * of the tenant row found no refresh token, and a token that expired
+   * mid-request failed as `auth_failed` while `configured` still said true.
+   * The platform binds the caller's own grant instead; see `bindUserGrant`.
+   */
+  #userGrant: GrantRefresher | null = null;
+
+  /**
+   * Point this instance's token refresh at one person's grant.
+   *
+   * Platform-only: `initializeWithUserGrant` (./user-grant.ts) calls it before
+   * `initialize()`. It binds once, so nothing that holds the instance later can
+   * re-point it at somebody else's grant.
+   */
+  static bindUserGrant(connector: BaseConnector, refresh: GrantRefresher): void {
+    // A connector that does not extend this class never refreshes through it,
+    // so there is nothing to point anywhere.
+    if (!(connector instanceof HttpConnector)) return;
+    if (connector.#userGrant) {
+      throw new Error(`connector "${connector.name}" already has a grant bound.`);
+    }
+    connector.#userGrant = refresh;
+  }
 
   /**
    * Subclasses that need extra setup override this and call
@@ -181,6 +226,19 @@ export abstract class HttpConnector implements BaseConnector {
     init: RequestInit = {},
     opts: RequestOptions<T> = {},
   ): Promise<T | null> {
+    return (await this.send<T>(path, init, opts)).body;
+  }
+
+  /**
+   * `request()`, keeping the headers of the response that answered. Only
+   * `paginate()` needs them: a `link-header` API says where the next page is
+   * in a header rather than in the body.
+   */
+  private async send<T>(
+    path: string,
+    init: RequestInit,
+    opts: RequestOptions<T>,
+  ): Promise<{ body: T | null; headers: Headers }> {
     if (!this.configured) {
       throw new ConnectorError({
         category: "unconfigured",
@@ -284,7 +342,7 @@ export abstract class HttpConnector implements BaseConnector {
     init: RequestInit,
     opts: RequestOptions<T>,
     ctx: { verb: string; attempt: number; timeoutMs: number },
-  ): Promise<T | null> {
+  ): Promise<{ body: T | null; headers: Headers }> {
     const signals: AbortSignal[] = [AbortSignal.timeout(ctx.timeoutMs)];
     if (init.signal) signals.push(init.signal);
 
@@ -342,11 +400,14 @@ export abstract class HttpConnector implements BaseConnector {
       });
     }
 
-    if (opts.responseType === "raw") return res as unknown as T;
+    // The body in the form the caller asked for, with the headers it came with.
+    const answer = (body: T | null) => ({ body, headers: res.headers });
+
+    if (opts.responseType === "raw") return answer(res as unknown as T);
 
     // 204 / 205 / 304 carry no body. Calling .json() here is the single most
     // common defect in hand-written API clients.
-    if (isBodyless(res.status)) return null;
+    if (isBodyless(res.status)) return answer(null);
 
     const maxBytes = this.http.maxResponseBytes ?? DEFAULTS.maxResponseBytes;
     const declared = Number(res.headers.get("content-length") ?? "");
@@ -373,8 +434,8 @@ export abstract class HttpConnector implements BaseConnector {
       });
     }
 
-    if (opts.responseType === "text") return text as unknown as T;
-    if (text.trim() === "") return null;
+    if (opts.responseType === "text") return answer(text as unknown as T);
+    if (text.trim() === "") return answer(null);
 
     let parsed: unknown;
     try {
@@ -393,10 +454,10 @@ export abstract class HttpConnector implements BaseConnector {
       });
     }
 
-    if (!opts.schema) return parsed as T;
+    if (!opts.schema) return answer(parsed as T);
 
     const validated = opts.schema.safeParse(parsed);
-    if (validated.success) return validated.data;
+    if (validated.success) return answer(validated.data);
 
     // Only the failing field *paths* are reported — never the values. A drifted
     // response is still a real response, and its contents are exactly the
@@ -455,6 +516,10 @@ export abstract class HttpConnector implements BaseConnector {
 
     let cursor: string | null = null;
     let nextUrl: string | null = null;
+    // link-header only: the origin the walk started on, and every URL it has
+    // requested or been sent to, so a Link pointing back cannot loop.
+    let origin: string | null = null;
+    const visited = new Set<string>();
 
     for (let page = 0; page < maxPages; page++) {
       if (policy.style === "cursor" && cursor && policy.cursorParam) {
@@ -465,11 +530,13 @@ export abstract class HttpConnector implements BaseConnector {
         query[policy.pageParam] = page + 1;
       }
 
+      // A next-page URL from a Link header is complete, query and all.
       const target = nextUrl ?? path;
-      const body = await this.request<unknown>(
+      const pageQuery = nextUrl ? undefined : query;
+      const { body, headers } = await this.send<unknown>(
         target,
         { method: "GET" },
-        { ...opts, query: nextUrl ? undefined : query, responseType: "json" },
+        { ...opts, query: pageQuery, responseType: "json" },
       );
       if (body == null) return;
 
@@ -505,11 +572,28 @@ export abstract class HttpConnector implements BaseConnector {
         cursor = typeof next === "string" && next.length > 0 ? next : null;
         if (!cursor) return;
       } else if (policy.style === "link-header") {
-        // The Link header is only readable from the raw response, so this style
-        // re-issues the call with responseType "raw" one level up. Until that
-        // lands, a short page terminates the walk.
-        if (items.length < pageSize) return;
-        nextUrl = null;
+        // The server says whether another page exists, in `Link: <…>;
+        // rel="next"`, and its absence is the end. Page size proves nothing
+        // either way here: a short page that still links onward is followed.
+        const requested = this.resolveUrl(target, pageQuery);
+        origin ??= new URL(requested).origin;
+        visited.add(requested);
+        const next = nextPageLink(headers.get("link"), requested);
+        if (!next || visited.has(next)) return;
+        // The next request carries this connector's credentials, so the walk
+        // stays on the origin it started on. A Link elsewhere is refused, not
+        // followed.
+        if (new URL(next).origin !== origin) {
+          throw new ConnectorError({
+            category: "unexpected_response",
+            connectorName: this.name,
+            subject: this.subject,
+            adminHint:
+              "The upstream's pagination Link header pointed at a different host. This connector only follows pages on the host the listing started on.",
+          });
+        }
+        visited.add(next);
+        nextUrl = next;
       } else if (items.length < pageSize) {
         return;
       }
@@ -616,6 +700,14 @@ export abstract class HttpConnector implements BaseConnector {
    */
   private accessToken: { value: string; expiresAt: number } | null = null;
 
+  /**
+   * The granted access token the upstream refused with a 401, until the
+   * refresh that replaces it. The refresh needs it: under the lock, a stored
+   * token that has not reached its expiry otherwise reads as another
+   * invocation's fresh one, and was handed straight back.
+   */
+  private rejectedToken: string | null = null;
+
   private mintsTokens(): boolean {
     return (
       this.auth.strategy === "oauth2_client_credentials" ||
@@ -635,6 +727,7 @@ export abstract class HttpConnector implements BaseConnector {
   private invalidateToken(): void {
     this.accessToken = null;
     if (this.auth.strategy === "oauth2_authorization_code") {
+      this.rejectedToken = this.credentials[TOKEN_KEYS.access] || null;
       // Zeroing the expiry is what makes the next bearerToken() refresh.
       this.credentials = { ...this.credentials, [TOKEN_KEYS.expiresAt]: "0" };
     }
@@ -690,9 +783,12 @@ export abstract class HttpConnector implements BaseConnector {
     const current = this.credentials[TOKEN_KEYS.access];
     if (current && expiresAt - TOKEN_SKEW_MS > Date.now()) return current;
 
+    const rejected = this.rejectedToken ?? undefined;
+    this.rejectedToken = null;
+
     let refreshed: Record<string, string>;
     try {
-      refreshed = await this.refreshStoredTokens();
+      refreshed = await this.refreshStoredTokens(rejected);
     } catch (err) {
       // Drop the dead token so the 401 replay does not attempt a second
       // refresh — a revoked grant should cost one token call, not two.
@@ -713,17 +809,26 @@ export abstract class HttpConnector implements BaseConnector {
   }
 
   /**
-   * Refresh and persist the tenant grant. Imported lazily so the database layer
-   * stays out of the module graph for every connector that never uses the
-   * authorization-code flow. Overridden in the verification harness.
+   * Refresh and persist the grant: the caller's own when one is bound (a
+   * user-scoped connector), otherwise the tenant's. Imported lazily so the
+   * database layer stays out of the module graph for every connector that
+   * never uses the authorization-code flow. Overridden in the verification
+   * harness.
+   *
+   * `rejected` is the token a 401 just refused, so it is renewed even if its
+   * stored expiry has not passed.
    */
-  protected async refreshStoredTokens(): Promise<Record<string, string>> {
+  protected async refreshStoredTokens(
+    rejected?: string,
+  ): Promise<Record<string, string>> {
+    if (this.#userGrant) return this.#userGrant(rejected);
     const { refreshConnectorTokens } = await import("./config");
     return refreshConnectorTokens({
       connectorName: this.name,
       subject: this.subject,
       policy: this.auth,
       skewMs: TOKEN_SKEW_MS,
+      rejected,
     });
   }
 

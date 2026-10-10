@@ -218,6 +218,19 @@ export interface ConnectorDocLink {
   url: string;
 }
 
+/**
+ * Reference material — a scope table, an API reference — shown below the setup
+ * checklist rather than inside a step.
+ */
+export interface ConnectorReferenceLink extends ConnectorDocLink {
+  /**
+   * When someone would open it, behind a "?". Required: a link inside a step
+   * is explained by the sentence around it, and this one has nothing around
+   * it.
+   */
+  why: string;
+}
+
 export interface ConnectorSetupStep {
   /** The instruction, and only the instruction. One imperative sentence. */
   text: string;
@@ -272,7 +285,7 @@ export interface ConnectorSetupGuide {
   steps: ConnectorSetupStep[];
   notes?: ConnectorSetupNotes;
   /** Reference material — scope tables, API docs. Not steps to carry out. */
-  docs?: ConnectorDocLink[];
+  docs?: ConnectorReferenceLink[];
 }
 
 export interface ConnectorAuthor {

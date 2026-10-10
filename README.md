@@ -268,7 +268,7 @@ run Docker, or if you need to work against shared data.
 
    ```bash
    cp .env.local.example .env.local
-   npm run keys:generate        # prints a fresh value for every platform key
+   npm run keys:generate        # prints a fresh value for every key
    ```
 
    Populate `.env.local`. The database is one variable, `DATABASE_URL` — for a

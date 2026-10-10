@@ -13,6 +13,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { appRegistry } from "@/generated/app-registry";
+import { isAppActive } from "@/lib/apps/access";
 import {
   hasAppPassword,
   verifyAppPassword,
@@ -61,8 +62,10 @@ export async function unlockApp(
     return { error: "Invalid request." };
   }
 
+  // A deactivated app answers as one that does not exist: no password check,
+  // and no cookie that would be waiting for it if it were switched back on.
   const manifest = appRegistry.find((a) => a.slug === appSlug);
-  if (!manifest) {
+  if (!manifest || !(await isAppActive(appSlug))) {
     return { error: "Invalid request." };
   }
 
