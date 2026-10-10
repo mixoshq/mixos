@@ -59,36 +59,18 @@ just pulled.
   blanked, styled from the theme's tokens.
 - **Route output is validated on every response.** The
   `output: { schema, validate: "dev-only" }` form is removed; pass the schema.
-- **MCP tools are read-only end to end.** A tool reaches only the connector
-  methods its manifest declares as reads, and an App Services provider called
-  from a tool runs read-only (`ctx.caller.readOnly` tells it so). A connector's
-  public arrow-function and bound methods now count toward its `telemetry`.
-- **`context.http` connects only to the addresses it checked**, with TLS and
-  the Host header still taken from the URL.
-- **Web Push** goes only to the browsers' push services, and unsubscribing
-  removes only your own subscription.
-- **Webhook replay** is keyed on the verified signature. For a connector that
-  signs no timestamp, replay records are kept for 90 days.
-- **A failed connector call reaches the widget.** A route that lets a
-  `ConnectorError` propagate now answers with the connector's envelope and
-  status (503, or 429 with `Retry-After`) instead of a 500, and `AsyncView`
-  renders it as "Not connected" or as an error with Retry.
-- **User-scoped grants renew themselves.** An expired token is renewed before
-  the request, against the person's own grant. One the provider won't renew
-  leaves the connector out of `context.connectors`, so the connect prompt shows.
-- **Three `connector.json` mistakes now fail the build:** a `setup.docs` link
-  without `why`, a `telemetry` entry naming a method the class doesn't publicly
-  have, and an `auth.strategy` other than `none` with no `credentialFields`.
-- **Fix:** the configure dialog reopens after Connect, and the OAuth return URL
-  refuses a path that would land on another host.
-- **Fix:** a granted scope list sent comma-separated (GitHub, Slack) no longer
-  reads as one scope that left every requested scope Refused.
-- **Fix:** a token the provider refuses before its stored expiry is renewed and
-  the call retried, instead of replayed with the same token.
-- **Fix:** a connector that authenticates with nothing no longer needs
-  `auth.scopesUrl`.
+- **Cross-app hooks are checked where they're used.** The build skips an app
+  that listens to another app's hook without `listensTo`, or fires another
+  app's hook, and the registrar refuses both at runtime. The bare `hooks` from
+  `@/lib/hooks` takes core hooks only. Listeners follow their app's activation,
+  checked each time a hook fires.
+- **App settings** are filled in on the Settings tab of an app's details in
+  Administration → Apps. `password` values are encrypted when saved and never
+  shown again.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
+- **Fix:** a deactivated app's `/p` pages return 404, as its API routes already
+  did.
 
 ## 2026-10-05
 
