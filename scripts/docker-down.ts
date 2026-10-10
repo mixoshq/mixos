@@ -36,10 +36,13 @@ const ROOT = path.resolve(__dirname, "..");
  * Resolved from `.env.instance` exactly as docker-up.ts does, so a `down` in a
  * checkout stops that checkout's stack and leaves another instance's running.
  * A literal here was what made the two scripts have to agree by hand.
+ *
+ * The one name is both halves of the instance: the compose project, and the
+ * Supabase project id, which supabase/config.toml reads from MIXOS_INSTANCE.
+ * Stopping Supabase by any other name would stop — and with `--reset`, delete
+ * the data of — a different instance than the app containers just stopped.
  */
-const COMPOSE_PROJECT = resolveInstance().name;
-/** Must match `project_id` in supabase/config.toml. */
-const SUPABASE_PROJECT = "mixos";
+const INSTANCE = resolveInstance();
 
 const useColor = process.stdout.isTTY === true && !process.env.NO_COLOR;
 const c = {
@@ -110,7 +113,15 @@ async function confirmReset(assumeYes: boolean): Promise<void> {
   }
 
   console.log("");
-  console.log(c.yellow(c.bold("  This deletes the local Postgres volume.")));
+  console.log(
+    c.yellow(
+      c.bold(
+        INSTANCE.isDefault
+          ? "  This deletes the local Postgres volume."
+          : `  This deletes the local Postgres volume of instance "${INSTANCE.name}".`,
+      ),
+    ),
+  );
   console.log("");
   console.log("  Gone for good:");
   console.log("    - every user account, including the seeded admin");
@@ -227,7 +238,7 @@ async function main() {
     const code = await stream("docker", [
       "compose",
       "-p",
-      COMPOSE_PROJECT,
+      INSTANCE.name,
       "--profile",
       "dev",
       "--profile",
@@ -252,11 +263,12 @@ async function main() {
     console.log(
       `\n${c.bold(args.reset ? "Stopping Supabase and deleting its data..." : "Stopping Supabase...")}`,
     );
-    // --project-id scopes this to our stack. Without it a developer with another
-    // Supabase project running loses it too, and `--all` does that on purpose —
-    // never use it here. The command is idempotent: on an already-stopped stack
-    // it exits 0 with {"message":"Stopped supabase local development setup."}.
-    const stopArgs = ["stop", "--project-id", SUPABASE_PROJECT];
+    // --project-id scopes this to this instance's stack. Without it a developer
+    // with another Supabase project running loses it too, and `--all` does that
+    // on purpose — never use it here. The command is idempotent: on an
+    // already-stopped stack it exits 0 with {"message":"Stopped supabase local
+    // development setup."}.
+    const stopArgs = ["stop", "--project-id", INSTANCE.name];
     // --no-backup is the flag that discards the data volumes; plain `stop`
     // snapshots them so the next `start` restores your data.
     if (args.reset) stopArgs.push("--no-backup");
@@ -284,7 +296,7 @@ async function main() {
     console.log(
       c.dim(
         "  The compose volumes holding the dev container's node_modules and .next cache\n" +
-          "  are kept — drop them too with `docker volume ls | grep mixos` if you need to.",
+          `  are kept — drop them too with \`docker volume ls | grep ${INSTANCE.name}\` if you need to.`,
       ),
     );
   }
