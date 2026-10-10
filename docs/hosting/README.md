@@ -14,7 +14,10 @@ A MixOS deployment is three things:
 
 Each deploy also runs **the release step** before new code takes traffic. It
 applies the database migrations and creates the first admin. Inside the image
-that is `node ops/release.cjs`; from a checkout, `npm run release`.
+that is `node ops/release.cjs`; from a checkout,
+`DATABASE_URL='<connection string>' npm run release`. It reads its settings
+only from the environment it runs in, never from a checkout's `.env` files, so
+it stops if nothing there names a database.
 
 ## Pick a path
 
@@ -104,10 +107,12 @@ has the detail.
    exist yet.
 
 It is safe to run on every deploy, and safe to run twice at once: each
-migration takes a transaction-scoped lock and re-checks the ledger first. A
-deploy that skips it does not serve errors. The readiness probe,
-`/api/health/ready`, returns 503 until the database is on the schema the build
-expects, so point the platform's health check there.
+migration takes a transaction-scoped lock and re-checks the ledger first. The
+readiness probe, `/api/health/ready`, returns 503 until the database has the
+platform schema the build expects and every app migration the build carries,
+so point the platform's health check there. On a host that waits for it, a
+deploy that skips the release step, or whose release step failed, does not
+serve errors.
 
 ### The database role
 

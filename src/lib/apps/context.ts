@@ -21,7 +21,7 @@ import { createTelemetryClient, instrumentConnector } from "./telemetry";
 import { getUserAppRole } from "./access";
 import { loadAppEnv } from "./env";
 import { createHttpClient } from "./http";
-import { hooks } from "@/lib/hooks";
+import { appRegistrar } from "@/lib/hooks/loader";
 
 /** One connector's manifest, or undefined if it is not in the registry. */
 function connectorManifest(name: string) {
@@ -78,7 +78,7 @@ export async function buildAppContext(
     hasRole: (wanted: string[]) => wanted.some((r) => roles.includes(r)),
   };
 
-  const registrar = hooks.createRegistrar(manifest.slug);
+  const registrar = appRegistrar(manifest.slug);
   const containment = await buildContainment(manifest);
 
   // Initialize declared connectors. Every connector is tenant-scoped: one
@@ -135,7 +135,7 @@ export async function buildPublicAppContext(
   appSlug: string,
 ): Promise<PublicAppContext> {
   const manifest = appRegistry.find((a) => a.slug === appSlug)!;
-  const registrar = hooks.createRegistrar(manifest.slug);
+  const registrar = appRegistrar(manifest.slug);
   const containment = await buildContainment(manifest);
   const connectors = await loadTenantConnectors(
     manifest,
@@ -308,7 +308,7 @@ export async function buildSystemAppContext(
   signal?: AbortSignal,
 ): Promise<SystemAppContext> {
   const manifest = appRegistry.find((a) => a.slug === appSlug)!;
-  const registrar = hooks.createRegistrar(manifest.slug);
+  const registrar = appRegistrar(manifest.slug);
   const containment = await buildContainment(manifest);
   const connectors = await loadTenantConnectors(
     manifest,
