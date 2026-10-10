@@ -2,6 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import {
+  ConnectorDisabledError,
+  isDisabledConnector,
+} from "@/lib/connectors/switch";
 import type {
   BaseConnector,
   ConnectorManifest,
@@ -35,6 +39,21 @@ export class ReadOnlyError extends Error {
 }
 
 /**
+ * The message to hand back for a failure the platform itself refused, or null
+ * for anything else.
+ *
+ * Both brokers flatten a handler's error to a generic line in production,
+ * since it may name internals. These two were written to be read: a write
+ * refused here, and a call to a connector an admin has disabled. Passing them
+ * on tells the model, or the calling app, why the call failed.
+ */
+export function refusalMessage(err: unknown): string | null {
+  if (err instanceof ReadOnlyError) return err.message;
+  if (err instanceof ConnectorDisabledError) return err.userMessage;
+  return null;
+}
+
+/**
  * A connector narrowed to the methods its manifest declares as reads.
  *
  * Plain properties (`name`, `configured`) pass through. Of everything callable,
@@ -61,6 +80,13 @@ export function readOnlyConnector(
   connector: BaseConnector,
   declared: readonly ConnectorTelemetryDefinition[],
 ): BaseConnector {
+  // A connector an admin turned off arrives as the context builder's stand-in
+  // (src/lib/connectors/switch.ts), and is handed on as it is. Every call on it
+  // already fails with "disabled by an administrator", and narrowing it here
+  // would answer a write or an undeclared method with a read-only refusal
+  // instead, which names the wrong reason.
+  if (isDisabledConnector(connector)) return connector;
+
   const reads = new Set(declared.filter((m) => !m.mutates).map((m) => m.method));
   const writes = new Set(declared.filter((m) => m.mutates).map((m) => m.method));
 

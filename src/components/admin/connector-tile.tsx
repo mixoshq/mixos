@@ -57,18 +57,29 @@ const STATUS_TONE = {
 export default function ConnectorTile({
   connector,
   onConfigure,
+  onDisable,
+  onEnable,
+  switching,
 }: {
   connector: ConnectorWithStatus;
   onConfigure: () => void;
+  /** Opens Disable's confirmation; nothing changes until it is confirmed. */
+  onDisable: () => void;
+  onEnable: () => void;
+  /** A Disable or Enable is in flight somewhere in the grid. */
+  switching: boolean;
 }) {
   const { state } = connector;
+  const disabled = connector.disabledAt !== null;
 
   return (
     <div
       className={cn(
         CARD_SHELL,
         "flex h-full flex-col p-5 transition-colors",
-        TILE_TONE[state],
+        // No tint while disabled: a green card would read as "ready to call"
+        // for a connector nothing may call. The pill below says why.
+        !disabled && TILE_TONE[state],
       )}
     >
       <div className="flex items-start gap-3">
@@ -123,6 +134,14 @@ export default function ConnectorTile({
         </span>
       </div>
 
+      {/* The app tile's Inactive pill, for the same kind of fact: an admin
+          switched this off, and the corner pill still says how it is set up. */}
+      {disabled && (
+        <div className="mt-3">
+          <StatusPill tone="warning">Disabled</StatusPill>
+        </div>
+      )}
+
       {/* mt-auto pins the action and the provenance row to the bottom, so
           tiles of differing height still line their buttons up across the
           row. */}
@@ -134,14 +153,28 @@ export default function ConnectorTile({
         <code className="min-w-0 truncate font-mono text-xs text-muted-foreground">
           /connectors/{connector.name}/
         </code>
-        <Button
-          variant={state === "ready" ? "secondary" : "primary"}
-          size="sm"
-          className="shrink-0"
-          onClick={onConfigure}
-        >
-          Configure
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* The app tile's Activate and Deactivate, in the same weights:
+              Enable is the primary action while the connector is off, and
+              Disable is the quiet one, since it stops every app that uses
+              the connector at once. */}
+          <Button
+            variant={disabled ? "primary" : "ghost"}
+            size="sm"
+            disabled={switching}
+            onClick={disabled ? onEnable : onDisable}
+            aria-label={`${disabled ? "Enable" : "Disable"} ${connector.displayName}`}
+          >
+            {disabled ? "Enable" : "Disable"}
+          </Button>
+          <Button
+            variant={disabled || state === "ready" ? "secondary" : "primary"}
+            size="sm"
+            onClick={onConfigure}
+          >
+            Configure
+          </Button>
+        </div>
       </div>
 
       {/* Identical to the theme tile's footer, deliberately: an admin moving

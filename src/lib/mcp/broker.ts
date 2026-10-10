@@ -5,7 +5,7 @@
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getUserById, hasAppGrant } from "@/lib/apps/access";
-import { ReadOnlyError, readOnlyConnectors } from "@/lib/apps/read-only";
+import { readOnlyConnectors, refusalMessage } from "@/lib/apps/read-only";
 import { createReadOnlyScopedClient } from "@/lib/apps/scoped-db";
 import { createServicesClient } from "@/lib/apps/services";
 import { recordMcpCall } from "@/lib/apps/telemetry";
@@ -165,11 +165,10 @@ export async function callTool(
     console.error(`[mcp] ${fullToolName} threw:`, err);
     throw new McpToolError(
       "TOOL_ERROR",
-      // A refused write carries the platform's own message, written for the
-      // model, so it is passed on rather than flattened.
-      err instanceof ReadOnlyError
-        ? err.message
-        : safeErrorMessage(err, `"${fullToolName}" failed.`),
+      // A refused write, or a call to a connector an admin has disabled,
+      // carries the platform's own message, written for the model, so it is
+      // passed on rather than flattened.
+      refusalMessage(err) ?? safeErrorMessage(err, `"${fullToolName}" failed.`),
     );
   }
 

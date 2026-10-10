@@ -144,6 +144,7 @@ Connector credentials are managed entirely through the admin UI:
 - Credentials are encrypted at rest in the database
 - When an app context is built, credentials are decrypted and passed to `initialize()`
 - If a connector has no saved credentials, it will still be available in `context.connectors` but `configured` will be `false` — unless it declares no credential fields at all, in which case there is nothing to save and it is ready
+- If an admin has disabled a connector, it is still in `context.connectors` with `configured` `false`, and every call fails with a `ConnectorError` saying an administrator disabled it. Let it propagate and the app shows that message. See [Turning a connector off](../connectors/credentials.md#turning-a-connector-off)
 
 ## User-Scoped (Per-User) Connectors
 
@@ -157,7 +158,7 @@ Some connectors authenticate each logged-in user against an external IdP (e.g. S
 
 A connector declares this itself: **`"userScoped": true` in its `connector.json`**. There is no inference from the class, and no naming convention — the manifest field is the whole answer, and the schema requires `auth.strategy` to be `oauth2_authorization_code` alongside it, since a shared API key cannot represent "each person's own account".
 
-When it is set, each request merges the **logged-in user's** stored access token into the credentials passed to `initialize()`, renewing it first if it has expired; the client id and secret stay tenant-wide, so the *application* is registered once and only the *grant* is personal. When it is absent, the connector is tenant-scoped and the admin-configured shared credentials are passed straight through. The flag is read in [`src/lib/apps/context.ts`](../../src/lib/apps/context.ts) when the context is built, and in the OAuth [start](../../src/app/api/connectors/%5Bname%5D/oauth/start/route.ts) and [callback](../../src/app/api/connectors/%5Bname%5D/oauth/callback/route.ts) routes, which use it to decide whether `requireAdmin()` applies and where the resulting grant is stored.
+When it is set, each request merges the **logged-in user's** stored access token into the credentials passed to `initialize()`, renewing it first if it has expired; the client id and secret stay tenant-wide, so the *application* is registered once and only the *grant* is personal. When it is absent, the connector is tenant-scoped and the admin-configured shared credentials are passed straight through. The flag is read in [`src/lib/apps/context.ts`](../../src/lib/apps/context.ts) when the context is built, and by the OAuth start and callback routes, in [`src/lib/connectors/oauth-flow.ts`](../../src/lib/connectors/oauth-flow.ts), which use it to decide whether `requireAdmin()` applies and where the resulting grant is stored.
 
 ### Required UX pattern
 

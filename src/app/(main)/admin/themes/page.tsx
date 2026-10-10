@@ -25,8 +25,9 @@ export default async function ThemesAdminPage() {
     // Re-authorize inside the action. The page's own check guards the render;
     // a server action is a separate entry point and must not trust it.
     const s = await requireReadOnlySession();
-    await requireAdmin(s);
-    await setActiveTheme(slug);
+    const admin = await requireAdmin(s);
+    // Audited as theme.apply, with this admin as the actor.
+    await setActiveTheme(slug, { id: admin.id, email: admin.email });
     // The theme is stamped on <html> in the root layout, so every route in the
     // app is downstream of this value.
     revalidatePath("/", "layout");

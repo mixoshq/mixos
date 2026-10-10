@@ -13,6 +13,10 @@ import type { BaseConnector } from "@/lib/connectors/types";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getDecryptedConfig } from "@/lib/connectors/config";
+import {
+  disabledConnector,
+  getDisabledConnectors,
+} from "@/lib/connectors/switch";
 import { initializeWithUserGrant } from "@/lib/connectors/user-grant";
 import { createScopedClient } from "./scoped-db";
 import { createNotificationsClient } from "./notifications";
@@ -184,10 +188,44 @@ async function loadTenantConnectors(
     when configured. A sub-component that declares one still needs it present in
     `context.connectors` on the deployments that have it set up.
   */
-  for (const connName of [
+  const declaredNames = [
     ...manifest.connectors,
     ...(manifest.optionalConnectors ?? []),
-  ]) {
+  ];
+  if (declaredNames.length === 0) return connectors;
+
+  /*
+    The admin switch (src/lib/connectors/switch.ts), read once for every
+    connector the app declares and before any of them is built. If it cannot be
+    read, none is loaded: a connector an admin may have turned off is not run on
+    the guess that it is still on.
+  */
+  let disabled: Map<string, string>;
+  try {
+    disabled = await getDisabledConnectors(declaredNames);
+  } catch (err) {
+    console.error(
+      `[${logTag}] could not read which connectors are disabled, so none were loaded:`,
+      err,
+    );
+    return connectors;
+  }
+
+  for (const connName of declaredNames) {
+    /*
+      Turned off by an admin. The connector is never imported, constructed or
+      handed its credentials. The app gets a stand-in whose every call fails
+      with "disabled by an administrator", which the route pipeline returns in
+      the connector's error envelope for the app to show.
+    */
+    if (disabled.has(connName)) {
+      connectors[connName] = disabledConnector(
+        connName,
+        connectorManifest(connName)?.displayName ?? connName,
+      );
+      continue;
+    }
+
     try {
       const mod = await import(`@connectors/${connName}/index`);
       const ConnectorClass =
