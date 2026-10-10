@@ -10,6 +10,7 @@ import cronstrue from "cronstrue";
 import RunNowButton from "./run-now-button";
 import SchedulerToggleButton from "./scheduler-toggle-button";
 import { CARD_SHELL } from "@/components/ui/card";
+import { StatusPill } from "@/components/ui/status";
 import { cn } from "@/lib/utils";
 
 /** One historical run of a job, newest first in `JobView.runs`. */
@@ -25,6 +26,11 @@ export interface RunView {
 export interface JobView {
   appSlug: string;
   appName: string;
+  /**
+   * False when an admin has switched the app off. None of its jobs run then,
+   * on the tick or by Run now, which the server refuses too.
+   */
+  appActive: boolean;
   jobName: string;
   /** Interval cadence in minutes, or null when the job uses `cron`. */
   intervalMinutes: number | null;
@@ -352,7 +358,11 @@ export default function ScheduledJobsList({
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge status={j.lastStatus} running={j.running} />
+                      {j.appActive ? (
+                        <StatusBadge status={j.lastStatus} running={j.running} />
+                      ) : (
+                        <StatusPill tone="warning">App inactive</StatusPill>
+                      )}
                       {j.lastStatus === "error" && j.lastError && (
                         <p
                           className="mt-1 max-w-xs truncate text-xs text-destructive"
@@ -366,7 +376,7 @@ export default function ScheduledJobsList({
                       className="px-4 py-3 text-muted-foreground"
                       suppressHydrationWarning
                     >
-                      {j.enabled ? nextDue(j.nextRunAt) : "—"}
+                      {j.enabled && j.appActive ? nextDue(j.nextRunAt) : "—"}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
@@ -381,7 +391,7 @@ export default function ScheduledJobsList({
                             name="jobName"
                             value={j.jobName}
                           />
-                          <RunNowButton disabled={j.running} />
+                          <RunNowButton disabled={j.running || !j.appActive} />
                         </form>
                         <form action={setEnabledAction}>
                           <input

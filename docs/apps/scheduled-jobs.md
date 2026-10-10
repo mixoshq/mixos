@@ -265,7 +265,9 @@ enabled switch, and its jobs don't run until the app is back.
 Admins see every declared job at **Administration → Scheduled Jobs**: its
 schedule (interval or cron), last run, status/error, next-due, an
 **enable/disable toggle**, and a **Run now** button. Disabling a job stops it on
-the next tick without a redeploy — the safety valve for a misbehaving job.
+the next tick without a redeploy — the safety valve for a misbehaving job. An
+inactive app's jobs show as **App inactive** and don't run, on the tick or by
+Run now.
 
 ## What drives the tick
 

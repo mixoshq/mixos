@@ -23,12 +23,13 @@
 // instances booting, a deploy overlapping a manual run — take turns and both
 // succeed.
 //
-// WHERE IT RUNS. From a checkout, `npm run release`. Inside the production
-// image it is bundled to ops/release.cjs (`npm run build:ops`, run by the
-// Dockerfile), because the image carries compiled output and no tsx, so the
-// same step works as a Render or Railway pre-deploy command and as the
-// one-shot `migrate` service in deploy/docker-compose.yml. The SQL parser that
-// checks app migrations loads ops/libpg-query.wasm from beside the bundle,
+// WHERE IT RUNS. From a checkout, `npm run release`. In a Vercel production
+// build, once `next build` has succeeded (scripts/vercel-release.ts). Inside
+// the production image it is bundled to ops/release.cjs (`npm run build:ops`,
+// run by the Dockerfile), because the image carries compiled output and no
+// tsx, so the same step works as a Render or Railway pre-deploy command and as
+// the one-shot `migrate` service in deploy/docker-compose.yml. The SQL parser
+// that checks app migrations loads ops/libpg-query.wasm from beside the bundle,
 // which `build:ops` copies there:
 //
 //   node ops/release.cjs

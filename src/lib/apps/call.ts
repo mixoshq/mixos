@@ -20,13 +20,13 @@
  * }
  * ```
  *
- * Same pipeline as the wire: the same auth-tier resolution against the page's
- * own session, the same role gate, the same input and output validation, the
- * same connector budget, the same telemetry row. What it skips is the network,
- * the JSON round trip, and the rate limiters — the last deliberately, because
- * the page render is already bounded by the request that triggered it, and
- * charging a user's API budget twice for one page view would make a dashboard
- * throttle itself.
+ * Same pipeline as the wire: the app gate before the route is imported, the
+ * same auth-tier resolution against the page's own session, the same role
+ * gate, the same input and output validation, the same connector budget, the
+ * same telemetry row. What it skips is the network, the JSON round trip, and
+ * the rate limiters — the last deliberately, because the page render is
+ * already bounded by the request that triggered it, and charging a user's API
+ * budget twice for one page view would make a dashboard throttle itself.
  *
  * It THROWS `AppError` rather than returning a Response. A page that wants to
  * degrade rather than fail should catch it.
@@ -42,6 +42,7 @@
  */
 
 import { appRegistry } from "@/generated/app-registry";
+import { checkAppGate } from "@/lib/apps/app-gate";
 import { AppError } from "@/lib/apps/errors";
 import { buildAppContext, buildPublicAppContext } from "@/lib/apps/context";
 import { resolveAuthTier } from "@/lib/apps/auth-tier";
@@ -98,6 +99,13 @@ export async function callAppRoute<TOut = unknown>(
           .join(", ") || "(none)"
       }.`,
     );
+  }
+
+  // The app gate, before the import, as on the wire: importing runs the
+  // module's top-level code, and an app an admin switched off must not get
+  // that far. `resolveAuthTier` below checks activation again.
+  if (!(await checkAppGate(appSlug)).open) {
+    throw new AppError("NOT_FOUND", `"${appSlug}" is not active.`);
   }
 
   const modulePath = pattern === "" ? "index" : pattern;

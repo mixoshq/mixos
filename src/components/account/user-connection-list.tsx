@@ -19,6 +19,8 @@ export interface UserConnectionItem {
   icon: string | null;
   /** Whether an admin has registered the application this signs into. */
   appRegistered: boolean;
+  /** An admin disabled this connector; connecting is refused until it is enabled. */
+  disabled: boolean;
   connectedAt: number | null;
   expiresAt: number | null;
 }
@@ -83,6 +85,18 @@ export default function UserConnectionList({
     <ul className="space-y-3">
       {items.map((item) => {
         const connected = item.connectedAt !== null;
+        const disconnect = (
+          <Button
+            size="sm"
+            busy={pending}
+            busyLabel="Disconnecting…"
+            onClick={() =>
+              startTransition(async () => disconnectAction(item.name))
+            }
+          >
+            Disconnect
+          </Button>
+        );
         return (
           // CARD_SHELL rather than <Card>: these rows are list items, and Card
           // only renders block-level tags. The constant is the same one Card
@@ -131,7 +145,17 @@ export default function UserConnectionList({
               </span>
             </span>
 
-            {!item.appRegistered ? (
+            {item.disabled ? (
+              // Connecting is refused while it is disabled, so this says why
+              // rather than offering a button that bounces. A grant already
+              // stored is kept, and is still the person's own to remove.
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="text-sm text-muted-foreground">
+                  An administrator has disabled this.
+                </span>
+                {connected && disconnect}
+              </span>
+            ) : !item.appRegistered ? (
               // The person cannot fix this themselves, so it explains rather
               // than offering a button that would fail.
               <span className="text-sm text-muted-foreground">
@@ -152,16 +176,7 @@ export default function UserConnectionList({
                   <Link2 className="h-4 w-4" aria-hidden />
                   Reconnect
                 </a>
-                <Button
-                  size="sm"
-                  busy={pending}
-                  busyLabel="Disconnecting…"
-                  onClick={() =>
-                    startTransition(async () => disconnectAction(item.name))
-                  }
-                >
-                  Disconnect
-                </Button>
+                {disconnect}
               </span>
             ) : (
               // A plain anchor: this is a full-page round trip out to the

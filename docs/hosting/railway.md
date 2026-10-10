@@ -90,9 +90,10 @@ redirect URIs have to match the domain people actually use.
 
 ## Upgrades
 
-Push to the branch the service tracks. Railway builds the image, runs the
-release step in a container of it, and only then replaces the running
-deployment, waiting for `/api/health/ready`. A failed release step fails the
+Merge the new release into the branch the service tracks, as in
+[Upgrading](README.md#upgrading). Railway builds the image, runs the release
+step in a container of it, and only then replaces the running deployment,
+waiting for `/api/health/ready`. A failed release step fails the
 deploy and leaves the previous one serving.
 
 The admin pages show the MixOS version and the commit the running deployment

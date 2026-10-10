@@ -106,7 +106,8 @@ export async function resolveAuthTier(opts: {
   // after an admin switched it off — the one surface where that matters most.
   // `not-served` rather than a 403, because from outside there is no such
   // route: an app that is off should not be distinguishable from one that was
-  // never here.
+  // never here. Both callers have already asked the app gate before importing
+  // the route (src/lib/apps/app-gate.ts); this is the second line.
   if (!(await isAppActive(appSlug))) return { kind: "not-served" };
 
   // Track why an identity tier failed, so a signed-in user who simply lacks the
