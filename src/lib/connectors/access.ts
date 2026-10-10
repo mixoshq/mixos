@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { sql } from "@/lib/db/client";
-import { TOKEN_KEYS } from "./oauth";
+import { TOKEN_KEYS, splitScopes } from "./oauth";
 
 /**
  * What a connector is actually allowed to do, and what it has actually done.
@@ -30,11 +30,11 @@ export interface ConnectorLogEntry {
 
 export interface ConnectorAccess {
   /**
-   * Scopes the provider actually granted, split from the space-delimited string
-   * it returned. Empty when the connector is not OAuth, or when the provider
-   * echoed no scope — which is not the same as "granted nothing", so
-   * `grantedKnown` distinguishes them rather than an empty list being read as a
-   * fact.
+   * Scopes the provider actually granted, split from the string it returned
+   * (space- or comma-separated; see `splitScopes`). Empty when the connector is
+   * not OAuth, or when no scope is stored — which is not the same as "granted
+   * nothing", so `grantedKnown` distinguishes them rather than an empty list
+   * being read as a fact.
    */
   granted: string[];
   grantedKnown: boolean;
@@ -45,9 +45,8 @@ export interface ConnectorAccess {
 export function grantedScopes(
   credentials: Record<string, string> | null | undefined,
 ): { granted: string[]; grantedKnown: boolean } {
-  const raw = credentials?.[TOKEN_KEYS.scope] ?? "";
-  if (!raw.trim()) return { granted: [], grantedKnown: false };
-  return { granted: raw.trim().split(/\s+/), grantedKnown: true };
+  const granted = splitScopes(credentials?.[TOKEN_KEYS.scope]);
+  return { granted, grantedKnown: granted.length > 0 };
 }
 
 /**

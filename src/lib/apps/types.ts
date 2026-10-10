@@ -329,16 +329,23 @@ export interface AppManifest {
 }
 
 /**
+ * The rules an app may escape. One, now: see ESCAPE_RULES in
+ * scripts/manifest-schemas.ts for the four that were removed and why.
+ */
+export type EscapeRule = "raw-response";
+
+/**
  * A declared exception to a platform guarantee.
  *
  * Escapes are the only way out, and they are on the record: named from a closed
- * set, carrying a reason a reviewer can act on, and surfaced on the app's admin
- * page. The set is closed deliberately — an unknown rule name is a build
- * failure rather than a no-op, because a typo'd escape reads as "declared" to a
- * reviewer while enforcing nothing.
+ * set, carrying a reason a reviewer can act on, and shown on the app's admin
+ * dialog. They are also load-bearing — the generator refuses the construct when
+ * its escape is missing — and the set is closed deliberately: an unknown rule
+ * name is a build failure rather than a no-op, because a typo'd escape reads as
+ * "declared" to a reviewer while enforcing nothing.
  */
 export interface AppEscape {
-  rule: string;
+  rule: EscapeRule;
   reason: string;
 }
 
@@ -416,7 +423,6 @@ export interface RouteMethodContract {
   raw: boolean;
   hasInput: boolean;
   hasOutput: boolean;
-  outputValidation: "always" | "dev-only";
   summary?: string;
 }
 

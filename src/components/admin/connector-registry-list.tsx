@@ -21,6 +21,10 @@ import { cn } from "@/lib/utils";
 
 /** Connection state for a three-legged connector; null for every other kind. */
 export interface ConnectorOAuthStatus {
+  /**
+   * A grant is stored: the deployment's, or for a user-scoped connector the
+   * viewing admin's own.
+   */
   connected: boolean;
   /** Epoch millis the access token expires, when one is stored. */
   expiresAt: number | null;
@@ -36,9 +40,11 @@ export interface ConnectorOAuthStatus {
 
 export type ConnectorWithStatus = ConnectorManifest & {
   /**
-   * Derived server-side by `connectorConfigState()` — the same function the
+   * Derived server-side by `registryConfigState()`, which applies the rule the
    * runtime's `configured` getter uses, so the tile cannot claim a connector is
-   * ready when no app could call it.
+   * ready when no app could call it. For a user-scoped connector it describes
+   * the deployment's half — the saved application — since each person's grant
+   * is their own.
    */
   state: ConnectorConfigState;
   /**

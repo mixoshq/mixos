@@ -22,11 +22,17 @@
  *      with a null body.
  *   2. A message that reaches the client has been through `safeErrorMessage()`.
  *      `AppError` messages are written to be seen, so they are passed through
- *      verbatim; anything *thrown* by a handler is not, and is wrapped.
+ *      verbatim; anything *thrown* by a handler is not, and is wrapped. The
+ *      one other thrown value written to be seen is a `ConnectorError`, whose
+ *      user message travels in the connector's own envelope.
  */
 
 import { safeErrorMessage } from "@/lib/safe-error";
 import type { ServiceErrorCode } from "@/lib/apps/services";
+import { isConnectorError } from "@/lib/connectors/errors";
+import type { ConnectorErrorCategory } from "@/lib/connectors/errors";
+import { connectorErrorEnvelope } from "@/lib/connectors/response";
+import type { ConnectorErrorEnvelope } from "@/lib/connectors/response";
 
 export type AppErrorCode =
   /** No such record, route, or resource. */
@@ -156,12 +162,39 @@ export function statusForServiceErrorCode(code: ServiceErrorCode): number {
   return STATUS_BY_SERVICE_CODE[code] ?? 502;
 }
 
+/**
+ * The coarse code a connector failure carries beside its envelope, so a client
+ * that branches on `code` keeps working. The envelope's `category` is the
+ * precise cause, and the HTTP status comes from the envelope, not from this.
+ */
+const CODE_BY_CONNECTOR_CATEGORY: Record<ConnectorErrorCategory, AppErrorCode> = {
+  unconfigured: "UNAVAILABLE",
+  auth_failed: "UNAVAILABLE",
+  forbidden: "UNAVAILABLE",
+  rate_limited: "RATE_LIMITED",
+  not_found: "NOT_FOUND",
+  invalid_request: "UNAVAILABLE",
+  conflict: "CONFLICT",
+  payload_too_large: "UNAVAILABLE",
+  timeout: "TIMEOUT",
+  upstream_error: "UNAVAILABLE",
+  network_error: "UNAVAILABLE",
+  unexpected_response: "UNAVAILABLE",
+};
+
 /** The JSON body shape every failed app route response carries. */
 export interface AppErrorBody {
   error: string;
   code: AppErrorCode;
   details?: unknown;
 }
+
+/**
+ * The body of a route whose connector call failed: the connector's own
+ * envelope (docs/connectors/failure-handling.md), which is what
+ * `ConnectorErrorState` renders, plus the platform `code`.
+ */
+export type ConnectorErrorBody = ConnectorErrorEnvelope & { code: AppErrorCode };
 
 /**
  * Normalize anything thrown inside a route into a status and a body.
@@ -171,11 +204,20 @@ export interface AppErrorBody {
  * naming a column becomes the generic fallback in production. Note that
  * `safeErrorMessage` never logs, so the caller of this function is responsible
  * for the server-side record.
+ *
+ * `isAdmin` decides whether a connector failure's admin-only fields are
+ * included. Pass the caller's real flag: it is the only thing that keeps the
+ * registry deep link and the upstream request id away from everyone else.
  */
 export function toErrorResponse(
   err: unknown,
   fallback: string,
-): { status: number; body: AppErrorBody } {
+  opts: { isAdmin?: boolean } = {},
+): {
+  status: number;
+  body: AppErrorBody | ConnectorErrorBody;
+  headers?: Record<string, string>;
+} {
   if (isAppError(err)) {
     return {
       status: statusForAppErrorCode(err.code),
@@ -184,6 +226,24 @@ export function toErrorResponse(
         code: err.code,
         ...(err.details !== undefined ? { details: err.details } : {}),
       },
+    };
+  }
+
+  // A connector call that failed and was allowed to propagate, which is what a
+  // route is told to do with one. It already carries a message written for the
+  // person reading it, the status its cause deserves (503 for a connector
+  // nobody has finished setting up, 429 and a Retry-After for a throttle), and
+  // admin detail gated on `isAdmin`. It used to fall through to the generic 500
+  // below, so none of that reached a widget and its "Not connected" and Retry
+  // states could not render.
+  if (isConnectorError(err)) {
+    const envelope = connectorErrorEnvelope(err, {
+      isAdmin: opts.isAdmin === true,
+    });
+    return {
+      status: envelope.status,
+      headers: envelope.headers,
+      body: { ...envelope.body, code: CODE_BY_CONNECTOR_CATEGORY[err.category] },
     };
   }
 

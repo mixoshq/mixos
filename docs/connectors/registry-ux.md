@@ -26,7 +26,7 @@ consecutive builds is how an author gives up.
 | `icon` | Otherwise the grid is a wall of identical plug glyphs |
 | `setup.title` | Names the provider-side step: "Create a Google Cloud OAuth app" |
 | `setup.steps[]` | What the admin does in someone else's console |
-| `auth.scopesUrl` | The page the Access list is read from — see [Scopes](scopes.md) |
+| `auth.scopesUrl` | The page the Access list is read from — see [Scopes](scopes.md). Not needed by a connector that authenticates with nothing (`auth.strategy` `none`): a public API has no permissions to list |
 
 An `oauth2_authorization_code` connector additionally must set
 `showRedirectUri` on **exactly one** step. It is the only value in the whole
@@ -175,6 +175,12 @@ worse than no tick, because it looks like the same thing.
 | Save credentials | every declared `credentialKeys` present |
 | Authorize | a refresh or access token stored |
 | Verify | `connector_configs.last_verified_at` set by a real call |
+
+A connector that declares no `credentialFields` has no Save step: there is
+nothing to save. A `userScoped` connector has no deployment-wide grant, so its
+Authorize step connects the admin's own account, and Verify makes its call with
+that grant. The tile reads **Configured** once the client id and secret are
+saved, since everyone else connects their own account at `/account/connections`.
 
 The first is inferred rather than self-reported: you cannot hold a Client ID for
 an app you never created. Only a **successful** verify writes its timestamp — a
