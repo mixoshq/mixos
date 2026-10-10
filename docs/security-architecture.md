@@ -100,7 +100,7 @@ up checking the wrong table.
 | 3    | Rate limit (IP), pre-auth      | 429     | Dispatcher (`src/lib/rate-limit.ts`) |
 | 4    | URL resolves to a route pattern| 404     | Dispatcher (`resolveRoutePath`)      |
 | 5    | This mount serves the route    | 404     | Dispatcher, from the **hoisted contract** — so no app module is imported for a caller the route would refuse |
-| 6    | Route module loads; method exported | 404 / 405 / 500 | Dispatcher (import and dispatch are separated, so a module that throws is not reported as missing) |
+| 6    | App is active, then the route module loads; method exported | 404 / 405 / 500 | Dispatcher. The app gate (`src/lib/apps/app-gate.ts`) runs before the import, so a deactivated app's module-scope code never runs. Import and dispatch are separated, so a module that throws is not reported as missing |
 | 7    | Live declaration matches the registry | 404 | Dispatcher — a gate decided from one source and enforced from another is not a gate |
 | 8    | Auth tier the caller earned    | 401 / 403 / 404 | `src/lib/apps/auth-tier.ts` |
 | 9    | CSRF token, cookie-authenticated mutations only | 403 | `src/lib/apps/csrf.ts` — authenticated mount, identity tiers, mutating methods |
@@ -282,7 +282,12 @@ checked on **every request**, inside `resolveAuthTier`, before any app code runs
 **The app has to be active, and in the running build.** `resolveAuthTier` and
 `hasAppGrant` refuse an app an admin has deactivated, or one the running build
 doesn't carry, before they read a grant (`isAppActive()` in
-[`src/lib/apps/access.ts`](../src/lib/apps/access.ts)). The second half matters
+[`src/lib/apps/access.ts`](../src/lib/apps/access.ts)). The app gate
+([`src/lib/apps/app-gate.ts`](../src/lib/apps/app-gate.ts)) asks the same
+before any of the app's modules is imported, so a deactivated app's code does
+not run at all: not its routes, jobs, syncs, services or `hooks.ts` (§20, §23,
+§25). Deactivating is the incident response: from the next request or tick,
+none of the app's code is started, with no restart. The second half matters
 because the release step keeps an app's row, and the grants, installs and
 widgets that hang off it, when the app leaves the build
 ([`scripts/sync-app-registry.ts`](../scripts/sync-app-registry.ts)): a rollback
@@ -1371,7 +1376,7 @@ operator needs to be able to see what a model has been reading.
 ## 18. The Unauthenticated Surface
 
 `src/proxy.ts` redirects to `/login` when no session cookie is present, except on
-`PUBLIC_ROUTE_PREFIXES`. That list is **fourteen entries**, and each one is a
+`PUBLIC_ROUTE_PREFIXES`. That list is **twelve entries**, and each one is a
 place where "no cookie" is the expected state and the route's own gate is the
 real control. Listing them here because the proxy is the wrong place to look for
 that control, and a reader who assumes a cookie check happened will misread every
@@ -1389,8 +1394,25 @@ one of these.
 | `/api/webhooks` | HMAC signature over the raw body (§19) |
 | `/api/cron` | timing-safe `CRON_SECRET` bearer compare (§20) |
 
-The matcher additionally exempts `themes/`, `favicon.ico` and the `icon*` /
-`apple-icon*` file-convention paths from middleware entirely.
+The matcher additionally exempts `_next/static`, `_next/image`,
+`themes/<id>/`, `connector-assets/`, `screenshots/`, `branding/`,
+`favicon.ico` and the `icon*` / `apple-icon*` file-convention paths from the
+proxy entirely, so neither the cookie check nor the maintenance response below
+applies to them.
+
+**Maintenance response.** Before the public list or the cookie check, the proxy
+asks whether the platform schema is behind this build
+(`src/lib/platform/maintenance.ts`, answer kept for 15 seconds). It can,
+because in Next 16 the proxy always runs on the Node.js runtime. While the
+schema is behind, every path except `/api/health/live` and `/api/health/ready`
+gets a 503 with `Retry-After: 30`: a static page for a page, and
+`{ "error": "This instance is being updated. Try again shortly." }` for
+`/api/*` and `/.well-known/*`. That includes `/api/cron` (the tick waits),
+`/api/webhooks` (senders retry) and `/api/mcp`. The page comes from the proxy
+with no app code and no query, under its own CSP, which allows no script.
+Neither body names a version or says what to run; the server log does both. A
+check that fails, or doesn't answer within 2 seconds, counts as not behind, as
+it does in readiness. App migrations behind don't trigger it.
 
 **Why removing an entry does not harden it.** For `/api/cron` and `/api/webhooks`
 the proxy would answer `307 → /login`, which is a perfectly successful HTTP
@@ -1400,11 +1422,14 @@ event. Nothing throws, nothing retries, and the scheduler simply stops. The
 route's own 401 is what an operator needs to see.
 
 **Health endpoints.** `/api/health/live` returns a static `{ status: "ok" }` with
-no database touch. `/api/health/ready` returns `ok` or `unavailable` with a 503;
-the caught error goes to `console.error` and never into the response body.
-Neither leaks version, commit, environment, or stack. Neither is rate-limited.
-The MixOS version and commit appear on the admin pages, to admins, and nowhere
-else.
+no database touch. `/api/health/ready` returns `{ status: "ok" }`, or a 503 with
+`{ status: "unavailable" }` and, when the database is behind, a `reason`:
+`schema-behind` or `app-migrations-behind`. It carries no number: not the
+schema versions, not a count of migrations. The server log names the versions
+and files, and a caught error goes to `console.error` and never into the
+response body. Neither leaks version, commit, environment, or stack. Neither is
+rate-limited. Both answer during the maintenance response. The MixOS version
+and commit appear on the admin pages, to admins, and nowhere else.
 
 ---
 
@@ -1465,6 +1490,13 @@ sidecar locally.
   RETURNING id` row-locks the match, so two overlapping ticks cannot both run the
   same job. A lease older than `STALE_LEASE_MINUTES` is reclaimable, so a job
   whose process died does not stay claimed forever.
+- **An inactive app's jobs do not run, not even by Run now.** The claim
+  requires the app to be active, for the tick and for an admin's **Run now**
+  alike, so the server refuses Run now on an inactive app, not only the
+  disabled button. The app gate (§3.1) is asked again before a job's or sync's
+  module is imported, so an app switched off after the claim runs nothing
+  either, and its job stays due. Run now, a job's Enable and Disable, and Start
+  and Stop tick are audited (§28).
 - **Apps not in the build** keep their job rows, with each job's enabled switch,
   for when they come back (§3.1). A tick runs only jobs of active apps the
   running build carries.
@@ -1560,8 +1592,14 @@ default-deny:
 | Provider declares this service in `provides` | `NOT_EXPOSED` |
 | Consumer declared this dependency in `consumes` | `NOT_DECLARED` |
 | Provider's `consumers` allowlist admits the caller | `FORBIDDEN` |
+| Provider app is active, whatever the audience | `PROVIDER_INACTIVE` |
 | For `audience: "user"`, an acting user exists | `NO_USER` |
 | That user holds a grant for the **provider** app | `FORBIDDEN_USER` |
+
+The activation check is the app gate (§3.1), asked before the provider's
+context is built or its handler imported. An `audience: "app"` service consults
+no grant, so this is what refuses an inactive provider's service to a job or a
+public route.
 
 The provider's handler runs with the **provider's own scoped context**, and the
 user is re-authorized in the provider's terms rather than inheriting the
@@ -1710,7 +1748,9 @@ server-side and platform-owned.
 
 It is **not** an authorization bypass: it re-runs `resolveAuthTier` against the
 page's own session, the role gate, and input/output validation, and it records
-the same telemetry row.
+the same telemetry row. Like the gateway, it checks that the app is active
+before it imports the route (the app gate, §3.1), so a deactivated app's
+module-scope code does not run; `resolveAuthTier` checks activation again.
 
 It is **bound to the calling app at build time.** Run with another app's slug
 it would execute that app's routes, mutations included, as the current user,
@@ -1810,8 +1850,15 @@ module is not a retention policy.
 
 Currently recorded: `connector.configure`, `connector.test`,
 `app.password.set`, `app.password.clear`, `app.activate`, `app.deactivate`,
-`app.missing`, `app.returned`, `user.grant.add`, `user.grant.revoke`,
-`user.role.set`.
+`app.missing`, `app.returned`, `app.job.run`, `app.job.enable`,
+`app.job.disable`, `scheduler.start`, `scheduler.stop`, `user.grant.add`,
+`user.grant.revoke`, `user.role.set`.
+
+**The Scheduled Jobs page's actions.** Run now, Enable and Disable are
+`app.job.*` rows against the app, with the job in `details`. Start and Stop
+tick are `scheduler.start` and `scheduler.stop`, with no target, since they
+switch every job at once. Run now is recorded as the run starts, so a long run
+leaves its row even if the request is cut short, and a refused one leaves none.
 
 **Rows the release step writes.** `app.missing` (an app left the build) and
 `app.returned` (it came back, with whether its files changed and both hashes)

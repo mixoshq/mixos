@@ -74,8 +74,44 @@ just pulled.
   next free number. If a merge brings in a migration with your number, rename
   yours to the next free number and change its `platform_schema_version` value
   to match.
+- **A maintenance page while the database is behind.** When the platform
+  schema is behind the build, every page shows a plain maintenance page and
+  every API route, `/api/cron`, `/api/webhooks` and `/api/mcp` included,
+  answers 503 with `Retry-After: 30` until the release step runs. Only
+  `/api/health/live` and `/api/health/ready` answer as usual. Locally,
+  `npm run db:local` brings it back. **Breaking:** `/api/health/ready` returns
+  only `status` and `reason`. The schema versions, the count of pending app
+  migrations and the message are gone; the server log has them.
+- **Vercel production builds run the release step.** `vercel.json` makes
+  `npm run vercel-build` the build command: `npm run build`, then the release
+  step when `VERCEL_ENV` is `production`, over Neon's `DATABASE_URL_UNPOOLED`
+  when it names the same database. Preview builds never run it. A build that
+  doesn't compile leaves the database alone, and a failed release step fails
+  the build, so the previous deployment keeps serving. Set
+  `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` on the project and the
+  first deploy creates the admin. Migrations have to work with the deployment
+  still serving: add in one release, remove in a later one. See
+  `docs/hosting/vercel.md`.
+- **`scripts/smoke-test-app.ts` tests real routes.** It looked for routes
+  with a pattern no `defineRoute` route matches, so it sent no requests, and
+  it skipped apps without connectors. It now reads routes from the generated
+  registry and tests every app, or the slugs you name, with GET and HEAD
+  only. Sign in with `SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`;
+  `--base-url` points it at another server. Activate and grant an app first:
+  one that isn't is reported, not worked around. It exits 1 when a route
+  fails or can't be reached, and its last line is a JSON verdict.
+- **A deactivated app runs nothing.** None of its modules is imported while it
+  is off: its API routes, over HTTP or through `callAppRoute()`, its jobs,
+  syncs, services and `hooks.ts`. Run now refuses its jobs, which Scheduled
+  Jobs shows as **App inactive**, and a consumer calling one of its services
+  gets `PROVIDER_INACTIVE`. Activating it takes effect on the next request,
+  with no restart. Run now, a job's Enable and Disable, and Start and Stop
+  tick are now audited, as `app.job.run`, `app.job.enable`, `app.job.disable`,
+  `scheduler.start` and `scheduler.stop`.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
+- **Fix:** a connection string that doesn't parse is reported by its variable's
+  name, and the release step and the app no longer print it, password included.
 - **Fix:** sign-in attempts are limited on every route that checks a password,
   including Auth.js's own callback, and those routes share one budget per IP.
 
