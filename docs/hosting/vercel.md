@@ -50,16 +50,22 @@ and the next tick picks up where the last one stopped.
 
 ## Upgrades
 
-When a change brings a migration, run the release step against production
-before promoting the deployment, as in step 4
+Merge the new release into your production branch, as in
+[Upgrading](README.md#upgrading). When it brings a migration, run the release
+step against production before promoting the deployment, as in step 4
 (`DATABASE_URL='<the connection string>' npm run release`), and run it again if
 you skip a version. The readiness probe, `/api/health/ready`, answers 503 while
 the database is behind the build, in its platform schema or its app migrations,
-so a monitor or a deployment check can catch a missed step.
+so a monitor or a deployment check can catch a missed step. A deployment
+promoted before a platform migration has run shows the
+[maintenance page](README.md#the-maintenance-page) until the step has run.
 
 Vercel's build doesn't run migrations by itself, and shouldn't. Preview
 deployments share the build, and a migration that ran on every preview build
 would run against whatever database that preview points at.
+
+The admin pages show the MixOS version and the commit the deployment was built
+from, which Vercel sets as `VERCEL_GIT_COMMIT_SHA`.
 
 ## Moving from an existing Vercel and Supabase deployment
 

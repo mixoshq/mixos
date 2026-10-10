@@ -46,6 +46,7 @@ import { FatalManifestError } from "./manifest-errors";
 import { readImageSize } from "./image-size";
 import { resolveThemeLogo, validateAppBranding } from "./brand-checks";
 import { appMigrationFiles, listAppMigrations } from "./app-migration-files";
+import { listPlatformMigrations } from "./platform-migration-files";
 import { checkAppMigrationSql, describeAppTables, formatSqlProblems } from "./app-sql-policy";
 import {
   appIdentifierProblems,
@@ -131,6 +132,7 @@ const CONNECTOR_REGISTRY_FILE = path.resolve(
 );
 const THEMES_DIR = path.resolve(__dirname, "../themes");
 const MIGRATIONS_DIR = path.resolve(__dirname, "../supabase/migrations");
+const PACKAGE_JSON_FILE = path.resolve(__dirname, "../package.json");
 const BUILD_INFO_FILE = path.resolve(OUTPUT_DIR, "build-info.ts");
 const THEME_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "theme-registry.ts");
 const THEMES_CSS_FILE = path.resolve(OUTPUT_DIR, "themes.css");
@@ -1773,16 +1775,15 @@ function validateUserScopedUsage(
  * somebody has to remember to bump alongside a file they just added is a
  * constant that will disagree with the directory within a month.
  *
- * Files are `NNNN_name.sql`. Anything that does not start with digits is not a
- * migration the Supabase CLI will apply in order, so it is ignored here too.
+ * The files are listed as the runner lists them
+ * (scripts/platform-migration-files.ts), so the build expects only a number
+ * whose file the runner applies. Two files with one number fail the build: the
+ * ledger would record that number for one of them, and the runner would skip
+ * the other as already applied.
  */
 function expectedSchemaVersion(): number {
   if (!fs.existsSync(MIGRATIONS_DIR)) return 0;
-  const numbers = fs
-    .readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith(".sql"))
-    .map((f) => Number(/^(\d+)/.exec(f)?.[1] ?? NaN))
-    .filter((n) => Number.isInteger(n));
+  const numbers = listPlatformMigrations(MIGRATIONS_DIR).map((m) => Number(m.version));
   return numbers.length ? Math.max(...numbers) : 0;
 }
 
@@ -1799,19 +1800,36 @@ function expectedAppMigrations(apps: readonly AppManifest[]): { slug: string; fi
 }
 
 /**
+ * This checkout's MixOS version: `package.json`'s, the one place it lives.
+ *
+ * Refused here unless it is `X.Y.Z` (with an optional pre-release or build
+ * suffix), so a build never carries a version that extensions' `requiresMixOS`
+ * floors cannot be compared against (src/lib/platform/version.ts).
+ */
+function packageVersion(): string {
+  const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON_FILE, "utf-8")) as { version?: unknown };
+  const version = typeof pkg.version === "string" ? pkg.version.trim() : "";
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(
+      `package.json's "version" must be X.Y.Z, optionally with a pre-release suffix ` +
+        `(found ${JSON.stringify(pkg.version)}). It is the MixOS version this build ` +
+        `reports, and the one extensions' requiresMixOS floors are compared against.`,
+    );
+  }
+  return version;
+}
+
+/**
  * The build-time facts the running server cannot work out for itself.
  *
- * Everything else about build identity is a RUNTIME variable, and deliberately:
- * `MIXOS_RELEASE` already carries the tag and is stamped into the runner stage
- * by the tag build (see the Dockerfile, and `isReleaseBuild` in
- * src/lib/repository/client.ts). Baking a second copy of the version in here
- * would create two sources of truth for one fact, and the one in the generated
- * file would be the stale one — it is written by the builder stage, which never
- * sees the runner stage's ARG.
+ * The version comes from `package.json`, and is stamped on every build: every
+ * host runs this generator before compiling, and `package.json` is in every
+ * build context, so a checkout and every kind of deployment know their version
+ * the same way. There is no runtime variable for it, so nothing can disagree.
  *
- * The schema version is different. It is derived from `supabase/migrations/`,
- * and that directory is not copied into the runner image at all, so the number
- * has to travel with the build or not exist.
+ * The schema version is derived from `supabase/migrations/`, and that directory
+ * is not copied into the runner image at all, so the number has to travel with
+ * the build or not exist.
  *
  * So is the list of app migrations the readiness probe waits for. `apps/` is in
  * the Docker image, but a serverless function sees a repository file only if
@@ -1820,19 +1838,24 @@ function expectedAppMigrations(apps: readonly AppManifest[]): { slug: string; fi
  * NOTE: no timestamp and no commit here. Every value in this file is stable for
  * a given checkout, so re-running the generator rewrites an identical file and
  * the dev server has nothing to recompile. A timestamp — or a git SHA, which
- * moves on every commit — would invalidate that on every `predev`.
+ * moves on every commit — would invalidate that on every `predev`. The commit
+ * is read at runtime instead (`mixosCommit` in src/lib/platform/version.ts).
  */
 function writeBuildInfo(apps: readonly AppManifest[], report = true): void {
+  const version = packageVersion();
   const schema = expectedSchemaVersion();
   const appMigrations = expectedAppMigrations(apps);
 
   const output = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
 //
-// Derived from supabase/migrations/ and apps/*/migrations/ at build time, so the
-// running server knows what it was built against without reading either. See
-// src/lib/platform/schema-version.ts and src/lib/platform/app-migrations.ts for
-// what this gates, and src/lib/platform/version.ts for the runtime half of
-// build identity.
+// Derived from package.json, supabase/migrations/ and apps/*/migrations/ at
+// build time, so the running server knows what it was built from without
+// reading any of them. See src/lib/platform/version.ts for the version and the
+// commit, and src/lib/platform/schema-version.ts and
+// src/lib/platform/app-migrations.ts for what the migrations gate.
+
+/** This build's MixOS version: package.json's \`version\`. */
+export const MIXOS_VERSION = ${JSON.stringify(version)};
 
 /** Highest migration number in supabase/migrations/ at build time. */
 export const EXPECTED_SCHEMA_VERSION = ${schema};
@@ -1844,7 +1867,8 @@ export const EXPECTED_APP_MIGRATIONS: readonly { slug: string; file: string }[] 
   fs.writeFileSync(BUILD_INFO_FILE, output, "utf-8");
   if (report) {
     console.log(
-      `Build stamp: expected schema version ${schema}, ${appMigrations.length} app migration(s)`,
+      `Build stamp: MixOS ${version}, expected schema version ${schema}, ` +
+        `${appMigrations.length} app migration(s)`,
     );
   }
 }
