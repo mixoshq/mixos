@@ -187,7 +187,7 @@ Delete any legacy source you staged inside the repo before reporting done.
 
 ## Verify
 
-Everything in [`/mixos app`'s verification](.claude/skills/mixos/actions/app.md#verify-before-reporting-done) — registry generation, `npm run typecheck`, migrations, the smoke test for connector-backed routes, a real browser pass on every surface you built, a double tick for any schedule or sync — **plus the parity audit**:
+Everything in [`/mixos app`'s verification](.claude/skills/mixos/actions/app.md#verify-before-reporting-done) — registry generation, `npm run typecheck`, migrations, the route smoke test, a real browser pass on every surface you built, a double tick for any schedule or sync — **plus the parity audit**:
 
 1. **Every inventory row has a terminal status.** `done`, `deferred: <reason>`, or `dropped: <reason>`. No blanks, no `todo` left in a shipped phase. A row you cannot account for means the inventory was wrong, which means go back and fix the inventory.
 2. **Walk the phase-1 rows against the running app.** For each `done` row, exercise that behaviour in the browser and confirm it matches what the source did. Reading the code you just wrote is not verification.
