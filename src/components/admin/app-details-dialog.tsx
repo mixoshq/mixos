@@ -18,6 +18,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { StatusPill } from "@/components/ui/status";
 import FolderTabs from "@/components/ui/folder-tabs";
 import LucideIcon from "@/components/lucide-icon";
+import AppSettingsPanel from "./app-settings-panel";
 import {
   renderAuthors,
   formatLastUpdated,
@@ -32,7 +33,7 @@ interface MissingConnector {
 }
 
 type DialogTab =
-  "overview" | "access" | "wiring" | "connectors" | "mcp" | "database";
+  "overview" | "access" | "settings" | "wiring" | "connectors" | "mcp" | "database";
 
 /**
  * Every tab, on every app, always.
@@ -51,6 +52,7 @@ type DialogTab =
 const TABS: Array<{ key: DialogTab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "access", label: "Access" },
+  { key: "settings", label: "Settings" },
   { key: "wiring", label: "Hooks & Services" },
   { key: "connectors", label: "Connectors" },
   { key: "mcp", label: "MCP" },
@@ -923,6 +925,8 @@ export default function AppDetailsDialog({
           )}
         </section>
       )}
+
+      {tab === "settings" && <AppSettingsPanel app={app} />}
     </Dialog>
   );
 }
