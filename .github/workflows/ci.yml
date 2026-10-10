@@ -52,15 +52,20 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # Dependency advisories. `--audit-level=high` rather than a clean slate:
-      # a low advisory in a dev-only transitive must not block a release, and a
-      # threshold nobody can meet is a threshold everybody learns to ignore.
+      # Dependency advisories, in two passes. What ships (`--omit=dev`) fails on
+      # a high advisory; dev tooling fails only on a critical one. A threshold
+      # nobody can meet is a threshold everybody learns to ignore: a low
+      # advisory in a dev-only transitive must not block a release, and neither
+      # must a high one with no fixed release (braces, which reaches only
+      # danger and eslint-config-next, as of October 2026).
       #
       # This step is the point of the exercise. The first audit run against this
       # repo returned 2 critical and 6 high — both criticals in the auth library
       # — not because anything regressed, but because nothing was looking.
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm audit --audit-level=critical
 
       # BLOCKING, and cheap. MIXOS_REPOSITORY_URL decides which catalogue's
       # checksums an install verifies downloads against, so a value that reaches

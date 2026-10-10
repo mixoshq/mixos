@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import webpush from "web-push";
+import { isPushServiceEndpoint } from "./endpoint";
 import { getVapidConfig } from "./vapid";
 import {
   deleteSubscriptionByEndpoint,
@@ -37,6 +38,13 @@ export async function sendPushToUsers(
 
   await Promise.all(
     subscriptions.map(async (sub) => {
+      // Checked again here, not only at subscribe time: this is the line that
+      // makes the request, and a row can predate the check. Skipped rather than
+      // deleted, so a push service added to the list later finds it intact.
+      if (!isPushServiceEndpoint(sub.endpoint)) {
+        console.warn("[push] skipped a subscription that is not a push service endpoint");
+        return;
+      }
       try {
         await webpush.sendNotification(sub, json);
         sent += 1;
