@@ -7,7 +7,11 @@ import assert from "node:assert/strict";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { validateConnectorMethods, validateConnectorTelemetry } from "./connector-checks";
+import {
+  validateConnectorMethods,
+  validateConnectorTelemetry,
+  validateRegistryContract,
+} from "./connector-checks";
 import { RawConnectorManifestSchema } from "./manifest-schemas";
 import { ReadOnlyError, readOnlyConnectors } from "../src/lib/apps/read-only";
 import type {
@@ -60,6 +64,37 @@ test("a method declared twice fails the build", () => {
   );
 });
 
+// ── setup guidance ─────────────────────────────────────────────────────────
+
+test("both templates satisfy the schema they are copied to meet", () => {
+  for (const dir of ["_template", "_template-oauth"]) {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(__dirname, `../connectors/${dir}/connector.json`), "utf-8"),
+    );
+    const parsed = RawConnectorManifestSchema.safeParse(manifest);
+    assert.ok(parsed.success, `${dir}: ${JSON.stringify(parsed.error?.issues)}`);
+  }
+});
+
+test("a setup.docs link must say when to open it", () => {
+  assert.deepEqual(issuesOf(templateManifest()), []);
+  const bare = templateManifest((m) => {
+    m.setup.docs = [{ label: "API reference", url: "https://docs.example.com/" }];
+  });
+  assert.ok(issuesOf(bare).some((i) => /^setup\.docs\.0\.why:/.test(i)), issuesOf(bare).join("; "));
+  const withWhy = templateManifest((m) => {
+    m.setup.docs = [
+      { label: "API reference", url: "https://docs.example.com/", why: "Open it to look up a field name." },
+    ];
+  });
+  assert.deepEqual(issuesOf(withWhy), []);
+  // Still strict: a key the schema does not know is refused.
+  const extra = templateManifest((m) => {
+    m.setup.docs = [{ label: "A", url: "https://docs.example.com/", why: "When.", note: "x" }];
+  });
+  assert.ok(issuesOf(extra).length > 0);
+});
+
 /**
  * From the manifest an author writes, through the build step that dropped
  * `mutates`, to a tool calling the write. The template declares `createItem`
@@ -110,6 +145,47 @@ test("a mutating method throws from an MCP tool context", async () => {
     return true;
   });
   assert.deepEqual(sent, ["GET /items"]);
+});
+
+// ── the manifest schema ─────────────────────────────────────────────────────
+
+/** The parts of the template's manifest these tests rewrite. */
+interface TemplateManifest {
+  setup: { docs?: unknown[] };
+  credentialFields?: unknown[];
+  auth: { scopesUrl?: string } & Record<string, unknown>;
+}
+
+/** The API-key template's manifest, with `edit` applied. */
+function templateManifest(edit: (m: TemplateManifest) => void = () => {}) {
+  const manifest = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "../connectors/_template/connector.json"), "utf-8"),
+  ) as TemplateManifest;
+  edit(manifest);
+  return RawConnectorManifestSchema.safeParse(manifest);
+}
+
+/** Each schema issue as "path: message". */
+function issuesOf(r: ReturnType<typeof templateManifest>): string[] {
+  return r.success ? [] : r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+}
+
+test("only a connector that authenticates with nothing may declare no credential fields", () => {
+  const publicApi = templateManifest((m) => {
+    delete m.credentialFields;
+    m.auth = { strategy: "none", scopesUrl: m.auth.scopesUrl };
+  });
+  assert.deepEqual(issuesOf(publicApi), []);
+
+  // An API key with no field to enter it in could never be configured.
+  const noField = templateManifest((m) => {
+    m.credentialFields = [];
+    m.auth = { strategy: "apiKey", scopesUrl: m.auth.scopesUrl };
+  });
+  assert.ok(
+    issuesOf(noField).some((i) => /^credentialFields: auth\.strategy "apiKey" needs a credential/.test(i)),
+    issuesOf(noField).join("; "),
+  );
 });
 
 // ── completeness of the declaration ─────────────────────────────────────────
@@ -174,4 +250,102 @@ test("helper classes beside the connector are not its methods", () => {
     }
   `);
   assert.doesNotThrow(() => validateConnectorMethods("acme", dir, []));
+});
+
+// ── every declared method exists ────────────────────────────────────────────
+
+test("a declared method the class does not have fails the build", () => {
+  const dir = connectorDir(`
+    export default class Acme extends HttpConnector {
+      readonly name = "acme";
+      async testConnection() { return { ok: true as const }; }
+      async listItems() { return this.request("/items"); }
+    }
+  `);
+  // A typo, or a method since renamed: never counted, and no read a tool can call.
+  assert.throws(
+    () => validateConnectorMethods("acme", dir, declared("listItems", "listThings")),
+    (err: Error) => /does not have: listThings\./.test(err.message),
+  );
+});
+
+test("a declared method that is private, protected or static does not count", () => {
+  const dir = connectorDir(`
+    export default class Acme extends HttpConnector {
+      readonly name = "acme";
+      async testConnection() { return { ok: true as const }; }
+      private async listItems() { return this.request("/items"); }
+      protected sync = () => null;
+      static create() { return new Acme(); }
+    }
+  `);
+  assert.throws(
+    () => validateConnectorMethods("acme", dir, declared("listItems", "sync", "create")),
+    (err: Error) => /does not have: listItems, sync, create\./.test(err.message),
+  );
+});
+
+test("methods inherited from HttpConnector or a base class in the file exist", () => {
+  const dir = connectorDir(`
+    class Base extends HttpConnector {
+      async ping() { return this.request("/ping"); }
+    }
+    export default class Acme extends Base {
+      readonly name = "acme";
+      async testConnection() { return { ok: true as const }; }
+    }
+  `);
+  assert.doesNotThrow(() =>
+    validateConnectorMethods("acme", dir, declared("ping", "initialize", "testConnection")),
+  );
+});
+
+test("a base class this file cannot see is not reported as missing methods", () => {
+  // What it inherits is unknown here, so a declared method cannot be proved absent.
+  const dir = connectorDir(`
+    import { SharedBase } from "./shared";
+    export default class Acme extends SharedBase {
+      readonly name = "acme";
+      async testConnection() { return { ok: true as const }; }
+    }
+  `);
+  assert.doesNotThrow(() => validateConnectorMethods("acme", dir, declared("listShared")));
+});
+
+// ── what the registry needs ─────────────────────────────────────────────────
+
+const shipped = {
+  icon: "assets/icon.svg",
+  setup: { title: "Create an API key", steps: [{ text: "Open API keys." }] },
+};
+
+test("a connector that authenticates with nothing needs no scope page", () => {
+  // A public API grants no permissions, so there is no page to read them from.
+  assert.doesNotThrow(() => validateRegistryContract("weather", shipped));
+  assert.doesNotThrow(() =>
+    validateRegistryContract("weather", { ...shipped, auth: { strategy: "none" } }),
+  );
+});
+
+test("a connector that authenticates still needs its scope page", () => {
+  assert.throws(
+    () => validateRegistryContract("acme", { ...shipped, auth: { strategy: "apiKey" } }),
+    /"auth\.scopesUrl"/,
+  );
+  assert.doesNotThrow(() =>
+    validateRegistryContract("acme", {
+      ...shipped,
+      auth: { strategy: "apiKey", scopesUrl: "https://docs.example.com/scopes" },
+    }),
+  );
+});
+
+test("everything the registry is missing is named at once", () => {
+  assert.throws(
+    () => validateRegistryContract("acme", { auth: { strategy: "oauth2_authorization_code" } }),
+    (err: Error) =>
+      ['"icon"', '"auth.scopesUrl"', '"setup.title"', '"setup.steps"'].every((field) =>
+        err.message.includes(field),
+      ),
+  );
 });
