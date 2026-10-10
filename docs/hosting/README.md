@@ -101,13 +101,14 @@ has the detail.
    reverse. Any Postgres works; the ledger's name is the CLI's, not a
    dependency on Supabase.
 2. **The app registry and app migrations**, as `npm run migrate:apps` does
-   locally. Apps no longer in the build are removed, together with their
-   grants, installs and widgets. Each app with a database gets a schema and a
-   database role of its own, created here if they are missing, and its
-   migrations run as that role, after every pending statement has been checked
-   against what an app migration may do. One refused statement stops the step
-   before any app SQL runs; see
+   locally. Each app with a database gets a schema and a database role of its
+   own, created here if they are missing, and its migrations run as that role,
+   after every pending statement has been checked against what an app
+   migration may do. One refused statement stops the step before any app SQL
+   runs; see
    [docs/apps/database.md](../apps/database.md#what-a-migration-may-contain).
+   An app the build no longer carries is not deleted; see
+   [When an app leaves the build](#when-an-app-leaves-the-build).
 3. **The first admin**, from `INITIAL_ADMIN_*`, only if that account does not
    exist yet.
 
@@ -118,6 +119,28 @@ platform schema the build expects and every app migration the build carries,
 so point the platform's health check there. On a host that waits for it, a
 deploy that skips the release step, or whose release step failed, does not
 serve errors.
+
+### When an app leaves the build
+
+The release step never deletes an app. When the build doesn't carry an app the
+database knows, because its folder was removed or renamed or the build skipped
+it, the step marks it missing and keeps everything it had: whether it was
+active, its grants, installs, widgets and password, its settings and API keys,
+its scheduled jobs and its tables. Nobody can open it while it is missing, and
+Admin > Apps lists it under **Not in this build**. A renamed folder is a new
+app: it arrives inactive with none of the old one's data.
+
+When the app comes back, the step compares a hash of its files with the one it
+recorded:
+
+- **The same files**, after a rollback or once the build stops skipping it: the
+  app comes back as it left, active or not.
+- **Different files**: the app comes back switched off and marked **Back with
+  different code** on Admin > Apps until an admin activates it. Its grants and
+  data are still there, so check what changed first.
+
+The audit log records both, as `app.missing` and `app.returned`, with
+`release-step` as the actor.
 
 ### The database role
 
