@@ -109,9 +109,10 @@ if (newScopeLabels.length > 0) {
  * laptop it was typed on and wrong everywhere else.
  *
  * `npm run verify:repository-url` is the same check in CI, and
- * `src/lib/repository/client.ts` ignores the variable outright in a release
- * build. This one exists because a review comment on the diff is the cheapest
- * place to catch it — before it is a commit anyone has to revert.
+ * `src/lib/repository/client.ts` ignores the variable on a built deployment
+ * unless it names that machine. This one exists because a review comment on the
+ * diff is the cheapest place to catch it — before it is a commit anyone has to
+ * revert.
  */
 const REPOSITORY_URL_FILES = [
   ".env.docker",

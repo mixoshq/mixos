@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  Clock,
   Loader2,
   ShieldCheck,
   XCircle,
@@ -144,6 +145,9 @@ export default function RegisterDialog({
 
   const yanked = manifest?.yanked === true;
   const blocked = yanked && !acceptYanked;
+  // Another registration held the lock, so nothing happened yet. The dialog
+  // stays on the same release, with the same answers, and offers it again.
+  const locked = outcome?.ok === false && outcome.code === "locked";
 
   return (
     <Dialog
@@ -155,7 +159,7 @@ export default function RegisterDialog({
           : `Install ${extension.name}`
       }
       subtitle={
-        outcome
+        outcome && !locked
           ? undefined
           : listing
             ? `${KIND_LABEL[kind].one} · ${listing.sourceRepo.owner}/${listing.sourceRepo.name}`
@@ -163,7 +167,7 @@ export default function RegisterDialog({
       }
       size="lg"
       footer={
-        outcome ? (
+        outcome && !locked ? (
           <Button variant="primary" onClick={onClose}>
             Done
           </Button>
@@ -179,7 +183,7 @@ export default function RegisterDialog({
               disabled={!manifest || blocked}
               onClick={register}
             >
-              Verify and register
+              {locked ? "Try again" : "Verify and register"}
             </Button>
           </>
         )
@@ -359,7 +363,7 @@ function Notice({
   icon,
   children,
 }: {
-  tone: "warning" | "danger" | "success";
+  tone: "warning" | "danger" | "success" | "neutral";
   icon: React.ReactNode;
   children: React.ReactNode;
 }) {
@@ -367,6 +371,7 @@ function Notice({
     warning: "border-warning/40 bg-warning/10",
     danger: "border-destructive/40 bg-destructive/10",
     success: "border-success/40 bg-success/10",
+    neutral: "border-border bg-muted",
   } as const;
   return (
     <div
@@ -442,6 +447,18 @@ function OutcomePanel({
           </Row>
         </dl>
       </div>
+    );
+  }
+
+  // Not a failure: someone else was registering, and this one never started.
+  // Neutral rather than a warning, because there is nothing to fix; the
+  // footer's "Try again" is the whole of what to do.
+  if (outcome.code === "locked") {
+    return (
+      <Notice tone="neutral" icon={<Clock className="h-4 w-4" aria-hidden />}>
+        <p className="font-medium">Not registered yet</p>
+        <p className="mt-1">{outcome.message}</p>
+      </Notice>
     );
   }
 
