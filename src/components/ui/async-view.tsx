@@ -6,7 +6,7 @@
 
 import type { ReactNode } from "react";
 import { EmptyState, ErrorState, type EmptyCause } from "@/components/ui/app-states";
-import ConnectorErrorState from "@/components/connectors/connector-error-state";
+import ConnectorErrorState from "@/components/ui/connector-error-state";
 import type { AppQuery } from "@/lib/apps/use-app-query";
 
 /**

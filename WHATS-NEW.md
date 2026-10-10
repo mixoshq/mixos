@@ -119,6 +119,19 @@ just pulled.
 - **App settings** are filled in on the Settings tab of an app's details in
   Administration → Apps. `password` values are encrypted when saved and never
   shown again.
+- **App code imports from a published list.** An app imports its own files,
+  the platform modules listed in `docs/apps/architecture.md` (some by name
+  only), and `react`, `zod`, `lucide-react`, `next/link`, `next/navigation` and
+  `next/font/*`. Types may come from anywhere. The registry generator judges
+  each import by the file it lands on, on every build and every Registry
+  install, and skips an app that imports anything else; ESLint shows the same
+  findings.
+- **Refused in app code:** Node built-ins, `require` and `module`, an
+  `import()` with a computed name or a URL, code in a dot-folder or `assets/`,
+  a symlink, `node_modules/` or `package.json` anywhere in an app, and writes
+  to an imported module.
+- **`callAppRoute` takes the app's own slug** as a string literal. The build
+  refuses another app's slug, one built at runtime, and any other use of it.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
 - **Fix:** a deactivated app's `/p` pages return 404, as its API routes already
