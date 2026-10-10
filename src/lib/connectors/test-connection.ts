@@ -6,6 +6,7 @@ import { connectorRegistry } from "@/generated/connector-registry";
 import { getDecryptedConfig } from "./config";
 import { connectorErrorEnvelope } from "./response";
 import type { EnvelopeCategory } from "./response";
+import { isConnectorDisabled } from "./switch";
 import { initializeWithUserGrant } from "./user-grant";
 import type { BaseConnector, ConnectorTestResult } from "./types";
 
@@ -25,7 +26,7 @@ export type ConnectorTestOutcome =
   | { ok: true; detail: string | null }
   | {
       ok: false;
-      category: EnvelopeCategory | "unsupported";
+      category: EnvelopeCategory | "unsupported" | "disabled";
       message: string;
       adminHint: string | null;
       upstreamRequestId: string | null;
@@ -61,6 +62,19 @@ export async function runConnectorTest(
   }
 
   try {
+    // Turned off by an admin (./switch.ts): not constructed, so not tested.
+    // Inside the try, so a switch that cannot be read fails the test rather
+    // than running it.
+    if (await isConnectorDisabled(connectorName)) {
+      return {
+        ok: false,
+        category: "disabled",
+        message: `${manifest.displayName} is disabled. Enable it to test the connection.`,
+        adminHint: null,
+        upstreamRequestId: null,
+      };
+    }
+
     const mod = await import(`@connectors/${connectorName}/index`);
     const ConnectorClass =
       mod.default ??

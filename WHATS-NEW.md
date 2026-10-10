@@ -108,6 +108,12 @@ just pulled.
   with no restart. Run now, a job's Enable and Disable, and Start and Stop
   tick are now audited, as `app.job.run`, `app.job.enable`, `app.job.disable`,
   `scheduler.start` and `scheduler.stop`.
+- **Disable a connector.** Admin > Connectors has Disable and Enable on each
+  connector. Disabling names the apps that use it and asks first. While it is
+  off, apps' calls to it fail with "disabled by an administrator", and its
+  webhooks, Connect and Test Connection are refused. Its credentials are kept.
+  The audit log records `connector.disable` and `connector.enable`, and now
+  `theme.apply` too. See `docs/connectors/credentials.md`.
 - **An app whose migrations are behind waits on its own.** While the build
   carries an app migration the database hasn't applied, none of that app's
   code runs, and it alone says "This app is being updated. Try again shortly.":
@@ -121,6 +127,8 @@ just pulled.
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's
   name, and the release step and the app no longer print it, password included.
+- **Fix:** sign-in attempts are limited on every route that checks a password,
+  including Auth.js's own callback, and those routes share one budget per IP.
 
 ## 2026-10-07
 

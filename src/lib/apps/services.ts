@@ -14,7 +14,7 @@ import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { hasAppGrant } from "./access";
 import { checkAppGate } from "./app-gate";
-import { ReadOnlyError, readOnlyConnectors } from "./read-only";
+import { readOnlyConnectors, refusalMessage } from "./read-only";
 import { createReadOnlyScopedClient } from "./scoped-db";
 import { recordServiceCall } from "./telemetry";
 import { safeErrorMessage } from "@/lib/safe-error";
@@ -237,10 +237,10 @@ async function runServiceRequest(
     if (err instanceof ServiceRequestError) throw err;
     throw new ServiceRequestError(
       "PROVIDER_ERROR",
-      // A refused write is the platform's own message and names no internals.
-      err instanceof ReadOnlyError
-        ? err.message
-        : safeErrorMessage(err, `"${providerSlug}:${serviceName}" failed.`),
+      // A refused write, or a call to a connector an admin has disabled, is the
+      // platform's own message and names no internals.
+      refusalMessage(err) ??
+        safeErrorMessage(err, `"${providerSlug}:${serviceName}" failed.`),
     );
   }
 
