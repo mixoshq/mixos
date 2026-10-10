@@ -326,7 +326,7 @@ caching the same payload will neither coalesce nor agree on when it's stale. And
 sharing an in-flight slot — the DB rows are already isolated by the scoped `db`
 you pass; the in-memory maps are not.
 
-The app needs a `swr_cache` table (bare name — the platform prefixes it):
+The app needs a `swr_cache` table in its own schema (bare name, as always):
 
 ```sql
 create table if not exists swr_cache (
