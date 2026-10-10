@@ -151,9 +151,10 @@ async function installGlobalApps(
  * back into the build with different code. Deactivating is meant to be
  * complete rather than cosmetic: an inactive app is filtered out of every list
  * AND refused by every gate — `hasAppGrant` (pages, MCP, OAuth) and
- * `resolveAuthTier` (every API route and public page) both call this. Hiding
- * an app that still answers requests would be a claim the platform does not
- * keep.
+ * `resolveAuthTier` (every API route and public page) both call this, and the
+ * app gate (`./app-gate.ts`) asks it before any of the app's modules is
+ * imported. Hiding an app that still answers requests would be a claim the
+ * platform does not keep.
  *
  * A missing row reads as INACTIVE. The row is written by the registry sync, so
  * its absence means an app the platform does not know about; defaulting that

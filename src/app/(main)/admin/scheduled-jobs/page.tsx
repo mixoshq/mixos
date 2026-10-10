@@ -2,13 +2,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { revalidatePath } from "next/cache";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
+import { checkAppGate } from "@/lib/apps/app-gate";
 import { appRegistry } from "@/generated/app-registry";
 import { createServiceClient } from "@/lib/db/server";
 import { sql } from "@/lib/db/client";
-import { getSchedulerEnabled, setSchedulerEnabled } from "@/lib/apps/scheduler";
+import { getSchedulerEnabled } from "@/lib/apps/scheduler";
+import {
+  runJobNowAction,
+  setJobEnabledAction,
+  setSchedulerEnabledAction,
+} from "@/lib/apps/scheduler-actions";
 import ScheduledJobsList, {
   type JobView,
   type RunView,
@@ -96,12 +101,18 @@ export default async function ScheduledJobsAdminPage() {
   // runtime state (may not exist yet before the first tick).
   const jobs: JobView[] = [];
   for (const app of appRegistry) {
-    for (const s of app.schedules ?? []) {
+    const schedules = app.schedules ?? [];
+    if (schedules.length === 0) continue;
+    // The gate Run now asks, so the page shows what the server will decide: an
+    // inactive app's jobs don't run, on the tick or by hand.
+    const appActive = (await checkAppGate(app.slug)).open;
+    for (const s of schedules) {
       const key = `${app.slug} ${s.name}`;
       const r = state.get(key);
       jobs.push({
         appSlug: app.slug,
         appName: app.name,
+        appActive,
         jobName: s.name,
         intervalMinutes: s.everyMinutes ?? null,
         cron: s.cron ?? null,
@@ -120,67 +131,6 @@ export default async function ScheduledJobsAdminPage() {
     }
   }
 
-  async function setEnabled(formData: FormData) {
-    "use server";
-    const appSlug = formData.get("appSlug") as string;
-    const jobName = formData.get("jobName") as string;
-    const enabled = formData.get("enabled") === "true";
-
-    const session = await requireReadOnlySession();
-    await requireAdmin(session);
-
-    // Look up the cadence from the registry so a not-yet-synced row can still
-    // be toggled — the upsert must supply exactly one cadence (cron or
-    // interval) to satisfy the check constraint.
-    const app = appRegistry.find((a) => a.slug === appSlug);
-    const schedule = app?.schedules?.find((s) => s.name === jobName);
-    if (!schedule) return;
-
-    const db = createServiceClient();
-    await db.from("app_scheduled_jobs").upsert(
-      {
-        app_slug: appSlug,
-        job_name: jobName,
-        interval_minutes: schedule.everyMinutes ?? null,
-        cron: schedule.cron ?? null,
-        timezone: schedule.timezone ?? null,
-        enabled,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "app_slug,job_name" },
-    );
-    revalidatePath("/admin/scheduled-jobs");
-  }
-
-  async function runNow(formData: FormData) {
-    "use server";
-    const appSlug = formData.get("appSlug") as string;
-    const jobName = formData.get("jobName") as string;
-
-    const session = await requireReadOnlySession();
-    await requireAdmin(session);
-
-    // Runs the handler inline (up to the scheduler's job timeout) so the
-    // refreshed page reflects the new status/error. Force-claim ignores
-    // due-ness but still refuses to overlap a live run.
-    const { runJobNow } = await import("@/lib/apps/scheduler");
-    await runJobNow(appSlug, jobName);
-    revalidatePath("/admin/scheduled-jobs");
-  }
-
-  async function setSchedulerEnabledAction(formData: FormData) {
-    "use server";
-    const enabled = formData.get("enabled") === "true";
-
-    const session = await requireReadOnlySession();
-    await requireAdmin(session);
-
-    // The durable global switch. When off, runDueJobs() skips every tick (all
-    // replicas + the CronJob), but per-job "Run now" still works as an override.
-    await setSchedulerEnabled(enabled);
-    revalidatePath("/admin/scheduled-jobs");
-  }
-
   return (
     <div>
       <div className="mb-6">
@@ -194,8 +144,8 @@ export default async function ScheduledJobsAdminPage() {
       <ScheduledJobsList
         jobs={jobs}
         schedulerEnabled={schedulerEnabled}
-        setEnabledAction={setEnabled}
-        runNowAction={runNow}
+        setEnabledAction={setJobEnabledAction}
+        runNowAction={runJobNowAction}
         setSchedulerEnabledAction={setSchedulerEnabledAction}
       />
     </div>
