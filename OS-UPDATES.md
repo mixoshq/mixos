@@ -1,6 +1,6 @@
 # Updating MixOS
 
-This guide explains how to make changes to the MixOS platform itself — the core code that powers apps, connectors, and themes.
+This guide explains how to make changes to the MixOS platform itself — the core code that powers apps, connectors, and themes. To upgrade a deployment to a new release of MixOS instead, see [Upgrading](docs/hosting/README.md#upgrading).
 
 ## What counts as an OS change?
 

@@ -56,6 +56,9 @@ alone.
 
 ### Upgrading
 
+Merge the new release into your fork and push it, as in
+[Upgrading](README.md#upgrading). Then, on the server:
+
 ```bash
 git pull
 docker compose -f deploy/docker-compose.yml build
