@@ -3,17 +3,20 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { NextResponse, type NextRequest } from "next/server";
+import { buildCsp, cspNonce } from "@/lib/csp";
 import { maintenanceState } from "@/lib/platform/maintenance";
 import { maintenanceGate } from "@/lib/platform/maintenance-gate";
 
 /**
  * The maintenance response, then an optimistic auth check.
  *
- * While the platform schema is behind this build, every request but the two
- * health probes gets a 503 from here, before anything that could reach a route
- * and query the database (src/lib/platform/maintenance.ts). That needs the
- * database, which a proxy can reach because in Next 16 it runs on the Node.js
- * runtime, always: `runtime` can't be set in this file.
+ * While the platform schema is behind this build, every request this sees but
+ * the two health probes gets a 503 from here, before anything that could reach
+ * a route and query the database (src/lib/platform/maintenance.ts). That needs
+ * the database, which a proxy can reach because in Next 16 it runs on the
+ * Node.js runtime, always: `runtime` can't be set in this file. The two app API
+ * mounts are outside `config.matcher` below, and their gateway gives the same
+ * response itself.
  *
  * Per Next.js guidance (docs/01-app/01-getting-started/16-proxy.md), proxy
  * middleware should not be used for full authorization. We only do a
@@ -27,15 +30,13 @@ const PUBLIC_ROUTE_PREFIXES = [
   "/api/auth",
   "/api/health",
   "/manifest.webmanifest",
-  // App public surface — pages and API routes whose manifest declares
-  // `visibility: "public"` or `"password"`. The visibility gate is
-  // enforced inside the route handlers themselves (see
-  // src/app/(public)/p/[appSlug]/[[...path]]/page.tsx and
-  // src/app/api/p/[appSlug]/[[...slug]]/route.ts); the proxy must NOT
-  // bounce unauthenticated visitors here, since "no session" is the
-  // expected state for the public surface.
+  // App public pages — pages whose manifest declares `visibility: "public"`
+  // or `"password"`. The visibility gate is enforced inside the page itself
+  // (see src/app/(public)/p/[appSlug]/[[...path]]/page.tsx); the proxy must
+  // NOT bounce unauthenticated visitors here, since "no session" is the
+  // expected state for the public surface. Their API, /api/p/<slug>, never
+  // reaches the proxy: see `config.matcher` below.
   "/p",
-  "/api/p",
   // MCP server. Authenticated by an OAuth 2.1 bearer token, not a session
   // cookie — "no cookie" is the expected state, and the endpoint's own 401
   // (with the WWW-Authenticate discovery header) is what a client needs to see.
@@ -94,74 +95,15 @@ function hasSessionCookie(request: NextRequest): boolean {
 }
 
 /**
- * Per-request CSP with a fresh nonce.
- *
- * WHY HERE AND NOT next.config.ts. A nonce has to be unique per request, so it
- * cannot come from static header config. Next reads the nonce out of this header
- * during SSR and applies it to its own framework scripts and bundles, which is
- * what makes `strict-dynamic` workable without hand-annotating every tag.
- *
- * The CSP is set in exactly ONE place. Two `Content-Security-Policy` headers are
- * INTERSECTED by the browser, not merged, so leaving the old static
- * `frame-ancestors` header in next.config.ts alongside this one would silently
- * produce a policy stricter than either.
- *
- * `frame-ancestors 'self'` is carried over deliberately — MixOS frames its own
- * pages, and this is the only clickjacking control (X-Frame-Options is not set,
- * and frame-ancestors supersedes it).
- *
- * `script-src` is the point of the exercise. `'strict-dynamic'` means a script
- * that carries the nonce may load further scripts, and nothing else may — so an
- * injected `<script>` an attacker plants in the DOM does not run, because it
- * cannot guess the nonce.
- *
- * `style-src` keeps `'unsafe-inline'`, and that is a considered trade rather than
- * an oversight: React writes `style={{...}}` attributes throughout the dashboard
- * (the drag-and-drop grid computes positions inline), a style attribute cannot
- * execute script, and the XSS protection here comes from `script-src`. Tightening
- * this means moving to `style-src-attr` plumbing for no meaningful gain.
- *
- * `connect-src 'self'` reinforces the egress boundary from the browser side: app
- * client code reaches its own routes through the SDK and has no business opening
- * a socket to anywhere else. Raw `fetch` is already lint-banned in `apps/**`.
- *
- * DEV. React uses `eval` in development to reconstruct server error stacks, so
- * `'unsafe-eval'` is required there and only there.
- *
- * COST, stated plainly: a nonce forces every page to be dynamically rendered,
- * because the nonce only exists once a request does. Static optimization, ISR and
- * PPR are off. For a signed-in dashboard that already reads a session cookie on
- * every page this changes almost nothing; the one surface that could have been
- * cached is the public `/p/<slug>` view.
- */
-function buildCsp(nonce: string): string {
-  const isDev = process.env.NODE_ENV === "development";
-  return [
-    "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' blob: data: https:",
-    "font-src 'self' data:",
-    "connect-src 'self'",
-    "worker-src 'self'",
-    "manifest-src 'self'",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'self'",
-    ...(isDev ? [] : ["upgrade-insecure-requests"]),
-  ].join("; ");
-}
-
-/**
- * Attach the nonce to the REQUEST headers as well as the response.
+ * The per-request CSP (src/lib/csp.ts), with the nonce attached to the REQUEST
+ * headers as well as the response.
  *
  * Next parses the nonce out of the request's `Content-Security-Policy` during
  * render; `x-nonce` is what a server component reads if it ever needs to hand
  * the nonce to a third-party script tag itself.
  */
 function withCsp(request: NextRequest): NextResponse {
-  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const nonce = cspNonce();
   const csp = buildCsp(nonce);
 
   const requestHeaders = new Headers(request.headers);
@@ -232,9 +174,23 @@ export const config = {
   // session, which is the theme-assets argument exactly — and, like
   // screenshots, only declared files are copied.
   //
-  // A path left out here is left out of the maintenance response too, so leave
-  // out only files that are served without reading the database.
+  // `api/apps/` and `api/p/` are the two app API mounts, left out for their
+  // request bodies. On every request the proxy runs for, Next buffers a copy of
+  // the body so the proxy and the route can both read it, and keeps only the
+  // first 10 MB of it (`proxyClientMaxBodySize`, an experimental option): the
+  // route gets a body cut short, the caller gets a 200, and the only trace is a
+  // warning in the server log. The gateway accepts bodies up to 27 MB
+  // (MAX_BODY_BYTES in src/lib/apps/dispatch.ts), so an upload between the two
+  // arrived truncated. Left out, the route reads the body as it was sent, and
+  // the gateway does for these paths what the proxy does for the rest: the
+  // maintenance response first, then this CSP on what it answers. It has no
+  // cookie check, and needs none: a cookie's presence is not a session, and the
+  // gateway's auth tiers decide who is served on both mounts.
+  //
+  // A path left out here is left out of the proxy's maintenance response too,
+  // so leave out only files that are served without reading the database, or a
+  // route that gives that response itself, as the app API gateway does.
   matcher: [
-    "/((?!_next/static|_next/image|themes/[^/]+/|connector-assets/|screenshots/|branding/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
+    "/((?!_next/static|_next/image|themes/[^/]+/|connector-assets/|screenshots/|branding/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-|api/apps/|api/p/).*)",
   ],
 };

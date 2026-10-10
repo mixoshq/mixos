@@ -4,16 +4,16 @@
 
 /**
  * Is this instance behind its database? The answer `src/proxy.ts` acts on, on
- * every request it sees.
+ * every request it sees, and the app API gateway (`src/lib/apps/dispatch.ts`)
+ * on the two mounts the proxy leaves out.
  *
  * It combines the two checks the readiness probe runs (`./schema-version.ts`):
  *
  *   - `platformBehind`: the platform schema is provably behind this build.
- *     While it is, the proxy answers everything but the health probes with the
- *     maintenance response (`./maintenance-gate.ts`).
+ *     While it is, the proxy and the gateway answer everything but the health
+ *     probes with the maintenance response (`./maintenance-gate.ts`).
  *   - `appsBehind`: the apps with a migration this build carries that the
- *     database hasn't applied. The proxy doesn't act on it, and readiness
- *     reports it.
+ *     database hasn't applied. Neither acts on it, and readiness reports it.
  *
  * "Can't tell" (the database unreachable, a query failing, no answer in time)
  * counts as not behind, as it does in readiness.
