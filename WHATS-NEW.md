@@ -76,6 +76,8 @@ just pulled.
   to match.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
+- **Fix:** sign-in attempts are limited on every route that checks a password,
+  including Auth.js's own callback, and those routes share one budget per IP.
 
 ## 2026-10-07
 
