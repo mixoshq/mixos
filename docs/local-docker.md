@@ -441,6 +441,9 @@ budget. Check `DATABASE_URL` in `.env.docker.local` uses
 `host.docker.internal`, not `127.0.0.1` — a container pointed at `127.0.0.1` is
 pointed at itself. Confirm the mapping resolves from inside:
 `docker compose -p mixos exec app-dev getent hosts host.docker.internal`.
+If the body has a `reason`, the database is reachable but missing a migration:
+`schema-behind` wants `npm run db:local`, and `app-migrations-behind` (an app
+migration you added since the last boot) wants `npm run migrate:apps`.
 
 **App API routes 404 in the prod image, with `{"error":"Route not found"}`.**
 `apps/` didn't make it into the standalone output. Note the failure mode: the

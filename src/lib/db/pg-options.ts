@@ -44,7 +44,7 @@ type ConnectionEnv =
  */
 function connectionFromEnv(): ConnectionEnv {
   const ssl = resolveSsl();
-  const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+  const url = connectionUrl();
   if (url) return { url, ssl };
 
   const required = ["PGHOST", "PGUSER", "PGPASSWORD", "PGDATABASE"] as const;
@@ -71,6 +71,24 @@ function connectionFromEnv(): ConnectionEnv {
     database: process.env.PGDATABASE!,
     ssl,
   };
+}
+
+/**
+ * The connection string connectionFromEnv uses, or undefined when it would
+ * fall back to the discrete PG* fields.
+ */
+export function connectionUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return (env.DATABASE_URL ?? env.POSTGRES_URL) || undefined;
+}
+
+/**
+ * Whether `env` names a database at all, in either shape connectionFromEnv
+ * accepts. It says nothing about whether the settings are complete or right:
+ * it is how the release step, which must never guess a database, tells
+ * "pointed somewhere" from "pointed nowhere".
+ */
+export function databaseNamed(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(connectionUrl(env) || env.PGHOST);
 }
 
 function resolveSsl(): PgOpts["ssl"] {
