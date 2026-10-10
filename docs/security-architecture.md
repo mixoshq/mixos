@@ -1888,7 +1888,8 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   happens to the data and grants the installed one already has.
 - **Run from a built artifact.** `checkInstallable()` refuses up front when
   `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
-  `output: "standalone"` tree, which its server `chdir`s to before listening.
+  `output: "standalone"` tree, which its server `chdir`s to before listening
+  (`isBuiltDeployment()`, `src/lib/platform/build.ts`).
 
   This check has to be a marker rather than a capability probe, because the
   capability probe passes and the capability is absent.
@@ -1915,7 +1916,7 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   execs a source file, and an archive that can set the mode of a file it places
   in the checkout can set the setuid bit.
 
-### A released build always searches mixos.org
+### A built deployment searches mixos.org
 
 `MIXOS_REPOSITORY_URL` decides where an instance gets the checksums it verifies
 every download against. **Whoever chooses the catalogue chooses what "verified"
@@ -1924,24 +1925,15 @@ project, and the one most likely to be set to something local and left there.
 
 It legitimately points at a laptop: `http://localhost:4321` for a host checkout
 of the mixos.org site, `http://host.docker.internal:4321` from inside the Docker
-stack. Both are right there and catastrophic in a release, so the value is
-gated on the way out by four layers:
+stack. Both are right there and wrong on a deployment, so the value is gated on
+the way out by four layers:
 
 | Layer | Where | Catches |
 | --- | --- | --- |
 | Pre-commit review | `dangerfile.ts` (`fail`) | A PR that pins it in a committed file |
-| CI | `npm run verify:repository-url`, blocking in `ci.yml` | The same, on every push — before a tag exists |
-| Runtime lock | `repositoryBaseUrl()` | A release built or deployed with it set anyway |
+| CI | `npm run verify:repository-url`, blocking in `ci.yml` | The same, on every push |
+| Runtime lock | `repositoryBaseUrl()` | A built deployment with it set anyway, in a committed file or in its own environment |
 | Default | `DEFAULT_REPOSITORY_URL` | Everything else |
-
-**The runtime lock is inert until a production build sets `MIXOS_RELEASE`.**
-The `Dockerfile` declares the `ARG` for the image path, but this repository
-deploys on Vercel, where nothing sets the variable today — so the first three
-layers are what actually hold, and a deployed instance would still honour an
-override applied to its own environment. The step that closes it is
-[`docs/plans/20260921_0842-release-versioning.md`](plans/20260921_0842-release-versioning.md):
-`next.config.ts` derives `MIXOS_RELEASE` from `package.json` when
-`VERCEL_ENV` is `production`.
 
 Only the scanned files matter, and the list is explicit rather than a glob:
 `.env.docker`, `docker-compose.yml` and the two Dockerfiles. `.env.local` is
@@ -1950,23 +1942,24 @@ travel. A **commented** example is not flagged — both env files carry one show
 the localhost form on purpose, and a check whose fix is "delete the
 documentation" is a check people learn to bypass.
 
-**The runtime lock keys on `MIXOS_RELEASE`, not `NODE_ENV`.** That variable
-carries the tag (`v1.2.0`) and is stamped by the tag-triggered build, nothing
-else. `npm run docker:prod` runs the production-parity profile with
-`NODE_ENV=production`, and that profile exists precisely so a developer can
-exercise a production shape locally — including against a local catalogue.
-Keying on `NODE_ENV` would take that away to catch a case it does not actually
-identify.
+**The runtime lock covers every built deployment**, by the marker
+`checkInstallable()` refuses on (`isBuiltDeployment()`,
+`src/lib/platform/build.ts`): `VERCEL` set, or a standalone `server.js` at the
+working directory, which is the Docker image on every host. There it ignores the
+override unless the value names the deployment's own machine, one of the four
+hosts in [the transport rule](#the-transport-carrying-the-checksum). That
+exception is what lets `npm run docker:prod`, the production image run locally,
+browse a local copy of the site. Keying the lock on `NODE_ENV` would take that
+profile away to catch a case `NODE_ENV` does not identify.
 
-When a release does carry an override, it is **ignored and logged, not
-refused**. A release that fails to boot over a stray environment variable is a
-worse outcome than one that quietly uses the right catalogue, and there is no
-branch here where refusing to start is safer: the correct value is known.
+An ignored override is **logged, not refused**. A deployment that fails to boot
+over a stray environment variable is a worse outcome than one that quietly uses
+the right catalogue, and there is no branch here where refusing to start is
+safer: the correct value is known.
 
-The one thing none of this constrains is a deployment's own environment after
-the fact — an operator who sets the variable on a released instance gets the
-warning and mixos.org. That is the intended end state: **all installs search
-mixos.org, and the override is a development affordance.**
+A source checkout honours the override, because developing the platform against
+another catalogue is what it is for. That is the intended end state: **every
+deployment searches mixos.org, and the override is a development affordance.**
 
 ### The transport carrying the checksum
 
