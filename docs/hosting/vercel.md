@@ -62,6 +62,9 @@ Vercel's build doesn't run migrations by itself, and shouldn't. Preview
 deployments share the build, and a migration that ran on every preview build
 would run against whatever database that preview points at.
 
+The admin pages show the MixOS version and the commit the deployment was built
+from, which Vercel sets as `VERCEL_GIT_COMMIT_SHA`.
+
 ## Moving from an existing Vercel and Supabase deployment
 
 Nothing about the database changes. Deploy this version, run the release step

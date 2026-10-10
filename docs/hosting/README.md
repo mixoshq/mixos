@@ -47,6 +47,7 @@ apps you add are in the build.
 | `CRON_SECRET` | Yes | The bearer token the tick sends. Without it `/api/cron` refuses every call, and jobs never run. |
 | `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | For the first deploy | The release step creates this account if no account has the email. It never changes an existing one, so the variables are safe to leave set. |
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind and install from it. See [Fixing what an instance runs](#fixing-what-an-instance-runs). |
+| `MIXOS_COMMIT` | No | The commit the admin pages show beside the MixOS version. For the Docker image it's a build argument. See [Which build is running](#which-build-is-running). |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated domains allowed to sign in. Blank: any. |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | No | Web Push, for apps that send notifications. |
 
@@ -90,6 +91,11 @@ lock installs down on an instance that runs from a checkout.
 [docs/security-architecture.md](../security-architecture.md#turning-it-off)
 has the detail.
 
+Those deployments browse mixos.org. `MIXOS_REPOSITORY_URL`, which points a
+development checkout at another catalogue, is ignored there unless it names the
+deployment's own machine (`localhost`, `127.0.0.1`, `[::1]` or
+`host.docker.internal`), and the server log says when it is.
+
 ### The release step
 
 [`scripts/release.ts`](../../scripts/release.ts) runs three things, in order:
@@ -101,13 +107,14 @@ has the detail.
    reverse. Any Postgres works; the ledger's name is the CLI's, not a
    dependency on Supabase.
 2. **The app registry and app migrations**, as `npm run migrate:apps` does
-   locally. Apps no longer in the build are removed, together with their
-   grants, installs and widgets. Each app with a database gets a schema and a
-   database role of its own, created here if they are missing, and its
-   migrations run as that role, after every pending statement has been checked
-   against what an app migration may do. One refused statement stops the step
-   before any app SQL runs; see
+   locally. Each app with a database gets a schema and a database role of its
+   own, created here if they are missing, and its migrations run as that role,
+   after every pending statement has been checked against what an app
+   migration may do. One refused statement stops the step before any app SQL
+   runs; see
    [docs/apps/database.md](../apps/database.md#what-a-migration-may-contain).
+   An app the build no longer carries is not deleted; see
+   [When an app leaves the build](#when-an-app-leaves-the-build).
 3. **The first admin**, from `INITIAL_ADMIN_*`, only if that account does not
    exist yet.
 
@@ -118,6 +125,50 @@ platform schema the build expects and every app migration the build carries,
 so point the platform's health check there. On a host that waits for it, a
 deploy that skips the release step, or whose release step failed, does not
 serve errors.
+
+### When an app leaves the build
+
+The release step never deletes an app. When the build doesn't carry an app the
+database knows, because its folder was removed or renamed or the build skipped
+it, the step marks it missing and keeps everything it had: whether it was
+active, its grants, installs, widgets and password, its settings and API keys,
+its scheduled jobs and its tables. Nobody can open it while it is missing, and
+Admin > Apps lists it under **Not in this build**. A renamed folder is a new
+app: it arrives inactive with none of the old one's data.
+
+When the app comes back, the step compares a hash of its files with the one it
+recorded:
+
+- **The same files**, after a rollback or once the build stops skipping it: the
+  app comes back as it left, active or not.
+- **Different files**: the app comes back switched off and marked **Back with
+  different code** on Admin > Apps until an admin activates it. Its grants and
+  data are still there, so check what changed first.
+
+The audit log records both, as `app.missing` and `app.returned`, with
+`release-step` as the actor.
+
+### Which build is running
+
+The admin pages show the MixOS version and the commit the deployment was built
+from, for example `MixOS 0.4.2 · commit 3e1f0a2`, so you can check that a deploy
+landed. Only admins see them.
+
+The version is `package.json`'s, stamped into every build. The commit comes from
+the host:
+
+| Host | Where the commit comes from |
+| --- | --- |
+| Docker Compose | `MIXOS_COMMIT=$(git rev-parse HEAD)` in front of the build command. See [docker-compose.md](docker-compose.md#upgrading). |
+| Coolify | `MIXOS_COMMIT=$SOURCE_COMMIT` in the resource's environment. See [docker-compose.md](docker-compose.md#coolify). |
+| Dokploy | Nothing maps it, so it shows as unknown. |
+| Render | `RENDER_GIT_COMMIT`, which Render sets. |
+| Railway | `RAILWAY_GIT_COMMIT_SHA`, which Railway sets on deploys from GitHub. |
+| Vercel | `VERCEL_GIT_COMMIT_SHA`, which Vercel sets. |
+
+The app takes the first of `MIXOS_COMMIT`, `VERCEL_GIT_COMMIT_SHA`,
+`RENDER_GIT_COMMIT` and `RAILWAY_GIT_COMMIT_SHA` that holds a commit SHA. An
+empty or malformed value is skipped. With none, the commit shows as unknown.
 
 ### The database role
 
@@ -183,7 +234,9 @@ holds work that hasn't been released yet.
    not this repository's. Once it merges, your host's guide says what happens
    next: [Docker Compose](docker-compose.md#upgrading),
    [Render](render.md#upgrades), [Railway](railway.md#upgrades) or
-   [Vercel](vercel.md#upgrades).
+   [Vercel](vercel.md#upgrades). When the deploy is done, the admin pages
+   show the new version and its commit
+   ([Which build is running](#which-build-is-running)).
 
 Skipping releases is fine. Merge the newest tag, and the release step applies
 every migration in between; read the notes of each release you skipped.

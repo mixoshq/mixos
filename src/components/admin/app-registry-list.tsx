@@ -24,6 +24,8 @@ interface Props {
   /** Live table counts per slug. A slug with no tables is absent, meaning 0. */
   tableCountsBySlug: Record<string, number>;
   activeBySlug: Record<string, boolean>;
+  /** Apps the release step brought back with different code: slug to when. */
+  returnedChangedBySlug: Record<string, string>;
 }
 
 export default function AppRegistryList({
@@ -32,6 +34,7 @@ export default function AppRegistryList({
   grantCountsBySlug,
   tableCountsBySlug,
   activeBySlug,
+  returnedChangedBySlug,
 }: Props) {
   const [query, setQuery] = useState("");
   const lower = query.toLowerCase();
@@ -87,6 +90,7 @@ export default function AppRegistryList({
               // Absent means the registry sync has not run since this app
               // appeared, which is not the same as active.
               isActive={activeBySlug[app.slug] === true}
+              returnedChangedAt={returnedChangedBySlug[app.slug] ?? null}
             />
           ))}
         </div>

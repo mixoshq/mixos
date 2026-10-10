@@ -257,6 +257,9 @@ Reconciliation also **deletes** rows for jobs the manifest no longer declares.
 Their `public.app_job_runs` history survives under the old name, so a renamed or
 removed job can linger on the admin page as an orphaned entry.
 
+An app that leaves the build is different: its rows are kept, each with its
+enabled switch, and its jobs don't run until the app is back.
+
 ## Observing and pausing jobs
 
 Admins see every declared job at **Administration → Scheduled Jobs**: its

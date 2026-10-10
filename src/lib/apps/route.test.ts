@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import { ConnectorError } from "../connectors/errors";
 import type { ConnectorErrorInit } from "../connectors/errors";
+import { connectorErrorResponse } from "../connectors/response";
 import { AppClientError, connectorErrorOf, createAppClient } from "./sdk";
 import { defineRoute, runRoute, type RouteDefinition } from "./route";
 
@@ -112,6 +113,96 @@ test("anything else a handler throws is still a generic 500 with nothing forward
   const body = await res.json();
   assert.equal(body.code, "HANDLER_ERROR");
   assert.doesNotMatch(JSON.stringify(body), /secret_table/);
+});
+
+// ── ctx.connectorErrorResponse, for a raw route ─────────────────────────────
+
+type Tier = "session" | "signed-in" | "password" | "key" | "public";
+
+/** A connector failure with every admin-only field set. */
+const authFailed = () =>
+  new ConnectorError({
+    connectorName: "acme",
+    subject: "Acme",
+    category: "auth_failed",
+    status: 401,
+    upstreamRequestId: "req-9",
+  });
+
+/** A raw route that answers its own connector failure, after `before` has run. */
+function rawRoute(before: (ctx: { user: unknown }) => void = () => {}) {
+  return defineRoute({
+    raw: true,
+    auth: ["session", "signed-in", "password", "key", "public"],
+    handler: async (ctx) => {
+      before(ctx);
+      return ctx.connectorErrorResponse(authFailed());
+    },
+  });
+}
+
+/** Run a route as a caller on `tier`, through the same pipeline the gateway uses. */
+function callAs(route: RouteDefinition, tier: Tier, isAdmin = false) {
+  const identity = tier === "session" || tier === "signed-in";
+  return runRoute(route, new Request("https://mixos.test/api/apps/acme-app/items"), {
+    context: {
+      user: identity ? { id: "user-1", isAdmin } : null,
+      connectors: {},
+      auth: tier,
+    } as never,
+    appSlug: "acme-app",
+    routePattern: "items",
+    method: "GET",
+  });
+}
+
+const ADMIN_ONLY = ["adminHint", "adminActionUrl", "upstreamRequestId", "status"];
+
+test("ctx.connectorErrorResponse answers as connectorErrorResponse would, for the caller's own admin flag", async () => {
+  for (const isAdmin of [false, true]) {
+    const res = await callAs(rawRoute(), "session", isAdmin);
+    const expected = connectorErrorResponse(authFailed(), { isAdmin });
+    assert.equal(res.status, expected.status);
+    assert.equal(res.headers.get("cache-control"), expected.headers.get("cache-control"));
+    assert.deepEqual(await res.json(), await expected.json());
+  }
+});
+
+test("ctx.connectorErrorResponse shows the admin-only fields to a signed-in admin and hides them from everyone else", async () => {
+  for (const tier of ["session", "signed-in"] as const) {
+    const admin = await (await callAs(rawRoute(), tier, true)).json();
+    assert.equal(admin.error.adminActionUrl, "/admin/connectors?connector=acme", tier);
+    assert.equal(admin.error.upstreamRequestId, "req-9", tier);
+    assert.equal(typeof admin.error.adminHint, "string", tier);
+
+    const user = await (await callAs(rawRoute(), tier, false)).json();
+    for (const key of ADMIN_ONLY) assert.equal(key in user.error, false, `${tier}: ${key} must not reach a non-admin`);
+  }
+  for (const tier of ["password", "key", "public"] as const) {
+    const body = await (await callAs(rawRoute(), tier)).json();
+    assert.equal(body.error.category, "auth_failed");
+    for (const key of ADMIN_ONLY) assert.equal(key in body.error, false, `${tier}: ${key} must not reach this caller`);
+  }
+});
+
+test("a handler cannot make itself an admin to read the admin-only fields", async () => {
+  const elevate = (ctx: { user: unknown }) => {
+    (ctx.user as { isAdmin: boolean }).isAdmin = true;
+  };
+
+  const raw = await (await callAs(rawRoute(elevate), "session", false)).json();
+  for (const key of ADMIN_ONLY) assert.equal(key in raw.error, false, `raw route: ${key}`);
+
+  // The same holds for a failure a JSON route lets propagate.
+  const route = defineRoute({
+    output: z.object({ items: z.array(z.string()) }),
+    handler: async (ctx) => {
+      elevate(ctx);
+      throw authFailed();
+    },
+  });
+  const propagated = await (await quietly(() => callAs(route, "session", false))).json();
+  for (const key of ADMIN_ONLY) assert.equal(key in propagated.error, false, `propagated: ${key}`);
 });
 
 // ── the client ──────────────────────────────────────────────────────────────
