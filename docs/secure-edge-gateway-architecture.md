@@ -253,8 +253,8 @@ so this is the only door.
 
 Pages under `apps/<slug>/pages/` do **not** build a context themselves.
 `buildAppContext()` is platform-internal — it performs no auth check of its own,
-and `@/lib/apps/context` is a restricted import for `apps/**/pages/**` and
-`apps/**/widgets/**`. Use the app's own route:
+and `@/lib/apps/context` is not on the app import list, so no app code can
+import it. Use the app's own route:
 
 ```ts
 import { callAppRoute } from "@/lib/apps/call";
@@ -268,6 +268,12 @@ budget, the same telemetry row. What it skips is the network, the JSON round
 trip, and **the rate limiters** — deliberately, because the page render is already
 bounded by the request that triggered it. It throws `AppError` rather than
 returning a `Response`.
+
+The first argument is the app's own slug, as a string literal. The build
+refuses any other, and any use of `callAppRoute` but a direct call: with
+another app's slug it would run that app's routes as the current user, around
+App Services. See
+[`security-architecture.md` §25](security-architecture.md#25-in-process-route-calls).
 
 ---
 
@@ -304,37 +310,33 @@ The boundary holds in five places:
    auth, role, and validation stages.
 2. **Types.** Widgets get `WidgetProps`. There is no shape through which client
    code can receive a context.
-3. **ESLint** ([`eslint.config.mjs`](../eslint.config.mjs)) — restrictions are
-   **tiered**, and each tier **restates the full set** rather than inheriting it:
-   - `apps/**` as a whole: no `@connectors/*`, no `@/lib/connectors/*`, no
-     `@/lib/db*`, no `process`, no raw network access, no HTML sinks, no `eval`,
-     and no constructing a scoped DB client.
-   - `apps/**/pages/**` and `apps/**/widgets/**`: the same, plus no importing
-     their own app's `lib/server/**`.
-   - The server tier — `apps/**/api/**`, `lib/server/**`, `services/**`,
-     `mcp/**`, `jobs/**` — is allowlisted for connectors but **still banned from
-     `@/lib/db*`**, the services broker, and the context builder. App API routes
-     are *not* a free pass to the raw database client.
+3. **The import list** ([`import-policy.mjs`](../src/lib/apps/import-policy.mjs)).
+   App code imports its own files, a published list of platform modules and a
+   few packages, and nothing else. In every tier, that rules out `@/lib/db*`,
+   constructing a scoped DB client, a connector or another app's code at
+   runtime, the services broker, the context builder and the hook system; and a
+   page or widget may not import its own app's `lib/server/**`. App API routes
+   are *not* a free pass to the raw database client.
 
-   **Why restated and not inherited.** ESLint flat config *replaces* a rule's
-   options when a later block names the same rule; it does not merge them.
-   Anything omitted from a later block is therefore allowed there. That is not
-   hypothetical: the pages/widgets block once omitted `@/lib/apps/context`, which
-   made the most client-facing tier the only one able to import the server
-   context builder. Adding a restriction means adding it to **every** block.
+   An import is judged by the file it resolves to, so neither a relative path
+   into `src/` nor `@/lib/db/../db/client` gets round it. Types may come from
+   anywhere: a handler needs `import type { ScopedClient }` to type
+   `context.db`, and a type cannot construct a client for another app's prefix.
 
-   `createScopedClient` is restricted by **name**, not by module, so
-   `import type { ScopedClient }` still works — a type cannot construct a client
-   for another app's prefix, and a handler needs it to type `context.db`.
-
-   These are `error`-level, and CI runs `npm run lint` as a blocking step.
+   This replaced three ESLint `no-restricted-imports` blocks, a denylist of
+   spellings that had to restate itself in every tier because flat config
+   *replaces* a rule's options rather than merging them. One omission had made
+   pages and widgets the only tier able to import the server context builder.
+   ESLint now runs the policy's own code (`mos-apps/app-imports`), so the editor
+   and the build give the same answer.
 4. **The registry generator.** Lint runs on pull requests to this repository
    and nowhere else, so for an extension installed from the Registry it is
    advice. The generator runs on every build and on every install, and before
    it loads any of an app's code it reads the app's syntax tree
    ([`scripts/app-containment.ts`](../scripts/app-containment.ts)): a reference
    to `process`, a network constructor or module, an HTML sink, `eval` or
-   `Function` skips the app, and on the install path a skip is a rejection,
+   `Function`, an import off the list, or any other way of loading code skips
+   the app, and on the install path a skip is a rejection,
    rolled back. It reads syntax, so it is not a sandbox — it makes accidental
    and naive use impossible to ship, and evasion conspicuous in review. See
    [`security-architecture.md` §24](security-architecture.md#24-environment-containment).
@@ -406,6 +408,8 @@ produces all three registries.
 | [`src/lib/connectors/user-config.ts`](../src/lib/connectors/user-config.ts) | Per-user OAuth grants |
 | [`src/lib/hooks/types.ts`](../src/lib/hooks/types.ts) | `AppContext`, `PublicAppContext`, `WidgetProps` |
 | [`src/lib/rate-limit.ts`](../src/lib/rate-limit.ts) | Token-bucket limiter |
-| [`eslint.config.mjs`](../eslint.config.mjs) | The tiered import restrictions |
+| [`src/lib/apps/import-policy.mjs`](../src/lib/apps/import-policy.mjs) | What app code may import, read by the build and by ESLint |
+| [`scripts/app-containment.ts`](../scripts/app-containment.ts) | The containment scan the registry generator runs on every app |
+| [`eslint.config.mjs`](../eslint.config.mjs) | The editor's copy of the containment rules |
 | [`apps/_template/api/hello/route.ts`](../apps/_template/api/hello/route.ts) | Canonical handler |
 | [`apps/_template/widgets/hello-mix.tsx`](../apps/_template/widgets/hello-mix.tsx) | Canonical widget |
