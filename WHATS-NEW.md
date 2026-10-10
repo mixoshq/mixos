@@ -44,6 +44,44 @@ just pulled.
   the dialog says so and offers **Try again**. If an install is paused for more
   than 15 minutes (a laptop asleep mid-download) and another starts meanwhile,
   the paused one stops before its next write and says what it left on disk.
+- **Every build knows its version.** The admin pages show it with the commit,
+  e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
+  into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
+  from Vercel, Render and Railway's own variables; on Docker Compose, build with
+  `MIXOS_COMMIT=$(git rev-parse HEAD)`, and on Coolify set
+  `MIXOS_COMMIT=$SOURCE_COMMIT`. See `docs/hosting/README.md`. **Breaking:** an
+  extension's `requiresMixOS` is now checked in a checkout too, against
+  `package.json`; bump it locally to try an extension that needs a newer MixOS.
+- **A built deployment browses mixos.org.** The Docker image on any host, and
+  Vercel, ignore `MIXOS_REPOSITORY_URL` unless it names their own machine
+  (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), and log it.
+  **Breaking:** a deployment pointed at another catalogue now browses
+  mixos.org; a source checkout still honours the override.
+- **Releases.** A version of MixOS is an annotated tag `vX.Y.Z` on `main` with
+  a GitHub Release, whose notes are its section of `CHANGELOG.md`.
+  `/mixos deploy release` opens the release PR, which sets the version in
+  `package.json` and writes that section from the Conventional Commits since
+  the last release (`scripts/release-prep.ts`). Once it merges, run it again
+  for the commands that tag the merge commit and publish the GitHub Release,
+  which a person runs. To upgrade a deployment, merge the newest release tag
+  into your fork rather than `upstream/main`
+  (`docs/hosting/README.md#upgrading`). Prereleases are `vX.Y.Z-rc.N`.
+- **Two platform migrations can't share a number.** The ledger records a
+  migration by its number, so the release step and `npm run db:migrate` applied
+  one of two files with the same number and silently skipped the other. Now
+  they apply nothing, the build and `npm run dev:docker` stop, and Danger fails
+  a PR that adds a number already on `main`, each naming both files and the
+  next free number. If a merge brings in a migration with your number, rename
+  yours to the next free number and change its `platform_schema_version` value
+  to match.
+- **A maintenance page while the database is behind.** When the platform
+  schema is behind the build, every page shows a plain maintenance page and
+  every API route, `/api/cron`, `/api/webhooks` and `/api/mcp` included,
+  answers 503 with `Retry-After: 30` until the release step runs. Only
+  `/api/health/live` and `/api/health/ready` answer as usual. Locally,
+  `npm run db:local` brings it back. **Breaking:** `/api/health/ready` returns
+  only `status` and `reason`. The schema versions, the count of pending app
+  migrations and the message are gone; the server log has them.
 - **A deactivated app runs nothing.** None of its modules is imported while it
   is off: its API routes, over HTTP or through `callAppRoute()`, its jobs,
   syncs, services and `hooks.ts`. Run now refuses its jobs, which Scheduled

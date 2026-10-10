@@ -3,9 +3,17 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { NextResponse, type NextRequest } from "next/server";
+import { maintenanceState } from "@/lib/platform/maintenance";
+import { maintenanceGate } from "@/lib/platform/maintenance-gate";
 
 /**
- * Optimistic auth check at the proxy layer.
+ * The maintenance response, then an optimistic auth check.
+ *
+ * While the platform schema is behind this build, every request but the two
+ * health probes gets a 503 from here, before anything that could reach a route
+ * and query the database (src/lib/platform/maintenance.ts). That needs the
+ * database, which a proxy can reach because in Next 16 it runs on the Node.js
+ * runtime, always: `runtime` can't be set in this file.
  *
  * Per Next.js guidance (docs/01-app/01-getting-started/16-proxy.md), proxy
  * middleware should not be used for full authorization. We only do a
@@ -165,8 +173,13 @@ function withCsp(request: NextRequest): NextResponse {
   return response;
 }
 
-export default function proxy(request: NextRequest) {
+export default async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // First, ahead of the public list: a public route queries the database as
+  // readily as a signed-in one, and the whole instance is waiting.
+  const maintenance = await maintenanceGate(pathname, maintenanceState);
+  if (maintenance) return maintenance;
 
   if (isPublic(pathname)) return withCsp(request);
 
@@ -187,11 +200,14 @@ export const config = {
   // login page both showed the root favicon whatever their <link> tags said.
   // These are logos: public by nature, and never a place a secret can hide.
   //
-  // `themes/` is exempt for the same reason, and one sharper one: the sign-in
-  // page itself is themed. With the theme's fonts and logo behind the auth
-  // redirect, the one page every user sees before they have a session is the
-  // one page that renders unstyled. A theme asset is a font file, a logo or a
-  // favicon — the same "public by nature" category as the icons above.
+  // Theme files, `/themes/<id>/<file>`, are exempt for the same reason, and one
+  // sharper one: the sign-in page itself is themed. With the theme's fonts and
+  // logo behind the auth redirect, the one page every user sees before they
+  // have a session is the one page that renders unstyled. A theme asset is a
+  // font file, a logo or a favicon — the same "public by nature" category as
+  // the icons above. The pattern is `themes/<id>/`, not `themes/`, because
+  // /themes/guide is a signed-in page and stays under the proxy, as
+  // /connectors/guide does below.
   //
   // `connector-assets/` is a connector's icon, copied out of
   // connectors/<name>/assets by the registry generator. Same category again: a
@@ -215,7 +231,10 @@ export const config = {
   // apps/<slug>/branding/. The sign-in page draws them before anyone has a
   // session, which is the theme-assets argument exactly — and, like
   // screenshots, only declared files are copied.
+  //
+  // A path left out here is left out of the maintenance response too, so leave
+  // out only files that are served without reading the database.
   matcher: [
-    "/((?!_next/static|_next/image|themes/|connector-assets/|screenshots/|branding/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
+    "/((?!_next/static|_next/image|themes/[^/]+/|connector-assets/|screenshots/|branding/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
   ],
 };
