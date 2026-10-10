@@ -91,6 +91,12 @@ Anything *else* your handler throws becomes a 500, with the message passed
 through `safeErrorMessage()` so a driver error naming a column never reaches the
 browser. You no longer write `safeErrorMessage` yourself — the pipeline does.
 
+The one exception is a failed connector call. Let the `ConnectorError`
+propagate: the response is that connector's envelope with its own status (503
+for a connector nobody has finished setting up, 429 with `Retry-After` for a
+throttle), which `AsyncView` renders as "Not connected" or as an error with
+Retry. See [Failure handling](../connectors/failure-handling.md).
+
 ## `input`: declared or unavailable
 
 An omitted `input` schema does not mean "unvalidated". It means **unavailable**:
@@ -227,7 +233,9 @@ budget: { connectorCalls: 20, ms: 8_000 }
   loops per-record over a full book trips it.
 - **`ms`** caps how long the caller waits. Default **30 000**. Note this bounds
   *latency*, not spend: the handler keeps running after the 504. Work that must
-  actually stop needs an `AbortSignal` threaded into the connector.
+  actually stop takes `context.signal`, which aborts when the budget runs out or
+  the caller goes away. Pass it to the connector methods that accept one, and
+  to `context.http.fetch`.
 
 ## `raw: true`
 
@@ -243,8 +251,11 @@ export const GET = defineRoute({
 ```
 
 Output validation and the payload cap are both skipped, and the timeout only
-covers producing the Response, not consuming its body. Declare the
-`raw-response` escape in `app.json` so the exception is on the record.
+covers producing the Response, not consuming its body. So the exception has to
+be on the record: `app.json` must declare
+`"escapes": [{ "rule": "raw-response", "reason": "…" }]`, or the build leaves the
+whole app out of the registry. An admin sees the declaration, and your reason,
+in the app's details. Auth, roles, CSRF and the rate limit apply as usual.
 
 **A raw route parses its own body.** Its `input` schema covers the query string
 and path params only — the pipeline deliberately does not read the body, because
@@ -372,7 +383,8 @@ side.
 
 The SDK throws `AppClientError` with the HTTP status and the response body on a
 non-2xx. The body carries `{ error, code }`, so a client can branch on the code
-rather than string-matching the message.
+rather than string-matching the message. After a connector failure `error` is the
+connector's envelope rather than a string, and `connectorErrorOf(err)` returns it.
 
 Requests always go to `/api/apps/<your-slug>/…`; you cannot call another app's
 routes. For that, use [App Services](./app-services.md).

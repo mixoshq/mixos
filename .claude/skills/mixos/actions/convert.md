@@ -79,8 +79,8 @@ Universal translation table. Apply it row by row against the inventory:
 | Cron job, queue worker, scheduler | `schedules: [{ name, everyMinutes \| cron }]` + `jobs/<name>.ts` | One cadence per job. `everyMinutes` ≥ 5 and a multiple of 5. Handler gets a **user-less** `SystemAppContext`. |
 | Incremental pull from an upstream (watermarks, "sync since") | `sync: [{ name, schedule, source, window, budgetMs }]` + `sync/<name>.ts` via `defineSync` | Prefer this over a hand-rolled job. The platform owns the watermark, budget, window halving, and empty-result guard — and the provider cursor never leaves the run. |
 | API client with credentials (Stripe, Salesforce, an internal API with a token) | A **connector** under `connectors/` | Tenant-scoped, admin-configured. See [1.4](#14-outbound-integrations--reuse-flag-delegate). |
-| Outbound HTTP with no credential | `context.http` + the hostname in `egress: []` | Raw `fetch` is a lint error in `apps/**`. |
-| `.env` / config keys | `env: [{ key, label, type }]` in `app.json` → `context.env.<KEY>` | `process.env` is a lint error — the raw environment carries platform secrets. `password`-typed values are encrypted at rest. |
+| Outbound HTTP with no credential | `context.http` + the hostname in `egress: []` | Raw `fetch` — or any other network constructor or HTTP client — fails the build in `apps/**`, with no escape. |
+| `.env` / config keys | `env: [{ key, label, type }]` in `app.json` → `context.env.<KEY>` | `process.env` fails the build, with no escape — the raw environment carries platform secrets. `password`-typed values are encrypted at rest. |
 | Page / screen / view template | `pages/*.tsx` | Server page calls `await callAppRoute("<slug>", "GET /items", input)`; client page calls `createAppClient<"<slug>">(slug).call(...)`. |
 | Dashboard card, KPI tile, embeddable chart | `widgets/*.tsx` + a `widgets[]` entry | Widget `id` comes from the filename. Widgets never import connectors, `context`, the DB, or `lib/server`. |
 | CSS, Tailwind config, theme file, design tokens, `dark:` classes | **Delete.** Semantic tokens from the design system | `text-foreground`, `bg-card`, `bg-primary`, `text-success/warning/destructive`, `cat-1`…`cat-6` for categorical. No hex, no palette classes, no `dark:` variants — colour forks in the theme, never in an app. |
@@ -92,7 +92,8 @@ Universal translation table. Apply it row by row against the inventory:
 | `org_id` / `tenant_id` / workspace column threaded through every query | **Delete the column.** | The platform deployment *is* the tenant, and connectors are tenant-scoped. Porting a tenancy column duplicates a boundary the platform already draws and quietly breaks every scoped query. Exception: the original really did model multiple *customer* records as data — then it stays as an ordinary domain column, not as a security boundary. |
 | Feature flags / kill switches | `env[]` entries, or plain code | Do not build a flag system. |
 | File uploads / blob storage | **Gap.** Flag it. | Confirm what the platform supports before promising it in the plan. Do not invent a storage path. |
-| Server-rendered HTML fragments, `dangerouslySetInnerHTML` | Rebuild as components | If genuinely unavoidable, it needs `escapes: [{ rule: "raw-html", reason }]` — a declared, reviewable exception, not a quiet one. |
+| Server-rendered HTML fragments, `dangerouslySetInnerHTML` | Rebuild as components; formatted text from elsewhere (a CMS, a README, notes) through `Markdown` from `@/components/ui/markdown` | There is no escape: the HTML sinks fail the build. If the source only offers HTML, that is a *gap* — record it and ask the user. |
+| File downloads, streamed or non-JSON responses, redirects | `defineRoute({ raw: true, … })` returning a `Response` | Declare `escapes: [{ rule: "raw-response", reason }]` in `app.json` — a raw route without it keeps the app out of the registry. Auth, roles, CSRF and the rate limit still apply. |
 | A second app hiding inside this one | A separate app + `provides`/`consumes` App Services | See [1.5](#15-decide-the-boundary-one-app-or-several). |
 
 ### 1.4 Outbound integrations — reuse, flag, delegate

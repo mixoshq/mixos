@@ -4,6 +4,7 @@
 
 import { createServiceClient } from "@/lib/db/server";
 import { appSchemaName } from "./app-identifiers";
+import { ReadOnlyError } from "./read-only";
 
 /**
  * Per-app database handle: the query builder, pinned to the app's own schema,
@@ -48,7 +49,8 @@ const MUTATING_METHODS = new Set(["insert", "update", "upsert", "delete"]);
 
 /**
  * A scoped DB client that can only read. Used by MCP tool handlers, which are
- * read-only by contract (see docs/apps/mcp.md).
+ * read-only by contract (see docs/apps/mcp.md), and by an App Services provider
+ * answering a request from one.
  *
  * The type alone would satisfy an honest caller; the Proxy is here for the
  * dishonest one. `ctx.db as any` is a one-token bypass of the compiler, and the
@@ -63,7 +65,7 @@ export function createReadOnlyScopedClient(appSlug: string): ReadOnlyScopedClien
     new Proxy(builder, {
       get(target, prop, receiver) {
         if (typeof prop === "string" && MUTATING_METHODS.has(prop)) {
-          throw new Error(
+          throw new ReadOnlyError(
             `MCP tools are read-only: "${prop}()" is not available on context.db (app "${appSlug}", table "${name}").`,
           );
         }

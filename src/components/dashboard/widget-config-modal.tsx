@@ -4,12 +4,13 @@
 
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useId, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { X, GripVertical, Plus } from "lucide-react";
 import type { WidgetDefinition, WidgetConfigField } from "@/lib/apps/types";
 import type { ResolvedConfig } from "@/lib/hooks/types";
 import { widgetLoaders } from "@/generated/app-registry";
+import { missingRequiredFields } from "@/lib/apps/widget-config-required";
 import { useListReorder } from "@/lib/dnd/use-list-reorder";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,8 @@ export default function WidgetConfigModal({
   const [config, setConfig] = useState<Record<string, unknown>>(initialConfig);
   const [resolvedConfig, setResolvedConfig] = useState<ResolvedConfig>({});
   const [loading, setLoading] = useState(true);
+  const idBase = useId();
+  const errorId = (key: string) => `${idBase}-${key}-error`;
 
   useEffect(() => {
     async function resolve() {
@@ -72,14 +75,39 @@ export default function WidgetConfigModal({
     return { ...defaults, ...config };
   }, [widget.config, resolvedConfig, config]);
 
+  // `required` is enforced here, on save: an empty required field keeps the
+  // modal open and says which one. Shown only after a save attempt, so a form
+  // that opens empty does not open covered in errors; derived from the current
+  // values, so each message clears as its field is filled.
+  const [triedToSave, setTriedToSave] = useState(false);
+  const missing = useMemo(
+    () =>
+      new Set(
+        missingRequiredFields(widget.config ?? [], effectiveConfig, resolvedConfig),
+      ),
+    [widget.config, effectiveConfig, resolvedConfig],
+  );
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (missing.size > 0) {
+      setTriedToSave(true);
+      return;
+    }
     onSave(effectiveConfig);
   };
 
   const renderField = (field: WidgetConfigField) => {
     const resolved = resolvedConfig[field.key];
     const options = resolved?.options ?? field.options ?? [];
+    const invalid = triedToSave && missing.has(field.key);
+    // On the inputs that can carry them; the grouped controls rely on the
+    // message rendered under them.
+    const a11y = {
+      "aria-required": field.required || undefined,
+      "aria-invalid": invalid || undefined,
+      "aria-describedby": invalid ? errorId(field.key) : undefined,
+    };
 
     switch (field.type) {
       case "multiselect": {
@@ -137,6 +165,7 @@ export default function WidgetConfigModal({
       case "select":
         return (
           <select
+            {...a11y}
             value={(effectiveConfig[field.key] as string) ?? ""}
             onChange={(e) =>
               setConfig((prev) => ({ ...prev, [field.key]: e.target.value }))
@@ -171,6 +200,7 @@ export default function WidgetConfigModal({
       case "number":
         return (
           <input
+            {...a11y}
             type="number"
             value={(effectiveConfig[field.key] as number) ?? ""}
             onChange={(e) =>
@@ -185,6 +215,7 @@ export default function WidgetConfigModal({
       default:
         return (
           <input
+            {...a11y}
             type="text"
             value={(effectiveConfig[field.key] as string) ?? ""}
             onChange={(e) =>
@@ -241,6 +272,14 @@ export default function WidgetConfigModal({
                       </label>
                     )}
                     {renderField(field)}
+                    {triedToSave && missing.has(field.key) && (
+                      <p
+                        id={errorId(field.key)}
+                        className="mt-1 text-xs text-destructive"
+                      >
+                        {field.label} is required.
+                      </p>
+                    )}
                   </div>
                 ))}
             </div>

@@ -7,6 +7,64 @@ import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 import noLowContrastTokenPairs from "./eslint-rules/no-low-contrast-token-pairs.mjs";
 
+/**
+ * Why each containment ban exists, worded the same as the registry generator's
+ * scan (scripts/app-containment.ts) so the editor and the build agree.
+ */
+const CONTAINMENT = {
+  env: "Apps must not read the process environment — it carries the platform's own secrets. Declare what you need under `env` in app.json and read it as context.env.<KEY>.",
+  network:
+    "Apps must not reach the network directly — that is the SSRF hole. Use context.http (bounded by the manifest's `egress` allowlist, with a resolve-and-recheck against private ranges), or a connector for a fixed upstream.",
+  html: "Apps must not render markup they did not author. Render Markdown with <Markdown> from @/components/ui/markdown.",
+  code: "Apps must not run a string as code.",
+};
+
+const PALETTE_MESSAGE =
+  "Raw palette colours dodge the contrast guarantee. Use semantic tokens: text-foreground, text-muted-foreground, text-success, text-warning, text-destructive, bg-card, bg-muted, bg-primary. See docs/apps/ux.md#color--contrast.";
+const OPAQUE_FILL_MESSAGE =
+  "An opaque bg-white / bg-black is a theme surface in disguise. Use bg-card, bg-background, or bg-muted. Alpha over a known ground (bg-white/10, bg-black/70) is fine and is not flagged.";
+const DARK_VARIANT_MESSAGE =
+  "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (mixos / mixos-dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.";
+
+/**
+ * The colour fence, as `no-restricted-syntax` selectors. Why each one exists
+ * is written at the design-system block below.
+ *
+ * A constant because more than one block sets `no-restricted-syntax` for app
+ * `.tsx` files, and flat config REPLACES a rule's options rather than merging
+ * them: a later block that sets the rule must restate these, or it switches
+ * them off for every file it matches.
+ */
+const COLOUR_FENCE = [
+  {
+    selector:
+      "Literal[value=/(?:^|[\\s\"'`:])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
+    message: PALETTE_MESSAGE,
+  },
+  {
+    selector:
+      "TemplateElement[value.raw=/(?:^|[\\s\"'`:])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
+    message: PALETTE_MESSAGE,
+  },
+  {
+    selector: "Literal[value=/(?:^|[\\s\"'`:])bg-(?:white|black)(?![\\w\\/-])/]",
+    message: OPAQUE_FILL_MESSAGE,
+  },
+  {
+    selector:
+      "TemplateElement[value.raw=/(?:^|[\\s\"'`:])bg-(?:white|black)(?![\\w\\/-])/]",
+    message: OPAQUE_FILL_MESSAGE,
+  },
+  {
+    selector: "Literal[value=/(?:^|[\\s\"'`:])dark:/]",
+    message: DARK_VARIANT_MESSAGE,
+  },
+  {
+    selector: "TemplateElement[value.raw=/(?:^|[\\s\"'`:])dark:/]",
+    message: DARK_VARIANT_MESSAGE,
+  },
+];
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -237,43 +295,7 @@ const eslintConfig = defineConfig([
   {
     files: ["apps/**/*.{ts,tsx}", "src/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector:
-            "Literal[value=/(?:^|[\\s\"'`:])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
-          message:
-            "Raw palette colours dodge the contrast guarantee. Use semantic tokens: text-foreground, text-muted-foreground, text-success, text-warning, text-destructive, bg-card, bg-muted, bg-primary. See docs/apps/ux.md#color--contrast.",
-        },
-        {
-          selector:
-            "TemplateElement[value.raw=/(?:^|[\\s\"'`:])(?:text|bg|border|ring|fill|stroke|from|to|via|divide)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\\d{2,3}(?![\\w\\/-])/]",
-          message:
-            "Raw palette colours dodge the contrast guarantee. Use semantic tokens: text-foreground, text-muted-foreground, text-success, text-warning, text-destructive, bg-card, bg-muted, bg-primary. See docs/apps/ux.md#color--contrast.",
-        },
-        {
-          selector:
-            "Literal[value=/(?:^|[\\s\"'`:])bg-(?:white|black)(?![\\w\\/-])/]",
-          message:
-            "An opaque bg-white / bg-black is a theme surface in disguise. Use bg-card, bg-background, or bg-muted. Alpha over a known ground (bg-white/10, bg-black/70) is fine and is not flagged.",
-        },
-        {
-          selector:
-            "TemplateElement[value.raw=/(?:^|[\\s\"'`:])bg-(?:white|black)(?![\\w\\/-])/]",
-          message:
-            "An opaque bg-white / bg-black is a theme surface in disguise. Use bg-card, bg-background, or bg-muted. Alpha over a known ground (bg-white/10, bg-black/70) is fine and is not flagged.",
-        },
-        {
-          selector: "Literal[value=/(?:^|[\\s\"'`:])dark:/]",
-          message:
-            "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (mixos / mixos-dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.",
-        },
-        {
-          selector: "TemplateElement[value.raw=/(?:^|[\\s\"'`:])dark:/]",
-          message:
-            "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (mixos / mixos-dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.",
-        },
-      ],
+      "no-restricted-syntax": ["error", ...COLOUR_FENCE],
     },
   },
   // ── Containment: an app reaches the environment and the network by declaration ──
@@ -290,28 +312,51 @@ const eslintConfig = defineConfig([
   // repeats both on each redirect hop. Fixed, admin-configured hosts belong in a
   // connector instead.
   //
-  // Both are escapable — `process-env` and `raw-fetch` in the manifest's
-  // `escapes` — but only on the record, with a reason a reviewer can act on.
+  // Markup the app did not author is an XSS sink; Markdown renders through
+  // <Markdown> from @/components/ui/markdown. And a string run as code is the
+  // way round all of the above.
+  //
+  // NONE OF THIS IS ESCAPABLE. These rules are the editor's copy of the
+  // containment scan in scripts/app-containment.ts, which the registry
+  // generator runs on every build and every Registry install — lint runs only
+  // on pull requests to this repository, so the generator's copy is the one
+  // that holds. Keep the two lists in step. See
+  // docs/plans/20261005_2150-app-escapes.md.
+  //
+  // Only this block sets these rules for apps/**, so nothing here is replaced
+  // by a later block's options.
   {
     files: ["apps/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-properties": [
         "error",
-        {
-          object: "process",
-          property: "env",
-          message:
-            "Apps must not read process.env — it carries the platform's own secrets. Declare what you need under `env` in app.json and read it as context.env.<KEY>.",
-        },
+        ...["globalThis", "window", "self", "global"].flatMap((object) => [
+          { object, property: "process", message: CONTAINMENT.env },
+          { object, property: "fetch", message: CONTAINMENT.network },
+          { object, property: "WebSocket", message: CONTAINMENT.network },
+          { object, property: "EventSource", message: CONTAINMENT.network },
+          { object, property: "XMLHttpRequest", message: CONTAINMENT.network },
+          { object, property: "eval", message: CONTAINMENT.code },
+          { object, property: "Function", message: CONTAINMENT.code },
+        ]),
+        { property: "innerHTML", message: CONTAINMENT.html },
+        { property: "outerHTML", message: CONTAINMENT.html },
+        { property: "insertAdjacentHTML", message: CONTAINMENT.html },
+        { object: "document", property: "write", message: CONTAINMENT.html },
+        { object: "document", property: "writeln", message: CONTAINMENT.html },
       ],
       "no-restricted-globals": [
         "error",
-        {
-          name: "fetch",
-          message:
-            "Apps must not call fetch directly — that is the SSRF hole. Use context.http (bounded by the manifest's `egress` allowlist, with a resolve-and-recheck against private ranges), or a connector for a fixed upstream.",
-        },
+        { name: "process", message: CONTAINMENT.env },
+        { name: "fetch", message: CONTAINMENT.network },
+        { name: "WebSocket", message: CONTAINMENT.network },
+        { name: "EventSource", message: CONTAINMENT.network },
+        { name: "XMLHttpRequest", message: CONTAINMENT.network },
       ],
+      "react/no-danger": "error",
+      "no-eval": "error",
+      "no-implied-eval": "error",
+      "no-new-func": "error",
     },
   },
   // ── Design system: apps compose from the primitives, not from raw elements ──
@@ -330,11 +375,18 @@ const eslintConfig = defineConfig([
   // The 86 hand-rolled `rounded-xl border border-border bg-card` shells that
   // drifted across 16 apps are the other half: `Card`/`SectionCard` export
   // CARD_SHELL, and a literal copy of it is now an error rather than the 87th.
+  //
+  // RESTATES the colour fence. This block sets no-restricted-syntax for
+  // apps/**/*.tsx, and flat config replaces a rule's options rather than
+  // merging them, so on its own it switched the palette, opaque-fill and
+  // `dark:` checks off for every widget and page — the files they were written
+  // for — while app .ts files and src/ kept them.
   {
     files: ["apps/**/*.tsx"],
     rules: {
       "no-restricted-syntax": [
         "error",
+        ...COLOUR_FENCE,
         {
           selector: "JSXOpeningElement[name.name='button']",
           message:

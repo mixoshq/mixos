@@ -66,18 +66,63 @@ just pulled.
   `.webp`, or the build fails. Both bundled themes already comply.
 - **`npm test`** runs the unit tests (`*.test.ts` under `src/` and `scripts/`)
   with Node's built-in runner, and CI runs it after typecheck.
-- **The release step reads only its own environment.** `npm run release` no
-  longer fills gaps from `.env.local` or `.env.docker`, and stops if nothing
-  names a database. On Vercel, pass `DATABASE_URL` (and `INITIAL_ADMIN_*` on the
-  first deploy) on the command line.
-- **Readiness waits for app migrations.** `/api/health/ready` answers 503 until
-  every app migration in the build is applied, and release steps that run at
-  the same time take turns.
-- **`keys:generate` and `keys:check` cover `AUTH_SECRET` and `CRON_SECRET`.**
+- **`raw-response` is the only app escape, and it is required.** A route with
+  `raw: true` registers only when `app.json` declares
+  `escapes: [{ "rule": "raw-response", "reason": "…" }]`, and an admin sees the
+  declaration and its reason in the app's details. `process-env`, `raw-fetch`,
+  `raw-html` and `output-validate-dev-only` are gone; a manifest naming one
+  fails the build.
+- **App containment is enforced by the build, not just lint.** The registry
+  generator reads every app's source on every build and every Registry install,
+  and skips an app that references `process`, raw network access (`fetch`,
+  `WebSocket`, the `http`/`net` modules, HTTP client packages), an HTML sink
+  (`dangerouslySetInnerHTML`, `innerHTML`, …), `eval` or `new Function`. Each
+  finding names the file and line.
+- **`Markdown` for text you did not write.** `@/components/ui/markdown` renders
+  GitHub-flavoured Markdown with raw HTML dropped and `javascript:` links
+  blanked, styled from the theme's tokens.
+- **Route output is validated on every response.** The
+  `output: { schema, validate: "dev-only" }` form is removed; pass the schema.
+- **Theme checks the build used to skip now fail it:** a custom property
+  outside the top-level `:root` (in a `.mix-*` rule, or a `:root` inside
+  `@media` or `@supports`), a colour token the build cannot evaluate or that is
+  translucent, a `var()` naming a token `:root` never sets, and an `@font-face`
+  missing from `fonts[]`. Only `--border` may be translucent; the build
+  composites it over `--background`. Both bundled themes already comply.
+- **The colour fence covers app widgets and pages again.** Raw palette classes,
+  an opaque `bg-white` / `bg-black` and `dark:` variants are lint errors in
+  `apps/**/*.tsx`, where a later config block had been switching them off.
+- **The contrast lint rule checks every installed theme**, not only `mixos`,
+  and names each theme an element fails under.
+- **`npm run lint` generates the registry first**, so the contrast rule has
+  theme tokens to read in CI, where it had been inactive.
+- **The theme picker shows `assets.preview`** above the theme's swatch row,
+  cropped to 16:9 from its top-left corner.
+- **More manifest rules fail the build.** A `sync` needs `"database": true`
+  and a `budgetMs` of at most 200000, because the scheduler stops a run at 240
+  seconds. Role keys must be unique. A `widgets.ts` that disagrees with
+  `app.json` now fails the build, where it used to leave the app out.
+- **`ctx.signal` for route handlers.** It aborts when the caller disconnects or
+  the route's `budget.ms` runs out. Pass it to connector calls and
+  `context.http.fetch` so the work stops, not just the wait.
+- **`signed-in` pages.** A page whose `pageVisibility` accepts `signed-in` opens
+  for any signed-in user, without the app's grant.
+- **Required widget fields.** The config modal won't save while a field marked
+  `required` is empty, and says which field.
+- **Untagged releases install.** A release published from the mixos.org website
+  has no git tag, and installs pinned to its commit like any other.
+- **Cross-app hooks are checked where they're used.** The build skips an app
+  that listens to another app's hook without `listensTo`, or fires another
+  app's hook, and the registrar refuses both at runtime. The bare `hooks` from
+  `@/lib/hooks` takes core hooks only. Listeners follow their app's activation,
+  checked each time a hook fires.
+- **App settings** are filled in on the Settings tab of an app's details in
+  Administration → Apps. `password` values are encrypted when saved and never
+  shown again.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
-- **Fix:** in a second instance, `docker:down` and `docker:reset` stop only that
-  instance.
+- **Fix:** a deactivated app's `/p` pages return 404, as its API routes already
+  did.
 
 ## 2026-10-05
 

@@ -12,9 +12,21 @@
  * block — is REJECTED rather than skipped. Skipping would mean the contrast
  * gate quietly stops covering that token, which is worse than not having the
  * gate: the build would still report success.
+ *
+ * Alpha is parsed rather than dropped, so the validator can reject a
+ * translucent token, or composite the one it allows (`--border`) over
+ * `--background`. A translucent colour on screen depends on whatever is
+ * painted behind it, so it has no single sRGB triple to measure, and measuring
+ * it as though it were opaque overstates its contrast.
  */
 
 export type Rgb = [number, number, number];
+
+/** A parsed colour. `alpha` is 1 for an opaque one. */
+export interface Color {
+  rgb: Rgb;
+  alpha: number;
+}
 
 function hslToRgb(h: number, s: number, l: number): Rgb {
   s /= 100;
@@ -30,60 +42,104 @@ function hslToRgb(h: number, s: number, l: number): Rgb {
   ];
 }
 
-function hexToRgb(hex: string): Rgb {
-  const h =
-    hex.length === 4
-      ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`
-      : hex;
-  return [
-    parseInt(h.slice(1, 3), 16),
-    parseInt(h.slice(3, 5), 16),
-    parseInt(h.slice(5, 7), 16),
-  ];
+/** `#rgb`, `#rgba`, `#rrggbb` or `#rrggbbaa`, already lowercased. */
+function parseHex(hex: string): Color {
+  const short = hex.length <= 5;
+  const digits = short
+    ? [...hex.slice(1)].map((d) => d + d)
+    : hex.slice(1).match(/../g)!;
+  const [r, g, b, a] = digits.map((d) => parseInt(d, 16));
+  return { rgb: [r, g, b], alpha: a === undefined ? 1 : a / 255 };
+}
+
+/** An alpha component, `0.5` or `50%`. Absent means opaque. */
+function parseAlpha(raw: string | undefined): number {
+  if (raw === undefined) return 1;
+  const n = raw.endsWith("%") ? Number(raw.slice(0, -1)) / 100 : Number(raw);
+  return Math.max(0, Math.min(1, n));
 }
 
 /**
- * Resolve `var(--x)` chains within one declaration block. This is what lets a
+ * Where a `var()` chain ends: a literal, a token the block never sets
+ * (`missing`, reached through `chain`), or a chain that comes back to itself.
+ */
+export type Resolution =
+  | { value: string }
+  | { missing: string; chain: string[] }
+  | { loop: string[] };
+
+/**
+ * Follow a `var(--x)` chain within one declaration block. This is what lets a
  * theme write `--primary: var(--brand-cyan)` and keep the literal brand value
  * and its semantic role from ever drifting apart, rather than repeating the
  * same hex in two places and hoping they stay in step.
+ *
+ * A chain that ends in nothing leaves the property unset in the browser, so the
+ * caller must fail on it rather than leave the token out: a token missing from
+ * the resolved block is one every check downstream silently skips. `chain` is
+ * the tokens already followed; start it with the token being resolved, so a
+ * self-reference is reported as a loop.
  */
 export function resolveVar(
   value: string,
   block: Map<string, string>,
-  depth = 0,
-): string | null {
-  if (depth > 8) return null;
+  chain: string[] = [],
+): Resolution {
   const ref = value.trim().match(/^var\(\s*--([\w-]+)\s*\)$/);
-  if (!ref) return value.trim();
-  const next = block.get(ref[1]);
-  return next == null ? null : resolveVar(next, block, depth + 1);
+  if (!ref) return { value: value.trim() };
+  const name = ref[1];
+  if (chain.includes(name)) return { loop: [...chain, name] };
+  const next = block.get(name);
+  if (next == null) return { missing: name, chain };
+  return resolveVar(next, block, [...chain, name]);
 }
 
-/** Parse a resolved colour value to sRGB. Returns null if not evaluable. */
-export function parseColor(value: string): Rgb | null {
+/**
+ * Parse a resolved colour value. Returns null if not evaluable. Alpha is
+ * returned, never dropped: whether a translucent colour is acceptable is the
+ * caller's decision, and it cannot make it if the alpha was thrown away here.
+ */
+export function parseColor(value: string): Color | null {
   const v = value.trim().toLowerCase();
 
-  if (v === "white") return [255, 255, 255];
-  if (v === "black") return [0, 0, 0];
+  if (v === "white") return { rgb: [255, 255, 255], alpha: 1 };
+  if (v === "black") return { rgb: [0, 0, 0], alpha: 1 };
 
-  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(v)) return hexToRgb(v);
+  if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(v)) return parseHex(v);
 
   const rgb = v.match(
-    /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)\s*(?:[/,]\s*[\d.%]+\s*)?\)$/,
+    /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)\s*(?:[/,]\s*([\d.]+%?)\s*)?\)$/,
   );
   if (rgb) {
-    return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])].map((n) =>
-      Math.max(0, Math.min(255, Math.round(n))),
-    ) as Rgb;
+    return {
+      rgb: [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])].map((n) =>
+        Math.max(0, Math.min(255, Math.round(n))),
+      ) as Rgb,
+      alpha: parseAlpha(rgb[4]),
+    };
   }
 
   const hsl = v.match(
-    /^hsla?\(\s*([\d.]+)(?:deg)?[\s,]+([\d.]+)%[\s,]+([\d.]+)%\s*(?:[/,]\s*[\d.%]+\s*)?\)$/,
+    /^hsla?\(\s*([\d.]+)(?:deg)?[\s,]+([\d.]+)%[\s,]+([\d.]+)%\s*(?:[/,]\s*([\d.]+%?)\s*)?\)$/,
   );
-  if (hsl) return hslToRgb(Number(hsl[1]), Number(hsl[2]), Number(hsl[3]));
+  if (hsl) {
+    return {
+      rgb: hslToRgb(Number(hsl[1]), Number(hsl[2]), Number(hsl[3])),
+      alpha: parseAlpha(hsl[4]),
+    };
+  }
 
   return null;
+}
+
+/** Alpha-composite `fg` at `alpha` over the opaque `bg`. */
+export function composite(fg: Rgb, bg: Rgb, alpha: number): Rgb {
+  return fg.map((c, i) => Math.round(c * alpha + bg[i] * (1 - alpha))) as Rgb;
+}
+
+/** `#rrggbb`, the one spelling the generated token table carries. */
+export function toHex(rgb: Rgb): string {
+  return `#${rgb.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
 export function relativeLuminance([r, g, b]: Rgb): number {
