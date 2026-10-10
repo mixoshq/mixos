@@ -70,6 +70,12 @@ type TypedCall<S extends string> = [S] extends [keyof AppRouteTypes]
 
 import type { AppRouteTypes } from "@/generated/app-clients";
 import type { RouteInputOf, RouteOutputOf } from "@/lib/apps/route";
+import { isConnectorErrorEnvelope } from "@/lib/connectors/response";
+import type { ConnectorErrorEnvelope } from "@/lib/connectors/response";
+
+// Re-exported because a widget may not import `@/lib/connectors/*`, and this is
+// the type `ConnectorErrorState` takes.
+export type { ConnectorErrorEnvelope };
 
 export interface RequestOptions {
   body?: unknown;
@@ -86,6 +92,34 @@ export class AppClientError extends Error {
     super(message);
     this.name = "AppClientError";
   }
+}
+
+/**
+ * The connector failure a route answered with, or null.
+ *
+ * A route whose connector call failed answers with that connector's envelope,
+ * `{ error: { category, message, connector, retryAfterMs, … } }`, which is
+ * exactly what `ConnectorErrorState` renders:
+ *
+ *   const envelope = connectorErrorOf(err);
+ *   if (envelope) return <ConnectorErrorState envelope={envelope} onRetry={retry} />;
+ *
+ * `useAppQuery` + `AsyncView` do this for you.
+ */
+export function connectorErrorOf(err: unknown): ConnectorErrorEnvelope | null {
+  return err instanceof AppClientError && isConnectorErrorEnvelope(err.body)
+    ? err.body
+    : null;
+}
+
+/**
+ * The message a failed response carries: `{ error: "…" }` from the route
+ * pipeline, or the connector envelope's own `error.message`.
+ */
+function messageOf(body: unknown): string | null {
+  const error = (body as { error?: unknown } | null)?.error;
+  if (typeof error === "string") return error;
+  return isConnectorErrorEnvelope(body) ? body.error.message : null;
 }
 
 function normalise(path: string): string {
@@ -144,9 +178,9 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
+    const body: unknown = await res.json().catch(() => null);
     throw new AppClientError(
-      body?.error ?? `Request failed: ${method} ${url} (${res.status})`,
+      messageOf(body) ?? `Request failed: ${method} ${url} (${res.status})`,
       res.status,
       body
     );
