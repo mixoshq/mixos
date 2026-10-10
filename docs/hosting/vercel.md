@@ -55,7 +55,9 @@ before promoting the deployment, as in step 4
 (`DATABASE_URL='<the connection string>' npm run release`), and run it again if
 you skip a version. The readiness probe, `/api/health/ready`, answers 503 while
 the database is behind the build, in its platform schema or its app migrations,
-so a monitor or a deployment check can catch a missed step.
+so a monitor or a deployment check can catch a missed step. A deployment
+promoted before a platform migration has run shows the
+[maintenance page](README.md#the-maintenance-page) until the step has run.
 
 Vercel's build doesn't run migrations by itself, and shouldn't. Preview
 deployments share the build, and a migration that ran on every preview build

@@ -1370,7 +1370,22 @@ one of these.
 The matcher additionally exempts `_next/static`, `_next/image`,
 `themes/<id>/`, `connector-assets/`, `screenshots/`, `branding/`,
 `favicon.ico` and the `icon*` / `apple-icon*` file-convention paths from the
-proxy entirely.
+proxy entirely, so neither the cookie check nor the maintenance response below
+applies to them.
+
+**Maintenance response.** Before the public list or the cookie check, the proxy
+asks whether the platform schema is behind this build
+(`src/lib/platform/maintenance.ts`, answer kept for 15 seconds). It can,
+because in Next 16 the proxy always runs on the Node.js runtime. While the
+schema is behind, every path except `/api/health/live` and `/api/health/ready`
+gets a 503 with `Retry-After: 30`: a static page for a page, and
+`{ "error": "This instance is being updated. Try again shortly." }` for
+`/api/*` and `/.well-known/*`. That includes `/api/cron` (the tick waits),
+`/api/webhooks` (senders retry) and `/api/mcp`. The page comes from the proxy
+with no app code and no query, under its own CSP, which allows no script.
+Neither body names a version or says what to run; the server log does both. A
+check that fails, or doesn't answer within 2 seconds, counts as not behind, as
+it does in readiness. App migrations behind don't trigger it.
 
 **Why removing an entry does not harden it.** For `/api/cron` and `/api/webhooks`
 the proxy would answer `307 → /login`, which is a perfectly successful HTTP
@@ -1380,9 +1395,13 @@ event. Nothing throws, nothing retries, and the scheduler simply stops. The
 route's own 401 is what an operator needs to see.
 
 **Health endpoints.** `/api/health/live` returns a static `{ status: "ok" }` with
-no database touch. `/api/health/ready` returns `ok` or `unavailable` with a 503;
-the caught error goes to `console.error` and never into the response body.
-Neither leaks version, commit, environment, or stack. Neither is rate-limited.
+no database touch. `/api/health/ready` returns `{ status: "ok" }`, or a 503 with
+`{ status: "unavailable" }` and, when the database is behind, a `reason`:
+`schema-behind` or `app-migrations-behind`. It carries no number: not the
+schema versions, not a count of migrations. The server log names the versions
+and files, and a caught error goes to `console.error` and never into the
+response body. Neither leaks version, commit, environment, or stack. Neither is
+rate-limited. Both answer during the maintenance response.
 
 ---
 
