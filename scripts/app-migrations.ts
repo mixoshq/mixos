@@ -12,12 +12,20 @@
 // read or write another's data, and applied files are recorded in
 // public._migrations so each runs exactly once. See docs/apps/database.md.
 //
+// Safe to run twice at once, like the platform migrations: every write below
+// happens in a transaction that first takes the release step's lock
+// (scripts/migration-lock.ts), and a migration re-reads the ledger once the
+// lock is held, so a second runner finds the file applied instead of applying
+// it again.
+//
 // Library only: scripts/migrate.ts (`npm run migrate:apps`) and
 // scripts/release.ts are the entry points.
 
 import fs from "fs";
 import path from "path";
 import { type Sql } from "postgres";
+import { listAppMigrations } from "./app-migration-files";
+import { takeMigrationLock } from "./migration-lock";
 import { syncAppRegistry } from "./sync-app-registry";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -93,19 +101,30 @@ async function getAppliedMigrations(
 /**
  * Apply one migration file transactionally: the DDL and the ledger INSERT
  * commit together, so a partial apply rolls back cleanly.
+ *
+ * The ledger is read again under the lock, because the caller's read happened
+ * before it: another runner may have applied this file in between.
  */
 async function applyMigration(
   sql: Sql,
   appSlug: string,
   file: string,
   sqlText: string,
-) {
-  await sql.begin(async (tx) => {
+): Promise<"applied" | "already"> {
+  return sql.begin(async (tx) => {
+    await takeMigrationLock(tx);
+    const done = await tx`
+      SELECT 1 FROM public._migrations
+      WHERE app_slug = ${appSlug} AND migration_file = ${file}
+    `;
+    if (done.length > 0) return "already" as const;
+
     await tx.unsafe(sqlText);
     await tx`
       INSERT INTO public._migrations (app_slug, migration_file)
       VALUES (${appSlug}, ${file})
     `;
+    return "applied" as const;
   });
 }
 
@@ -133,16 +152,21 @@ async function ensureSyncState(sql: Sql, slug: string): Promise<void> {
   if (!declaresSync) return;
 
   const table = `_app_${slug.replace(/-/g, "_")}__sync_state`;
-  await sql.unsafe(`
-    create table if not exists public."${table}" (
-      name           text primary key,
-      synced_through timestamptz,
-      window_days    int,
-      last_status    text,
-      last_run_at    timestamptz
-    )
-  `);
-  await sql.unsafe(`alter table public."${table}" enable row level security`);
+  // Under the lock: two `create table if not exists` at once can still collide
+  // on the type the table creates, rather than one of them skipping.
+  await sql.begin(async (tx) => {
+    await takeMigrationLock(tx);
+    await tx.unsafe(`
+      create table if not exists public."${table}" (
+        name           text primary key,
+        synced_through timestamptz,
+        window_days    int,
+        last_status    text,
+        last_run_at    timestamptz
+      )
+    `);
+    await tx.unsafe(`alter table public."${table}" enable row level security`);
+  });
   console.log(`  ${slug}: sync state ready`);
 }
 
@@ -166,55 +190,45 @@ async function ensureSyncState(sql: Sql, slug: string): Promise<void> {
  * running migrations twice hardens nothing the second time.
  */
 async function hardenRowLevelSecurity(sql: Sql) {
-  const rows = await sql<{ relname: string }[]>`
-    select c.relname
-    from pg_class c
-    join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname = 'public'
-      and c.relkind = 'r'
-      and not c.relrowsecurity
-      and not exists (
-        select 1
-        from pg_depend d
-        where d.objid = c.oid
-          and d.deptype = 'e'
-      )
-    order by c.relname
-  `;
+  return sql.begin(async (tx) => {
+    await takeMigrationLock(tx);
+    const rows = await tx<{ relname: string }[]>`
+      select c.relname
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public'
+        and c.relkind = 'r'
+        and not c.relrowsecurity
+        and not exists (
+          select 1
+          from pg_depend d
+          where d.objid = c.oid
+            and d.deptype = 'e'
+        )
+      order by c.relname
+    `;
 
-  for (const { relname } of rows) {
-    await sql.unsafe(
-      `alter table public."${relname}" enable row level security`,
-    );
-    console.log(`  RLS enabled: ${relname}`);
-  }
+    for (const { relname } of rows) {
+      await tx.unsafe(
+        `alter table public."${relname}" enable row level security`,
+      );
+      console.log(`  RLS enabled: ${relname}`);
+    }
 
-  return rows.length;
+    return rows.length;
+  });
 }
 
 async function migrateApps(sql: Sql) {
-  if (!fs.existsSync(APPS_DIR)) return;
-  const entries = fs.readdirSync(APPS_DIR, { withFileTypes: true });
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name.startsWith("_")) continue;
-
-    const slug = entry.name;
-
+  // The same listing the build stamps for the readiness probe, so what this
+  // applies and what a deployment waits for are one set of files.
+  for (const { slug, files } of listAppMigrations(APPS_DIR)) {
     // The platform owns the sync watermark table, so an app that declares a
     // `sync` never writes a migration for it — and never gets the chance to
     // shape it wrongly. Created before the app's own migrations so one of them
     // could reference it.
     await ensureSyncState(sql, slug);
 
-    const migrationsDir = path.join(APPS_DIR, slug, "migrations");
-    if (!fs.existsSync(migrationsDir)) continue;
-
-    const files = fs
-      .readdirSync(migrationsDir)
-      .filter((f) => f.endsWith(".sql"))
-      .sort();
     if (files.length === 0) continue;
 
     const applied = await getAppliedMigrations(sql, slug);
@@ -224,12 +238,19 @@ async function migrateApps(sql: Sql) {
         console.log(`  ${slug}/${file}: already applied`);
         continue;
       }
-      const raw = fs.readFileSync(path.join(migrationsDir, file), "utf-8");
+      const raw = fs.readFileSync(
+        path.join(APPS_DIR, slug, "migrations", file),
+        "utf-8",
+      );
       const prefix = `_app_${slug.replace(/-/g, "_")}_`;
       const sqlText = addTablePrefix(raw, prefix);
       console.log(`  ${slug}/${file}: applying...`);
-      await applyMigration(sql, slug, file, sqlText);
-      console.log(`  ${slug}/${file}: applied`);
+      const outcome = await applyMigration(sql, slug, file, sqlText);
+      console.log(
+        outcome === "applied"
+          ? `  ${slug}/${file}: applied`
+          : `  ${slug}/${file}: already applied by another run`,
+      );
     }
   }
 }

@@ -5,7 +5,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AppClientError, createAppClient } from "@/lib/apps/sdk";
+import {
+  AppClientError,
+  connectorErrorOf,
+  createAppClient,
+  type ConnectorErrorEnvelope,
+} from "@/lib/apps/sdk";
 
 /**
  * Fetch from one of this app's declared routes, with every state a fetch can be
@@ -30,6 +35,12 @@ export interface AppQueryError {
   /** The platform's error code (`NOT_FOUND`, `FORBIDDEN`, …) when there was one. */
   code?: string;
   status?: number;
+  /**
+   * Set when the route's connector call failed: that connector's envelope,
+   * which `AsyncView` renders as `ConnectorErrorState` — "Not connected", with
+   * no Retry, when an administrator has to act; an error with Retry otherwise.
+   */
+  envelope?: ConnectorErrorEnvelope;
 }
 
 export interface AppQuery<T> {
@@ -41,7 +52,13 @@ export interface AppQuery<T> {
 function toQueryError(err: unknown): AppQueryError {
   if (err instanceof AppClientError) {
     const body = err.body as { code?: string } | null;
-    return { message: err.message, code: body?.code, status: err.status };
+    const envelope = connectorErrorOf(err);
+    return {
+      message: err.message,
+      code: body?.code,
+      status: err.status,
+      ...(envelope ? { envelope } : {}),
+    };
   }
   return { message: "Something went wrong." };
 }

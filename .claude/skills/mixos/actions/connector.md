@@ -55,7 +55,7 @@ These fields are required and the build rejects a connector without them:
 | `icon` | The registry tile. Written as a full path — `"assets/icon.svg"`. Square, ≥512x512 for raster; a `viewBox` for SVG |
 | `setup.title` | The provider-side step's name — "Create a Google Cloud OAuth app" |
 | `setup.steps[]` | What the admin does in the provider's console |
-| `auth.scopesUrl` | The page the permissions list is read from |
+| `auth.scopesUrl` | The page the permissions list is read from. Not needed when `auth.strategy` is `none`: a public API has no permissions to list |
 
 Three-legged OAuth also requires `showRedirectUri` on **exactly one** step.
 

@@ -192,3 +192,50 @@ export function extractRequestId(headers: Headers): string | null {
   }
   return null;
 }
+
+/**
+ * The `rel="next"` target of a `Link` header (RFC 8288), resolved against the
+ * URL that was requested, or null when the header names no next page.
+ *
+ *   Link: <https://api.example.com/items?page=3>; rel="next", <…?page=9>; rel="last"
+ *
+ * Walked by hand rather than split on commas, because a URL can contain a
+ * comma and so can a quoted parameter. `rel` may list several relations
+ * (`rel="next last"`); any one of them being `next` counts.
+ */
+export function nextPageLink(
+  header: string | null,
+  requestUrl: string,
+): string | null {
+  if (!header) return null;
+
+  let from = 0;
+  while (from < header.length) {
+    const open = header.indexOf("<", from);
+    if (open === -1) return null;
+    const close = header.indexOf(">", open + 1);
+    if (close === -1) return null;
+
+    // This link's parameters run to the next comma outside a quoted string.
+    let end = close + 1;
+    let quoted = false;
+    for (; end < header.length; end++) {
+      if (header[end] === '"') quoted = !quoted;
+      else if (header[end] === "," && !quoted) break;
+    }
+
+    const rel = /;\s*rel\s*=\s*(?:"([^"]*)"|([^\s;,]+))/i.exec(
+      header.slice(close + 1, end),
+    );
+    const relations = (rel?.[1] ?? rel?.[2] ?? "").toLowerCase().split(/\s+/);
+    if (relations.includes("next")) {
+      try {
+        return new URL(header.slice(open + 1, close).trim(), requestUrl).href;
+      } catch {
+        return null;
+      }
+    }
+    from = end + 1;
+  }
+  return null;
+}
