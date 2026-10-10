@@ -146,8 +146,9 @@ async function installGlobalApps(
 /**
  * Is this app active on this instance?
  *
- * `apps.is_active` is an admin's switch, set on the Apps page and untouched by
- * the registry sync, so it survives a redeploy. Deactivating is meant to be
+ * `apps.is_active` is an admin's switch, set on the Apps page, so it survives a
+ * redeploy. The registry sync only ever turns it off, for an app that came
+ * back into the build with different code. Deactivating is meant to be
  * complete rather than cosmetic: an inactive app is filtered out of every list
  * AND refused by every gate — `hasAppGrant` (pages, MCP, OAuth) and
  * `resolveAuthTier` (every API route and public page) both call this. Hiding
@@ -158,12 +159,19 @@ async function installGlobalApps(
  * its absence means an app the platform does not know about; defaulting that
  * to "serve it" would make a failed sync an availability decision.
  *
+ * So does an app this build doesn't carry, whatever its row says. The release
+ * step keeps the row of an app that left the build, switch included, so the
+ * app can come back as it was (scripts/sync-app-registry.ts). Until it does,
+ * its widgets, installs and grants stay in the database, and off every user's
+ * dashboard and menus.
+ *
  * Deduped per request: a single page render asks this for every widget on the
  * dashboard, and they are all the same question. `cache` is React's
  * request-scoped memo, so it never outlives the request that made it and an
  * admin's activation takes effect on the next one.
  */
 export const isAppActive = cache(async (slug: string): Promise<boolean> => {
+  if (!appRegistry.some((a) => a.slug === slug)) return false;
   const supabase = createServiceClient();
   const { data } = await supabase
     .from("apps")
@@ -201,6 +209,10 @@ export async function setAppActive(
       description: manifest?.description ?? null,
       icon: manifest?.icon ?? null,
       is_active: isActive,
+      // Activating is the admin's answer to an app that came back into the
+      // build with different code, so it clears that flag. Deactivating leaves
+      // the question open.
+      ...(isActive ? { returned_changed_at: null } : {}),
     },
     { onConflict: "slug" },
   );
