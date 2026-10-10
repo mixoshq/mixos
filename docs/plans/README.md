@@ -84,7 +84,7 @@ Keep it scannable but executable:
   `theme.css` / `assets/` for a theme). Reference existing utilities to reuse,
   with paths.
 - **Verification** — how the change is proven end-to-end (generate registry,
-  typecheck, migrate, run the app, smoke-test connectors).
+  typecheck, migrate, run the app, smoke-test its routes).
 
 **Never put a secret value in a plan file** — record only the *name* of a setting
 and where it belongs. Plan files are committed.
