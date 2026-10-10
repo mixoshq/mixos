@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { cache } from "react";
+import { recordAdminAction, type AdminActor } from "@/lib/apps/admin-audit";
 import { createServiceClient } from "@/lib/db/server";
 import {
   themeRegistry,
@@ -55,7 +56,9 @@ export const getActiveTheme = cache(async (): Promise<ActiveTheme> => {
 });
 
 /**
- * Admin-only. The caller is responsible for `requireAdmin()`.
+ * Admin-only. The caller is responsible for `requireAdmin()`, and passes that
+ * admin in as `actor`: the change is recorded as `theme.apply`, since it
+ * changes the look of every page for everyone at once.
  *
  * Writes into `public.platform_settings`, which predates this feature and
  * already holds `scheduler_enabled`. The `theme_mode` key this used to write
@@ -63,14 +66,26 @@ export const getActiveTheme = cache(async (): Promise<ActiveTheme> => {
  * appearance decision. Nothing seeds that key, so there is no row to migrate —
  * any left behind on an install is simply never read again.
  */
-export async function setActiveTheme(slug: string): Promise<void> {
+export async function setActiveTheme(
+  slug: string,
+  actor: AdminActor,
+): Promise<void> {
   if (!themeRegistry.some((t) => t.slug === slug)) {
     throw new Error(`Unknown theme "${slug}".`);
   }
   const supabase = createServiceClient();
-  await supabase
+  const { error } = await supabase
     .from("platform_settings")
     .upsert([{ key: THEME_KEY, value: slug, updated_at: new Date().toISOString() }], {
       onConflict: "key",
     });
+  // Checked before the audit row, so the log never records a theme that was
+  // not applied.
+  if (error) throw error;
+
+  await recordAdminAction(actor, {
+    action: "theme.apply",
+    targetType: "theme",
+    targetId: slug,
+  });
 }
