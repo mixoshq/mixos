@@ -5,9 +5,9 @@
 /**
  * What app code may not touch, read off the syntax tree.
  *
- * Apps run in the platform's own server process, with no sandbox. Three things
- * that arrangement depends on keeping out of an app's hands are checked here,
- * for every app, on every build and every Registry install:
+ * Apps run in the platform's own server process, with no sandbox. What that
+ * arrangement depends on keeping out of an app's hands is checked here, for
+ * every app, on every build and every Registry install:
  *
  *  - THE PROCESS ENVIRONMENT. `process.env` holds DATABASE_URL (every table,
  *    as their owner) and CONNECTOR_ENCRYPTION_KEY (every stored credential).
@@ -17,9 +17,13 @@
  *    the host and re-checks every address. A fixed upstream is a connector.
  *  - THE PAGE'S MARKUP. HTML the app did not author is an XSS sink. Markdown
  *    renders through `<Markdown>` from @/components/ui/markdown.
+ *  - THE PLATFORM'S OWN MODULES. App code imports its own files, a published
+ *    list of platform modules and a few packages, and nothing else. That rule,
+ *    and what app code may do with what it imports, is src/lib/apps/
+ *    import-policy.mjs, which this scan runs on every file.
  *
- * Plus the obvious ways round all three: running a string as code, and naming a
- * global or a module with a string built at runtime.
+ * Plus the obvious ways round all of it: running a string as code, naming a
+ * global with a string built at runtime, and code the scan never reads.
  *
  * WHY HERE AND NOT ONLY IN LINT. ESLint carries the same bans, as feedback in
  * an editor, but lint runs on pull requests to this repository and nowhere
@@ -31,20 +35,35 @@
  * real global — `process`, `fetch` — then resolves to no symbol at all, while a
  * local variable, parameter or import of the same name resolves to its
  * declaration. So an approvals app's own `const process = …` is left alone, and
- * `ctx.http.fetch(…)` is a property access, not the global.
+ * `ctx.http.fetch(…)` is a property access, not the global. A declaration the
+ * compiler erases (`declare const process`, a type-only import) is not a local:
+ * the running code still reaches the global.
  *
  * NOT A SANDBOX. This reads syntax. Code determined to evade it can still
  * assemble a name at runtime or reach the same object through another module.
  * What it does is make accidental and naive use impossible to ship, and make
- * evasion conspicuous in review. See docs/plans/20261005_2150-app-escapes.md.
+ * evasion conspicuous in review. See docs/plans/20261005_2150-app-escapes.md
+ * and docs/plans/20261007_0153-app-import-allowlist.md.
  */
 import fs from "fs";
 import path from "path";
 import * as ts from "typescript";
+import {
+  SCAN_OPTIONS,
+  accessedName,
+  checkAppSource,
+  inTypePosition,
+  isGlobalObject,
+  isGlobalReference,
+  isReference,
+  isScannedFile,
+  unwrap,
+} from "../src/lib/apps/import-policy.mjs";
 
 export interface ContainmentFinding {
   /** Path relative to the app directory, with forward slashes. */
   file: string;
+  /** 1-based; 0 for a finding about the file itself rather than a line in it. */
   line: number;
   /** The construct, as written: `process.env`, `fetch`, `dangerouslySetInnerHTML`. */
   what: string;
@@ -62,20 +81,17 @@ const WHY = {
   code: "runs a string as code.",
   computed:
     "indexes the global object with a name built at runtime, which is how every rule above would otherwise be routed around.",
-  computedModule:
-    "loads a module whose name is built at runtime, which is how the import rules would otherwise be routed around.",
+  symlink:
+    "is a symbolic link, which can point anywhere, so the build cannot tell what it loads. Put the file itself in the app.",
+  nodeModules:
+    "holds packages the build never read, and one here would replace the instance's own copy for this app. An app uses the packages MixOS provides.",
+  packageJson:
+    "changes how the app's imports resolve. An app has no packages of its own: it uses the ones MixOS provides.",
 } as const;
 
-const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
-
-/** Directories that hold nothing the app runs. */
-const NOT_CODE = new Set(["node_modules", "plans", "screenshots", "migrations", "assets"]);
-
-/** The global object, by every name it goes by. */
-const GLOBAL_OBJECTS = new Set(["globalThis", "window", "self", "global"]);
-
 /**
- * Globals that are refused wherever they are referenced.
+ * Globals that are refused wherever they are referenced. The module loaders,
+ * `require` and `module` among them, are import-policy.mjs's to refuse.
  *
  * Maps, not object literals: looking a name up in `{}` finds `toString` and
  * `constructor` on its prototype, which would report every app that mentions
@@ -91,162 +107,77 @@ const RESTRICTED_GLOBALS = new Map<string, keyof typeof WHY>([
   ["Function", "code"],
 ]);
 
-/** Modules whose import is refused, with or without a `node:` prefix. */
-const RESTRICTED_MODULES = new Map<string, keyof typeof WHY>([
-  ["process", "env"],
-  ...(["http", "https", "http2", "net", "tls", "dgram"] as const).map(
-    (m) => [m, "network"] as const,
-  ),
-  ...(
-    ["undici", "node-fetch", "axios", "got", "ky", "superagent", "cross-fetch", "isomorphic-fetch"] as const
-  ).map((m) => [m, "network"] as const),
-]);
-
-function listSourceFiles(dir: string, out: string[] = []): string[] {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith(".")) continue;
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (!NOT_CODE.has(entry.name)) listSourceFiles(full, out);
-    } else if (SOURCE_EXTENSIONS.has(path.extname(entry.name)) && !entry.name.endsWith(".d.ts")) {
-      out.push(full);
-    }
-  }
-  return out;
-}
-
-function moduleName(specifier: string): string {
-  return specifier.startsWith("node:") ? specifier.slice("node:".length) : specifier;
-}
-
-/** True when `node` sits inside a type, where a name refers to nothing at runtime. */
-function inTypePosition(node: ts.Node): boolean {
-  for (let n: ts.Node | undefined = node.parent; n; n = n.parent) {
-    if (ts.isTypeNode(n)) return true;
-    if (ts.isStatement(n) || ts.isSourceFile(n)) return false;
-  }
-  return false;
-}
-
-/** `(x as any)`, `x!`, `<T>x`, `x satisfies T` and `(x)` are all still `x`. */
-function unwrap(expr: ts.Expression): ts.Expression {
-  let e = expr;
-  while (
-    ts.isParenthesizedExpression(e) ||
-    ts.isAsExpression(e) ||
-    ts.isTypeAssertionExpression(e) ||
-    ts.isNonNullExpression(e) ||
-    ts.isSatisfiesExpression(e)
-  ) {
-    e = e.expression;
-  }
-  return e;
-}
-
 /**
- * `./locales/${lang}`: a path built at runtime that still starts inside the
- * app, so it cannot name a built-in or a package.
+ * Every source file the scan reads, and what in the tree it refuses outright.
+ *
+ * Dot-directories are never entered, and code in one, or in the root
+ * directories that hold no code (assets/, plans/, migrations/, screenshots/),
+ * is not read; import-policy.mjs refuses any import that lands there. What it
+ * cannot judge at all is refused wherever it is: a symbolic link, which can
+ * point outside the app; `node_modules/`, which shadows the instance's own
+ * packages; and `package.json`, which changes how imports resolve.
  */
-function isRelativeTemplate(expr: ts.Expression): boolean {
-  const e = unwrap(expr);
-  if (!ts.isTemplateExpression(e)) return false;
-  const head = e.head.text;
-  return (head.startsWith("./") || head.startsWith("../")) && !head.includes("node_modules");
-}
+function walkApp(appDir: string): { files: string[]; findings: ContainmentFinding[] } {
+  const files: string[] = [];
+  const findings: ContainmentFinding[] = [];
+  const refuse = (full: string, why: string) =>
+    findings.push({ file: path.relative(appDir, full).split(path.sep).join("/"), line: 0, what: "", why });
 
-/** The property name of `a.b` or `a["b"]`, when it is written literally. */
-function accessedName(node: ts.PropertyAccessExpression | ts.ElementAccessExpression): string | undefined {
-  if (ts.isPropertyAccessExpression(node)) return node.name.text;
-  const arg = node.argumentExpression;
-  return ts.isStringLiteralLike(arg) ? arg.text : undefined;
+  const visit = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        refuse(full, WHY.symlink);
+      } else if (entry.isDirectory()) {
+        if (entry.name === "node_modules") refuse(full, WHY.nodeModules);
+        else visit(full);
+      } else if (entry.isFile()) {
+        if (entry.name === "package.json") refuse(full, WHY.packageJson);
+        else if (isScannedFile(appDir, full)) files.push(full);
+      }
+    }
+  };
+  visit(appDir);
+  return { files, findings };
 }
 
 /**
  * Scans every source file under `appDir` and returns what it found, empty when
- * the app is clean. Never throws for the app's sake; a file that does not parse
- * is the build's problem to report, not this scan's.
+ * the app is clean. The directory's name is the app's slug. Never throws for
+ * the app's sake; a file that does not parse is the build's problem to report,
+ * not this scan's.
  */
-export function scanAppContainment(appDir: string): ContainmentFinding[] {
-  const files = listSourceFiles(appDir);
-  if (files.length === 0) return [];
-
-  const program = ts.createProgram(files, {
-    noLib: true,
-    noResolve: true,
-    types: [],
-    allowJs: true,
-    checkJs: false,
-    jsx: ts.JsxEmit.Preserve,
-    target: ts.ScriptTarget.ES2022,
-    module: ts.ModuleKind.ESNext,
-    noEmit: true,
-  });
+export function scanAppContainment(appDirPath: string): ContainmentFinding[] {
+  const appDir = fs.realpathSync(appDirPath);
+  const walk = walkApp(appDir);
+  const found: (ContainmentFinding & { column: number })[] = walk.findings.map((f) => ({ ...f, column: 0 }));
+  const program = ts.createProgram(walk.files, SCAN_OPTIONS);
   const checker = program.getTypeChecker();
-  const findings: ContainmentFinding[] = [];
 
-  /** Unresolved means global: nothing in the app declares or imports it. */
-  const isGlobalReference = (id: ts.Identifier): boolean => {
-    if (ts.isShorthandPropertyAssignment(id.parent) && id.parent.name === id) {
-      return checker.getShorthandAssignmentValueSymbol(id.parent) === undefined;
-    }
-    const symbol = checker.getSymbolAtLocation(id);
-    return symbol === undefined || !symbol.declarations || symbol.declarations.length === 0;
-  };
-
-  const isGlobalObject = (expr: ts.Expression): boolean => {
-    const e = unwrap(expr);
-    return ts.isIdentifier(e) && GLOBAL_OBJECTS.has(e.text) && isGlobalReference(e);
-  };
-
-  for (const file of files) {
+  for (const file of walk.files) {
     const source = program.getSourceFile(file);
     if (!source) continue;
     const rel = path.relative(appDir, file).split(path.sep).join("/");
 
     const report = (node: ts.Node, what: string, why: keyof typeof WHY) => {
-      const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
-      findings.push({ file: rel, line: line + 1, what, why: WHY[why] });
-    };
-
-    const checkModule = (
-      node: ts.Node,
-      specifier: ts.Expression | undefined,
-      label = (name: string) => `import "${name}"`,
-    ) => {
-      if (!specifier || !ts.isStringLiteralLike(specifier)) return;
-      const why = RESTRICTED_MODULES.get(moduleName(specifier.text));
-      if (why) report(node, label(specifier.text), why);
+      const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source));
+      found.push({ file: rel, line: line + 1, column: character, what, why: WHY[why] });
     };
 
     const visit = (node: ts.Node): void => {
-      // import … from "node:https" / export … from "axios"
-      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-        checkModule(node, node.moduleSpecifier);
-      } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
-        checkModule(node, node.moduleReference.expression);
-      } else if (ts.isCallExpression(node)) {
-        // require("https") and import("https"). A name built at runtime is
-        // refused outright, unless it is a relative path.
-        const isImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
-        if (isImport || (ts.isIdentifier(node.expression) && node.expression.text === "require")) {
-          const call = isImport ? "import" : "require";
-          const specifier = node.arguments[0];
-          if (specifier && ts.isStringLiteralLike(unwrap(specifier))) {
-            checkModule(node, unwrap(specifier), (name) => `${call}("${name}")`);
-          } else if (specifier && !isRelativeTemplate(specifier)) {
-            report(node, `${call}(…)`, "computedModule");
-          }
-        }
+      if (ts.isCallExpression(node)) {
         // el.insertAdjacentHTML(…), document.write(…)
         const callee = node.expression;
         if (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) {
           const name = accessedName(callee);
           if (name === "insertAdjacentHTML") report(node, name, "html");
+          const holder = unwrap(callee.expression);
           if (
             (name === "write" || name === "writeln") &&
-            ts.isIdentifier(unwrap(callee.expression)) &&
-            (unwrap(callee.expression) as ts.Identifier).text === "document" &&
-            isGlobalReference(unwrap(callee.expression) as ts.Identifier)
+            ts.isIdentifier(holder) &&
+            holder.text === "document" &&
+            isGlobalReference(checker, holder)
           ) {
             report(node, `document.${name}`, "html");
           }
@@ -271,9 +202,9 @@ export function scanAppContainment(appDir: string): ContainmentFinding[] {
         report(node, "dangerouslySetInnerHTML", "html");
       } else if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
         // globalThis.fetch, window["process"], and globalThis[computed]
-        if (isGlobalObject(node.expression)) {
+        if (isGlobalObject(checker, node.expression)) {
           const name = accessedName(node);
-          const holder = (unwrap(node.expression) as ts.Identifier).text;
+          const holder = unwrap(node.expression).getText(source);
           if (name === undefined) {
             report(node, `${holder}[…]`, "computed");
           } else {
@@ -281,42 +212,36 @@ export function scanAppContainment(appDir: string): ContainmentFinding[] {
             if (why) report(node, `${holder}.${name}`, why);
           }
         }
-      } else if (ts.isIdentifier(node) && RESTRICTED_GLOBALS.has(node.text) && !inTypePosition(node)) {
+      } else if (
+        ts.isIdentifier(node) &&
+        RESTRICTED_GLOBALS.has(node.text) &&
+        !inTypePosition(node) &&
+        isReference(node) &&
+        isGlobalReference(checker, node)
+      ) {
         // The bare global: process, fetch, eval, Function, WebSocket…
         const parent = node.parent;
-        const isPropertyName =
-          (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
-          ((ts.isPropertyAssignment(parent) ||
-            ts.isMethodDeclaration(parent) ||
-            ts.isPropertyDeclaration(parent) ||
-            ts.isPropertySignature(parent) ||
-            ts.isMethodSignature(parent) ||
-            ts.isGetAccessorDeclaration(parent) ||
-            ts.isSetAccessorDeclaration(parent) ||
-            ts.isEnumMember(parent)) &&
-            parent.name === node) ||
-          (ts.isBindingElement(parent) && parent.propertyName === node) ||
-          ((ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent)) && parent.propertyName === node) ||
-          ts.isJsxAttribute(parent) ||
-          ts.isLabeledStatement(parent);
-        if (!isPropertyName && isGlobalReference(node)) {
-          const member =
-            node.text === "process" && ts.isPropertyAccessExpression(parent) && parent.expression === node
-              ? `process.${parent.name.text}`
-              : node.text;
-          report(node, member, RESTRICTED_GLOBALS.get(node.text)!);
-        }
+        const member =
+          node.text === "process" && ts.isPropertyAccessExpression(parent) && parent.expression === node
+            ? `process.${parent.name.text}`
+            : node.text;
+        report(node, member, RESTRICTED_GLOBALS.get(node.text)!);
       }
       ts.forEachChild(node, visit);
     };
 
     visit(source);
+    for (const f of checkAppSource({ source, checker, appDir })) found.push({ file: rel, ...f });
   }
 
-  return findings;
+  return found
+    .sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line || a.column - b.column))
+    .map(({ file, line, what, why }) => ({ file, line, what, why }));
 }
 
 /** One line per finding, for a `Skipping <slug>/ — …` message. */
 export function formatFindings(findings: ContainmentFinding[]): string {
-  return findings.map((f) => `\n      ${f.file}:${f.line} — ${f.what} ${f.why}`).join("");
+  return findings
+    .map((f) => `\n      ${f.file}${f.line > 0 ? `:${f.line}` : ""} — ${f.what ? `${f.what} ${f.why}` : f.why}`)
+    .join("");
 }
