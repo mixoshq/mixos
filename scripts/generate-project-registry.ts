@@ -44,6 +44,7 @@ import { compileTheme, ThemeError } from "./theme-css";
 import { FatalManifestError } from "./manifest-errors";
 import { readImageSize } from "./image-size";
 import { resolveThemeLogo, validateAppBranding } from "./brand-checks";
+import { formatFindings, scanAppContainment } from "./app-containment";
 import type { Screenshot, ScreenshotKind } from "../src/lib/screenshots";
 import {
   SCREENSHOT_EXTENSIONS,
@@ -54,6 +55,19 @@ import {
 } from "../src/lib/screenshots";
 import { BRAND_HOOKS } from "../src/lib/branding/types";
 import * as ts from "typescript";
+
+/**
+ * Thrown when an app is refused for what its code does, not for a malformed
+ * manifest — an undeclared escape, today. Takes the per-app `Skipping ...`
+ * path like any other per-app failure, but prints its own message rather than
+ * "invalid manifest", which would send the author to the wrong file.
+ */
+class AppRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AppRejectedError";
+  }
+}
 
 /**
  * Manifests store `lastUpdated` as an ISO 8601 string (legible in a diff);
@@ -474,7 +488,6 @@ interface RawRouteDefinition {
   raw: boolean;
   input?: unknown;
   output?: unknown;
-  outputValidation: "always" | "dev-only";
   summary?: string;
 }
 
@@ -619,7 +632,6 @@ async function scanApiRoutes(
           raw: exported.raw,
           hasInput: exported.input != null,
           hasOutput: exported.output != null,
-          outputValidation: exported.outputValidation,
           ...(exported.summary ? { summary: exported.summary } : {}),
         });
       }
@@ -807,7 +819,7 @@ function copyBrandLogos(
 }
 
 function validateEscapes(
-  raw: { rule: string; reason: string }[] | undefined,
+  raw: AppEscape[] | undefined,
   slug: string,
 ): AppEscape[] {
   if (!raw || raw.length === 0) return [];
@@ -1447,6 +1459,22 @@ async function scanApps(): Promise<AppManifest[]> {
     if (entry.name.startsWith("_")) continue; // template directories
 
     const appDir = path.join(APPS_DIR, entry.name);
+
+    // Containment runs FIRST, before anything imports the app's code: loading
+    // the manifest imports widgets.ts and scanning routes imports every
+    // route.ts, and an import runs the module's top level. A finding skips the
+    // app rather than aborting the run — on the install path a `Skipping
+    // <slug>/` line is a `rejected-by-registry`, rolled back, which is the
+    // right verdict on the extension (see regenerateRegistry() in
+    // src/lib/repository/install.ts). See scripts/app-containment.ts.
+    const findings = scanAppContainment(appDir);
+    if (findings.length > 0) {
+      console.warn(
+        `  Skipping ${entry.name}/ — its code reaches what an app may not:${formatFindings(findings)}`,
+      );
+      continue;
+    }
+
     let raw: Record<string, unknown> | null;
     try {
       raw = await loadAppManifest(appDir);
@@ -1517,6 +1545,29 @@ async function scanApps(): Promise<AppManifest[]> {
       // also where a bare `export async function GET` fails the build.
       const routes = await scanApiRoutes(appDir, entry.name);
       validateRouteContracts(routes, entry.name, r.roles ?? [], apiVisibility);
+
+      // The one remaining escape is load-bearing: a route that owns its own
+      // Response registers only when the manifest says so, with a reason, where
+      // a reviewer and the admin dialog can see it.
+      const rawRoutes = routes.flatMap((route) =>
+        route.methods
+          .filter((m) => m.raw)
+          .map((m) => `${m.method} /${route.path}`),
+      );
+      const declaresRaw = (r.escapes ?? []).some((e) => e.rule === "raw-response");
+      if (rawRoutes.length > 0 && !declaresRaw) {
+        throw new AppRejectedError(
+          `${rawRoutes.join(", ")} ${rawRoutes.length === 1 ? "returns its" : "return their"} own Response ` +
+            `(\`raw: true\`), which needs { "rule": "raw-response", "reason": "…" } under \`escapes\` in app.json.`,
+        );
+      }
+      if (rawRoutes.length === 0 && declaresRaw) {
+        // Not a refusal — the declaration costs nothing — but a stale one tells
+        // a reviewer something about the app that is no longer true.
+        console.warn(
+          `    apps/${entry.name}/app.json declares the raw-response escape, but no route sets \`raw: true\`. Remove it.`,
+        );
+      }
 
       const hookScan = scanHooks(path.join(APPS_DIR, entry.name), entry.name);
 
@@ -1602,7 +1653,11 @@ async function scanApps(): Promise<AppManifest[]> {
     } catch (err) {
       // FatalManifestError aborts the entire generator run — see class doc.
       if (err instanceof FatalManifestError) throw err;
-      console.warn(`  Skipping ${entry.name}/ — invalid manifest: ${err}`);
+      console.warn(
+        err instanceof AppRejectedError
+          ? `  Skipping ${entry.name}/ — ${err.message}`
+          : `  Skipping ${entry.name}/ — invalid manifest: ${err}`,
+      );
     }
   }
 

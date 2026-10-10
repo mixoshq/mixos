@@ -175,6 +175,6 @@ When a visitor opens a `password` page without a valid unlock cookie:
 ### Anti-patterns
 
 - Don't reference `context.user` or any logged-in-user-only API from a public/password page.
-- Don't `dangerouslySetInnerHTML` visitor input. Public pages are reachable by anyone, so XSS is more dangerous here than on authenticated surfaces.
+- Don't render visitor input as markup. `dangerouslySetInnerHTML` and the other HTML sinks fail the build in any app; formatted text goes through `Markdown` (`@/components/ui/markdown`), which drops raw HTML. Public pages are reachable by anyone, so XSS is more dangerous here than on authenticated surfaces.
 - Don't bake credentials, secrets, or another user's data into a public page's HTML — even if the user only navigated there logged in, the page is being served to anonymous traffic.
 - Don't rely on a `password` page being "private". The visitor only had to know one password; treat the surface as semi-trusted.

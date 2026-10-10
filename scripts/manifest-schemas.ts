@@ -135,22 +135,24 @@ const roleSchema = z.strictObject({
  * The closed set of rules an app may escape.
  *
  * An escape is the only way out of a platform guarantee, and it is on the
- * record: declared in the manifest with a reason, surfaced on the app's admin
- * page, and visible in review. The set is closed deliberately — an unknown rule
- * name is a build failure rather than a no-op, because a typo'd escape reads as
- * "declared" to a reviewer while enforcing nothing at all.
+ * record: declared in the manifest with a reason, shown on the app's admin
+ * dialog, and visible in review. It is also load-bearing — the generator
+ * refuses the construct when the escape is missing — so a declaration is never
+ * a label standing in for a check. The set is closed deliberately: an unknown
+ * rule name is a build failure rather than a no-op, because a typo'd escape
+ * reads as "declared" to a reviewer while enforcing nothing at all.
+ *
+ * Four more used to be here, and went in docs/plans/20261005_2150-app-escapes.md.
+ * `process-env` and `raw-fetch` reached exactly what apps sharing the platform's
+ * process must not — the service-role and encryption keys, and the network past
+ * `egress` — and nothing ever needed them. `raw-html` became the `Markdown`
+ * primitive. `output-validate-dev-only` was unused and only ever traded a
+ * production 500 for a log line. All four are now unconditional: the generator's
+ * containment scan (app-containment.ts) rejects them in every app.
  */
 const ESCAPE_RULES = [
-  /** Renders HTML the app did not author (`dangerouslySetInnerHTML`). */
-  "raw-html",
   /** A route returns its own Response (`defineRoute({ raw: true })`). */
   "raw-response",
-  /** Output validation runs only outside production, for a measured hot path. */
-  "output-validate-dev-only",
-  /** Reads `process.env` directly instead of declaring `env`. */
-  "process-env",
-  /** Calls `fetch` directly instead of a connector or `context.http`. */
-  "raw-fetch",
 ] as const;
 
 const escapeSchema = z.strictObject({

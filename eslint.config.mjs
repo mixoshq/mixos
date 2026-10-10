@@ -7,6 +7,18 @@ import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 import noLowContrastTokenPairs from "./eslint-rules/no-low-contrast-token-pairs.mjs";
 
+/**
+ * Why each containment ban exists, worded the same as the registry generator's
+ * scan (scripts/app-containment.ts) so the editor and the build agree.
+ */
+const CONTAINMENT = {
+  env: "Apps must not read the process environment — it carries the platform's own secrets. Declare what you need under `env` in app.json and read it as context.env.<KEY>.",
+  network:
+    "Apps must not reach the network directly — that is the SSRF hole. Use context.http (bounded by the manifest's `egress` allowlist, with a resolve-and-recheck against private ranges), or a connector for a fixed upstream.",
+  html: "Apps must not render markup they did not author. Render Markdown with <Markdown> from @/components/ui/markdown.",
+  code: "Apps must not run a string as code.",
+};
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -290,28 +302,51 @@ const eslintConfig = defineConfig([
   // repeats both on each redirect hop. Fixed, admin-configured hosts belong in a
   // connector instead.
   //
-  // Both are escapable — `process-env` and `raw-fetch` in the manifest's
-  // `escapes` — but only on the record, with a reason a reviewer can act on.
+  // Markup the app did not author is an XSS sink; Markdown renders through
+  // <Markdown> from @/components/ui/markdown. And a string run as code is the
+  // way round all of the above.
+  //
+  // NONE OF THIS IS ESCAPABLE. These rules are the editor's copy of the
+  // containment scan in scripts/app-containment.ts, which the registry
+  // generator runs on every build and every Registry install — lint runs only
+  // on pull requests to this repository, so the generator's copy is the one
+  // that holds. Keep the two lists in step. See
+  // docs/plans/20261005_2150-app-escapes.md.
+  //
+  // Only this block sets these rules for apps/**, so nothing here is replaced
+  // by a later block's options.
   {
     files: ["apps/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-properties": [
         "error",
-        {
-          object: "process",
-          property: "env",
-          message:
-            "Apps must not read process.env — it carries the platform's own secrets. Declare what you need under `env` in app.json and read it as context.env.<KEY>.",
-        },
+        ...["globalThis", "window", "self", "global"].flatMap((object) => [
+          { object, property: "process", message: CONTAINMENT.env },
+          { object, property: "fetch", message: CONTAINMENT.network },
+          { object, property: "WebSocket", message: CONTAINMENT.network },
+          { object, property: "EventSource", message: CONTAINMENT.network },
+          { object, property: "XMLHttpRequest", message: CONTAINMENT.network },
+          { object, property: "eval", message: CONTAINMENT.code },
+          { object, property: "Function", message: CONTAINMENT.code },
+        ]),
+        { property: "innerHTML", message: CONTAINMENT.html },
+        { property: "outerHTML", message: CONTAINMENT.html },
+        { property: "insertAdjacentHTML", message: CONTAINMENT.html },
+        { object: "document", property: "write", message: CONTAINMENT.html },
+        { object: "document", property: "writeln", message: CONTAINMENT.html },
       ],
       "no-restricted-globals": [
         "error",
-        {
-          name: "fetch",
-          message:
-            "Apps must not call fetch directly — that is the SSRF hole. Use context.http (bounded by the manifest's `egress` allowlist, with a resolve-and-recheck against private ranges), or a connector for a fixed upstream.",
-        },
+        { name: "process", message: CONTAINMENT.env },
+        { name: "fetch", message: CONTAINMENT.network },
+        { name: "WebSocket", message: CONTAINMENT.network },
+        { name: "EventSource", message: CONTAINMENT.network },
+        { name: "XMLHttpRequest", message: CONTAINMENT.network },
       ],
+      "react/no-danger": "error",
+      "no-eval": "error",
+      "no-implied-eval": "error",
+      "no-new-func": "error",
     },
   },
   // ── Design system: apps compose from the primitives, not from raw elements ──
