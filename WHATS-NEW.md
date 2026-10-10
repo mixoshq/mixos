@@ -40,6 +40,12 @@ just pulled.
   both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
   new app, and the old slug keeps the old data. Migration 0010; run
   `npm run db:local` to apply it.
+- **Disable a connector.** Admin > Connectors has Disable and Enable on each
+  connector. Disabling names the apps that use it and asks first. While it is
+  off, apps' calls to it fail with "disabled by an administrator", and its
+  webhooks, Connect and Test Connection are refused. Its credentials are kept.
+  The audit log records `connector.disable` and `connector.enable`, and now
+  `theme.apply` too. See `docs/connectors/credentials.md`.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 
