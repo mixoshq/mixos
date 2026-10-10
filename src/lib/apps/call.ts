@@ -30,6 +30,15 @@
  *
  * It THROWS `AppError` rather than returning a Response. A page that wants to
  * degrade rather than fail should catch it.
+ *
+ * ITS OWN ROUTES ONLY, AND THE BUILD SAYS SO. Nothing here checks which app is
+ * calling: given another app's slug, this runs that app's routes, mutations
+ * included, as the current user, around the consent App Services requires. The
+ * registry generator's containment scan closes that before any request: app
+ * code may call `callAppRoute` only directly, with its own slug as a string
+ * literal, and no other use of the binding passes (src/lib/apps/
+ * import-policy.mjs). Platform code calling this is trusted to pass the right
+ * slug.
  */
 
 import { appRegistry } from "@/generated/app-registry";

@@ -10,9 +10,10 @@ import { docsUrl } from "@/lib/docs";
 import { requireAdmin } from "@/lib/apps/access";
 import { installEnabled } from "@/lib/repository/policy";
 import { getAppGrantCounts, getAppTableCounts } from "@/lib/apps/admin-actions";
-import { getAppActiveMap } from "@/lib/apps/access";
+import { getAppActiveMap, getAppBuildStatus } from "@/lib/apps/access";
 import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
 import AppRegistryList from "@/components/admin/app-registry-list";
+import AppsNotInBuild from "@/components/admin/apps-not-in-build";
 import BrandConflicts from "@/components/admin/brand-conflicts";
 import { getActiveTheme } from "@/lib/themes/active";
 
@@ -27,6 +28,9 @@ export default async function AppsAdminPage() {
   // getAppTableCounts.
   const tableCountsBySlug = await getAppTableCounts();
   const activeBySlug = await getAppActiveMap();
+  // Apps the release step kept after they left the build, and apps it brought
+  // back with different code. See getAppBuildStatus.
+  const buildStatus = await getAppBuildStatus();
   const { theme } = await getActiveTheme();
 
   // Precompute the missing-connector map once per page load. Shown here as a
@@ -100,6 +104,11 @@ export default async function AppsAdminPage() {
         grantCountsBySlug={grantCountsBySlug}
         tableCountsBySlug={tableCountsBySlug}
         activeBySlug={activeBySlug}
+        returnedChangedBySlug={buildStatus.returnedChanged}
+      />
+      <AppsNotInBuild
+        apps={buildStatus.notInBuild}
+        grantCountsBySlug={grantCountsBySlug}
       />
     </div>
   );
