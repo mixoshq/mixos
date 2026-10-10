@@ -26,8 +26,10 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Push subscribe API   | `src/app/api/push/*/route.ts`                 |
 | Client SDK           | `src/lib/apps/sdk.ts`                         |
 | Credential config    | `src/lib/connectors/config.ts`                |
+| Connector switch     | `src/lib/connectors/switch.ts`                |
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
+| Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
 | Safe error helper    | `src/lib/safe-error.ts`                       |
 | Security headers     | `next.config.ts`                              |
 | App import policy    | `src/lib/apps/import-policy.mjs`              |
@@ -589,7 +591,7 @@ What the platform does between those two boxes, in order:
 | CSRF protection      | Cross-site request forgery    | `SameSite=Lax` cookie, plus double-submit token on cookie-authenticated mutations | `csrf.ts`, Auth.js, Next.js (see §7) |
 | Admin authorization  | Admin-only pages and actions  | `requireAdmin()` re-reads `is_admin` per call | `access.ts` (see §9)         |
 | Server-side admin    | Admin action bypass           | `requireAdmin()` in pages + server actions   | `access.ts`, admin pages     |
-| Rate limiting        | Abuse / DoS                   | Postgres token-bucket, memory pre-filter     | `rate-limit.ts`, gateway     |
+| Rate limiting        | Abuse / DoS, password guessing | Postgres token-bucket, memory pre-filter    | `rate-limit.ts`, gateway, sign-in (§6) |
 | Tier resolution      | Per-request auth decision     | `resolveAuthTier()`, strongest-first, fails closed | `auth-tier.ts`          |
 | App access control   | Unauthorized app access       | `hasAppGrant()` checks `user_app_grants`     | `auth-tier.ts` via `access.ts` |
 | Email domain gate    | Unauthorized user provisioning| `ALLOWED_EMAIL_DOMAINS` env var check        | `access.ts` (`ensureUser`)   |
@@ -738,6 +740,27 @@ x-forwarded-for: <attacker-spoofed>, <real-client-ip>
 
 The pre-filter's in-memory store (`src/lib/rate-limit.ts`) evicts stale entries
 automatically; the Postgres authority is pruned from the cron tick.
+
+### Sign-in attempts
+
+Password sign-in has its own per-IP bucket, `login-credentials`: a burst of 10
+attempts, then one more every 10 seconds, right or wrong. It is charged inside
+the password check itself, the credentials provider's `authorize()`
+(`src/lib/auth/config.ts`, with the limit in `src/lib/auth/sign-in-limit.ts`),
+not in front of a route. So every route that reaches that check draws on one
+budget: the login page's server action, and Auth.js's own
+`POST /api/auth/callback/credentials`, which any client can call with a token
+from `/api/auth/csrf`.
+
+The key is the client IP by the rule above. Auth.js passes `authorize()` a
+request with the client's headers on both routes. On the server-action path,
+`signIn()` copies them from the action's request.
+
+The charge comes first. A refused attempt reads no account and runs no hash, so
+it is cheap and answers the same for a known and an unknown email. The login
+page shows "Too many sign-in attempts. Please try again shortly." Auth.js's
+route answers in its usual error form: a redirect to
+`/login?error=CredentialsSignin&code=rate_limited`.
 
 ---
 
@@ -1381,7 +1404,7 @@ one of these.
 
 | Prefix | Real gate |
 |---|---|
-| `/login`, `/api/auth` | the sign-in flow itself |
+| `/login`, `/api/auth` | the sign-in flow itself, with one per-IP limit on password attempts (§6) |
 | `/api/health` | none — see below |
 | `/manifest.webmanifest` | none; static |
 | `/p` | the public page route (`src/lib/apps/public-page.ts`): the page's own `pageVisibility`, the app gate (§3.1), and the unlock cookie for a `password` page |
@@ -1485,6 +1508,37 @@ Declaring the provider's timestamp header, where it signs one, removes that.
 
 **Do not swallow errors in `handleWebhook()`.** Throw. A swallowed error loses the
 delivery for good; a thrown one makes the provider retry.
+
+### Turning a connector off
+
+An admin can **Disable** a connector at Admin > Connectors and **Enable** it
+again. The switch is a `platform_settings` row, `connector.disabled.<name>`,
+whose value is when it was disabled
+([`src/lib/connectors/switch.ts`](../src/lib/connectors/switch.ts)). It is
+stored in the database rather than in `connector.json`, so whoever publishes a
+connector cannot turn it back on.
+
+While it is off, nothing reaches the connector:
+
+| Where | What happens |
+|---|---|
+| The app context (`loadTenantConnectors` in `src/lib/apps/context.ts`): app routes, public routes, scheduled jobs and App Services | The connector is not imported or constructed. The app gets a stand-in whose every call fails with a `ConnectorError` saying an administrator disabled it, which a route returns in the usual envelope. |
+| MCP tools | Their connectors come from the same context. The read-only wrapper (`src/lib/apps/read-only.ts`) passes the stand-in on unchanged, and the broker gives the model its message. |
+| `POST /api/webhooks/<name>` | The same 401 as a connector with no signing secret, before anything is decrypted, claimed or run. |
+| OAuth start and callback (`src/lib/connectors/oauth-flow.ts`) | Refused with `?oauth=disabled`. The callback refuses before the code is exchanged, so no grant is stored. |
+| Test Connection (`src/lib/connectors/test-connection.ts`) | Refused without calling the provider. |
+
+If the switch can't be read, none of these reaches the connector: the app
+context loads no connectors at all, and the others fail instead of going ahead.
+
+Activating an app does not check the switch. An app activated while a connector
+it requires is disabled runs, and its calls to that connector fail as above.
+
+**Credentials are kept.** Disabling doesn't touch `connector_configs`, or
+anyone's grant in `user_connector_oauth`, so enabling needs nothing entered
+again. That also means disabling is not a response to a leaked credential: an
+admin who suspects one revokes it at the provider and enters a new one. Disable
+and Enable are audited (§28).
 
 ---
 
@@ -1875,10 +1929,13 @@ would in fact survive, but retention that depends on a `WHERE` clause in another
 module is not a retention policy.
 
 Currently recorded: `connector.configure`, `connector.test`,
-`app.password.set`, `app.password.clear`, `app.activate`, `app.deactivate`,
-`app.missing`, `app.returned`, `app.job.run`, `app.job.enable`,
-`app.job.disable`, `scheduler.start`, `scheduler.stop`, `user.grant.add`,
-`user.grant.revoke`, `user.role.set`.
+`connector.disable`, `connector.enable`, `app.password.set`,
+`app.password.clear`, `app.activate`, `app.deactivate`, `app.missing`,
+`app.returned`, `app.job.run`, `app.job.enable`, `app.job.disable`,
+`scheduler.start`, `scheduler.stop`, `theme.apply`, `user.grant.add`,
+`user.grant.revoke`, `user.role.set`. `connector.disable` and
+`connector.enable` name the apps that declare the connector, in `details` as
+`requiredBy` and `optionalFor`.
 
 **The Scheduled Jobs page's actions.** Run now, Enable and Disable are
 `app.job.*` rows against the app, with the job in `details`. Start and Stop

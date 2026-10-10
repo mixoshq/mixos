@@ -2,11 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import type { NextAuthConfig, Session } from "next-auth";
+import type { NextAuthConfig, Session, User } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
 import { createServiceClient } from "@/lib/db/server";
 import { verifyPassword } from "./password";
+import { chargeSignInAttempt } from "./sign-in-limit";
 
 const ALLOWED_DOMAINS = process.env.ALLOWED_EMAIL_DOMAINS
   ? process.env.ALLOWED_EMAIL_DOMAINS.split(",").map((d) =>
@@ -20,6 +21,69 @@ function emailAllowed(email: string): boolean {
   return !!domain && ALLOWED_DOMAINS.includes(domain);
 }
 
+/** The account a password is checked against. */
+export interface CredentialsAccount {
+  id: string;
+  email: string;
+  display_name: string | null;
+  password_hash: string | null;
+}
+
+/**
+ * What the password check reads and calls. Swappable so a test can run it
+ * without a database and count what it did.
+ */
+export interface CredentialsCheck {
+  findAccount(email: string): Promise<CredentialsAccount | null>;
+  verifyPassword(plaintext: string, hash: string): Promise<boolean>;
+}
+
+const DATABASE_CHECK: CredentialsCheck = {
+  async findAccount(email) {
+    const supabase = createServiceClient();
+    const { data } = await supabase
+      .from("users")
+      .select("id, email, display_name, password_hash, is_admin")
+      .eq("email", email)
+      .maybeSingle();
+    return (data as CredentialsAccount | null) ?? null;
+  },
+  verifyPassword,
+};
+
+/**
+ * The credentials provider's `authorize()`, the one password check. Every
+ * route into it charges the same per-IP sign-in limit, and charges it first:
+ * a refused attempt reads no account and runs no hash (./sign-in-limit.ts).
+ */
+export function createCredentialsAuthorize(
+  check: CredentialsCheck = DATABASE_CHECK,
+) {
+  return async function authorize(
+    raw: Partial<Record<string, unknown>>,
+    request?: Request,
+  ): Promise<User | null> {
+    await chargeSignInAttempt(request);
+
+    const email =
+      typeof raw?.email === "string" ? raw.email.trim().toLowerCase() : "";
+    const password = typeof raw?.password === "string" ? raw.password : "";
+    if (!email || !password) return null;
+    if (!emailAllowed(email)) return null;
+
+    const user = await check.findAccount(email);
+    if (!user?.password_hash) return null;
+    const ok = await check.verifyPassword(password, user.password_hash);
+    if (!ok) return null;
+
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.display_name ?? user.email,
+    };
+  };
+}
+
 const credentialsProvider = Credentials({
   id: "credentials",
   name: "Email and password",
@@ -27,30 +91,7 @@ const credentialsProvider = Credentials({
     email: { label: "Email", type: "email" },
     password: { label: "Password", type: "password" },
   },
-  async authorize(raw) {
-    const email =
-      typeof raw?.email === "string" ? raw.email.trim().toLowerCase() : "";
-    const password = typeof raw?.password === "string" ? raw.password : "";
-    if (!email || !password) return null;
-    if (!emailAllowed(email)) return null;
-
-    const supabase = createServiceClient();
-    const { data: user } = await supabase
-      .from("users")
-      .select("id, email, display_name, password_hash, is_admin")
-      .eq("email", email)
-      .maybeSingle();
-
-    if (!user?.password_hash) return null;
-    const ok = await verifyPassword(password, user.password_hash);
-    if (!ok) return null;
-
-    return {
-      id: user.id as string,
-      email: user.email as string,
-      name: (user.display_name as string) ?? user.email,
-    };
-  },
+  authorize: createCredentialsAuthorize(),
 });
 
 /**
