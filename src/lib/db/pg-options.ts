@@ -81,6 +81,14 @@ export function connectionUrl(env: NodeJS.ProcessEnv = process.env): string | un
   return (env.DATABASE_URL ?? env.POSTGRES_URL) || undefined;
 }
 
+/** The variable connectionUrl read, so a message can name it without its value. */
+export function connectionUrlName(
+  env: NodeJS.ProcessEnv = process.env,
+): "DATABASE_URL" | "POSTGRES_URL" | undefined {
+  if (!connectionUrl(env)) return undefined;
+  return env.DATABASE_URL !== undefined ? "DATABASE_URL" : "POSTGRES_URL";
+}
+
 /**
  * Whether `env` names a database at all, in either shape connectionFromEnv
  * accepts. It says nothing about whether the settings are complete or right:
@@ -132,7 +140,19 @@ export function createPgClient(extra: PgOpts = {}): Sql {
   const options = { prepare: false, ...extra } as PgOpts;
 
   if ("url" in conn) {
-    return postgres(conn.url, { ...options, ssl: conn.ssl });
+    try {
+      return postgres(conn.url, { ...options, ssl: conn.ssl });
+    } catch (err) {
+      // Node's URL parser keeps the whole string on its error, as `input`, so
+      // logging that error would print the password with it. Say which
+      // variable is wrong instead, and drop the original.
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      if (code !== "ERR_INVALID_URL" && !(err instanceof URIError)) throw err;
+      throw new Error(
+        `${connectionUrlName() ?? "The connection string"} is not a valid connection URL. ` +
+          `A password containing @ : / ? # % has to be percent-encoded.`,
+      );
+    }
   }
   return postgres({ ...conn, ...options });
 }
