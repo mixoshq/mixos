@@ -204,6 +204,15 @@ interface AppContext {
 Each capability field is `null` unless the manifest asks for it. That is the
 grant model: an app gets what it declared and nothing else.
 
+A route handler's context carries two more members, which the pipeline adds per
+request whichever tier won (`RouteRuntime` in
+[`route.ts`](../src/lib/apps/route.ts)): `signal`, aborted when the caller goes
+away or the route's `budget.ms` runs out, and `connectorErrorResponse(err)`, a
+failed connector call as the Response the pipeline would send, for a
+`raw: true` route. Its admin-only fields are included only for a signed-in
+admin. The pipeline reads that from the resolved caller before the handler
+runs, so an app cannot choose it.
+
 ### Connectors
 
 For each name in `manifest.connectors`, the builder imports

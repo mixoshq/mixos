@@ -262,6 +262,12 @@ and path params only — the pipeline deliberately does not read the body, becau
 reading it would drain the stream and hand your handler an already-consumed
 `Request`, which is the one thing a raw route exists to read.
 
+**A raw route answers its own connector failures.** Catch the error and return
+`ctx.connectorErrorResponse(err)`: the connector's envelope with its status and
+headers, the same answer a JSON route gets by letting the error propagate. The
+pipeline decides from the caller whether the envelope's admin-only fields go in,
+so the route never does. See [Failure handling](../connectors/failure-handling.md).
+
 ## Using connectors
 
 ```ts
