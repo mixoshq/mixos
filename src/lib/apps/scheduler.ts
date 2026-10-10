@@ -131,6 +131,11 @@ function withTimeout<T>(
  * manifest no longer declares them. The admin-controlled `enabled` flag and
  * runtime state (`last_run_at`, history) are preserved on existing rows; only a
  * genuine cadence change reseeds `next_run_at`.
+ *
+ * Only a manifest in this build can stop declaring a job. An app the build
+ * doesn't carry keeps its rows, and with them each job's `enabled` switch, so
+ * the app comes back with its jobs as an admin left them, the way the release
+ * step keeps its `apps` row (scripts/sync-app-registry.ts).
  */
 async function syncSchedules(): Promise<void> {
   const nowMs = Date.now();
@@ -193,7 +198,9 @@ async function syncSchedules(): Promise<void> {
     }
   }
 
+  const inBuild = new Set(appRegistry.map((a) => a.slug));
   for (const row of existing) {
+    if (!inBuild.has(row.app_slug)) continue;
     if (!declared.has(`${row.app_slug} ${row.job_name}`)) {
       await sql`
         delete from public.app_scheduled_jobs
@@ -413,12 +420,15 @@ export async function runDueJobs(): Promise<void> {
     await syncSchedules();
     // Joined to `apps` rather than filtered afterwards: a deactivated app runs
     // nothing, and leaving its jobs to be claimed and then skipped would still
-    // advance `next_run_at`, so reactivating would silently lose a window.
+    // advance `next_run_at`, so reactivating would silently lose a window. The
+    // same goes for an app this build doesn't carry: its row and jobs are kept,
+    // active or not, until it comes back, and this build has no handler to run.
     const jobs = (await sql`
       select j.app_slug, j.job_name, j.interval_minutes, j.cron, j.timezone
       from public.app_scheduled_jobs j
       join public.apps a on a.slug = j.app_slug
       where j.enabled and a.is_active
+        and j.app_slug = any(${appRegistry.map((a) => a.slug)})
     `) as unknown as JobRow[];
 
     await Promise.all(

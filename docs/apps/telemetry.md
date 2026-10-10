@@ -107,7 +107,7 @@ Events are recorded in a platform-owned table, `public.telemetry_events`:
 | `properties` | `jsonb` — your dimensions bag |
 | `created_at` | timestamptz |
 
-There is intentionally **no foreign key** to `apps` — events stay attributed even after an app is removed from the repo and swept out of `apps`, matching the existing `app_open_events` design.
+There is intentionally **no foreign key** to `apps` — events stay attributed to the slug whatever happens to the app's `apps` row, matching the existing `app_open_events` design.
 
 ## Limits
 
