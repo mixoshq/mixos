@@ -29,6 +29,15 @@ x-image: &image
   build:
     context: ..
     dockerfile: Dockerfile
+    args:
+      # The commit the admin pages name beside the version, baked into the
+      # image. From the shell, not deploy/.env, where it would go stale:
+      #
+      #   MIXOS_COMMIT=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.yml build
+      #
+      # Unset builds fine; the commit then shows as unknown. On Coolify, set it
+      # to $SOURCE_COMMIT (docs/hosting/docker-compose.md).
+      MIXOS_COMMIT: ${MIXOS_COMMIT:-}
 
 x-app-env: &app-env
   # The database below, over the compose network. Plaintext is right here — the
