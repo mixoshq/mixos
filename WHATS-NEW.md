@@ -120,6 +120,11 @@ just pulled.
   name, and the release step and the app no longer print it, password included.
 - **Fix:** sign-in attempts are limited on every route that checks a password,
   including Auth.js's own callback, and those routes share one budget per IP.
+- **Fix:** app API routes get request bodies over 10 MB whole. Up to 27 MB, a
+  body reaches a route on `/api/apps` or `/api/p` exactly as sent, and a larger
+  one gets a 413, with or without a `content-length`. Without a session cookie,
+  `/api/apps` now answers with a JSON 401 or 404 instead of a redirect to
+  `/login`.
 
 ## 2026-10-07
 
