@@ -293,7 +293,9 @@ run Docker, or if you need to work against shared data.
    `db:migrate` records what it applied in the same ledger the Supabase CLI
    keeps, so against a linked Supabase project `npm run db:push` does the same
    job, and the two can be mixed. Schema changes append a new
-   `supabase/migrations/NNNN_*.sql`.
+   `supabase/migrations/NNNN_*.sql` with the next free number. The ledger
+   records a migration by its number, so two files with one number are
+   refused; see [OS-UPDATES.md](OS-UPDATES.md).
 
    Apps that declare their own tables are separate — their migrations live in
    `apps/<slug>/migrations/` and are applied by `npm run migrate:apps`. Each app
