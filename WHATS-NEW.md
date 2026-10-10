@@ -57,6 +57,15 @@ just pulled.
   (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), and log it.
   **Breaking:** a deployment pointed at another catalogue now browses
   mixos.org; a source checkout still honours the override.
+- **Releases.** A version of MixOS is an annotated tag `vX.Y.Z` on `main` with
+  a GitHub Release, whose notes are its section of `CHANGELOG.md`.
+  `/mixos deploy release` opens the release PR, which sets the version in
+  `package.json` and writes that section from the Conventional Commits since
+  the last release (`scripts/release-prep.ts`). Once it merges, run it again
+  for the commands that tag the merge commit and publish the GitHub Release,
+  which a person runs. To upgrade a deployment, merge the newest release tag
+  into your fork rather than `upstream/main`
+  (`docs/hosting/README.md#upgrading`). Prereleases are `vX.Y.Z-rc.N`.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 

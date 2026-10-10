@@ -60,6 +60,9 @@ alone.
 
 ### Upgrading
 
+Merge the new release into your fork and push it, as in
+[Upgrading](README.md#upgrading). Then, on the server:
+
 ```bash
 git pull
 MIXOS_COMMIT=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.yml build
