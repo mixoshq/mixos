@@ -39,14 +39,8 @@ const SYNC_JOB_PREFIX = "sync:";
 import type { ScheduleCadence } from "./types";
 import { type Cadence, computeNextRun } from "./cron";
 import { buildSystemAppContext } from "./context";
+import { JOB_TIMEOUT_MS } from "./job-limits";
 
-/**
- * A handler may run at most this long before it's abandoned. Kept under the
- * 5-minute tick cadence (the `crons[].schedule` entry in vercel.json, which is
- * also the minimum schedulable granularity) so a slow job cannot still be
- * running when the next tick arrives.
- */
-const JOB_TIMEOUT_MS = 4 * 60_000;
 /** A claim held longer than this is presumed crashed and may be reclaimed. */
 const STALE_LEASE_MINUTES = 15;
 

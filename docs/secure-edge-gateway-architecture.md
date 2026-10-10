@@ -60,7 +60,7 @@ flowchart TD
 
     DISPATCH["dispatchAppRoute() — src/lib/apps/dispatch.ts<br/>twelve checks, in order — enumerated below<br/>413 · 404 · 429 · 405 · 401 · 403 · 500"]
 
-    DISPATCH --> DB["Scoped DB<br/>_app_*"]
+    DISPATCH --> DB["Scoped DB<br/>the app's own schema"]
     DISPATCH --> CONN["Connector<br/>(Gmail, …)"]
     DISPATCH --> HTTP["context.http<br/>(egress)"]
 ```
@@ -298,7 +298,7 @@ no way to receive a connector or a DB handle in client code.
 
 ## Enforcement
 
-The boundary holds in four places, not three:
+The boundary holds in five places:
 
 1. **Runtime.** Every HTTP request to either mount goes through the dispatcher.
    The one other entry point into a handler, `callAppRoute`, re-runs the same
@@ -308,8 +308,8 @@ The boundary holds in four places, not three:
 3. **ESLint** ([`eslint.config.mjs`](../eslint.config.mjs)) — restrictions are
    **tiered**, and each tier **restates the full set** rather than inheriting it:
    - `apps/**` as a whole: no `@connectors/*`, no `@/lib/connectors/*`, no
-     `@/lib/db*`, no raw `fetch`, no `process.env`, and no constructing a scoped
-     DB client.
+     `@/lib/db*`, no `process`, no raw network access, no HTML sinks, no `eval`,
+     and no constructing a scoped DB client.
    - `apps/**/pages/**` and `apps/**/widgets/**`: the same, plus no importing
      their own app's `lib/server/**`.
    - The server tier — `apps/**/api/**`, `lib/server/**`, `services/**`,
@@ -329,15 +329,28 @@ The boundary holds in four places, not three:
    for another app's schema, and a handler needs it to type `context.db`.
 
    These are `error`-level, and CI runs `npm run lint` as a blocking step.
-4. **Manifest `escapes`.** `app.json` may name rules from a closed set —
-   `raw-html`, `raw-response`, `output-validate-dev-only`, `process-env`,
-   `raw-fetch` — each with a written reason of at least a sentence. Naming a rule
+4. **The registry generator.** Lint runs on pull requests to this repository
+   and nowhere else, so for an extension installed from the Registry it is
+   advice. The generator runs on every build and on every install, and before
+   it loads any of an app's code it reads the app's syntax tree
+   ([`scripts/app-containment.ts`](../scripts/app-containment.ts)): a reference
+   to `process`, a network constructor or module, an HTML sink, `eval` or
+   `Function` skips the app, and on the install path a skip is a rejection,
+   rolled back. It reads syntax, so it is not a sandbox — it makes accidental
+   and naive use impossible to ship, and evasion conspicuous in review. See
+   [`security-architecture.md` §24](security-architecture.md#24-environment-containment).
+5. **Manifest `escapes`.** `app.json` may name rules from a closed set with one
+   member, `raw-response`, each with a written reason of at least a sentence. A
+   route with `raw: true` registers only when the manifest declares it, so the
+   declaration is the switch rather than a label beside one. Naming a rule
    outside the set is a build failure, because a typo'd escape reads as
-   "declared" to a reviewer while enforcing nothing. Three of the five disclaim
-   controls this document describes (`raw-fetch` the egress containment,
-   `process-env` the environment boundary, `raw-html` the injection boundary), so
-   an app carrying one is a review item. The set is visible in the generated
-   registry.
+   "declared" to a reviewer while enforcing nothing. The set once held four
+   more — `process-env`, `raw-fetch` and `raw-html`, which disclaimed the
+   environment boundary, the egress containment and the injection boundary,
+   and `output-validate-dev-only` — removed in
+   [`plans/20261005_2150-app-escapes.md`](plans/20261005_2150-app-escapes.md).
+   Declared escapes appear in the generated registry and in the app's details
+   in admin.
 
 ---
 

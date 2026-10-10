@@ -97,6 +97,8 @@ Omit them and `public/` keeps serving the existing icons. The layout deliberatel
 
 Optional. The admin picker already renders a live swatch row from the theme's own resolved tokens, plus a specimen of each `--type-*` role set in its own family — both more honest than a screenshot, and neither can go stale. A preview image is worth adding only when the theme's distinction is something colour and type cannot show: a texture, a shadow treatment, a border language.
 
+When a theme declares one, the picker shows it at the top of the theme's tile, above the swatch row, cropped to 16:9 and keeping its top-left corner. Compose it in that shape, with what matters at the top left.
+
 ## Screenshots
 
 ```jsonc

@@ -5,6 +5,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Image from "next/image";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -76,9 +77,26 @@ export default function ThemeRegistryList({
             >
               <h3 className="font-medium text-foreground">{theme.name}</h3>
 
-              {/* The palette, not a screenshot: a swatch row is honest about
-                  what will actually change, and never goes stale the way a
-                  captured image does. */}
+              {/* `assets.preview`, when the theme ships one: for what colour
+                  and type cannot show, such as a texture, a shadow treatment
+                  or a border language. Cropped to one shape so a row of tiles
+                  lines up, keeping the top-left corner, where a capture of
+                  the UI starts. */}
+              {theme.assets.preview && (
+                <div className="relative mt-2 aspect-video overflow-hidden rounded border border-border bg-muted">
+                  <Image
+                    src={`${theme.assetBase}/${theme.assets.preview}`}
+                    alt={`Preview of the ${theme.name} theme`}
+                    fill
+                    sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                    className="object-cover object-left-top"
+                  />
+                </div>
+              )}
+
+              {/* The palette, always, and never replaced by the preview: a
+                  swatch row is honest about what will actually change, and
+                  never goes stale the way a captured image does. */}
               <div className="mt-2 flex h-6 overflow-hidden rounded">
                 {theme.swatches.map((sw) => (
                   <span

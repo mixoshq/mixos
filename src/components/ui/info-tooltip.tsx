@@ -19,7 +19,7 @@
  * Not the same thing as a chart tooltip, which positions itself from a hovered
  * data index inside an SVG plot. This one anchors to its own trigger.
  */
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 
 export function InfoTooltip({
   tip,
@@ -36,6 +36,22 @@ export function InfoTooltip({
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
+
+  // Escape closes the bubble wherever focus is: it may have opened on hover,
+  // with focus somewhere else on the page. Listened for in the capture phase
+  // and stopped there, so the same key press does not also close a dialog the
+  // tooltip sits in. It stays closed until the trigger is hovered or focused
+  // again.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(false);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [open]);
 
   return (
     <span

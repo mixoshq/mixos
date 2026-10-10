@@ -30,7 +30,9 @@
  * codebase's history — a raw `error.message` reaching the browser, a forgotten
  * status code, a handler that returns `undefined` and 200s. A route that
  * genuinely needs to own its Response (a file stream, a redirect) declares
- * `raw: true`, and that shows up in review as the exception it is.
+ * `raw: true`, and that shows up in review as the exception it is. A failed
+ * connector call needs no Response either: the handler lets the ConnectorError
+ * propagate and the pipeline answers with that connector's envelope.
  *
  * WHAT AN OMITTED `input` MEANS. Not "unvalidated" — *unavailable*. A route
  * with no `input` schema receives `{}`, and anything the caller sent is
@@ -48,6 +50,7 @@ import {
   type RouteAuth,
 } from "@/lib/apps/types";
 import type { BaseConnector } from "@/lib/connectors/types";
+import { isConnectorError } from "@/lib/connectors/errors";
 import { AppError, toErrorResponse } from "@/lib/apps/errors";
 import { withTimeout } from "@/lib/timeout";
 import { recordRouteCall } from "@/lib/apps/telemetry";
@@ -76,10 +79,12 @@ export type { AppErrorCode } from "@/lib/apps/errors";
 /**
  * Per-route ceilings.
  *
- * `ms` bounds how long the caller waits. It does NOT stop the handler — see the
- * warning on `withTimeout`. `connectorCalls` is the one that bounds actual
- * spend: every method call on `ctx.connectors.*` is counted, and the route
- * fails once it passes the cap rather than fanning out unboundedly.
+ * `ms` bounds how long the caller waits. When it runs out the caller gets a 504
+ * and `ctx.signal` aborts, but the handler itself is not interrupted — see the
+ * warning on `withTimeout`. Work stops only where the handler passed the signal
+ * on. `connectorCalls` is the one that bounds actual spend: every method call
+ * on `ctx.connectors.*` is counted, and the route fails once it passes the cap
+ * rather than fanning out unboundedly.
  */
 export interface RouteBudget {
   /** Maximum method calls across all of `ctx.connectors`. */
@@ -112,17 +117,6 @@ const DEFAULT_BUDGET_MS = 30_000;
 const MAX_PAYLOAD_CHARS = 5_000_000;
 
 /**
- * Output validation can be relaxed for a measured hot path, but only as a
- * *declared* escape (`output-validate-dev-only` in the manifest's `escapes`),
- * so it appears in review rather than being a quiet omission.
- */
-export type OutputValidation = "always" | "dev-only";
-
-export type RouteOutput<TOut> =
-  | z.ZodType<TOut>
-  | { schema: z.ZodType<TOut>; validate: OutputValidation };
-
-/**
  * The context handed to a handler that resolved to an identity-carrying tier.
  * `auth` says which one, so a route serving both a member and a stranger can
  * branch on the fact rather than inferring it from `user !== null`.
@@ -136,17 +130,32 @@ export type AnonContext = PublicAppContext & {
 
 export type ResolvedContext = AuthedContext | AnonContext;
 
+/** What the pipeline adds to a handler's context, whichever tier won. */
+export interface RouteRuntime {
+  /**
+   * Aborted when the caller goes away or the route's `budget.ms` runs out.
+   *
+   * Running out of budget sends the caller a 504 but cannot interrupt the
+   * handler. Pass this to the connector methods and `ctx.http.fetch` calls
+   * that should stop with the route, and check `signal.aborted` between the
+   * steps of a loop. A server page's `callAppRoute` has no caller to go away,
+   * so there only the budget aborts it.
+   */
+  signal: AbortSignal;
+}
+
 /**
  * The context a handler receives, derived from its declared auth set. Declaring
  * any anonymous auth widens `ctx.user` to `AppContextUser | null`, so the
  * compiler — not a code reviewer — is what makes the handler cover the
  * signed-out branch.
  */
-export type ContextFor<A extends readonly RouteAuth[]> = [
+export type ContextFor<A extends readonly RouteAuth[]> = ([
   Extract<A[number], "password" | "key" | "public">,
 ] extends [never]
   ? AuthedContext
-  : ResolvedContext;
+  : ResolvedContext) &
+  RouteRuntime;
 
 interface BaseRouteSpec<A extends readonly RouteAuth[]> {
   /** Accepted auths. Defaults to `["session"]`. */
@@ -189,7 +198,13 @@ export interface JsonRouteSpec<
 > extends BaseRouteSpec<A> {
   raw?: false;
   input?: S;
-  output: RouteOutput<TOut>;
+  /**
+   * Validated on every response, in every environment. The parse is also what
+   * strips keys the schema does not declare, so it is never skipped; there used
+   * to be a `{ schema, validate: "dev-only" }` form, removed with its escape in
+   * docs/plans/20261005_2150-app-escapes.md.
+   */
+  output: z.ZodType<TOut>;
   handler: (ctx: ContextFor<A>, input: ParsedInput<S>) => TOut | Promise<TOut>;
 }
 
@@ -225,7 +240,6 @@ export interface RouteDefinition<S = unknown, TOut = unknown> {
   readonly raw: boolean;
   readonly input?: z.ZodType;
   readonly output?: z.ZodType;
-  readonly outputValidation: OutputValidation;
   readonly handler: (
     ctx: never,
     input: never,
@@ -277,15 +291,19 @@ export function defineRoute(
     | RawRouteSpec<z.ZodType | undefined, readonly RouteAuth[]>,
 ): RouteDefinition {
   const raw = spec.raw === true;
-  const declaredOutput = raw
+  const output = raw
     ? undefined
     : (spec as JsonRouteSpec<z.ZodType | undefined, unknown, readonly RouteAuth[]>)
         .output;
 
-  const output =
-    declaredOutput && "schema" in declaredOutput ? declaredOutput.schema : declaredOutput;
-  const outputValidation: OutputValidation =
-    declaredOutput && "validate" in declaredOutput ? declaredOutput.validate : "always";
+  // TypeScript already refuses anything but a schema; this is for a route that
+  // reached here without it, so the mistake surfaces when the route is defined
+  // (which the generator does at build time) rather than on its first request.
+  if (output !== undefined && typeof (output as { safeParse?: unknown }).safeParse !== "function") {
+    throw new Error(
+      "defineRoute: `output` must be a Zod schema. The `{ schema, validate }` form was removed — output is validated on every response.",
+    );
+  }
 
   return {
     brand: ROUTE_DEFINITION,
@@ -303,7 +321,6 @@ export function defineRoute(
     raw,
     ...(spec.input ? { input: spec.input as z.ZodType } : {}),
     ...(output ? { output: output as z.ZodType } : {}),
-    outputValidation,
     handler: spec.handler as RouteDefinition["handler"],
   };
 }
@@ -630,6 +647,12 @@ async function executeRoute(
     input = parsed.data;
   }
 
+  // `ctx.signal` aborts on whichever comes first: the caller going away (the
+  // request's own signal, which the HTTP mounts tie to the connection) or the
+  // time budget running out. The timeout below only rejects the caller's
+  // promise; this is what lets a handler stop the work as well.
+  const outOfTime = new AbortController();
+
   // Always wrapped. A cap of 0 means "no connector calls", and the counter
   // rejects the first one; skipping the proxy at 0 would make the strictest
   // declaration an author can write the only unbounded one.
@@ -640,6 +663,7 @@ async function executeRoute(
       def.budget.connectorCalls,
       label,
     ),
+    signal: AbortSignal.any([request.signal, outOfTime.signal]),
   };
 
   const handler = def.handler as (
@@ -651,10 +675,13 @@ async function executeRoute(
   const result = await withTimeout(
     Promise.resolve(handler(ctx, input, request)),
     def.budget.ms,
-    () =>
-      AppError.timeout(
+    () => {
+      const err = AppError.timeout(
         `${label} did not finish within its ${def.budget.ms}ms budget.`,
-      ),
+      );
+      outOfTime.abort(err);
+      return err;
+    },
   );
 
   // A raw route owns its Response: no output schema, no payload cap, and the
@@ -679,26 +706,17 @@ async function executeRoute(
   if (!def.output) return { kind: "data", payload: result };
 
   const parsed = def.output.safeParse(result);
-  // The `dev-only` escape downgrades a FAILURE from a 500 to a log. It does not
-  // skip the parse, because `parsed.data` is also what strips undeclared keys —
-  // skipping it would turn a performance escape into a data leak, and production
-  // would send fields the schema exists to withhold.
+  // The parse is also what strips keys the schema does not declare, so it is
+  // the parsed data — never the raw result — that goes out.
   if (parsed.success) return { kind: "data", payload: parsed.data };
 
-  const enforce =
-    def.outputValidation === "always" || process.env.NODE_ENV !== "production";
-
-  // Logged either way, because safeErrorMessage never logs and in production
-  // the caller only sees the generic message. Without this an output mismatch
-  // is invisible on the server.
+  // Logged, because safeErrorMessage never logs and in production the caller
+  // only sees the generic message. Without this an output mismatch is invisible
+  // on the server.
   console.error(
-    enforce
-      ? `[route] ${label} returned a payload that failed its own output schema:`
-      : `[route] ${label} failed its own output schema (validation relaxed by a declared escape):`,
+    `[route] ${label} returned a payload that failed its own output schema:`,
     parsed.error.issues,
   );
-
-  if (!enforce) return { kind: "data", payload: result };
 
   throw new AppError(
     "INVALID_OUTPUT",
@@ -746,6 +764,21 @@ function budgetFrom(err: unknown): "timeout" | "connector-budget" | undefined {
   if (err.code === "TIMEOUT") return "timeout";
   if (err.code === "BUDGET_EXCEEDED") return "connector-budget";
   return undefined;
+}
+
+/**
+ * The server-side record of a failed route. An `AppError` is an answer the
+ * route chose, so it is not logged. A connector failure is logged as our own
+ * classification only (`[acme] auth_failed (HTTP 401)`): its `cause` can be
+ * the transport error itself, and that may carry the URL a key was sent in.
+ */
+function logFailure(label: string, err: unknown): void {
+  if (err instanceof AppError) return;
+  if (isConnectorError(err)) {
+    console.error(`[route] ${label} failed: ${err.message}`);
+    return;
+  }
+  console.error(`[route] ${label} threw:`, err);
 }
 
 /**
@@ -813,13 +846,16 @@ export async function runRoute(
       headers: { "content-type": "application/json" },
     });
   } catch (err) {
-    if (!(err instanceof AppError)) {
-      console.error(`[route] ${label} threw:`, err);
-    }
-    const { status, body } = toErrorResponse(err, `${label} failed.`);
+    logFailure(label, err);
+    // A connector failure the handler let propagate comes back as that
+    // connector's envelope, with its own status and headers; `isAdmin` is what
+    // decides whether its admin-only fields are in it.
+    const { status, body, headers } = toErrorResponse(err, `${label} failed.`, {
+      isAdmin: context.user?.isAdmin === true,
+    });
     record(status, budgetFrom(err));
     try {
-      return NextResponse.json(body, { status });
+      return NextResponse.json(body, { status, headers });
     } catch {
       // `details` is app-supplied (Zod issues, but also whatever an author put
       // in an AppError). A BigInt or a circular reference in there would throw
@@ -878,9 +914,7 @@ export async function runRouteData<TOut = unknown>(
     record(200);
     return out.payload as TOut;
   } catch (err) {
-    if (!(err instanceof AppError)) {
-      console.error(`[route] ${label} threw:`, err);
-    }
+    logFailure(label, err);
     const { status } = toErrorResponse(err, `${label} failed.`);
     record(status, budgetFrom(err));
     throw err;
