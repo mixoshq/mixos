@@ -30,7 +30,7 @@ Open ports 80 and 443.
 git clone https://github.com/<you>/mixos.git     # your fork, with your apps
 cd mixos
 sh deploy/new-env.sh https://mixos.example.com you@example.com
-docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.https.yml up -d --build
+MIXOS_COMMIT=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.https.yml up -d --build
 ```
 
 `deploy/new-env.sh` writes `deploy/.env` with every key generated and prints the
@@ -41,6 +41,10 @@ existing `deploy/.env`, because the keys in it decrypt data already stored.
 The first `up` builds the image, which takes several minutes. Then Postgres
 starts, the release step applies the schema and creates your admin, the app
 starts, and Caddy obtains the certificate. Sign in at your URL.
+
+`MIXOS_COMMIT` is optional. It's the commit the admin pages show beside the
+MixOS version, built into the image. Leave it out and the commit shows as
+unknown.
 
 **Back up `deploy/.env`.** Three of its keys encrypt connector credentials,
 per-user OAuth grants and app settings at rest. Without them that data can't be
@@ -56,9 +60,12 @@ alone.
 
 ### Upgrading
 
+Merge the new release into your fork and push it, as in
+[Upgrading](README.md#upgrading). Then, on the server:
+
 ```bash
 git pull
-docker compose -f deploy/docker-compose.yml build
+MIXOS_COMMIT=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.yml build
 docker compose -f deploy/docker-compose.yml run --rm migrate
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.https.yml up -d
 ```
@@ -120,6 +127,11 @@ If port 3000 is already taken on the server, set `MIXOS_PORT` to something
 free. The loopback publish isn't how Coolify reaches the app; it only has to
 not collide with anything.
 
+To show the commit on the admin pages, set `MIXOS_COMMIT` to `$SOURCE_COMMIT`
+in the resource's environment variables. Coolify leaves the source commit out of
+builds by default, so also make it available during the build, in the
+resource's advanced build settings.
+
 ## Dokploy
 
 [Dokploy](https://dokploy.com) works the same way:
@@ -129,6 +141,9 @@ not collide with anything.
 2. Paste `deploy/.env`, generated as above, into the service's environment.
 3. Add a domain for the `app` service on container port 3000.
 4. Deploy.
+
+On Dokploy the admin pages show the commit as unknown, since nothing passes
+`MIXOS_COMMIT` to the build.
 
 ## What runs where
 
