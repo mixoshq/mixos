@@ -30,12 +30,14 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
 | Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
+| Password re-check limit | `src/lib/auth/recheck-limit.ts`            |
 | Safe error helper    | `src/lib/safe-error.ts`                       |
 | Security headers     | `next.config.ts`                              |
 | App import policy    | `src/lib/apps/import-policy.mjs`              |
 | App containment scan | `scripts/app-containment.ts`                  |
 | ESLint restrictions  | `eslint.config.mjs`                           |
 | MCP endpoint         | `src/app/api/mcp/route.ts`                    |
+| MCP bearer-check limit | `src/lib/mcp/bearer-limit.ts`               |
 | MCP tool broker      | `src/lib/mcp/broker.ts`                       |
 | MCP tool discovery   | `src/lib/mcp/tools.ts`                        |
 | OAuth AS crypto      | `src/lib/mcp/oauth.ts`                        |
@@ -577,7 +579,7 @@ What the platform does between those two boxes, in order:
 | CSRF protection      | Cross-site request forgery    | `SameSite=Lax` cookie, plus double-submit token on cookie-authenticated mutations | `csrf.ts`, Auth.js, Next.js (see §7) |
 | Admin authorization  | Admin-only pages and actions  | `requireAdmin()` re-reads `is_admin` per call | `access.ts` (see §9)         |
 | Server-side admin    | Admin action bypass           | `requireAdmin()` in pages + server actions   | `access.ts`, admin pages     |
-| Rate limiting        | Abuse / DoS, password guessing | Postgres token-bucket, memory pre-filter    | `rate-limit.ts`, gateway, sign-in (§6) |
+| Rate limiting        | Abuse / DoS, password guessing | Postgres token-bucket, memory pre-filter    | `rate-limit.ts`, gateway, sign-in and password re-checks (§6), MCP (§17), webhooks (§19) |
 | Tier resolution      | Per-request auth decision     | `resolveAuthTier()`, strongest-first, fails closed | `auth-tier.ts`          |
 | App access control   | Unauthorized app access       | `hasAppGrant()` checks `user_app_grants`     | `auth-tier.ts` via `access.ts` |
 | Email domain gate    | Unauthorized user provisioning| `ALLOWED_EMAIL_DOMAINS` env var check        | `access.ts` (`ensureUser`)   |
@@ -590,7 +592,7 @@ What the platform does between those two boxes, in order:
 | App containment scan | Secrets, egress, injection    | Syntax-tree scan; a finding skips the app    | `app-containment.ts` (see §24) |
 | SDK routing          | Direct DB/connector access    | All client calls go through `/api/apps/...`  | `sdk.ts`                     |
 | Safe error responses | Internal detail leakage       | `safeErrorMessage()` strips details in prod  | `safe-error.ts`, all routes  |
-| Request body limit   | Memory-exhaustion DoS         | 27 MB cap, `content-length` checked first    | `dispatch.ts` (`MAX_BODY_BYTES`) |
+| Request body limit   | Memory-exhaustion DoS         | 27 MB cap, `content-length` checked first; 5 MiB on webhooks, read no further than the cap | `dispatch.ts` (`MAX_BODY_BYTES`), `webhook.ts` (`MAX_WEBHOOK_BODY_BYTES`) |
 | Timing-safe queries  | User/app enumeration          | `.maybeSingle()` on all access checks        | `access.ts`                  |
 | Security headers     | Clickjacking, MIME sniffing   | CSP `frame-ancestors 'self'`, `nosniff`, etc | `next.config.ts`             |
 | Session cookies      | Session hijacking / forgery   | Auth.js JWT, httpOnly, secure, sameSite=lax  | `next-auth` (Auth.js v5)     |
@@ -708,9 +710,10 @@ exposure, not a new one.
 
 The cron tick deletes buckets untouched for an hour. The invariant: that TTL must
 exceed `maxTokens / refillRatePerSecond` for **every** configured limiter, or GC
-forgives an abuser mid-penalty. The slowest limiter today is OAuth dynamic
-registration at 10 tokens / 0.05 per second = 200 seconds, leaving ~18x headroom.
-A slower limiter than that needs a longer TTL or per-row budget columns.
+forgives an abuser mid-penalty. The slowest limiter today is the password
+re-check at 5 tokens / one every 300 seconds = 1,500 seconds, leaving ~2.4x
+headroom. A slower limiter than that needs a longer TTL or per-row budget
+columns.
 
 ### IP extraction hardening
 
@@ -723,6 +726,10 @@ an attacker prepends fake IPs to bypass rate limiting.
 x-forwarded-for: <attacker-spoofed>, <real-client-ip>
                                       ^^^^^^^^^^^^^^^^ used
 ```
+
+Every per-IP limit keys on this rule (`getClientIp`,
+`src/lib/apps/public-access.ts`), which is why MixOS is served behind a proxy
+or platform that sets these headers ([hosting](hosting/README.md)).
 
 The pre-filter's in-memory store (`src/lib/rate-limit.ts`) evicts stale entries
 automatically; the Postgres authority is pruned from the cron tick.
@@ -747,6 +754,32 @@ it is cheap and answers the same for a known and an unknown email. The login
 page shows "Too many sign-in attempts. Please try again shortly." Auth.js's
 route answers in its usual error form: a redirect to
 `/login?error=CredentialsSignin&code=rate_limited`.
+
+An attempt that is let through runs exactly one bcrypt hash, whether or not the
+email has an account. With no account, or an account with no password, the
+password is compared against `DUMMY_PASSWORD_HASH` (`src/lib/auth/password.ts`),
+a hash of the same cost and format whose password nobody has, and the attempt
+is refused whatever the comparison says. So the time a wrong password takes
+doesn't say which emails have accounts.
+
+### Password re-checks
+
+Two server actions ask a signed-in person for their own password:
+
+- "Change my password" (`updatePassword`, `src/lib/account/actions.ts`) checks
+  the current password.
+- Setting another user's password (`adminSetPassword`,
+  `src/lib/admin/user-actions.ts`) checks the acting admin's, which is what
+  keeps someone at an admin's unlocked laptop from taking over another account.
+
+Both draw on one bucket per user, `password-recheck`
+(`src/lib/auth/recheck-limit.ts`): 5 attempts in a burst, then one more every 5
+minutes, right or wrong. One bucket, because both re-check the same password.
+
+The key is the user id from the session, not the IP: the session says whose
+password is being checked, wherever it is used from. The charge comes before
+the hash, so a refused attempt runs none, and both actions answer "Too many
+attempts. Please try again shortly." whatever the password was.
 
 ---
 
@@ -1202,6 +1235,10 @@ The rate limiter runs before body parsing (in the App Router, the request
 body is not read until the handler calls `request.json()`), so rate limiting
 applies even to oversized requests.
 
+Inbound webhooks have a cap of their own, 5 MiB (`MAX_WEBHOOK_BODY_BYTES`,
+`src/lib/connectors/webhook.ts`), which holds without `content-length` too: the
+route reads the body a chunk at a time and stops at the cap (§19).
+
 ---
 
 ## 16. Connector Initialization Safety
@@ -1354,6 +1391,11 @@ or a native custom scheme, and only public clients are accepted.
   the hardest to debug from the client side.
 - Rate limiting is **per token**, not per IP: claude.ai egresses from shared
   addresses, so an IP bucket would let one caller starve another.
+- A token that **fails** the check is limited per IP instead
+  (`src/lib/mcp/bearer-limit.ts`): 30 failures in a burst, then one every 2
+  seconds. The bucket is read before the token is looked up and charged only
+  on a failure, so a valid token never spends it. Past the budget, a request
+  from that address is answered 429 with `Retry-After`, without a lookup.
 - `Access-Control-Allow-Origin: *` is set on the two `.well-known` discovery
   documents **only**. They are public endpoint metadata with no user data. The
   token, authorize, and MCP endpoints get no CORS relaxation.
@@ -1390,16 +1432,19 @@ one of these.
 | `/manifest.webmanifest` | none; static |
 | `/p` | the public page route (`src/lib/apps/public-page.ts`): the page's own `pageVisibility`, the app being active, and the unlock cookie for a `password` page |
 | `/api/p` | the dispatcher's `password` / `key` / `public` tiers (§1) |
-| `/api/mcp` | OAuth 2.1 bearer token (§17) |
+| `/api/mcp` | OAuth 2.1 bearer token (§17), with a per-IP limit on failed checks |
 | `/api/oauth`, `/.well-known`, `/api/well-known` | the OAuth endpoints' own validation (§17) |
-| `/api/webhooks` | HMAC signature over the raw body (§19) |
+| `/api/webhooks` | HMAC signature over the raw body (§19), behind a per-IP limit and a body cap |
 | `/api/cron` | timing-safe `CRON_SECRET` bearer compare (§20) |
 
 The matcher additionally exempts `_next/static`, `_next/image`,
 `themes/<id>/`, `connector-assets/`, `screenshots/`, `branding/`,
 `favicon.ico` and the `icon*` / `apple-icon*` file-convention paths from the
 proxy entirely, so neither the cookie check nor the maintenance response below
-applies to them.
+applies to them. It also exempts `api/webhooks/`, so that a delivery's body is
+read only by the webhook route, which stops at its cap (§19). That route runs
+the maintenance gate itself, before anything else, so the maintenance response
+still applies to it.
 
 **Maintenance response.** Before the public list or the cookie check, the proxy
 asks whether the platform schema is behind this build
@@ -1409,17 +1454,18 @@ schema is behind, every path except `/api/health/live` and `/api/health/ready`
 gets a 503 with `Retry-After: 30`: a static page for a page, and
 `{ "error": "This instance is being updated. Try again shortly." }` for
 `/api/*` and `/.well-known/*`. That includes `/api/cron` (the tick waits),
-`/api/webhooks` (senders retry) and `/api/mcp`. The page comes from the proxy
-with no app code and no query, under its own CSP, which allows no script.
+`/api/mcp`, and `/api/webhooks` (senders retry), whose route answers it with
+the same gate, first, since the proxy leaves it out. The page comes from the
+proxy with no app code and no query, under its own CSP, which allows no script.
 Neither body names a version or says what to run; the server log does both. A
 check that fails, or doesn't answer within 2 seconds, counts as not behind, as
 it does in readiness. App migrations behind don't trigger it.
 
-**Why removing an entry does not harden it.** For `/api/cron` and `/api/webhooks`
-the proxy would answer `307 → /login`, which is a perfectly successful HTTP
-exchange. The cron sidecar's `curl` has no `-L`, so it records the status and
-keeps ticking; a webhook provider records the delivery as accepted and drops the
-event. Nothing throws, nothing retries, and the scheduler simply stops. The
+**Why removing an entry does not harden it.** For `/api/cron`, and for
+`/api/webhooks` were the matcher to stop leaving it out, the proxy would answer
+`307 → /login`, which is a perfectly successful HTTP exchange. The cron
+sidecar's `curl` has no `-L`, so it records the status and keeps ticking; a
+webhook provider records the delivery as accepted and drops the event. Nothing throws, nothing retries, and the scheduler simply stops. The
 route's own 401 is what an operator needs to see.
 
 **Health endpoints.** `/api/health/live` returns a static `{ status: "ok" }` with
@@ -1471,6 +1517,17 @@ Declaring the provider's timestamp header, where it signs one, removes that.
 
 **Do not swallow errors in `handleWebhook()`.** Throw. A swallowed error loses the
 delivery for good; a thrown one makes the provider retry.
+
+### Limits before the signature
+
+The proxy leaves `/api/webhooks/` out, so a delivery's body is read only by the
+route, which runs the maintenance gate itself, first (§18). Then a per-IP limit
+with the app gateway's budget, 60 deliveries in a burst and then 10 a second,
+answers 429 with `Retry-After`. A body cap of 5 MiB answers 413: the route
+refuses a declared length over it without reading the body, and reads a body
+without one no further than the cap. Both come before the connector switch
+below is read, the credentials are decrypted or anything is recorded, so a
+provider's retry is processed as a first delivery.
 
 ### Turning a connector off
 
