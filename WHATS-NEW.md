@@ -30,6 +30,16 @@ just pulled.
 - **`updatedAt` in `app.json`** lists columns the platform sets to `now()` on
   every update, with its own trigger, since an app migration can no longer
   create one.
+- **An app that leaves the build keeps its data.** The release step and
+  `npm run migrate:apps` used to delete an app the build no longer carried,
+  with its grants, installs, password and widgets, even when the build had only
+  skipped it. They now mark it missing and keep everything, scheduled jobs
+  included, and Admin > Apps lists it under **Not in this build**. If it comes
+  back with the same files it is as it left; with different files it comes
+  back inactive and flagged until an admin activates it. The audit log records
+  both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
+  new app, and the old slug keeps the old data. Migration 0010; run
+  `npm run db:local` to apply it.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 

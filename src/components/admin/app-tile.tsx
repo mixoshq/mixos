@@ -5,6 +5,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { AlertCircle } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import LucideIcon from "@/components/lucide-icon";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,12 @@ interface AppTileProps {
   tableCount: number;
   /** Whether the app serves anything on this instance. */
   isActive: boolean;
+  /**
+   * Set when the release step brought this app back into the build with files
+   * that differ from the ones it left with, and switched it off. Activating
+   * clears it.
+   */
+  returnedChangedAt: string | null;
 }
 
 /**
@@ -51,8 +58,9 @@ interface AppTileProps {
  * status colour because configuration is the whole point of that grid. An app
  * has no such state — every app in this list is in the registry, and being in
  * the registry is the whole of being valid — so tinting each card would invent
- * a status to report. Colour stays reserved for the one thing on this page that
- * genuinely signals state: the unconfigured-connector strip.
+ * a status to report. Colour stays reserved for the things on this page that
+ * genuinely need an admin: the unconfigured-connector strip, and the strip on
+ * an app that came back into the build with different code.
  */
 export default function AppTile({
   app,
@@ -60,6 +68,7 @@ export default function AppTile({
   grantCount,
   tableCount,
   isActive,
+  returnedChangedAt,
 }: AppTileProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -154,13 +163,16 @@ export default function AppTile({
         badge its own fill, which reads as four severities when it is really
         four measurements — and six of those would be a traffic light.
       */}
-      {(pills.length > 0 || !isActive) && (
+      {(pills.length > 0 || !isActive || returnedChangedAt) && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {/* The one pill here that is a state rather than a measurement, so
-              the one that gets a tone. Nothing marks an active app: active is
+          {/* The pills here that are states rather than measurements, so the
+              ones that get a tone. Nothing marks an active app: active is
               what every app in a working instance is, and a green pill on
               every tile would be a row of decoration. */}
           {!isActive && <StatusPill tone="warning">Inactive</StatusPill>}
+          {returnedChangedAt && (
+            <StatusPill tone="warning">Back with different code</StatusPill>
+          )}
           {pills.map((text) => (
             <StatusPill key={text} tone="neutral">
               {text}
@@ -179,6 +191,22 @@ export default function AppTile({
             app={app}
             missingConnectors={missingConnectors}
           />
+        </div>
+      )}
+
+      {/* Why the pill above is there, and what clears it. The same strip as
+          the connector warning: one fact about this app that needs an admin
+          before it is used. */}
+      {returnedChangedAt && (
+        <div className="mt-3 rounded-lg border-l-4 border-brand-accent bg-brand-accent/10 py-2 pl-3 pr-3">
+          <p className="flex items-start gap-2 text-xs text-foreground">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+            <span>
+              This app left the build and came back with different files, so
+              it was switched off. Its grants and data were kept. Check what
+              changed, then activate it.
+            </span>
+          </p>
         </div>
       )}
 
