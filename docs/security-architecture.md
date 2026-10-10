@@ -99,7 +99,7 @@ up checking the wrong table.
 | 3    | Rate limit (IP), pre-auth      | 429     | Dispatcher (`src/lib/rate-limit.ts`) |
 | 4    | URL resolves to a route pattern| 404     | Dispatcher (`resolveRoutePath`)      |
 | 5    | This mount serves the route    | 404     | Dispatcher, from the **hoisted contract** — so no app module is imported for a caller the route would refuse |
-| 6    | Route module loads; method exported | 404 / 405 / 500 | Dispatcher (import and dispatch are separated, so a module that throws is not reported as missing) |
+| 6    | App is active, then the route module loads; method exported | 404 / 405 / 500 | Dispatcher. The app gate (`src/lib/apps/app-gate.ts`) runs before the import, so a deactivated app's module-scope code never runs. Import and dispatch are separated, so a module that throws is not reported as missing |
 | 7    | Live declaration matches the registry | 404 | Dispatcher — a gate decided from one source and enforced from another is not a gate |
 | 8    | Auth tier the caller earned    | 401 / 403 / 404 | `src/lib/apps/auth-tier.ts` |
 | 9    | CSRF token, cookie-authenticated mutations only | 403 | `src/lib/apps/csrf.ts` — authenticated mount, identity tiers, mutating methods |
@@ -1536,8 +1536,14 @@ default-deny:
 | Provider declares this service in `provides` | `NOT_EXPOSED` |
 | Consumer declared this dependency in `consumes` | `NOT_DECLARED` |
 | Provider's `consumers` allowlist admits the caller | `FORBIDDEN` |
+| Provider app is active, whatever the audience | `PROVIDER_INACTIVE` |
 | For `audience: "user"`, an acting user exists | `NO_USER` |
 | That user holds a grant for the **provider** app | `FORBIDDEN_USER` |
+
+The activation check is the app gate (§3.1), asked before the provider's
+context is built or its handler imported. An `audience: "app"` service consults
+no grant, so this is what refuses an inactive provider's service to a job or a
+public route.
 
 The provider's handler runs with the **provider's own scoped context**, and the
 user is re-authorized in the provider's terms rather than inheriting the
@@ -1686,7 +1692,9 @@ server-side and platform-owned.
 
 It is **not** an authorization bypass: it re-runs `resolveAuthTier` against the
 page's own session, the role gate, and input/output validation, and it records
-the same telemetry row.
+the same telemetry row. Like the gateway, it checks that the app is active
+before it imports the route (the app gate, §3.1), so a deactivated app's
+module-scope code does not run; `resolveAuthTier` checks activation again.
 
 It is **bound to the calling app at build time.** Run with another app's slug
 it would execute that app's routes, mutations included, as the current user,

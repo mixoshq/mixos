@@ -4,7 +4,7 @@
 
 import { hookLoaders } from "@/generated/app-hook-loaders";
 import { appRegistry } from "@/generated/app-registry";
-import { isAppActive } from "@/lib/apps/access";
+import { checkAppGate } from "@/lib/apps/app-gate";
 import { hooks } from "./hook-system";
 import { consentedListens } from "./scope";
 import type { HookRegistrar } from "./types";
@@ -32,9 +32,20 @@ import type { HookRegistrar } from "./types";
  * runs synchronously after the import resolves, so two concurrent requests
  * cannot both register the same new module.
  *
- * Activation is NOT decided at load. Every installed app's entrypoint is
- * loaded; dispatch checks `isAppActive` per request (installed below), because
- * that switch can flip at any time and a process outlives many flips.
+ * Only an app the app gate lets through is loaded (src/lib/apps/app-gate.ts):
+ * importing `hooks.ts` runs its top-level code, and then its entrypoint, so an
+ * inactive app's `hooks.ts` never runs. The gate is asked for each app on every
+ * call, because the admin's switch can flip at any time and a process outlives
+ * many flips: an app activated since the last call loads on this one, with no
+ * restart.
+ *
+ * An app switched off after it loaded keeps its registrations, and they do not
+ * run: dispatch asks the gate per request for each app with a listener on the
+ * hook (installed below), and the brand filters check activation themselves
+ * (src/lib/branding/resolve.ts). Activating it again lets them run. They are
+ * not dropped here, because the gate reads a failed lookup as "off" too, and
+ * dropping them on that would turn a database blip into the default brand on
+ * every page, where `resolve.ts` would have served the last good one.
  */
 
 type Entrypoint = (hooks: HookRegistrar) => void;
@@ -43,15 +54,17 @@ const registered = new Map<string, Entrypoint>();
 
 /**
  * How `hooks.doAction` and `hooks.applyFilters` decide whether an app's
- * listener runs: the admin's switch, asked per dispatch and request-cached.
+ * listener runs: the app gate, asked per dispatch and request-cached.
  * Installed here because an app's listeners come only from the two registrars
  * this module hands out, so it is in place before any of them can exist.
  */
-hooks.setActivation(isAppActive);
+hooks.setActivation(async (slug) => (await checkAppGate(slug)).open);
 
 export async function ensureHooksLoaded(): Promise<void> {
   await Promise.all(
     Object.entries(hookLoaders).map(async ([slug, load]) => {
+      if (!(await checkAppGate(slug)).open) return;
+
       let entry: unknown;
       try {
         entry = (await load()).default;
