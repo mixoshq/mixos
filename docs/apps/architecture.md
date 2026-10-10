@@ -181,7 +181,75 @@ The manifest stays plain, and says nothing about config for that widget:
 - Keys are `component` paths, not widget names. A path is already unique within an app; a name is prose and free to collide.
 - A key that matches no widget in `app.json` is an error, and so is a widget declaring `config` in both files. Two files describing one widget can drift, so neither direction is reconciled silently.
 - Field arrays must be plain data — the generator serializes them into the registry with `JSON.stringify`. Functions, class instances and React nodes won't survive. Preset helpers return plain data, so they're safe.
-- Imports resolve through the project's tsconfig paths (`@/*`, `@apps/*`, `@connectors/*`). Any import that works in runtime TS works here.
+- `widgets.ts` is app code like the rest: it imports from the same list. See [What an app can import](#what-an-app-can-import).
 - Plain config needs no `widgets.ts` at all — declare `config` inline in `app.json` and skip the file.
 
 See [`src/lib/apps/widget-config-presets.ts`](../../src/lib/apps/widget-config-presets.ts) for the list of built-in presets and [Widgets → Config Presets](./widgets.md#config-presets) for when to use which.
+
+## What an app can import
+
+An app gets what its manifest declares, through `context`. An import is another
+way in, so app code imports three things and nothing else:
+
+- **Its own files**, inside `apps/<slug>/`, by relative path or as
+  `@apps/<slug>/…`. JSON, CSS and images in the app import too.
+- **The platform modules below**, by their `@/` name. From some of them, only
+  the names listed.
+- **The packages below.**
+
+**Types come from anywhere.** A type is erased before anything runs, so
+`import type { ScopedClient } from "@/lib/apps/scoped-db"`, a connector's class
+type or another app's `services/types` is fine.
+
+<!-- BEGIN app-imports: generated from src/lib/apps/import-policy.mjs by scripts/generate-import-docs.ts. Do not edit by hand. -->
+| Module | Names | For |
+| --- | --- | --- |
+| `@/lib/apps/route` | `defineRoute`, `AppError`, `isAppError` | The route contract and its errors |
+| `@/lib/apps/errors` | `AppError`, `isAppError` | The same errors, for server code outside a route |
+| `@/lib/apps/call` | `callAppRoute` | A server page calling its own routes in-process. The first argument is the app's own slug, written as a string: `callAppRoute("my-app", …)` |
+| `@/lib/apps/sdk` | all | The browser SDK: `createAppClient`, `AppClientError`, `track` and the push opt-in helpers |
+| `@/lib/apps/use-app-query` | all | The client data hook, `useAppQuery` |
+| `@/lib/apps/swr-cache` | `createSwrCache` | A cache over the app's own `context.db` |
+| `@/lib/apps/sync` | `defineSync` | Declared syncs |
+| `@/lib/apps/widget-config-presets` | all | Widget config field builders |
+| `@/lib/connectors/errors` | `ConnectorError`, `isConnectorError` | Recognising a connector failure |
+| `@/lib/use-client-value` | all | `useClientValue` |
+| `@/lib/utils` | `cn` | Class merging |
+| `@/components/ui/*` | all | The UI primitives, one module per file in `src/components/ui/` |
+
+**Packages:** `react`, `zod` and `lucide-react`, at any path inside them, and `next/link`, `next/navigation`, `next/font/google` and `next/font/local`, at exactly that path.
+
+**Node built-ins:** none.
+<!-- END app-imports -->
+
+**The build enforces it.** The registry generator reads every app's source
+before it loads any of it, on every build and every Registry install, and skips
+an app that imports anything else. On the install path that rejects the app and
+rolls it back. ESLint shows the same findings in an editor, from the same code
+([`src/lib/apps/import-policy.mjs`](../../src/lib/apps/import-policy.mjs)). Each
+finding names the file, the line, the import and what to use instead.
+
+**An import is judged by where it lands, not how it is spelled.** Relative
+paths, the `@/` aliases and symlinks are followed first, so
+`@/lib/db/../db/client` is refused like `@/lib/db`. A relative path out of the
+app is refused even when it leads to a module on the list: platform modules are
+imported by their `@/` name.
+
+Also refused:
+
+| Refused | Why |
+| --- | --- |
+| `require`, `module`, `import x = require(…)`, `import.meta`, and a bundler's own `__loader__` globals | They load code around these rules. App code is ES modules |
+| `import(…)` of anything but the app's own file, named by a string literal | A name built at runtime can point anywhere |
+| A URL: `data:`, `file:`, `https:` | It loads code the build never read |
+| Code in a dot-directory, in `assets/`, `plans/`, `migrations/` or `screenshots/`, or a `.d.ts` | The build does not read those, so nothing may load code from them |
+| A symbolic link, `node_modules/` or `package.json` anywhere in the app | Each changes what an import loads without the build seeing it |
+| A page or widget importing its app's `lib/server/` | That reaches connectors and the database around the gateway. A server page calls `callAppRoute`; a widget calls `createAppClient` |
+| `callAppRoute` with anything but the app's own slug as a string literal, or used any way but a direct call | It runs routes as the current user, and another app's routes are that app's. Another app's data comes through [App Services](./app-services.md) |
+| A write to anything imported from outside the app: `X.y = …`, `delete X.y`, `Object.defineProperty(X, …)`, `Object.assign(X, …)`, `Reflect.set(X, …)` | The platform and every other app share those modules |
+| The global object handed on: `const g = globalThis`, `Reflect.get(window, …)`, `const { x } = window` | A name read off it later can't be seen. Read the name where you use it: `window.location`. `typeof window` and `"x" in window` are fine |
+
+**There is no escape hatch.** No manifest field opens an import. When apps need
+something that isn't on the list, it is added for every app, by a reviewed
+change to `src/lib/apps/import-policy.mjs`, or it becomes a `context`
+capability behind a manifest declaration.
