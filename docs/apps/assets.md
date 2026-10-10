@@ -29,10 +29,8 @@ import Icon from "../assets/icon.svg";
 export default function MyAppPage() {
   return (
     <div>
-      {/* Next.js Image component (optimized) */}
-      <Image src={logo} alt="Logo" width={120} height={40} />
-
-      {/* Standard img tag also works */}
+      {/* An imported image is an object; its URL is .src */}
+      <img src={logo.src} alt="Logo" width={120} height={40} />
       <img src={heroImg.src} alt="Hero" />
 
       {/* SVGs can be imported as React components */}

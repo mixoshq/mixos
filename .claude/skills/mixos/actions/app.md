@@ -46,6 +46,8 @@ Do not infer conventions from surrounding code alone, and do not guess based on 
 
 - Folder name === slug. No separate `slug` field in `app.json`. No leading underscore on shipped apps.
 - Widgets and client pages must NEVER import connectors, `context`, or server modules. They call the app's own API routes via `createAppClient(appSlug)`.
+- App code imports its own files, the platform modules on the published list, and `react`, `zod`, `lucide-react`, `next/link`, `next/navigation` and `next/font/*`. Nothing else, no Node built-ins, and no `require` or computed `import()`: the build skips an app that tries (see [What an app can import](docs/apps/architecture.md#what-an-app-can-import)). What a platform module would have done comes from `context`, behind a manifest declaration. Types may come from anywhere.
+- A server page calls `callAppRoute("<this app's slug>", …)` with its own slug written as a string, and nothing imported from outside the app is written to. Both are build errors otherwise.
 - Never hand-edit `src/generated/app-registry.ts`.
 - Do not set `slug`, `hasPages`, or `hookCounts` in `app.json` — the registry fills these in. `lastUpdated` is stamped automatically by the pre-commit hook, not written by hand.
 - `icon` must be a lowercase hyphenated Lucide name (e.g. `bar-chart`).
@@ -95,7 +97,7 @@ Triage by outcome class, then act. Re-run the smoke test after every fix or user
 
 - **`GUARD_MISMATCH`** — code bug. Add the missing `if (!connector?.configured)` early-return in the route per [`apps/AGENTS.md` invariant 12](apps/AGENTS.md). Fix and re-run.
 - **`OK_EMPTY`** — route returned `{}`, `[]`, or `null`. May be valid (no rows yet) or a shape bug. Read the widget file: if the widget expects `{ deals: [...], totalArr: number }` and the route returns `{}`, you have a shape mismatch — fix in code. If the upstream really has no data, ask the user whether that's expected.
-- **Code-side errors** (wrong property name, wrong status code, missing `safeErrorMessage`, typo in SQL or a monday.com column name): fix in the route and re-run.
+- **Code-side errors** (wrong property name, wrong status code, typo in SQL or a monday.com column name): fix in the route and re-run.
 - **`AUTH_ERROR`** (401/403, or 5xx with auth-y error text) — do **not** edit code. Ask the user, e.g. *"The `<connector>` route is returning 401/403. Can you confirm the credentials in `/admin/connectors` are valid and include the scope(s) `<...>`? The error body was: `<excerpt>`."*
 - **`UNAUTHENTICATED`** — your `SMOKE_COOKIE` is missing/expired, or the gateway redirected to `/login`. Re-grab the cookie from DevTools per the script's setup instructions and re-run.
 - **`RATE_LIMITED`** — wait, then re-run once. If it persists, ask the user whether to lower the request budget or back off the polling interval before re-running.
