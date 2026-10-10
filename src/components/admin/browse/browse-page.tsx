@@ -7,6 +7,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
+import { isBuiltDeployment } from "@/lib/platform/build";
 import { repositoryBaseUrl } from "@/lib/repository/client";
 import { checkInstallable } from "@/lib/repository/install";
 import { installEnabled } from "@/lib/repository/policy";
@@ -104,6 +105,7 @@ export default async function BrowsePage({
       <ExtensionBrowser
         kind={kind}
         repositoryOrigin={origin}
+        repositoryOverridable={!isBuiltDeployment()}
         installedSlugs={installedSlugs}
         installable={ok ? null : (reason ?? null)}
       />
