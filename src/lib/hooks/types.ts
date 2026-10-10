@@ -131,6 +131,15 @@ export interface McpToolContext {
   caller: McpCaller;
 }
 
+/**
+ * The context an app's server code gets for a caller with an identity: the
+ * `session` and `signed-in` tiers. A route handler's context carries two more
+ * members, which the route pipeline adds per request whichever tier won
+ * (`RouteRuntime` in src/lib/apps/route.ts): `signal`, aborted when the caller
+ * goes away or the budget runs out, and `connectorErrorResponse(err)`, a failed
+ * connector call as the Response the pipeline would send, for a `raw: true`
+ * route. Its admin-only fields are included only when `user.isAdmin` is true.
+ */
 export interface AppContext {
   user: AppContextUser;
   connectors: Record<string, BaseConnector>;
@@ -172,6 +181,10 @@ export interface AppContext {
  * intended to be reachable publicly must declare
  * their handler with `{ context: PublicAppContext }` and not assume a
  * user identity; reading `context.user` is a type error.
+ *
+ * A route handler here also gets `signal` and `connectorErrorResponse(err)`
+ * from the pipeline (see `AppContext`). With no user, a connector error's
+ * admin-only fields are never included.
  */
 export interface PublicAppContext {
   user: null;

@@ -67,10 +67,24 @@ The route pipeline answers with a stable envelope and the right HTTP status:
 
 The admin fields are written server-side only when the caller is an admin: the
 pipeline reads `context.user.isAdmin`, which is what keeps internal detail away
-from ordinary users. A `raw: true` route that builds its own Response uses
-`connectorErrorResponse(err, { isAdmin: context.user?.isAdmin })` from
-`@/lib/connectors/response` for the same envelope, and must pass `isAdmin`
-honestly.
+from ordinary users. A `raw: true` route that builds its own Response returns
+`ctx.connectorErrorResponse(err)` for the same envelope:
+
+```ts
+export const GET = defineRoute({
+  raw: true,
+  handler: async (ctx) => {
+    try {
+      return Response.json(await ctx.connectors.acme.listThings({ signal: ctx.signal }));
+    } catch (err) {
+      return ctx.connectorErrorResponse(err);
+    }
+  },
+});
+```
+
+The route pipeline decides the admin fields from the caller, not the app: a
+signed-in admin gets them, and a password, key or public caller never does.
 
 `unconfigured` and `auth_failed` map to **503**, not 500: a missing credential
 is a genuinely unavailable dependency. `invalid_request` maps to **502**, not
@@ -87,7 +101,7 @@ about what the message holds, so none of it is forwarded.
 `connectorErrorOf` from `@/lib/apps/sdk` returns the envelope from the error:
 
 ```tsx
-import ConnectorErrorState from "@/components/connectors/connector-error-state";
+import ConnectorErrorState from "@/components/ui/connector-error-state";
 import { connectorErrorOf } from "@/lib/apps/sdk";
 
 const envelope = connectorErrorOf(err);
