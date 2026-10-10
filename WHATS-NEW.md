@@ -57,6 +57,11 @@ just pulled.
   (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), and log it.
   **Breaking:** a deployment pointed at another catalogue now browses
   mixos.org; a source checkout still honours the override.
+- **The Docker image is read-only to the server.** Its files are owned by root,
+  so the server can't change its own code on any host, and
+  `deploy/docker-compose.yml` runs `app` and `migrate` on a read-only root
+  filesystem, with Next's caches and `/tmp` on `tmpfs`. Something you add that
+  writes at runtime needs a mount; see `docs/hosting/docker-compose.md`.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 
