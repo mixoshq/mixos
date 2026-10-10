@@ -1097,27 +1097,22 @@ function validateThemeAssets(
 }
 
 /**
- * A declared font must exist AND be referenced by an @font-face in theme.css.
- * A manifest font nobody @font-faces is a file shipped to every user for
- * nothing; an @font-face with no manifest entry hides a dependency from review.
+ * A declared font must exist. Whether theme.css loads it — and whether every
+ * font theme.css loads is declared — is checked by compileTheme, which has the
+ * parsed @font-face rules: a manifest font nobody @font-faces is a file shipped
+ * to every user for nothing; an @font-face with no manifest entry hides a
+ * dependency from review.
  */
 function validateThemeFonts(
   fonts: ThemeFontFace[],
   slug: string,
   dir: string,
-  css: string,
 ): ThemeFontFace[] {
   for (const font of fonts) {
     if (!fs.existsSync(path.join(dir, "assets", font.file))) {
       throw new ThemeError(
         `themes/${slug}/theme.json: fonts[] names "${font.file}", which does not exist. ` +
           `Expected it at themes/${slug}/assets/${font.file}.`,
-      );
-    }
-    if (!css.includes(font.file)) {
-      throw new ThemeError(
-        `themes/${slug}/theme.json: fonts[] declares "${font.file}", but no @font-face in ` +
-          `theme.css loads it. A font file shipped to every user and never used is pure weight.`,
       );
     }
   }
@@ -1179,10 +1174,10 @@ async function scanThemes(): Promise<{
       dir,
       escapes: r.escapes ?? [],
       declaredSurfaces: r.surfaces ?? [],
+      declaredFonts: (r.fonts ?? []).map((f) => f.file),
     });
 
-    const rawCss = fs.readFileSync(path.join(dir, "theme.css"), "utf-8");
-    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir, rawCss);
+    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir);
     const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
     const screenshots = validateScreenshots(r.screenshots, "themes", slug, dir);
     const logo = assets.logo
@@ -2018,8 +2013,9 @@ export function getTheme(slug: string): ThemeManifest {
   fs.writeFileSync(THEME_REGISTRY_FILE, themeOutput, "utf-8");
 
   // Read by eslint-rules/no-low-contrast-token-pairs.mjs, which cannot import
-  // TypeScript and must not re-parse CSS. It lints against the fallback theme:
-  // which theme is *active* is a runtime database value the build cannot know.
+  // TypeScript and must not re-parse CSS. It lints against every installed
+  // theme: which one is *active* is a runtime database value the build cannot
+  // know, so an element has to clear the floor under each of them.
   fs.writeFileSync(
     THEME_TOKENS_FILE,
     JSON.stringify({ fallback: fallbackTheme, tokens: themeTokens }, null, 2),

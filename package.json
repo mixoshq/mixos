@@ -15,6 +15,7 @@
     "pretypecheck": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
     "build": "next build",
     "start": "next start",
+    "prelint": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
