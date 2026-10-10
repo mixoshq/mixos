@@ -40,6 +40,10 @@ just pulled.
   both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
   new app, and the old slug keeps the old data. Migration 0010; run
   `npm run db:local` to apply it.
+- **Registry installs take turns safely.** While another install is running,
+  the dialog says so and offers **Try again**. If an install is paused for more
+  than 15 minutes (a laptop asleep mid-download) and another starts meanwhile,
+  the paused one stops before its next write and says what it left on disk.
 - **A deactivated app runs nothing.** None of its modules is imported while it
   is off: its API routes, over HTTP or through `callAppRoute()`, its jobs,
   syncs, services and `hooks.ts`. Run now refuses its jobs, which Scheduled
