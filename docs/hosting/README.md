@@ -14,7 +14,10 @@ A MixOS deployment is three things:
 
 Each deploy also runs **the release step** before new code takes traffic. It
 applies the database migrations and creates the first admin. Inside the image
-that is `node ops/release.cjs`; from a checkout, `npm run release`.
+that is `node ops/release.cjs`; from a checkout,
+`DATABASE_URL='<connection string>' npm run release`. It reads its settings
+only from the environment it runs in, never from a checkout's `.env` files, so
+it stops if nothing there names a database.
 
 ## Pick a path
 
@@ -99,15 +102,22 @@ has the detail.
    dependency on Supabase.
 2. **The app registry and app migrations**, as `npm run migrate:apps` does
    locally. Apps no longer in the build are removed, together with their
-   grants, installs and widgets.
+   grants, installs and widgets. Each app with a database gets a schema and a
+   database role of its own, created here if they are missing, and its
+   migrations run as that role, after every pending statement has been checked
+   against what an app migration may do. One refused statement stops the step
+   before any app SQL runs; see
+   [docs/apps/database.md](../apps/database.md#what-a-migration-may-contain).
 3. **The first admin**, from `INITIAL_ADMIN_*`, only if that account does not
    exist yet.
 
 It is safe to run on every deploy, and safe to run twice at once: each
-migration takes a transaction-scoped lock and re-checks the ledger first. A
-deploy that skips it does not serve errors. The readiness probe,
-`/api/health/ready`, returns 503 until the database is on the schema the build
-expects, so point the platform's health check there.
+migration takes a transaction-scoped lock and re-checks the ledger first. The
+readiness probe, `/api/health/ready`, returns 503 until the database has the
+platform schema the build expects and every app migration the build carries,
+so point the platform's health check there. On a host that waits for it, a
+deploy that skips the release step, or whose release step failed, does not
+serve errors.
 
 ### The database role
 
@@ -116,6 +126,18 @@ that owns a table can use it. **Run the release step as the same role the app
 connects as**, which it does whenever both use the same `DATABASE_URL`. A
 setup where an admin role migrates and a restricted role serves will find
 every table empty to the app.
+
+That role also needs to be able to create roles (`CREATEROLE`). Each app with a
+database gets one, `mixos_app_<slug>`, which cannot log in and owns only that
+app's schema; the release step creates it and makes itself a member, which is
+how the app reaches its tables. The default role on Supabase, Neon, RDS,
+Render and Railway has it, and so does the superuser in a container.
+
+**One MixOS database per Postgres server.** Roles belong to the whole server,
+not to one database, so two MixOS databases on the same server would share each
+app's role. The release step refuses an app role that another database on the
+server already uses. Give each MixOS install a Postgres server of its own, not
+just a database of its own.
 
 On Supabase that lock is doing real work. Every Supabase project serves its
 own public API over the `public` schema, whether or not MixOS uses it, and RLS

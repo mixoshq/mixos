@@ -33,17 +33,20 @@
  * rule can never disagree with the theme: re-tone a token and the rule
  * re-derives on the next generate.
  *
- * It lints against the FALLBACK theme's light mode. Which theme is *active* is
- * a database value that the build cannot know, and the dark mode of each theme
- * is verified wholesale by scripts/theme-css.ts instead — this rule exists for
- * the one thing that pass cannot see, which is which two tokens a given element
- * puts together.
+ * It lints against EVERY installed theme. Which theme is *active* is a database
+ * value the build cannot know, so an element has to clear the floor under each
+ * palette it could be rendered in. It used to read only the fallback theme, so
+ * a combination that failed under `mixos-dark`, or under a theme you authored,
+ * was never reported. scripts/theme-css.ts verifies each palette wholesale;
+ * this rule exists for the one thing that pass cannot see, which is which two
+ * tokens a given element puts together.
  *
  * Two checks:
  *
  *   1. PAIR — an element that sets both a `bg-*` and a `text-*` token. The
- *      background is composited over white when it carries alpha; the ratio must
- *      clear 4.5:1, or 3:1 for text that WCAG counts as large.
+ *      background is composited over each theme's own page background when it
+ *      carries alpha; the ratio must clear 4.5:1, or 3:1 for text that WCAG
+ *      counts as large.
  *   2. DIM — a text token dimmed by `/N` or a bare `opacity-N`. There is no
  *      ground on which this passes: `muted-foreground` **is** the dimmed step of
  *      the ladder, and dimming it again lands at 2.71:1.
@@ -81,15 +84,6 @@ const THEME_TOKENS = resolve(
 
 // ── colour maths ────────────────────────────────────────────────────────────
 
-function hslToRgb(h, s, l) {
-  s /= 100;
-  l /= 100;
-  const k = (n) => (n + h / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  return [f(0), f(8), f(4)].map((v) => Math.round(v * 255));
-}
-
 function hexToRgb(hex) {
   const h = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
   return [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
@@ -113,40 +107,38 @@ function composite(fg, bg, alpha) {
   return fg.map((c, i) => Math.round(c * alpha + bg[i] * (1 - alpha)));
 }
 
-// ── token table, from the generated theme registry ─────────────────────────
+// ── token tables, from the generated theme registry ─────────────────────────
 
 /**
- * Reads the fallback theme's resolved light-mode tokens. `var()` chains have
- * already been followed by the theme compiler, so every value here is a literal.
+ * Every installed theme's colours, slug → Map(token → rgb), from the `tokens`
+ * object of theme-tokens.json. The theme compiler has already followed `var()`
+ * chains and writes every colour as `#rrggbb`, whatever the theme wrote, so a
+ * hex is all this reads; anything else (a radius, a font stack) is not a colour.
+ *
+ * @param {Record<string, Record<string, unknown>> | undefined} tokensBySlug
+ * @returns {Map<string, Map<string, number[]>> | null}
  */
-function readTokens() {
-  const raw = JSON.parse(readFileSync(THEME_TOKENS, "utf8"));
-  const values = raw.tokens?.[raw.fallback];
-  if (!values) return null;
-
-  const tokens = new Map();
-  for (const [name, value] of Object.entries(values)) {
-    if (typeof value !== "string") continue;
-    const hex = value.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
-    if (hex) {
-      tokens.set(name, hexToRgb(value));
-      continue;
+export function palettesFrom(tokensBySlug) {
+  const palettes = new Map();
+  for (const [slug, values] of Object.entries(tokensBySlug ?? {})) {
+    const tokens = new Map();
+    for (const [name, value] of Object.entries(values ?? {})) {
+      if (typeof value === "string" && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)) {
+        tokens.set(name, hexToRgb(value));
+      }
     }
-    const hsl = value.match(/^hsl\(\s*([\d.]+)\s+([\d.]+)%\s+([\d.]+)%\s*\)$/);
-    if (hsl) {
-      tokens.set(name, hslToRgb(Number(hsl[1]), Number(hsl[2]), Number(hsl[3])));
-    }
+    if (tokens.size > 0) palettes.set(slug, tokens);
   }
-  return tokens.size > 0 ? tokens : null;
+  return palettes.size > 0 ? palettes : null;
 }
 
-let TOKENS = null;
+let PALETTES = null;
 try {
-  TOKENS = readTokens();
+  PALETTES = palettesFrom(JSON.parse(readFileSync(THEME_TOKENS, "utf8")).tokens);
 } catch {
-  TOKENS = null;
+  PALETTES = null;
 }
-if (TOKENS == null) {
+if (PALETTES == null) {
   // A no-op beats a crash: a broken parse must not take editor linting with it.
   // Loud enough to notice in CI output, quiet enough not to fail the run.
   console.warn(
@@ -154,15 +146,14 @@ if (TOKENS == null) {
   );
 }
 
-/** The ground an alpha fill is assumed to sit on. Both are #ffffff today. */
-const GROUND = TOKENS?.get("background") ?? [255, 255, 255];
+const WHITE = [255, 255, 255];
 
 /**
  * A few tokens are defined against a ground that is NOT the page background.
  * `--brand-foreground` and `--brand-accent` exist to sit on `--brand` — the
  * menu bar, the login page, a branded panel — which the theme contract requires
  * to be a surface dark enough to carry them (scripts/theme-css.ts verifies
- * `brand-foreground/brand` at 4.5:1 in every mode).
+ * `brand-foreground/brand` at 4.5:1 in every theme).
  *
  * Without this, `text-brand-foreground/70` on the menu bar measures against
  * white and reports 1.03:1 — a false positive on markup that is correct, and
@@ -174,18 +165,18 @@ const GROUND_TOKEN_FOR = {
 };
 
 /**
- * The ground a token is defined against: the page background for almost
- * everything, `--brand` for the two that exist to sit on the brand surface.
+ * The ground a token is defined against in one palette: that theme's page
+ * background for almost everything, its `--brand` for the two that exist to
+ * sit on the brand surface. An alpha fill is composited over it.
  *
  * This applies to a *fill* as much as to text. `bg-brand-foreground/10` is the
  * menu bar's own hover tint — a 10% wash of the bar's text colour over the bar
  * — so compositing it over the page background reports a near-white fill that
  * nothing on the bar could sit on.
  */
-function groundFor(token) {
+function groundFor(token, palette) {
   const via = GROUND_TOKEN_FOR[token];
-  const rgb = via && TOKENS?.get(via);
-  return rgb ?? GROUND;
+  return (via && palette.get(via)) ?? palette.get("background") ?? WHITE;
 }
 
 // ── class parsing ───────────────────────────────────────────────────────────
@@ -230,9 +221,10 @@ function written(p) {
 
 /**
  * Groups a class list into the states it produces: the resting state, plus one
- * per variant, each inheriting from resting.
+ * per variant, each inheriting from resting. `known` is every colour token any
+ * installed theme sets.
  */
-function statesFor(classString) {
+function statesFor(classString, known) {
   const parsed = classString
     .split(/\s+/)
     .filter(Boolean)
@@ -254,12 +246,12 @@ function statesFor(classString) {
       target.bold = true;
     } else if (p.base.startsWith("text-")) {
       const token = p.base.slice(5);
-      if (TOKENS?.has(token)) target.text = { token, alpha: p.alpha, cls: written(p) };
+      if (known.has(token)) target.text = { token, alpha: p.alpha, cls: written(p) };
     } else if (p.base.startsWith("bg-")) {
       const token = p.base.slice(3);
       // An unknown fill (bg-cat-1, bg-[#fff], a Tailwind palette class the other
       // rule already flags) means an unknown ground — better silent than wrong.
-      target.bg = TOKENS?.has(token) ? { token, alpha: p.alpha, cls: written(p) } : "unknown";
+      target.bg = known.has(token) ? { token, alpha: p.alpha, cls: written(p) } : "unknown";
     } else if (/^opacity-\d+$/.test(p.base)) {
       target.opacity = Number(p.base.slice(8)) / 100;
     }
@@ -287,34 +279,74 @@ function isLarge(state) {
  * `bg-accent text-accent-foreground`, whose fills happen to be the same colour.)
  *
  * So the candidates are measured: the fill's own foreground, then plain
- * `text-foreground`, and only a candidate that actually clears the floor is
- * suggested.
+ * `text-foreground`, and only a candidate that clears the floor under every
+ * theme that sets the fill is suggested.
  */
-function swapSuggestion(state) {
-  const fill = composite(
-    TOKENS.get(state.bg.token),
-    groundFor(state.bg.token),
-    state.bg.alpha,
-  );
+function swapSuggestion(state, palettes) {
   const floor = isLarge(state) ? 3 : 4.5;
   for (const token of [`${state.bg.token}-foreground`, "foreground"]) {
     if (token === state.text.token) continue;
-    const rgb = TOKENS.get(token);
-    if (rgb == null) continue;
-    const r = contrast(rgb, fill);
-    if (r >= floor) {
-      return `keep the fill and raise the text to \`text-${token}\` (${r.toFixed(2)}:1)`;
+    let worst = Infinity;
+    for (const palette of palettes.values()) {
+      const bg = palette.get(state.bg.token);
+      if (bg == null) continue; // this theme does not set the fill
+      const rgb = palette.get(token);
+      if (rgb == null) {
+        worst = 0;
+        break;
+      }
+      const fill = composite(bg, groundFor(state.bg.token, palette), state.bg.alpha);
+      worst = Math.min(worst, contrast(rgb, fill));
+    }
+    if (worst !== Infinity && worst >= floor) {
+      const at = palettes.size > 1
+        ? `at least ${worst.toFixed(2)}:1 under every installed theme`
+        : `${worst.toFixed(2)}:1`;
+      return `keep the fill and raise the text to \`text-${token}\` (${at})`;
     }
   }
   return "keep the fill and raise the text to a token that clears the floor on it";
 }
 
 /**
- * Failures in one class list, as `{ key, message }`. `key` identifies the
- * finding so the same one isn't reported twice for one element.
+ * What one state's text comes out to under one theme's palette, or null when
+ * that palette does not set a token the state uses — an optional token, such
+ * as `--brand-cyan`, that only some themes declare. `thinned` is the combined
+ * alpha of a dimmed text token, or null for a plain pair.
  */
-function failuresIn(classString) {
-  if (TOKENS == null) return [];
+function ratioUnder(palette, state, thinned) {
+  const text = palette.get(state.text.token);
+  if (text == null) return null;
+  // The element's own fill when it has one; otherwise the ground the alpha
+  // maths assumes. An element with no fill of its own isn't pair-checked at
+  // all (see the header), but a *dimmed* token fails on any light ground.
+  let ownFill = null;
+  if (state.bg != null && state.bg !== "unknown") {
+    const bg = palette.get(state.bg.token);
+    if (bg == null) return null;
+    ownFill = composite(bg, groundFor(state.bg.token, palette), state.bg.alpha);
+  }
+  if (thinned != null) {
+    const ground = ownFill ?? groundFor(state.text.token, palette);
+    return contrast(composite(text, ground, thinned), ground);
+  }
+  return ownFill == null ? null : contrast(text, ownFill);
+}
+
+/** "4.13:1 under mixos and 3.90:1 under mixos-dark" */
+function measuredUnder(failing) {
+  const parts = failing.map(({ slug, ratio }) => `${ratio.toFixed(2)}:1 under ${slug}`);
+  return parts.length > 1
+    ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`
+    : parts[0];
+}
+
+/**
+ * Failures in one class list, as `{ key, message }`. `key` identifies the
+ * finding so the same one isn't reported twice for one element, and a finding
+ * names every theme it fails under.
+ */
+function failuresIn(classString, palettes, known) {
   const out = [];
   const seen = new Set();
   const add = (key, message) => {
@@ -323,52 +355,40 @@ function failuresIn(classString) {
     out.push({ key, message });
   };
 
-  for (const state of statesFor(classString)) {
+  for (const state of statesFor(classString, known)) {
     const where = state.name === "" ? "" : ` in the \`${state.name}:\` state`;
 
     if (state.text == null) continue;
     const floor = isLarge(state) ? 3 : 4.5;
-    // The element's own fill when it has one; otherwise the ground the alpha
-    // maths assumes. An element with no fill of its own isn't pair-checked at
-    // all (see the header), but a *dimmed* token fails on any light ground.
-    const ownFill = state.bg != null && state.bg !== "unknown"
-      ? composite(
-          TOKENS.get(state.bg.token),
-          groundFor(state.bg.token),
-          state.bg.alpha,
-        )
-      : null;
-    const pageGround = groundFor(state.text.token);
 
-    // ── DIM: a text token thinned by /N or a bare opacity-N ──
+    // DIM is a text token thinned by /N or a bare opacity-N; otherwise this is
+    // a PAIR, two opaque tokens on one element, and needs a fill of its own.
     const dim = state.text.alpha < 1 ? state.text.alpha : null;
     const faded = state.opacity != null && state.opacity < 1 ? state.opacity : null;
     const thinned = dim != null && faded != null ? dim * faded : (dim ?? faded);
+    if (thinned == null && (state.bg == null || state.bg === "unknown")) continue;
+
+    const failing = [];
+    for (const [slug, palette] of palettes) {
+      const ratio = ratioUnder(palette, state, thinned);
+      if (ratio != null && ratio < floor) failing.push({ slug, ratio });
+    }
+    if (failing.length === 0) continue;
+
     if (thinned != null) {
-      const ground = ownFill ?? pageGround;
-      const ratio = contrast(
-        composite(TOKENS.get(state.text.token), ground, thinned),
-        ground,
+      const how = faded != null
+        ? `\`opacity-${Math.round(faded * 100)}\` on \`${state.text.cls}\``
+        : `\`${state.text.cls}\``;
+      add(
+        `dim:${state.text.cls}:${thinned}`,
+        `${how}${where} thins a colour token to ${measuredUnder(failing)} against its ground — under the ${floor}:1 floor. The token ladder already has a quiet step: use text-muted-foreground for secondary text, and don't dim *that* (text-muted-foreground/70 is 2.71:1). See docs/apps/ux.md#never-dim-a-token.`,
       );
-      if (ratio < floor) {
-        const how = faded != null
-          ? `\`opacity-${Math.round(faded * 100)}\` on \`${state.text.cls}\``
-          : `\`${state.text.cls}\``;
-        add(
-          `dim:${state.text.cls}:${thinned}`,
-          `${how}${where} thins a colour token to ${ratio.toFixed(2)}:1 against its ground — under the ${floor}:1 floor. The token ladder already has a quiet step: use text-muted-foreground for secondary text, and don't dim *that* (text-muted-foreground/70 is 2.71:1). See docs/apps/ux.md#never-dim-a-token.`,
-        );
-      }
       continue; // a thinned token isn't also a clean pair
     }
 
-    // ── PAIR: two opaque tokens on one element ──
-    if (ownFill == null) continue;
-    const ratio = contrast(TOKENS.get(state.text.token), ownFill);
-    if (ratio >= floor) continue;
     add(
       `pair:${state.text.cls}:${state.bg.cls}`,
-      `\`${state.text.cls}\` on \`${state.bg.cls}\`${where} is ${ratio.toFixed(2)}:1 — under the ${floor}:1 floor. globals.css verifies each token against the page background and against its own foreground, never against another token, so this pair is legal by name and illegal by measurement. Fixes: drop the fill and keep the text colour on the page background; ${swapSuggestion(state)}; or carry the meaning with a label or \`StatusDot\` instead of a tint. See docs/apps/ux.md#verified-pairs-two-legal-tokens-can-make-an-illegal-element.`,
+      `\`${state.text.cls}\` on \`${state.bg.cls}\`${where} is ${measuredUnder(failing)} — under the ${floor}:1 floor. The theme build verifies each token against the page background and against its own foreground, never against another token, so this pair is legal by name and illegal by measurement. Fixes: drop the fill and keep the text colour on the page background; ${swapSuggestion(state, palettes)}; or carry the meaning with a label or \`StatusDot\` instead of a tint. See docs/apps/ux.md#verified-pairs-two-legal-tokens-can-make-an-illegal-element.`,
     );
   }
   return out;
@@ -421,48 +441,62 @@ function variantsOf(node, depth = 0) {
   }
 }
 
-const rule = {
-  meta: {
-    type: "problem",
-    docs: {
-      description:
-        "Disallow same-element semantic colour token pairs that fall below the WCAG AA contrast floor.",
-      url: "https://github.com/MixOSWork/mixos/blob/main/docs/apps/ux.md#verified-pairs-two-legal-tokens-can-make-an-illegal-element",
+/**
+ * The rule, measuring against `palettes` (from `palettesFrom`, or null for
+ * none). The default export measures every installed theme; this is exported
+ * so a test can hand it fixture palettes instead.
+ *
+ * @param {Map<string, Map<string, number[]>> | null} palettes
+ * @returns {import("eslint").Rule.RuleModule}
+ */
+export function createRule(palettes) {
+  const known = new Set(
+    palettes == null ? [] : [...palettes.values()].flatMap((p) => [...p.keys()]),
+  );
+
+  return {
+    meta: {
+      type: "problem",
+      docs: {
+        description:
+          "Disallow same-element semantic colour token pairs that fall below the WCAG AA contrast floor.",
+        url: "https://github.com/MixOSWork/mixos/blob/main/docs/apps/ux.md#verified-pairs-two-legal-tokens-can-make-an-illegal-element",
+      },
+      schema: [],
+      messages: { lowContrast: "{{detail}}" },
     },
-    schema: [],
-    messages: { lowContrast: "{{detail}}" },
-  },
-  create(context) {
-    if (TOKENS == null) return {};
-    /** Ranges of className attributes already handled, so literals inside them don't double-report. */
-    const handled = [];
+    create(context) {
+      if (palettes == null) return {};
+      /** Ranges of className attributes already handled, so literals inside them don't double-report. */
+      const handled = [];
 
-    const report = (node, failures) => {
-      for (const f of failures) {
-        context.report({ node, messageId: "lowContrast", data: { detail: f.message } });
-      }
-    };
-
-    return {
-      JSXAttribute(node) {
-        if (node.name?.name !== "className" || node.value == null) return;
-        handled.push(node.value.range);
-        const strings = variantsOf(node.value);
-        const failures = new Map();
-        for (const s of strings) {
-          if (!LOOKS_LIKE_CLASSES.test(s)) continue;
-          for (const f of failuresIn(s)) failures.set(f.key, f);
+      const report = (node, failures) => {
+        for (const f of failures) {
+          context.report({ node, messageId: "lowContrast", data: { detail: f.message } });
         }
-        report(node, [...failures.values()]);
-      },
-      Literal(node) {
-        if (typeof node.value !== "string") return;
-        if (!LOOKS_LIKE_CLASSES.test(node.value)) return;
-        if (handled.some(([start, end]) => node.range[0] >= start && node.range[1] <= end)) return;
-        report(node, failuresIn(node.value));
-      },
-    };
-  },
-};
+      };
 
-export default rule;
+      return {
+        JSXAttribute(node) {
+          if (node.name?.name !== "className" || node.value == null) return;
+          handled.push(node.value.range);
+          const strings = variantsOf(node.value);
+          const failures = new Map();
+          for (const s of strings) {
+            if (!LOOKS_LIKE_CLASSES.test(s)) continue;
+            for (const f of failuresIn(s, palettes, known)) failures.set(f.key, f);
+          }
+          report(node, [...failures.values()]);
+        },
+        Literal(node) {
+          if (typeof node.value !== "string") return;
+          if (!LOOKS_LIKE_CLASSES.test(node.value)) return;
+          if (handled.some(([start, end]) => node.range[0] >= start && node.range[1] <= end)) return;
+          report(node, failuresIn(node.value, palettes, known));
+        },
+      };
+    },
+  };
+}
+
+export default createRule(PALETTES);

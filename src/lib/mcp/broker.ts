@@ -4,9 +4,10 @@
 
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
-import type { BaseConnector } from "@/lib/connectors/types";
 import { getUserById, hasAppGrant } from "@/lib/apps/access";
+import { ReadOnlyError, readOnlyConnectors } from "@/lib/apps/read-only";
 import { createReadOnlyScopedClient } from "@/lib/apps/scoped-db";
+import { createServicesClient } from "@/lib/apps/services";
 import { recordMcpCall } from "@/lib/apps/telemetry";
 import type { McpToolContext } from "@/lib/hooks/types";
 import { safeErrorMessage } from "@/lib/safe-error";
@@ -164,7 +165,11 @@ export async function callTool(
     console.error(`[mcp] ${fullToolName} threw:`, err);
     throw new McpToolError(
       "TOOL_ERROR",
-      safeErrorMessage(err, `"${fullToolName}" failed.`),
+      // A refused write carries the platform's own message, written for the
+      // model, so it is passed on rather than flattened.
+      err instanceof ReadOnlyError
+        ? err.message
+        : safeErrorMessage(err, `"${fullToolName}" failed.`),
     );
   }
 
@@ -190,56 +195,10 @@ export async function callTool(
 }
 
 /**
- * Refuse a mutating connector call from a read-only tool.
- *
- * `ctx.db` has been read-only three ways since MCP shipped — the type has no
- * write verbs, a runtime Proxy throws on them, and ESLint blocks the raw client.
- * Connectors were the acknowledged hole: docs/apps/mcp.md said plainly that the
- * platform "cannot know which connector methods mutate" and that "a reviewer has
- * to confirm it."
- *
- * Now a connector declares it (`telemetry[].mutates`), so the platform can. What
- * this does NOT do is guess: a method the connector never declared passes
- * through, because inferring intent from a method name would be worse than an
- * honest gap. Declaring a connector's writes is what buys the enforcement.
- */
-function readOnlyConnectors(
-  connectors: Record<string, BaseConnector>,
-): Record<string, BaseConnector> {
-  const wrapped: Record<string, BaseConnector> = {};
-  for (const [name, connector] of Object.entries(connectors)) {
-    const declared = connectorRegistry.find((c) => c.name === name);
-    const mutating = new Set(
-      (declared?.telemetry ?? []).filter((m) => m.mutates).map((m) => m.method),
-    );
-    if (mutating.size === 0) {
-      wrapped[name] = connector;
-      continue;
-    }
-    wrapped[name] = new Proxy(connector, {
-      get(target, prop) {
-        // `target` as the receiver, not the proxy: a connector's getters read
-        // their own private fields, and routing `this` back through the proxy
-        // turns a working getter into a runtime error.
-        const value = Reflect.get(target, prop, target);
-        if (typeof value !== "function" || !mutating.has(String(prop))) {
-          return value;
-        }
-        return () => {
-          throw new McpToolError(
-            "TOOL_ERROR",
-            `"${name}.${String(prop)}" changes data upstream and cannot be called from an MCP tool. Tools answer questions; they do not act.`,
-          );
-        };
-      },
-    }) as BaseConnector;
-  }
-  return wrapped;
-}
-
-/**
  * Build the app's own context, then narrow it for a tool: swap the scoped DB for
- * a read-only one, drop `notifications` and `hooks`, and stamp the caller.
+ * a read-only one, narrow connectors to their declared reads, make App Services
+ * calls read-only for the provider too, drop `notifications` and `hooks`, and
+ * stamp the caller.
  *
  * Reusing `buildAppContext` is the point — a tool gets exactly the connectors,
  * roles, and scoped DB that the app's own API routes get for this user, so
@@ -267,10 +226,20 @@ async function buildMcpToolContext(
 
   return {
     user: appCtx.user,
-    connectors: readOnlyConnectors(appCtx.connectors),
+    connectors: readOnlyConnectors(appCtx.connectors, connectorRegistry),
     db: appCtx.manifest.database ? createReadOnlyScopedClient(slug) : null,
     telemetry: appCtx.telemetry,
-    services: appCtx.services,
+    // Not `appCtx.services`: that client runs the provider's handler with a
+    // writable db and connectors, and a tool must not be able to write by
+    // asking another app to. This one runs it read-only.
+    services:
+      appCtx.manifest.consumes.length > 0
+        ? createServicesClient({
+            callerSlug: slug,
+            actingUser: appCtx.user,
+            readOnly: true,
+          })
+        : null,
     manifest: appCtx.manifest,
     caller: {
       kind: "mcp",
