@@ -463,11 +463,11 @@ const connectorTelemetryEventSchema = z.strictObject({
    * Declared here, the platform can. The MCP context wraps `ctx.connectors` and
    * throws on a method marked `mutates`, so a read-only tool calling a write is
    * a runtime error rather than a blocking review finding somebody has to catch.
+   * A method that is not declared at all cannot be called from a tool either.
    *
-   * Defaults to `false`, which is safe for the wrong reason and stated here so
-   * nobody mistakes it for a guarantee: an UNDECLARED method is invisible to
-   * this check entirely. Declaring a connector's writes is what buys the
-   * enforcement.
+   * Defaults to `false`, which is not a guarantee: a method that writes but is
+   * declared without `mutates` is treated as a read. Declaring a connector's
+   * writes is what buys the enforcement.
    */
   mutates: z.boolean().optional(),
 });

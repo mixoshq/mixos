@@ -490,6 +490,9 @@ What the platform does between those two boxes, in order:
   (`src/app/api/push/*`), each pinning `user_id` from `requireReadOnlySession()`.
   App code never reads or writes it, and the `ScopedClient` cannot reach it
   (no `_app_<slug>_` prefix).
+- **Endpoints are push services only.** The server POSTs to every stored
+  endpoint, so one is accepted only on a browser vendor's push service (§13),
+  at subscribe time and again before each send.
 - **No client-side push API.** Widgets/pages opt in only through the SDK helper
   `enablePushNotifications()` (`src/lib/apps/sdk.ts`), which posts the browser
   subscription to the platform route. The VAPID **private** key never leaves the
@@ -977,7 +980,14 @@ implements **both** halves, and the second is the one people skip:
      at fetch time.
    - Every returned address is checked against 0/8, 10/8, 127/8,
      172.16-31, 192.168/16, 169.254/16 (metadata), 100.64/10 (CGNAT),
-     198.18-19, multicast, ::1, fc00::/7, fe80::/10, and IPv4-mapped v6.
+     198.18-19, multicast, ::/96 (incl. ::1), fc00::/7, fe80::/10,
+     fec0::/10, ff00::/8, Teredo, and any v6 form that carries an IPv4
+     address (mapped, NAT64, 6to4), which is judged as that address.
+   - The connection is PINNED to the addresses checked. The request goes
+     out over node:http(s) with a `lookup` that answers with them, so the
+     name is never resolved a second time; the URL's hostname still sets
+     the Host header, the TLS server name and the certificate check.
+     (`fetch` cannot be handed an address, which is why it is not used.)
    - Redirects are followed MANUALLY (max 3 hops) so every hop repeats
      both checks. A 302 to 169.254.169.254 would otherwise walk straight
      past them.
@@ -994,7 +1004,7 @@ fixed, admin-configured upstream belongs in a connector instead.
 `context.http` cannot do something an app needs, that is a platform gap to fix,
 not a rule for the app to disclaim.
 
-**Platform code** fetches URLs it did not author in two places, and neither goes
+**Platform code** fetches URLs it did not author in three places, and none goes
 through `context.http`:
 
 - **The connector OAuth token exchange** (§18). The token endpoint comes from the
@@ -1003,6 +1013,13 @@ through `context.http`:
 - **The repository install path** (§31). The tarball URL is chosen by
   mixos.org, which makes it the sharper of the two. It is confined by a fixed
   host allowlist rather than by resolve-and-recheck, for the reason given there.
+- **Web Push delivery** (§3.5). Each notification is a POST to the endpoint a
+  browser handed `/api/push/subscribe`, which any signed-in user can call. It is
+  confined to the browser vendors' push services by a fixed host allowlist
+  (`src/lib/push/endpoint.ts`), checked when a subscription is saved and again
+  before each send — for the same reason as §31: the legitimate destinations
+  are a handful of names, and an allowlist also refuses public hosts that
+  resolve-and-recheck would let through.
 
 ## 14. Security Response Headers
 
@@ -1152,7 +1169,7 @@ already reach in that app.
 
 ### Read-only enforcement
 
-Three layers, because a model-driven caller with a leaked token writing to app
+Layered, because a model-driven caller with a leaked token writing to app
 tables is the worst outcome this feature could have:
 
 1. **Type** — `McpToolContext.db` is a `ReadOnlyScopedClient` with no
@@ -1164,15 +1181,26 @@ tables is the worst outcome this feature could have:
 
 4. **Connector declaration** — a connector marks each method `mutates: true` in
    its `telemetry` list, and the MCP context wraps `ctx.connectors` in a proxy
-   that throws on those. This used to be the acknowledged hole: the platform
-   could not know which connector methods write, so it was reviewer-enforced.
+   (`src/lib/apps/read-only.ts`) through which a tool can call only the methods
+   declared as reads. A `mutates` method throws, and so does anything the
+   manifest does not declare — the base class's `request()` included, which is
+   protected to the compiler but reachable with `as any`, and sends whatever
+   verb it is handed. This used to be the acknowledged hole: the platform could
+   not know which connector methods write, so it was reviewer-enforced.
 
    Two details make the declaration trustworthy rather than decorative. The
    generator parses the connector class **from the AST** and fails the build if
-   any public method is missing from `telemetry` — under-reporting is the one
-   failure a permissions view cannot have. And the proxy does not *guess*: an
-   undeclared method would pass through, which is why completeness is a build
-   error rather than a lint.
+   any public method is missing from `telemetry` — a method written as an
+   arrow-function property counts — because under-reporting is the one failure
+   a permissions view cannot have. And the proxy does not *guess*: it refuses
+   whatever is undeclared rather than reading intent from a method's name. What
+   it does trust is the declaration itself — a method that writes but is not
+   marked `mutates` runs.
+
+5. **App Services** — a tool's `ctx.services` is a client that runs the
+   provider's handler read-only: the provider gets the read-only scoped client
+   and connectors narrowed as in (4), and `caller.readOnly` tells it so. Without
+   this a tool could write by asking another app to.
 
 ### Token handling
 
@@ -1310,10 +1338,20 @@ Both halves are required, and the second is the one that gets skipped:
    and deliveries outside the tolerance are rejected as `stale`.
 
 **Replay protection** is a separate table, `connector_webhook_events`, keyed by a
-**digest of the signature** rather than the signature itself — the row is a dedupe
-marker that outlives the request, and there is no reason for a live
-credential-adjacent value to sit in it. Rows are pruned by the cron sweep, since
-beyond the freshness window the timestamp check already rejects the replay.
+**digest of the MAC that verified** rather than the MAC itself — the row is a
+dedupe marker that outlives the request, and there is no reason for a live
+credential-adjacent value to sit in it. The key is never taken from the header
+as sent: one MAC has several accepted spellings (hex or base64, bare or behind
+any `prefix=`), and a key per spelling would let a captured delivery replay
+under a new one.
+
+Rows of a connector whose policy declares a timestamp header are pruned by the
+cron sweep after a day, since beyond the freshness window the timestamp check
+already rejects the replay. A policy without one has no window — the signature
+is valid for as long as the secret is — so its rows are kept for **90 days**,
+and that is the limit of the protection: for a connector that signs no
+timestamp, a delivery captured more than 90 days ago could be accepted once.
+Declaring the provider's timestamp header, where it signs one, removes that.
 
 **Do not swallow errors in `handleWebhook()`.** Throw. A swallowed error loses the
 delivery for good; a thrown one makes the provider retry.
@@ -1440,6 +1478,9 @@ another provider, so there are no cycles and no impersonation.
 
 On the public surface there is no user, so only `audience: "app"` services are
 reachable — a public consumer route must do its own authorization first.
+
+A request from an MCP tool runs the provider read-only, as the tool itself is
+(§17).
 
 ---
 
