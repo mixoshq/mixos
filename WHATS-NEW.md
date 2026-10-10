@@ -9,6 +9,30 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-10-08
+
+- **Each app's tables are in a schema of its own.** An app with
+  `"database": true` gets `app_<slug>`, owned by a database role of its own,
+  `mixos_app_<slug>`, which the release step and `npm run migrate:apps` create.
+  The `_app_<slug>_` table prefix is gone: write bare names, as before, and
+  `context.db` reads the app's schema. The release step's role needs
+  `CREATEROLE`, which every supported host's default role has, and a Postgres
+  server holds one MixOS database: app roles belong to the whole server.
+- **App migrations are checked before they run, and run as the app.** Every
+  statement is parsed with Postgres's own parser and checked against what an app
+  migration may do: tables, indexes, views, sequences, enum types and their rows
+  in the app's schema. Triggers, functions, `DO`, policies, grants, `SET`,
+  extensions, anything outside the app's schema, and function calls beyond a
+  short list of built-ins fail the build and the release step, with the file
+  and line. See `docs/apps/database.md`. **Breaking:** an app that ships
+  `migrations/` must set `"database": true`, and an app slug must be lowercase
+  letters and digits joined by single hyphens or underscores.
+- **`updatedAt` in `app.json`** lists columns the platform sets to `now()` on
+  every update, with its own trigger, since an app migration can no longer
+  create one.
+- **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
+  and `my-app` and `my_app` no longer share tables.
+
 ## 2026-10-07
 
 - **Runs on any Postgres.** The platform no longer uses supabase-js or
