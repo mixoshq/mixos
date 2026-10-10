@@ -82,6 +82,16 @@ just pulled.
   `npm run db:local` brings it back. **Breaking:** `/api/health/ready` returns
   only `status` and `reason`. The schema versions, the count of pending app
   migrations and the message are gone; the server log has them.
+- **Vercel production builds run the release step.** `vercel.json` makes
+  `npm run vercel-build` the build command: `npm run build`, then the release
+  step when `VERCEL_ENV` is `production`, over Neon's `DATABASE_URL_UNPOOLED`
+  when it names the same database. Preview builds never run it. A build that
+  doesn't compile leaves the database alone, and a failed release step fails
+  the build, so the previous deployment keeps serving. Set
+  `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` on the project and the
+  first deploy creates the admin. Migrations have to work with the deployment
+  still serving: add in one release, remove in a later one. See
+  `docs/hosting/vercel.md`.
 - **`scripts/smoke-test-app.ts` tests real routes.** It looked for routes
   with a pattern no `defineRoute` route matches, so it sent no requests, and
   it skipped apps without connectors. It now reads routes from the generated
@@ -92,6 +102,8 @@ just pulled.
   fails or can't be reached, and its last line is a JSON verdict.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
+- **Fix:** a connection string that doesn't parse is reported by its variable's
+  name, and the release step and the app no longer print it, password included.
 
 ## 2026-10-07
 
