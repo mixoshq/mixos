@@ -276,9 +276,12 @@ export async function registerExtensionAction(input: {
 function describeFailure(err: unknown): { code: string; message: string; detail?: string } {
   // Not a failure of the extension or the repository — someone else is already
   // registering. Its own code so the UI can offer "try again" rather than the
-  // tone the rest of this list deserves.
+  // tone the rest of this list deserves. Nothing has been downloaded or written.
   if (err instanceof LockUnavailableError) {
-    return { code: "locked", message: err.message };
+    return {
+      code: "locked",
+      message: "Another administrator is installing or registering. Try again in a moment.",
+    };
   }
   if (err instanceof ContentHashMismatch) {
     return {
