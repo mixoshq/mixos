@@ -33,6 +33,12 @@ The apps, connectors and themes a deployment runs are the ones in the
 repository it is built from. Deploy **your fork**, not this repository, so the
 apps you add are in the build.
 
+A new app arrives **inactive** on each instance. The release step adds it
+switched off, and none of its code runs until an admin activates it on that
+instance's **Admin > Apps**. The switch is kept in the database, so an instance
+with a database of its own, staging as well as production, activates each app
+on its own.
+
 ## What every path needs
 
 ### Environment
