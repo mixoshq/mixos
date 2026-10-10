@@ -12,9 +12,9 @@ import type { TarEntry } from "./tar";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
-// install.ts decides once, as it loads, whether it runs from a built
-// deployment, and VERCEL is one of its two markers. Set before the imports
-// below, which are dynamic for that reason, so this file sees the module as a
+// VERCEL is one of the two markers src/lib/platform/build.ts reads to tell a
+// built deployment from a checkout. Set before the imports below, which are
+// dynamic so that nothing loads before it, so this file sees the module as a
 // Vercel deployment would.
 process.env.VERCEL = "1";
 delete process.env.INSTALL_APPS;
