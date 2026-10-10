@@ -206,6 +206,10 @@ export class HookSystem {
    * `beforeDispatch` runs before each fire; the platform loads every app's
    * `hooks.ts` there, so a listener declared in one is registered whichever
    * request comes first.
+   *
+   * Only the platform calls this, and `clearEntrypoint`. Either, with another
+   * app's slug, would act as that app, which is why app code cannot import the
+   * hook system at runtime (src/lib/apps/import-policy.mjs).
    */
   createRegistrar(
     appSlug: string,
