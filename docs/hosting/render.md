@@ -67,8 +67,9 @@ address, and OAuth redirect URIs have to match the domain people actually use.
 
 ## Upgrades
 
-Push to the branch the service tracks. Render builds the image, runs the
-release step in it, and switches traffic once `/api/health/ready` answers. If
+Merge the new release into the branch the service tracks, as in
+[Upgrading](README.md#upgrading). Render builds the image, runs the release
+step in it, and switches traffic once `/api/health/ready` answers. If
 the release step fails, the deploy fails and the previous version keeps
 serving. The pre-deploy logs say why.
 

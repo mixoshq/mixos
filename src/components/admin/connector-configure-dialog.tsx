@@ -468,6 +468,7 @@ export default function ConnectorConfigureDialog({
   const credentialsSaved = state !== "unconfigured";
   const authorized = isOAuth ? oauth.connected : true;
   const verified = verification.verifiedAt !== null;
+  const disabled = connector.disabledAt !== null;
 
   /*
     Both of these are relative to *now*, so neither can be computed during the
@@ -490,6 +491,10 @@ export default function ConnectorConfigureDialog({
         : null,
     null,
   );
+  const disabledText = useClientValue(() => {
+    const at = connector.disabledAt ? Date.parse(connector.disabledAt) : NaN;
+    return Number.isFinite(at) ? formatRelative(at) : null;
+  }, null);
 
   async function copyRedirectUri() {
     if (!oauth?.redirectUri) return;
@@ -977,9 +982,12 @@ export default function ConnectorConfigureDialog({
             onChange={setTab}
             surface="card"
           />
-          <StatusPill tone={STATUS_TONE[state]}>
-            {STATUS_LABEL[state]}
-          </StatusPill>
+          <span className="flex shrink-0 items-center gap-1.5">
+            {disabled && <StatusPill tone="warning">Disabled</StatusPill>}
+            <StatusPill tone={STATUS_TONE[state]}>
+              {STATUS_LABEL[state]}
+            </StatusPill>
+          </span>
         </div>
       }
       icon={
@@ -1001,6 +1009,22 @@ export default function ConnectorConfigureDialog({
       <div className="space-y-4">
         {tab === "details" && (
           <div className="space-y-5">
+            {/*
+              First, because it changes what the rest of this dialog can do:
+              Connect and Verify are refused while it is off.
+            */}
+            {disabled && (
+              <div className="rounded-lg border border-warning/40 bg-warning/10 px-4 py-3">
+                <p className="text-sm font-medium text-foreground">
+                  Disabled{disabledText ? ` ${disabledText}` : ""}
+                </p>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Apps can&apos;t call it, and Connect and Verify are refused
+                  until it is enabled. Its credentials are kept.
+                </p>
+              </div>
+            )}
+
             {/*
               The way in, and only while there is a way in to offer. Right
               justified so the button lands where every other primary action in

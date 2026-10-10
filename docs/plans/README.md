@@ -45,7 +45,7 @@ Current platform plans:
 | [`20260825_2153-theme-abstraction.md`](20260825_2153-theme-abstraction.md) | `themes/` as a first-class abstraction; ships `themes/mixos` as theme one |
 | [`20260826_1959-dark-mode-legibility.md`](20260826_1959-dark-mode-legibility.md) | Dark-mode legibility once `data-mode="dark"` became reachable: body ground/ink from tokens, the surface ladder, the palette fence extended to `src/` |
 | [`20260826_2041-single-palette-themes.md`](20260826_2041-single-palette-themes.md) | Collapses the theme/mode axes: one palette per theme, `mixos` light by default, `mixos-dark` as a sibling theme |
-| [`20260921_0842-release-versioning.md`](20260921_0842-release-versioning.md) | Version tags and `MIXOS_RELEASE` on Vercel via a release-PR flow; restores `/mixos deploy release` |
+| [`20260921_0842-release-versioning.md`](20260921_0842-release-versioning.md) | Releases: a release PR, an annotated `vX.Y.Z` tag on `main` and a GitHub Release, through `/mixos deploy release` and `scripts/release-prep.ts`; deployments upgrade by merging the release tag |
 | [`20260921_2323-welcome-tour.md`](20260921_2323-welcome-tour.md) | First-run welcome tour: brand takeover, three screens, the lockup-to-menu-bar reveal, and a guide-step framework |
 | [`20260922_2234-extension-screenshots.md`](20260922_2234-extension-screenshots.md) | `screenshots/` and a manifest `screenshots` array for apps and themes: build-time verification and measurement, resolved public URLs in the registries |
 | [`20260922_2320-extension-dev-instances.md`](20260922_2320-extension-dev-instances.md) | Extensions move to their own repositories, developed inside an installed instance; env-driven compose/Supabase identity so instances can run side by side |
@@ -84,7 +84,7 @@ Keep it scannable but executable:
   `theme.css` / `assets/` for a theme). Reference existing utilities to reuse,
   with paths.
 - **Verification** — how the change is proven end-to-end (generate registry,
-  typecheck, migrate, run the app, smoke-test connectors).
+  typecheck, migrate, run the app, smoke-test its routes).
 
 **Never put a secret value in a plan file** — record only the *name* of a setting
 and where it belongs. Plan files are committed.

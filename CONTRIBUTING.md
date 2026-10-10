@@ -82,7 +82,9 @@ line 1 and the notice directly below it.
 - **Commit messages** follow `type(scope): summary` — for example
   `feat(os): …`, `fix(deps): …`, `docs(os): …`, `feat(wall-e): …`. Scope is
   `os` for the platform, or the slug of the app, connector or theme.
-  Breaking changes add `!`: `feat(os)!: …`.
+  Breaking changes add `!`: `feat(os)!: …`. A release takes its version
+  number and its notes from these (see [Releases](README.md#releases)), so
+  label them accurately.
 - **Before pushing,** run `npm run lint` and `npm run typecheck`. CI runs both.
 - **Manifests** under `apps/`, `connectors/` and `themes/` are validated by the
   pre-commit hook (`.githooks/pre-commit`, enabled by `npm install`). If it

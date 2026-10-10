@@ -8,7 +8,14 @@ import type {
   BaseConnector,
   ConnectorTelemetryDefinition,
 } from "@/lib/connectors/types";
-import { ReadOnlyError, readOnlyConnector, readOnlyConnectors } from "./read-only";
+import { ConnectorError } from "@/lib/connectors/errors";
+import { ConnectorDisabledError, disabledConnector } from "@/lib/connectors/switch";
+import {
+  ReadOnlyError,
+  readOnlyConnector,
+  readOnlyConnectors,
+  refusalMessage,
+} from "./read-only";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -154,4 +161,60 @@ test("narrowing a context's connectors over the telemetry proxy", async () => {
   assert.throws(() => tool.createItem(), ReadOnlyError);
   assert.throws(() => tool.request("/items", { method: "DELETE" }), ReadOnlyError);
   assert.deepEqual(connector.sent, ["GET /items"]);
+});
+
+// ── a connector an admin disabled ───────────────────────────────────────────
+
+/** The stand-in's refusal, and not a read-only one. */
+function isDisabledRefusal(err: unknown): boolean {
+  assert.ok(err instanceof ConnectorDisabledError, `got ${String(err)}`);
+  assert.equal(err.userMessage, "Acme has been disabled by an administrator.");
+  return true;
+}
+
+test("a disabled connector is refused through the wrapper with the switch's reason, whatever is called", async () => {
+  const tool = readOnlyConnector(
+    "acme",
+    disabledConnector("acme", "Acme"),
+    DECLARED,
+  ) as unknown as Acme;
+
+  assert.equal(tool.configured, false);
+  // A declared read, a declared write, and what the manifest never declared:
+  // all three say the connector is disabled, which is the reason they fail.
+  await assert.rejects(tool.listItems(), isDisabledRefusal);
+  await assert.rejects(tool.createItem(), isDisabledRefusal);
+  await assert.rejects(tool.archiveItem(), isDisabledRefusal);
+  await assert.rejects(tool.request("/items", { method: "POST" }), isDisabledRefusal);
+});
+
+test("in one context, the enabled connector is served and the disabled one refused", async () => {
+  const connector = new AcmeConnector();
+  const tools = readOnlyConnectors(
+    { acme: connector, other: disabledConnector("other", "Acme") },
+    [
+      { name: "acme", telemetry: DECLARED },
+      { name: "other", telemetry: DECLARED },
+    ],
+  );
+
+  assert.deepEqual(await (tools.acme as unknown as Acme).listItems(), { ok: true });
+  await assert.rejects((tools.other as unknown as Acme).listItems(), isDisabledRefusal);
+  assert.deepEqual(connector.sent, ["GET /items"]);
+});
+
+test("the brokers pass on the platform's own refusals and flatten everything else", () => {
+  assert.equal(
+    refusalMessage(new ReadOnlyError('"acme.createItem" changes data upstream.')),
+    '"acme.createItem" changes data upstream.',
+  );
+  assert.equal(
+    refusalMessage(new ConnectorDisabledError("acme", "Acme")),
+    "Acme has been disabled by an administrator.",
+  );
+  assert.equal(
+    refusalMessage(new ConnectorError({ category: "auth_failed", connectorName: "acme" })),
+    null,
+  );
+  assert.equal(refusalMessage(new Error('relation "secret_table" does not exist')), null);
 });

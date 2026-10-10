@@ -3,428 +3,220 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Smoke-test an app's connector data path against a running dev server.
+ * Smoke-test apps' API routes on a running MixOS, as a signed-in user.
  *
- * Usage:
- *   SMOKE_COOKIE='<authjs.session-token value>' \
- *     npx tsx scripts/smoke-test-app.ts <app-slug>
+ *   SMOKE_EMAIL=you@example.com SMOKE_PASSWORD='…' \
+ *     npx tsx scripts/smoke-test-app.ts [<slug> …] [--base-url <url>]
  *
- * Walks apps/<slug>/api/**\/route.ts, fetches every GET route through the
- * /api/apps/[...slug] gateway, and classifies the response so the caller
- * (typically the /mixos app skill) can decide what to do next.
+ * With no slug it tests every app in this build. `--base-url` defaults to
+ * http://localhost:3000 (or $PORT). Run it from the checkout the server was
+ * built from: the routes come from src/generated/app-registry.ts, which
+ * `npm run dev`, `npm run build` and `npm run registry` write.
  *
- * Outcome classes are documented inline on the Outcome type below. Exit
- * code is 0 only if every route lands on an OK_* / UNCONFIGURED_TENANT /
- * SKIPPED_* outcome.
+ * SIGNING IN. Either of:
+ *
+ *   SMOKE_EMAIL, SMOKE_PASSWORD   signs in with the password, like the user
+ *   SMOKE_COOKIE                  an existing session: the value of the
+ *                                 `authjs.session-token` cookie
+ *                                 (`__Secure-authjs.session-token` over HTTPS),
+ *                                 or a whole `name=value` Cookie header
+ *
+ * SMOKE_COOKIE wins when both are set. Neither the password nor the cookie is
+ * ever printed.
+ *
+ * Test like a real user: activate each app and grant it to that user first. An
+ * app that is inactive, or not granted, is reported as such and fails the run.
+ * This script never changes either.
+ *
+ * WHAT IT SENDS, and how it reads each answer: scripts/app-smoke.ts. In short,
+ * GET and HEAD only, with a fake value in every path param. POST, PUT, PATCH
+ * and DELETE routes are listed and never sent.
+ *
+ * OUTPUT. A table per app on stderr, then one JSON line on stdout: the verdict,
+ * with every app and every route (`Verdict` in scripts/app-smoke.ts).
+ *
+ * EXIT CODE.
+ *   0  nothing failed and nothing was blocked
+ *   1  a route failed (5xx, network error, timeout) or was blocked (signed
+ *      out, app inactive or not granted, rate limited)
+ *   2  the run couldn't start: bad arguments, no registry, no sign-in, or no
+ *      server at the base URL
  */
 
-import { promises as fs } from "fs";
+import fs from "fs";
 import path from "path";
-import { isConnectorErrorEnvelope } from "../src/lib/connectors/response";
+import {
+  SmokeSetupError,
+  buildVerdict,
+  cookieHeaderFrom,
+  exitCodeFor,
+  formatApp,
+  formatSummary,
+  runSmoke,
+  sessionUser,
+  setupFailure,
+  signIn,
+  type SmokeApp,
+  type Verdict,
+} from "./app-smoke";
 
-const REPO_ROOT = path.resolve(__dirname, "..");
-const PORT = process.env.PORT ?? "3000";
-const HOST = `http://localhost:${PORT}`;
-const COOKIE = process.env.SMOKE_COOKIE;
-const FETCH_TIMEOUT_MS = 30_000;
+const REGISTRY = path.resolve(__dirname, "../src/generated/app-registry.ts");
 
-interface AppManifest {
-  name: string;
-  connectors?: string[];
+const USAGE = [
+  "Usage: npx tsx scripts/smoke-test-app.ts [<slug> ...] [--base-url <url>]",
+  "Sign in with SMOKE_EMAIL and SMOKE_PASSWORD, or pass a session as SMOKE_COOKIE.",
+].join("\n");
+
+/** Values that must never reach the output. Short ones are left alone: they'd mangle it. */
+const secrets: string[] = [];
+
+function keepSecret(value: string | undefined): void {
+  if (!value || value.length < 6) return;
+  // As written, and as it would appear inside the JSON line.
+  secrets.push(value, JSON.stringify(value).slice(1, -1));
 }
 
-interface RouteInfo {
-  /** Path under apps/<slug>/api, slash-joined. "" for the index route. */
-  apiPath: string;
-  /** HTTP methods exported from route.ts. */
-  methods: string[];
-  /** True if any segment is `[param]`. */
-  isDynamic: boolean;
-  /** Connector names referenced via `context.connectors.<name>`. */
-  connectorsUsed: string[];
-  /** Connectors used without a `<name>?.configured` (or `.configured`) guard. */
-  unguardedConnectors: string[];
-}
-
-type Outcome =
-  /** 2xx, non-empty body, not the not-connected sentinel. */
-  | "OK_DATA"
-  /**
-   * 200 with `{ "connected": false }`. Legacy shape from the removed
-   * user-scoped (per-user OAuth) connector model. Still classified rather than
-   * treated as data so an app carrying the old pattern is reported clearly
-   * instead of passing with an empty payload — but a connector is now either
-   * configured for everyone or for no one, so new code should return 503.
-   */
-  | "OK_NOT_CONNECTED"
-  /** 2xx with `{}`, `[]`, or null body. Could be valid; could be a shape bug. */
-  | "OK_EMPTY"
-  /**
-   * 503 — the `configured` guard fired, or the connector call failed as
-   * unconfigured and the route let it propagate. Expected when an admin hasn't
-   * set creds.
-   */
-  | "UNCONFIGURED_TENANT"
-  /** 401 — no/invalid session cookie reached the gateway. */
-  | "UNAUTHENTICATED"
-  /** 403 — session valid but user lacks app access (or upstream auth failed). */
-  | "AUTH_ERROR"
-  /** 429 from the platform or upstream. */
-  | "RATE_LIMITED"
-  /** 5xx without a recognised guard shape — likely a real upstream/code failure. */
-  | "UPSTREAM_ERROR"
-  /** 5xx on a route that uses a connector without a configured guard — code bug. */
-  | "GUARD_MISMATCH"
-  /** Has a `[param]` segment; cannot synthesise a value. */
-  | "SKIPPED_DYNAMIC"
-  /** route.ts exports no GET handler. */
-  | "SKIPPED_NO_GET"
-  | "UNKNOWN";
-
-interface RouteResult {
-  route: RouteInfo;
-  url?: string;
-  status?: number;
-  outcome: Outcome;
-  excerpt?: string;
-  notes: string[];
-}
-
-const PASSING: ReadonlySet<Outcome> = new Set([
-  "OK_DATA",
-  "OK_NOT_CONNECTED",
-  "UNCONFIGURED_TENANT",
-  "SKIPPED_DYNAMIC",
-  "SKIPPED_NO_GET",
-]);
-
-async function main(): Promise<void> {
-  const slug = process.argv[2];
-  if (!slug) die("Usage: tsx scripts/smoke-test-app.ts <app-slug>");
-  if (slug.startsWith("_")) {
-    die(
-      `Refusing to smoke-test underscore-prefixed app "${slug}" (template, skipped by registry).`,
-    );
-  }
-
-  const appDir = path.join(REPO_ROOT, "apps", slug);
-  const manifestPath = path.join(appDir, "app.json");
-  let manifest: AppManifest;
-  try {
-    manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as AppManifest;
-  } catch (err) {
-    die(`Failed to read ${manifestPath}: ${(err as Error).message}`);
-  }
-
-  const declaredConnectors = manifest.connectors ?? [];
-  if (declaredConnectors.length === 0) {
-    console.log(`[smoke] ${slug} declares no connectors. Nothing to smoke-test.`);
-    return;
-  }
-
-  const apiDir = path.join(appDir, "api");
-  let routes: RouteInfo[];
-  try {
-    routes = await walkApi(apiDir);
-  } catch {
-    console.log(`[smoke] ${slug} has no api/ directory. Nothing to smoke-test.`);
-    return;
-  }
-  if (routes.length === 0) {
-    console.log(`[smoke] ${slug} has no api routes. Nothing to smoke-test.`);
-    return;
-  }
-
-  if (!COOKIE) {
-    console.error(
-      [
-        "[smoke] SMOKE_COOKIE is not set. The /api/apps gateway requires a valid",
-        "        NextAuth session.",
-        `        1. Open ${HOST} and sign in as a user with access to the app.`,
-        "        2. In DevTools → Application → Cookies, copy the value of",
-        "           `authjs.session-token` (or `__Secure-authjs.session-token`).",
-        `        3. Re-run as: SMOKE_COOKIE='<value>' npx tsx scripts/smoke-test-app.ts ${slug}`,
-      ].join("\n"),
-    );
-    process.exit(2);
-  }
-
-  console.log(`[smoke] App: ${slug}`);
-  console.log(`[smoke] Declared connectors: ${declaredConnectors.join(", ")}`);
-  console.log(`[smoke] Routes discovered: ${routes.length}`);
-  console.log("");
-
-  const results: RouteResult[] = [];
-  for (const route of routes) {
-    results.push(await testRoute(slug, route));
-  }
-
-  printTable(results);
-  printGuardWarnings(results);
-  printExcerpts(results);
-
-  const failing = results.filter((r) => !PASSING.has(r.outcome));
-  console.log("");
-  if (failing.length === 0) {
-    console.log("[smoke] All routes look healthy.");
-    process.exit(0);
-  }
-  console.log(
-    `[smoke] ${failing.length} route(s) need attention. See "When the smoke test fails" in /mixos app.`,
-  );
-  process.exit(1);
-}
-
-async function walkApi(apiDir: string): Promise<RouteInfo[]> {
-  const out: RouteInfo[] = [];
-  await walk(apiDir, [], out);
+function redact(text: string): string {
+  let out = text;
+  for (const s of secrets) out = out.split(s).join("[redacted]");
   return out;
 }
 
-async function walk(dir: string, segments: string[], out: RouteInfo[]): Promise<void> {
-  const entries = await fs.readdir(dir);
-
-  if (entries.includes("route.ts")) {
-    const filePath = path.join(dir, "route.ts");
-    const source = await fs.readFile(filePath, "utf8");
-    const methods = extractMethods(source);
-    const { used, unguarded } = analyseConnectorUsage(source);
-    out.push({
-      apiPath: segments.join("/"),
-      methods,
-      isDynamic: segments.some((s) => s.startsWith("[") && s.endsWith("]")),
-      connectorsUsed: used,
-      unguardedConnectors: unguarded,
-    });
-  }
-
-  for (const entry of entries) {
-    if (entry === "route.ts") continue;
-    const full = path.join(dir, entry);
-    const stat = await fs.stat(full);
-    if (stat.isDirectory()) {
-      await walk(full, [...segments, entry], out);
-    }
-  }
+function say(line: string): void {
+  console.error(redact(line));
 }
 
-function extractMethods(source: string): string[] {
-  const methods = new Set<string>();
-  const re = /export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\b/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) methods.add(m[1]);
-  return [...methods];
-}
-
-function analyseConnectorUsage(source: string): {
-  used: string[];
-  unguarded: string[];
-} {
-  const used = new Set<string>();
-  const re = /context\.connectors\.([a-zA-Z0-9_]+)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) used.add(m[1]);
-
-  const unguarded: string[] = [];
-  for (const name of used) {
-    const guardRe = new RegExp(`\\b${name}\\??\\.configured\\b`);
-    if (!guardRe.test(source)) unguarded.push(name);
-  }
-  return { used: [...used], unguarded };
-}
-
-async function testRoute(slug: string, route: RouteInfo): Promise<RouteResult> {
-  const notes: string[] = [];
-  if (route.unguardedConnectors.length > 0) {
-    notes.push(
-      `connectors used without a configured guard: ${route.unguardedConnectors.join(", ")}`,
-    );
-  }
-
-  if (route.isDynamic) return { route, outcome: "SKIPPED_DYNAMIC", notes };
-  if (!route.methods.includes("GET")) return { route, outcome: "SKIPPED_NO_GET", notes };
-
-  const url = `${HOST}/api/apps/${slug}${route.apiPath ? "/" + route.apiPath : ""}`;
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
-  let res: Response;
+function baseUrlFrom(raw: string): string {
+  let url: URL;
   try {
-    res = await fetch(url, {
-      method: "GET",
-      headers: { Cookie: cookieHeader() },
-      signal: ac.signal,
-      redirect: "manual",
-    });
-  } catch (err) {
-    return {
-      route,
-      url,
-      outcome: "UPSTREAM_ERROR",
-      excerpt: `fetch failed: ${(err as Error).message}`,
-      notes,
-    };
-  } finally {
-    clearTimeout(timer);
-  }
-
-  // A redirect from the gateway means the session was rejected and Next is
-  // sending us to /login. Treat that as unauthenticated.
-  if (res.status >= 300 && res.status < 400) {
-    return {
-      route,
-      url,
-      status: res.status,
-      outcome: "UNAUTHENTICATED",
-      excerpt: `redirect to ${res.headers.get("location") ?? "(unknown)"}`,
-      notes,
-    };
-  }
-
-  const text = await res.text();
-  const excerpt = text.slice(0, 800);
-  let body: unknown = null;
-  try {
-    body = JSON.parse(text);
+    url = new URL(raw);
   } catch {
-    /* not JSON */
+    throw new SmokeSetupError(`--base-url ${raw} is not a URL`);
   }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new SmokeSetupError(`--base-url must be http or https, not ${url.protocol}`);
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
 
-  return {
-    route,
-    url,
-    status: res.status,
-    outcome: classify(res.status, body, route),
-    excerpt,
-    notes,
+interface Args {
+  slugs: string[];
+  baseUrl: string;
+  help: boolean;
+}
+
+function parseArgs(argv: string[], fallbackBaseUrl: string): Args {
+  const slugs: string[] = [];
+  let baseUrl = fallbackBaseUrl;
+  let help = false;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "-h" || arg === "--help") help = true;
+    else if (arg === "--base-url") {
+      const value = argv[++i];
+      if (!value) throw new SmokeSetupError("--base-url needs a URL (see --help)");
+      baseUrl = baseUrlFrom(value);
+    } else if (arg.startsWith("--base-url=")) {
+      baseUrl = baseUrlFrom(arg.slice("--base-url=".length));
+    } else if (arg.startsWith("-")) {
+      throw new SmokeSetupError(`unknown option ${arg} (see --help)`);
+    } else if (!slugs.includes(arg)) {
+      slugs.push(arg);
+    }
+  }
+  return { slugs, baseUrl, help };
+}
+
+async function loadApps(slugs: string[]): Promise<SmokeApp[]> {
+  if (!fs.existsSync(REGISTRY)) {
+    throw new SmokeSetupError(
+      "src/generated/app-registry.ts is missing. Run `npm run registry` first.",
+    );
+  }
+  const { appRegistry } = (await import("../src/generated/app-registry")) as {
+    appRegistry: SmokeApp[];
   };
-}
+  if (slugs.length === 0) return appRegistry;
 
-function cookieHeader(): string {
-  const v = COOKIE!;
-  // Accept either the bare token value or a pre-formatted "name=value[; ...]"
-  // pair so the user can copy directly from DevTools either way.
-  return v.includes("=") ? v : `authjs.session-token=${v}`;
-}
-
-function classify(status: number, body: unknown, route: RouteInfo): Outcome {
-  if (status === 401) return "UNAUTHENTICATED";
-  if (status === 403) return "AUTH_ERROR";
-  if (status === 429) return "RATE_LIMITED";
-  if (status === 503) return "UNCONFIGURED_TENANT";
-
-  const isObj =
-    body !== null && typeof body === "object" && !Array.isArray(body);
-  const errorField =
-    isObj && typeof (body as { error?: unknown }).error === "string"
-      ? (body as { error: string }).error
-      : undefined;
-
-  if (status >= 500) {
-    // A connector failure the route let propagate comes back as that
-    // connector's envelope — the documented way to handle one — so a missing
-    // `configured` guard is not what went wrong.
-    if (route.unguardedConnectors.length > 0 && !isConnectorErrorEnvelope(body)) {
-      return "GUARD_MISMATCH";
-    }
-    if (errorField && /unauthor|invalid_grant|forbidden|scope|token/i.test(errorField)) {
-      return "AUTH_ERROR";
-    }
-    return "UPSTREAM_ERROR";
+  const unknown = slugs.filter((s) => !appRegistry.some((a) => a.slug === s));
+  if (unknown.length > 0) {
+    const known = appRegistry.map((a) => a.slug).join(", ") || "none";
+    throw new SmokeSetupError(
+      `not in this build's registry: ${unknown.join(", ")}. Apps in it: ${known}. ` +
+        "Template folders (starting with _) never are; run `npm run registry` after adding an app.",
+    );
   }
-
-  if (status >= 200 && status < 300) {
-    if (isObj && (body as { connected?: unknown }).connected === false) {
-      return "OK_NOT_CONNECTED";
-    }
-    if (
-      body === null ||
-      (Array.isArray(body) && body.length === 0) ||
-      (isObj && Object.keys(body as object).length === 0)
-    ) {
-      return "OK_EMPTY";
-    }
-    if (body !== null && typeof body !== "undefined") return "OK_DATA";
-  }
-
-  return "UNKNOWN";
+  return slugs.map((s) => appRegistry.find((a) => a.slug === s)!);
 }
 
-function printTable(results: RouteResult[]): void {
-  const rows = results.map((r) => ({
-    route: "/" + r.route.apiPath,
-    methods: r.route.methods.join(",") || "—",
-    connectors: r.route.connectorsUsed.join(",") || "—",
-    status: r.status?.toString() ?? "—",
-    outcome: r.outcome,
-  }));
+/** The session to test with, and whose it is. */
+async function signedIn(baseUrl: string): Promise<{ cookie: string; user: string }> {
+  const { SMOKE_COOKIE, SMOKE_EMAIL, SMOKE_PASSWORD } = process.env;
+  let cookie: string;
+  if (SMOKE_COOKIE) {
+    // A line break would make fetch throw an error that quotes the value.
+    if (/[\r\n\0]/.test(SMOKE_COOKIE)) {
+      throw new SmokeSetupError("SMOKE_COOKIE holds a line break or a NUL. Copy the value again.");
+    }
+    cookie = cookieHeaderFrom(SMOKE_COOKIE, baseUrl);
+  } else if (SMOKE_EMAIL && SMOKE_PASSWORD) {
+    cookie = await signIn({ baseUrl, email: SMOKE_EMAIL, password: SMOKE_PASSWORD });
+  } else {
+    throw new SmokeSetupError(
+      "no sign-in. Set SMOKE_EMAIL and SMOKE_PASSWORD, or SMOKE_COOKIE, for a user the apps are granted to.",
+    );
+  }
+  for (const pair of cookie.split(";")) keepSecret(pair.slice(pair.indexOf("=") + 1).trim());
 
-  const widths = {
-    route: Math.max(5, ...rows.map((r) => r.route.length)),
-    methods: Math.max(7, ...rows.map((r) => r.methods.length)),
-    connectors: Math.max(10, ...rows.map((r) => r.connectors.length)),
-    status: Math.max(6, ...rows.map((r) => r.status.length)),
-    outcome: Math.max(7, ...rows.map((r) => r.outcome.length)),
-  };
+  const user = await sessionUser({ baseUrl, cookie });
+  if (!user) {
+    throw new SmokeSetupError(
+      SMOKE_COOKIE
+        ? "SMOKE_COOKIE wasn't accepted: it may have expired, or come from another server."
+        : "the server didn't accept the session it just issued.",
+    );
+  }
+  return { cookie, user };
+}
 
-  const header =
-    "ROUTE".padEnd(widths.route) +
-    "  " +
-    "METHODS".padEnd(widths.methods) +
-    "  " +
-    "CONNECTORS".padEnd(widths.connectors) +
-    "  " +
-    "STATUS".padEnd(widths.status) +
-    "  " +
-    "OUTCOME";
-  console.log(header);
-  console.log("-".repeat(header.length));
-  for (const r of rows) {
-    console.log(
-      r.route.padEnd(widths.route) +
-        "  " +
-        r.methods.padEnd(widths.methods) +
-        "  " +
-        r.connectors.padEnd(widths.connectors) +
-        "  " +
-        r.status.padEnd(widths.status) +
-        "  " +
-        r.outcome,
+async function run(): Promise<Verdict> {
+  const fallback = `http://localhost:${process.env.PORT || "3000"}`;
+  let baseUrl = fallback;
+  try {
+    const args = parseArgs(process.argv.slice(2), fallback);
+    baseUrl = args.baseUrl;
+    if (args.help) {
+      console.log(USAGE);
+      process.exit(0);
+    }
+    const apps = await loadApps(args.slugs);
+    const { cookie, user } = await signedIn(baseUrl);
+    say(`[smoke] ${baseUrl}, signed in as ${user}`);
+
+    const results = await runSmoke({
+      baseUrl,
+      cookie,
+      apps,
+      onApp: (app) => formatApp(app).forEach(say),
+    });
+    return buildVerdict(baseUrl, user, results);
+  } catch (err) {
+    if (err instanceof SmokeSetupError) return setupFailure(baseUrl, err.message);
+    say(`[smoke] ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    return setupFailure(
+      baseUrl,
+      `unexpected error: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }
 
-function printGuardWarnings(results: RouteResult[]): void {
-  const flagged = results.filter((r) => r.notes.length > 0);
-  if (flagged.length === 0) return;
-  console.log("");
-  console.log("[smoke] Static analysis warnings:");
-  for (const r of flagged) {
-    for (const note of r.notes) {
-      console.log(`  /${r.route.apiPath}: ${note}`);
-    }
-  }
-}
+keepSecret(process.env.SMOKE_PASSWORD);
+keepSecret(process.env.SMOKE_COOKIE?.trim());
 
-function printExcerpts(results: RouteResult[]): void {
-  const interesting = results.filter(
-    (r) => !PASSING.has(r.outcome) && r.excerpt,
+void run().then((verdict) => {
+  say(formatSummary(verdict));
+  // Exit once the line is written: stdout to a pipe can be asynchronous.
+  process.stdout.write(`${redact(JSON.stringify(verdict))}\n`, () =>
+    process.exit(exitCodeFor(verdict)),
   );
-  if (interesting.length === 0) return;
-  console.log("");
-  console.log("[smoke] Response excerpts (first 400 chars, whitespace-collapsed):");
-  for (const r of interesting) {
-    console.log(
-      `  /${r.route.apiPath} [${r.outcome}]: ${(r.excerpt ?? "").replace(/\s+/g, " ").slice(0, 400)}`,
-    );
-  }
-}
-
-function die(msg: string): never {
-  console.error("[smoke] " + msg);
-  process.exit(2);
-}
-
-main().catch((err) => {
-  console.error("[smoke] Fatal:", err);
-  process.exit(2);
 });
