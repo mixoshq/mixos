@@ -112,34 +112,24 @@ ENV NODE_ENV=production \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 
-# The release this image was cut from, e.g. `v1.2.0`. The tag-triggered build
-# passes it:  --build-arg MIXOS_RELEASE=${{ github.ref_name }}
+# The commit this image was built from, shown on the admin pages beside the
+# version. Purely descriptive — nothing gates on it — but "which code is this
+# instance actually running" is unanswerable without it. Read by
+# src/lib/platform/version.ts. deploy/docker-compose.yml passes it from the
+# shell:
 #
-# It is what tells the running app it is a RELEASE rather than someone's local
-# `npm run docker:prod`, and the only thing that consumes it is the repository
-# lock in src/lib/repository/client.ts: a released build ignores
-# MIXOS_REPOSITORY_URL and always searches https://mixos.org, because whoever
-# chooses the catalogue chooses what "verified" means for every install of it.
-# See docs/security-architecture.md §31.
+#   MIXOS_COMMIT=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.yml build
 #
-# EMPTY BY DEFAULT, and that is correct rather than an oversight. A locally
-# built prod-parity image is not a release, and must stay pointable at a local
-# catalogue — that is the whole reason the `prod` profile exists. The gate that
-# stops a wrong value being committed in the first place is
-# `npm run verify:repository-url`, which blocks in CI.
-ARG MIXOS_RELEASE=""
-ENV MIXOS_RELEASE=${MIXOS_RELEASE}
-
-# The commit the release was cut from. Purely descriptive — nothing gates on it
-# — but "which code is this instance actually running" is unanswerable without
-# it, and a tag can be moved while a SHA cannot. Read by
-# src/lib/platform/version.ts, alongside MIXOS_RELEASE above.
-#
-# The tag workflow passes:  --build-arg MIXOS_COMMIT=${{ github.sha }}
+# EMPTY BY DEFAULT, which the app reads as unset. Render and Railway build this
+# image without the argument and set their own commit variables at runtime, and
+# the app falls through to those; with none, the commit shows as unknown.
 #
 # It is an ARG in the RUNNER stage rather than something the builder derives from
 # git, because .dockerignore keeps .git out of the build context (line 23) — the
 # builder has no repository to ask.
+#
+# The version needs no argument. `npm run build` above stamps package.json's
+# version into the build (src/generated/build-info.ts).
 ARG MIXOS_COMMIT=""
 ENV MIXOS_COMMIT=${MIXOS_COMMIT}
 

@@ -48,6 +48,7 @@ apps you add are in the build.
 | `CRON_SECRET` | Yes | The bearer token the tick sends. Without it `/api/cron` refuses every call, and jobs never run. |
 | `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | For the first deploy | The release step creates this account if no account has the email. It never changes an existing one, so the variables are safe to leave set. |
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind and install from it. See [Fixing what an instance runs](#fixing-what-an-instance-runs). |
+| `MIXOS_COMMIT` | No | The commit the admin pages show beside the MixOS version. For the Docker image it's a build argument. See [Which build is running](#which-build-is-running). |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated domains allowed to sign in. Blank: any. |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | No | Web Push, for apps that send notifications. |
 
@@ -90,6 +91,11 @@ On those, the flags decide whether the catalogue can be browsed at all. They
 lock installs down on an instance that runs from a checkout.
 [docs/security-architecture.md](../security-architecture.md#turning-it-off)
 has the detail.
+
+Those deployments browse mixos.org. `MIXOS_REPOSITORY_URL`, which points a
+development checkout at another catalogue, is ignored there unless it names the
+deployment's own machine (`localhost`, `127.0.0.1`, `[::1]` or
+`host.docker.internal`), and the server log says when it is.
 
 ### The release step
 
@@ -144,6 +150,28 @@ recorded:
 The audit log records both, as `app.missing` and `app.returned`, with
 `release-step` as the actor.
 
+### Which build is running
+
+The admin pages show the MixOS version and the commit the deployment was built
+from, for example `MixOS 0.4.2 · commit 3e1f0a2`, so you can check that a deploy
+landed. Only admins see them.
+
+The version is `package.json`'s, stamped into every build. The commit comes from
+the host:
+
+| Host | Where the commit comes from |
+| --- | --- |
+| Docker Compose | `MIXOS_COMMIT=$(git rev-parse HEAD)` in front of the build command. See [docker-compose.md](docker-compose.md#upgrading). |
+| Coolify | `MIXOS_COMMIT=$SOURCE_COMMIT` in the resource's environment. See [docker-compose.md](docker-compose.md#coolify). |
+| Dokploy | Nothing maps it, so it shows as unknown. |
+| Render | `RENDER_GIT_COMMIT`, which Render sets. |
+| Railway | `RAILWAY_GIT_COMMIT_SHA`, which Railway sets on deploys from GitHub. |
+| Vercel | `VERCEL_GIT_COMMIT_SHA`, which Vercel sets. |
+
+The app takes the first of `MIXOS_COMMIT`, `VERCEL_GIT_COMMIT_SHA`,
+`RENDER_GIT_COMMIT` and `RAILWAY_GIT_COMMIT_SHA` that holds a commit SHA. An
+empty or malformed value is skipped. With none, the commit shows as unknown.
+
 ### The database role
 
 Every table has row-level security enabled with no policies, so only the role
@@ -180,6 +208,44 @@ statements or session state, and the migration runner's lock is
 transaction-scoped. On Vercel, the production build's release step uses Neon's
 direct `DATABASE_URL_UNPOOLED` instead, when it names the same role and
 database as `DATABASE_URL`.
+
+## Upgrading
+
+Each version of MixOS is a release: a tag on this repository's `main`, such
+as `v0.2.0`, listed on the [releases page](https://github.com/mixoshq/mixos/releases)
+with notes that put breaking changes first. Upgrade by merging the newest
+release tag into your fork. Don't merge `upstream/main`: between releases it
+holds work that hasn't been released yet.
+
+1. **Back up the database.** Migrations only go forward, so a backup is the
+   way back. `pg_dump` works on every path; for the database in the Compose
+   file, see [Backups and access](docker-compose.md#backups-and-access).
+2. **Merge the release on a branch.** Add this repository as `upstream` once
+   (`git remote add upstream https://github.com/mixoshq/mixos.git`), then:
+
+   ```bash
+   git fetch upstream --tags
+   git describe --abbrev=0 --exclude '*-*' upstream/main   # the newest release, e.g. v0.2.0
+   git switch -c upgrade-v0.2.0
+   git merge --no-edit v0.2.0
+   ```
+
+3. **Check it.** Read the release's breaking changes against your apps. Then
+   run `npm ci && npm run build`, and start it locally with
+   `npm run dev:docker`, which applies its migrations to your local database
+   first.
+4. **Push the branch and open a pull request** against your fork's `main`,
+   not this repository's. Once it merges, your host's guide says what happens
+   next: [Docker Compose](docker-compose.md#upgrading),
+   [Render](render.md#upgrades), [Railway](railway.md#upgrades) or
+   [Vercel](vercel.md#upgrades). When the deploy is done, the admin pages
+   show the new version and its commit
+   ([Which build is running](#which-build-is-running)).
+
+Skipping releases is fine. Merge the newest tag, and the release step applies
+every migration in between; read the notes of each release you skipped.
+Prereleases, tags with a suffix such as `v0.3.0-rc.1`, are for trying a
+version before it's final, and `--exclude '*-*'` leaves them out.
 
 ## Before going public
 
