@@ -4,6 +4,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
+import { connectorRegistry } from "@/generated/connector-registry";
 import { runDueJobs } from "@/lib/apps/scheduler";
 import { pruneRateBuckets } from "@/lib/rate-limit";
 import { pruneUnlockFailures } from "@/lib/apps/unlock-rate-limit";
@@ -69,7 +70,14 @@ export async function GET(request: NextRequest) {
   // report the tick as failed, and pruneRateBuckets swallows its own errors.
   const prunedBuckets = await pruneRateBuckets();
   const prunedRouteEvents = await pruneRouteTelemetry();
-  const prunedWebhookEvents = await pruneWebhookEvents();
+  // A connector whose webhook signs a timestamp has its replay markers swept
+  // after a day. Every other marker is kept for 90 days, because for those it
+  // is the one thing refusing a replay.
+  const prunedWebhookEvents = await pruneWebhookEvents(
+    connectorRegistry
+      .filter((c) => c.webhook?.timestampHeader)
+      .map((c) => c.name),
+  );
   const prunedUnlockFailures = await pruneUnlockFailures();
 
   return NextResponse.json({

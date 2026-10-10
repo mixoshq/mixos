@@ -6,7 +6,6 @@ import { requireReadOnlySession } from "@/lib/auth/session";
 import { ensureUser, getUserApps } from "@/lib/apps/access";
 import { getDashboard } from "@/lib/dashboard/actions";
 import { appRegistry } from "@/generated/app-registry";
-import { hooks } from "@/lib/hooks";
 import DashboardGrid from "@/components/dashboard/grid";
 
 export default async function DashboardPage() {
@@ -14,9 +13,6 @@ export default async function DashboardPage() {
   const userId = await ensureUser(session.user);
   const enabledSlugs = await getUserApps(userId);
   const enabledApps = appRegistry.filter((a) => enabledSlugs.includes(a.slug));
-
-  // Only active apps' hooks will fire
-  hooks.setActiveApps(enabledSlugs);
 
   const { layout, widgets } = await getDashboard();
 

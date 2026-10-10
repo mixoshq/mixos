@@ -72,8 +72,18 @@ just pulled.
   `required` is empty, and says which field.
 - **Untagged releases install.** A release published from the mixos.org website
   has no git tag, and installs pinned to its commit like any other.
+- **Cross-app hooks are checked where they're used.** The build skips an app
+  that listens to another app's hook without `listensTo`, or fires another
+  app's hook, and the registrar refuses both at runtime. The bare `hooks` from
+  `@/lib/hooks` takes core hooks only. Listeners follow their app's activation,
+  checked each time a hook fires.
+- **App settings** are filled in on the Settings tab of an app's details in
+  Administration → Apps. `password` values are encrypted when saved and never
+  shown again.
 - **Fix:** per-user connector scope status was never saved (migration 0008).
   Run `npm run db:local` to apply it.
+- **Fix:** a deactivated app's `/p` pages return 404, as its API routes already
+  did.
 
 ## 2026-10-05
 

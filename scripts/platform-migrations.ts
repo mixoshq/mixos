@@ -21,16 +21,16 @@
 // Each file is applied in its own transaction, together with its ledger row,
 // under a transaction-scoped advisory lock, and the ledger is re-read once the
 // lock is held. Two runners started together — two instances booting, a deploy
-// overlapping a manual run — therefore apply each file exactly once. A
-// session-scoped lock would not survive a transaction pooler (see 0007's notes
-// on _platform_locks); a transaction-scoped one does.
+// overlapping a manual run — therefore apply each file exactly once. The lock
+// is the one every step of the release takes; see scripts/migration-lock.ts.
 //
 // Library only: scripts/db-migrate.ts and scripts/release.ts are the entry
 // points.
 
 import fs from "fs";
 import path from "path";
-import type { Sql, TransactionSql } from "postgres";
+import type { Sql } from "postgres";
+import { takeMigrationLock } from "./migration-lock";
 
 const MIGRATION_FILE = /^(\d+)_(.+)\.sql$/;
 
@@ -55,10 +55,6 @@ export function listPlatformMigrations(dir: string): PlatformMigration[] {
     .sort((a, b) => Number(a.version) - Number(b.version) || a.file.localeCompare(b.file));
 }
 
-async function lock(tx: TransactionSql): Promise<void> {
-  await tx`select pg_advisory_xact_lock(hashtext('mixos:platform-migrations'))`;
-}
-
 export interface PlatformMigrationResult {
   applied: string[];
   alreadyApplied: number;
@@ -81,7 +77,7 @@ export async function migratePlatform(
   const migrations = listPlatformMigrations(dir);
 
   await sql.begin(async (tx) => {
-    await lock(tx);
+    await takeMigrationLock(tx);
     // Checked first rather than `if not exists`, which would announce on every
     // run that there was nothing to do.
     const [{ exists }] = await tx<{ exists: boolean }[]>`
@@ -103,7 +99,7 @@ export async function migratePlatform(
 
   for (const m of migrations) {
     const outcome = await sql.begin(async (tx) => {
-      await lock(tx);
+      await takeMigrationLock(tx);
       const done = await tx`
         select 1 from supabase_migrations.schema_migrations where version = ${m.version}
       `;

@@ -91,6 +91,12 @@ Anything *else* your handler throws becomes a 500, with the message passed
 through `safeErrorMessage()` so a driver error naming a column never reaches the
 browser. You no longer write `safeErrorMessage` yourself — the pipeline does.
 
+The one exception is a failed connector call. Let the `ConnectorError`
+propagate: the response is that connector's envelope with its own status (503
+for a connector nobody has finished setting up, 429 with `Retry-After` for a
+throttle), which `AsyncView` renders as "Not connected" or as an error with
+Retry. See [Failure handling](../connectors/failure-handling.md).
+
 ## `input`: declared or unavailable
 
 An omitted `input` schema does not mean "unvalidated". It means **unavailable**:
@@ -377,7 +383,8 @@ side.
 
 The SDK throws `AppClientError` with the HTTP status and the response body on a
 non-2xx. The body carries `{ error, code }`, so a client can branch on the code
-rather than string-matching the message.
+rather than string-matching the message. After a connector failure `error` is the
+connector's envelope rather than a string, and `connectorErrorOf(err)` returns it.
 
 Requests always go to `/api/apps/<your-slug>/…`; you cannot call another app's
 routes. For that, use [App Services](./app-services.md).

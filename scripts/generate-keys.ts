@@ -3,39 +3,47 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Emit a fresh value for every platform cryptographic key.
+ * Emit a fresh value for every key a deployment needs: AUTH_SECRET,
+ * CRON_SECRET and the six platform cryptographic keys.
  *
- * Enumerates `PLATFORM_KEYS` rather than listing names, so a key added to the
- * inventory is generated here without anyone remembering to update this file —
- * which is the failure mode that produced the problem this split exists to fix.
+ * Enumerates `DEPLOYMENT_SECRETS` and `PLATFORM_KEYS` rather than listing
+ * names, so a key added to either inventory is generated here without anyone
+ * remembering to update this file — which is the failure mode that produced the
+ * problem this split exists to fix.
  *
- *   npx tsx scripts/generate-keys.ts            # all six, paste-ready
+ *   npx tsx scripts/generate-keys.ts            # all eight, paste-ready
  *   npx tsx scripts/generate-keys.ts --missing  # only the ones not already set
  *   npx tsx scripts/generate-keys.ts --check    # exit 1 if any is missing/invalid
  */
 import { randomBytes } from "node:crypto";
 import {
+  DEPLOYMENT_SECRETS,
   PLATFORM_KEYS,
+  missingDeploymentSecrets,
   missingPlatformKeys,
   platformKey,
+  type DeploymentSecretName,
   type PlatformKeyName,
+  type PlatformKeySpec,
 } from "../src/lib/env/keys";
 import { loadEnv } from "./load-env";
 
 const KEY_BYTES = 32;
-const names = Object.keys(PLATFORM_KEYS) as PlatformKeyName[];
+const secretNames = Object.keys(DEPLOYMENT_SECRETS) as DeploymentSecretName[];
+const keyNames = Object.keys(PLATFORM_KEYS) as PlatformKeyName[];
+const total = secretNames.length + keyNames.length;
 
 function main() {
   const mode = process.argv[2];
 
   if (mode === "--check") {
     loadEnv();
-    const missing = missingPlatformKeys();
+    const missing = [...missingDeploymentSecrets(), ...missingPlatformKeys()];
     if (missing.length === 0) {
-      console.log(`All ${names.length} platform keys are set and well-formed.`);
+      console.log(`All ${total} keys are set and well-formed.`);
       return;
     }
-    console.error(`${missing.length} platform key(s) missing or malformed:\n`);
+    console.error(`${missing.length} key(s) missing or malformed:\n`);
     for (const m of missing) console.error(`  ${m.env}\n    ${m.reason}`);
     console.error(
       "\nGenerate the missing ones with:\n  npx tsx scripts/generate-keys.ts --missing",
@@ -46,8 +54,13 @@ function main() {
   const onlyMissing = mode === "--missing";
   if (onlyMissing) loadEnv();
 
-  const wanted = onlyMissing
-    ? names.filter((n) => {
+  const wanted: PlatformKeySpec[] = [
+    ...secretNames
+      .map((n) => DEPLOYMENT_SECRETS[n])
+      .filter((spec) => !onlyMissing || !process.env[spec.env]),
+    ...keyNames
+      .filter((n) => {
+        if (!onlyMissing) return true;
         // The same validation the app applies, so a base64 key a hosting
         // platform generated counts as present.
         try {
@@ -57,19 +70,19 @@ function main() {
           return true;
         }
       })
-    : names;
+      .map((n) => PLATFORM_KEYS[n]),
+  ];
 
   if (wanted.length === 0) {
-    console.log("# Every platform key is already set.");
+    console.log("# Every key is already set.");
     return;
   }
 
   console.log(
-    "# Platform cryptographic keys. Each protects exactly one thing, so rotating",
-    "\n# one has a bounded blast radius. See src/lib/env/keys.ts.\n",
+    "# Keys for a MixOS deployment. Each protects exactly one thing, so rotating\n" +
+      "# one has a bounded blast radius. See src/lib/env/keys.ts.\n",
   );
-  for (const n of wanted) {
-    const spec = PLATFORM_KEYS[n];
+  for (const spec of wanted) {
     console.log(`# ${spec.purpose}`);
     console.log(`# Rotating: ${spec.rotationEffect}`);
     console.log(`${spec.env}=${randomBytes(KEY_BYTES).toString("hex")}\n`);
