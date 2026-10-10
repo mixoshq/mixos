@@ -21,6 +21,8 @@ import { getUserTokens } from "@/lib/connectors/user-config";
 import { getConnectorLog, grantedScopes } from "@/lib/connectors/access";
 import { getScopeStatus } from "@/lib/connectors/scope-status";
 import { getConnectorDependents } from "@/lib/connectors/dependents";
+import { getDisabledConnectors } from "@/lib/connectors/switch";
+import { setConnectorEnabled } from "@/lib/connectors/switch-admin";
 import { TOKEN_KEYS, redirectUriFor } from "@/lib/connectors/oauth";
 import { runConnectorTest } from "@/lib/connectors/test-connection";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
@@ -51,6 +53,10 @@ const OAUTH_MESSAGES: Record<string, { tone: "ok" | "warn"; text: string }> = {
     text: "Save the client ID and secret first, then connect.",
   },
   unsupported: { tone: "warn", text: "This connector does not use OAuth." },
+  disabled: {
+    tone: "warn",
+    text: "This connector is disabled. Enable it, then connect.",
+  },
 };
 
 /**
@@ -89,6 +95,11 @@ export default async function ConnectorsAdminPage({
       ? params.connector
       : null;
 
+  // Which connectors an admin has turned off, and when: one read for the grid.
+  const disabled = await getDisabledConnectors(
+    connectorRegistry.map((c) => c.name),
+  );
+
   const statuses = await Promise.all(
     connectorRegistry.map(async (c) => {
       // Read once, derive everything from it. This used to ask
@@ -124,6 +135,7 @@ export default async function ConnectorsAdminPage({
       // Static, from the manifests — no query, and it counts apps that are
       // shipped rather than only those an admin has switched on.
       const dependents = getConnectorDependents(c.name);
+      const disabledAt = disabled.get(c.name) ?? null;
 
       if (c.auth?.strategy !== "oauth2_authorization_code") {
         return {
@@ -133,6 +145,7 @@ export default async function ConnectorsAdminPage({
           access,
           scopeStatus,
           dependents,
+          disabledAt,
           oauth: null,
         };
       }
@@ -156,6 +169,7 @@ export default async function ConnectorsAdminPage({
         access,
         scopeStatus,
         dependents,
+        disabledAt,
         oauth: {
           connected: Boolean(
             grant?.[TOKEN_KEYS.refresh] || grant?.[TOKEN_KEYS.access],
@@ -243,6 +257,27 @@ export default async function ConnectorsAdminPage({
     return outcome;
   }
 
+  /**
+   * Disable or Enable. Takes effect on the next request everywhere: the app
+   * context, webhooks, OAuth and Test Connection read the switch per request.
+   * Credentials are not touched either way.
+   */
+  async function switchConnector(
+    connectorName: string,
+    enabled: boolean,
+  ): Promise<void> {
+    "use server";
+    const session = await requireReadOnlySession();
+    const admin = await requireAdmin(session);
+    await setConnectorEnabled(connectorName, enabled, {
+      id: admin.id,
+      email: admin.email,
+    });
+    // My Connections lists user-scoped connectors and says when one is off.
+    revalidatePath("/admin/connectors");
+    revalidatePath("/account/connections");
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-start justify-between">
@@ -304,6 +339,7 @@ export default async function ConnectorsAdminPage({
         initialOpen={openConnector}
         configureAction={configureConnector}
         testAction={testConnector}
+        switchAction={switchConnector}
       />
     </div>
   );
