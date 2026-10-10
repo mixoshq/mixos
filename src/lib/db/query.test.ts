@@ -233,8 +233,37 @@ test("upsert without onConflict targets the primary key, as PostgREST does", asy
   const { error } = await db.from("user_app_grants").upsert({ user_id: "u", app_slug: "a", role: null });
 
   assert.equal(error, null);
-  assert.deepEqual(calls[0].params, ['public."user_app_grants"']);
+  assert.deepEqual(calls[0].params, ['"public"."user_app_grants"']);
   assert.match(calls[1].text, / on conflict \("user_id", "app_slug"\) do update set /);
+});
+
+test("a client for another schema qualifies every table with it, and nothing else changes", async () => {
+  const { db, calls } = fakeSql(({ text }) => (text.includes("pg_index") ? [{ name: "id" }] : []));
+  const app = db.schema("app_sales_tracker");
+  await app.from("orders").select("id").eq("status", "open");
+  await app.from("orders").upsert({ id: 1, status: "open" });
+  await db.from("users").select("id");
+
+  assert.equal(
+    calls[0].text,
+    `select (select to_json(_p) from (select _t."id" as "id") as _p) as _r from "app_sales_tracker"."orders" as _t ` +
+      `where _t."status" = (select _f."status" from json_populate_record(null::"app_sales_tracker"."orders", $1::json) as _f)`,
+  );
+  // The default upsert target is looked up in the same schema.
+  assert.deepEqual(calls[1].params, ['"app_sales_tracker"."orders"']);
+  assert.match(calls[2].text, /^insert into "app_sales_tracker"\."orders" as _t /);
+  // The client it came from still reaches public.
+  assert.match(calls[3].text, / from "public"\."users" as _t$/);
+});
+
+test("a schema that is not a plain identifier is refused before any SQL is written", async () => {
+  const { db, calls } = fakeSql();
+  for (const schema of ['app_x"; drop table users; --', "public.users", "app x", ""]) {
+    const { error } = await db.schema(schema).from("orders").select("id");
+    assert.equal(error?.code, "MIXOS_QUERY", schema);
+    assert.match(error?.message ?? "", /Invalid schema name/);
+  }
+  assert.equal(calls.length, 0);
 });
 
 test("update sets only the given columns, from the payload's own types", async () => {

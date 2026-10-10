@@ -38,7 +38,8 @@
 // the mirror is replaced whole or not at all, and two runners take turns.
 
 import type { Sql } from "postgres";
-import { appRegistry } from "../src/generated/app-registry";
+import type { AppManifest } from "../src/lib/apps/types";
+import { appRegistry as builtRegistry } from "../src/generated/app-registry";
 import { takeMigrationLock } from "./migration-lock";
 
 export interface AppRegistrySyncResult {
@@ -46,7 +47,17 @@ export interface AppRegistrySyncResult {
   removed: string[];
 }
 
-export async function syncAppRegistry(sql: Sql): Promise<AppRegistrySyncResult> {
+/** What the mirror records of each app. */
+export type MirroredApp = Pick<AppManifest, "slug" | "name" | "description" | "icon">;
+
+/**
+ * `appRegistry` is this build's registry. A test passes its own, the way it
+ * passes the app migration runner its own apps.
+ */
+export async function syncAppRegistry(
+  sql: Sql,
+  appRegistry: readonly MirroredApp[] = builtRegistry,
+): Promise<AppRegistrySyncResult> {
   const slugs = appRegistry.map((a) => a.slug);
 
   return sql.begin(async (tx) => {
