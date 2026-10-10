@@ -14,6 +14,7 @@
     "prebuild": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
     "pretypecheck": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
     "build": "next build",
+    "vercel-build": "npm run build && tsx scripts/vercel-release.ts",
     "start": "next start",
     "prelint": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
     "lint": "eslint",
