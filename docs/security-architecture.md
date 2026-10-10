@@ -28,6 +28,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Credential config    | `src/lib/connectors/config.ts`                |
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
+| Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
 | Safe error helper    | `src/lib/safe-error.ts`                       |
 | Security headers     | `next.config.ts`                              |
 | App import policy    | `src/lib/apps/import-policy.mjs`              |
@@ -575,7 +576,7 @@ What the platform does between those two boxes, in order:
 | CSRF protection      | Cross-site request forgery    | `SameSite=Lax` cookie, plus double-submit token on cookie-authenticated mutations | `csrf.ts`, Auth.js, Next.js (see §7) |
 | Admin authorization  | Admin-only pages and actions  | `requireAdmin()` re-reads `is_admin` per call | `access.ts` (see §9)         |
 | Server-side admin    | Admin action bypass           | `requireAdmin()` in pages + server actions   | `access.ts`, admin pages     |
-| Rate limiting        | Abuse / DoS                   | Postgres token-bucket, memory pre-filter     | `rate-limit.ts`, gateway     |
+| Rate limiting        | Abuse / DoS, password guessing | Postgres token-bucket, memory pre-filter    | `rate-limit.ts`, gateway, sign-in (§6) |
 | Tier resolution      | Per-request auth decision     | `resolveAuthTier()`, strongest-first, fails closed | `auth-tier.ts`          |
 | App access control   | Unauthorized app access       | `hasAppGrant()` checks `user_app_grants`     | `auth-tier.ts` via `access.ts` |
 | Email domain gate    | Unauthorized user provisioning| `ALLOWED_EMAIL_DOMAINS` env var check        | `access.ts` (`ensureUser`)   |
@@ -724,6 +725,27 @@ x-forwarded-for: <attacker-spoofed>, <real-client-ip>
 
 The pre-filter's in-memory store (`src/lib/rate-limit.ts`) evicts stale entries
 automatically; the Postgres authority is pruned from the cron tick.
+
+### Sign-in attempts
+
+Password sign-in has its own per-IP bucket, `login-credentials`: a burst of 10
+attempts, then one more every 10 seconds, right or wrong. It is charged inside
+the password check itself, the credentials provider's `authorize()`
+(`src/lib/auth/config.ts`, with the limit in `src/lib/auth/sign-in-limit.ts`),
+not in front of a route. So every route that reaches that check draws on one
+budget: the login page's server action, and Auth.js's own
+`POST /api/auth/callback/credentials`, which any client can call with a token
+from `/api/auth/csrf`.
+
+The key is the client IP by the rule above. Auth.js passes `authorize()` a
+request with the client's headers on both routes. On the server-action path,
+`signIn()` copies them from the action's request.
+
+The charge comes first. A refused attempt reads no account and runs no hash, so
+it is cheap and answers the same for a known and an unknown email. The login
+page shows "Too many sign-in attempts. Please try again shortly." Auth.js's
+route answers in its usual error form: a redirect to
+`/login?error=CredentialsSignin&code=rate_limited`.
 
 ---
 
@@ -1362,7 +1384,7 @@ one of these.
 
 | Prefix | Real gate |
 |---|---|
-| `/login`, `/api/auth` | the sign-in flow itself |
+| `/login`, `/api/auth` | the sign-in flow itself, with one per-IP limit on password attempts (§6) |
 | `/api/health` | none — see below |
 | `/manifest.webmanifest` | none; static |
 | `/p` | the public page route (`src/lib/apps/public-page.ts`): the page's own `pageVisibility`, the app being active, and the unlock cookie for a `password` page |

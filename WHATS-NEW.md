@@ -112,6 +112,8 @@ just pulled.
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's
   name, and the release step and the app no longer print it, password included.
+- **Fix:** sign-in attempts are limited on every route that checks a password,
+  including Auth.js's own callback, and those routes share one budget per IP.
 
 ## 2026-10-07
 
