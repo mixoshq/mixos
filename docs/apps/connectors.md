@@ -104,7 +104,7 @@ export default class MyServiceConnector implements BaseConnector {
 
 A connector method that a scheduled job or a multi-page backfill will call has obligations beyond returning data. Get these wrong and the job times out, or keeps burning API quota after the platform has already abandoned it.
 
-**Accept an `AbortSignal` and compose it with your own timeout.** A job passes `ctx.signal`; a route passes `request.signal`. Either way the method must stop when the caller gives up, *and* still enforce its own per-request ceiling:
+**Accept an `AbortSignal` and compose it with your own timeout.** A job and a route both pass `ctx.signal`. Either way the method must stop when the caller gives up, *and* still enforce its own per-request ceiling:
 
 ```ts
 async getCalendarEvents(opts: { /* … */ signal?: AbortSignal }) {

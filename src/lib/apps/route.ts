@@ -79,10 +79,12 @@ export type { AppErrorCode } from "@/lib/apps/errors";
 /**
  * Per-route ceilings.
  *
- * `ms` bounds how long the caller waits. It does NOT stop the handler — see the
- * warning on `withTimeout`. `connectorCalls` is the one that bounds actual
- * spend: every method call on `ctx.connectors.*` is counted, and the route
- * fails once it passes the cap rather than fanning out unboundedly.
+ * `ms` bounds how long the caller waits. When it runs out the caller gets a 504
+ * and `ctx.signal` aborts, but the handler itself is not interrupted — see the
+ * warning on `withTimeout`. Work stops only where the handler passed the signal
+ * on. `connectorCalls` is the one that bounds actual spend: every method call
+ * on `ctx.connectors.*` is counted, and the route fails once it passes the cap
+ * rather than fanning out unboundedly.
  */
 export interface RouteBudget {
   /** Maximum method calls across all of `ctx.connectors`. */
@@ -128,17 +130,32 @@ export type AnonContext = PublicAppContext & {
 
 export type ResolvedContext = AuthedContext | AnonContext;
 
+/** What the pipeline adds to a handler's context, whichever tier won. */
+export interface RouteRuntime {
+  /**
+   * Aborted when the caller goes away or the route's `budget.ms` runs out.
+   *
+   * Running out of budget sends the caller a 504 but cannot interrupt the
+   * handler. Pass this to the connector methods and `ctx.http.fetch` calls
+   * that should stop with the route, and check `signal.aborted` between the
+   * steps of a loop. A server page's `callAppRoute` has no caller to go away,
+   * so there only the budget aborts it.
+   */
+  signal: AbortSignal;
+}
+
 /**
  * The context a handler receives, derived from its declared auth set. Declaring
  * any anonymous auth widens `ctx.user` to `AppContextUser | null`, so the
  * compiler — not a code reviewer — is what makes the handler cover the
  * signed-out branch.
  */
-export type ContextFor<A extends readonly RouteAuth[]> = [
+export type ContextFor<A extends readonly RouteAuth[]> = ([
   Extract<A[number], "password" | "key" | "public">,
 ] extends [never]
   ? AuthedContext
-  : ResolvedContext;
+  : ResolvedContext) &
+  RouteRuntime;
 
 interface BaseRouteSpec<A extends readonly RouteAuth[]> {
   /** Accepted auths. Defaults to `["session"]`. */
@@ -630,6 +647,12 @@ async function executeRoute(
     input = parsed.data;
   }
 
+  // `ctx.signal` aborts on whichever comes first: the caller going away (the
+  // request's own signal, which the HTTP mounts tie to the connection) or the
+  // time budget running out. The timeout below only rejects the caller's
+  // promise; this is what lets a handler stop the work as well.
+  const outOfTime = new AbortController();
+
   // Always wrapped. A cap of 0 means "no connector calls", and the counter
   // rejects the first one; skipping the proxy at 0 would make the strictest
   // declaration an author can write the only unbounded one.
@@ -640,6 +663,7 @@ async function executeRoute(
       def.budget.connectorCalls,
       label,
     ),
+    signal: AbortSignal.any([request.signal, outOfTime.signal]),
   };
 
   const handler = def.handler as (
@@ -651,10 +675,13 @@ async function executeRoute(
   const result = await withTimeout(
     Promise.resolve(handler(ctx, input, request)),
     def.budget.ms,
-    () =>
-      AppError.timeout(
+    () => {
+      const err = AppError.timeout(
         `${label} did not finish within its ${def.budget.ms}ms budget.`,
-      ),
+      );
+      outOfTime.abort(err);
+      return err;
+    },
   );
 
   // A raw route owns its Response: no output schema, no payload cap, and the

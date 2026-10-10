@@ -32,7 +32,9 @@ import type { SystemAppContext, ScopedClient } from "@/lib/hooks/types";
  *     shrink survives the tick boundary. Relaxing matters as much as shrinking —
  *     without it one dense stretch shrinks the window permanently.
  *   - **The empty-result guard**: an upstream outage returns zero rows, not an
- *     error, and writing that through blanks every card on the page.
+ *     error, and writing that through blanks every card on the page. An empty
+ *     window that reaches the present is held; one that ends in the past
+ *     advances, because holding it would stall the sync for good.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -214,8 +216,16 @@ export async function runSync<Item>(
   // An upstream outage returns zero rows rather than an error. Writing that
   // through would blank every card built on this data, so a window that drained
   // with nothing at all does not advance the watermark — the next tick re-reads
-  // the same range, which costs nothing because the writes are upserts.
-  const suspiciouslyEmpty = drained && items === 0 && state?.synced_through != null;
+  // the range, which costs nothing because the writes are upserts.
+  //
+  // Only while the window reaches the present, though. Such a window grows with
+  // the clock, so the next tick reads it again with more time in it, and once
+  // it is a full window wide it ends in the past. A window that ends in the past
+  // never changes, so holding it would re-read the same empty range on every
+  // tick and the sync would never move again. That one advances.
+  const reachesNow = to.getTime() >= now;
+  const suspiciouslyEmpty =
+    drained && items === 0 && state?.synced_through != null && reachesNow;
 
   let note: string | undefined;
   if (drained && !suspiciouslyEmpty) {
