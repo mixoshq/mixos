@@ -723,20 +723,19 @@ async function runInstall(
   }
 
   /*
-    `requiresMixOS` has been parsed and shown to admins since this module was
-    written, and enforced against nothing, because no part of a running instance
-    knew what version of MixOS it was. `src/generated/build-info.ts` now carries
-    the release this image was built from, so the floor the publisher declared
-    can actually hold.
+    The publisher's floor, compared with this build's version: `package.json`'s,
+    which every build stamps into `src/generated/build-info.ts` (see
+    `src/lib/platform/version.ts`). Every checkout and every deployment has one,
+    so the floor the publisher declared holds wherever this runs.
 
     Unlike `yanked`, this has no override. A withdrawn release is a risk an admin
     is in a position to weigh; a release that needs platform features this build
     does not have is not a judgement call, and the failure it produces lands on
     users rather than on the admin who accepted it.
 
-    An untagged build cannot compare and says so rather than refusing — see the
-    reasoning in `satisfiesMinimum`. That path is logged, because "declared but
-    not enforced" silently is exactly the state this change exists to end.
+    A floor that is not a version cannot be compared, and is allowed with a
+    reason rather than refused — see `satisfiesMinimum`. That path is logged,
+    because a floor that was declared and not enforced should never be silent.
   */
   const compat = satisfiesMinimum(manifest.requiresMixOS);
   if (!compat.allowed) {
