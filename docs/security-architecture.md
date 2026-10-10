@@ -26,6 +26,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Push subscribe API   | `src/app/api/push/*/route.ts`                 |
 | Client SDK           | `src/lib/apps/sdk.ts`                         |
 | Credential config    | `src/lib/connectors/config.ts`                |
+| Connector switch     | `src/lib/connectors/switch.ts`                |
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
 | Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
@@ -1471,6 +1472,37 @@ Declaring the provider's timestamp header, where it signs one, removes that.
 **Do not swallow errors in `handleWebhook()`.** Throw. A swallowed error loses the
 delivery for good; a thrown one makes the provider retry.
 
+### Turning a connector off
+
+An admin can **Disable** a connector at Admin > Connectors and **Enable** it
+again. The switch is a `platform_settings` row, `connector.disabled.<name>`,
+whose value is when it was disabled
+([`src/lib/connectors/switch.ts`](../src/lib/connectors/switch.ts)). It is
+stored in the database rather than in `connector.json`, so whoever publishes a
+connector cannot turn it back on.
+
+While it is off, nothing reaches the connector:
+
+| Where | What happens |
+|---|---|
+| The app context (`loadTenantConnectors` in `src/lib/apps/context.ts`): app routes, public routes, scheduled jobs and App Services | The connector is not imported or constructed. The app gets a stand-in whose every call fails with a `ConnectorError` saying an administrator disabled it, which a route returns in the usual envelope. |
+| MCP tools | Their connectors come from the same context. The read-only wrapper (`src/lib/apps/read-only.ts`) passes the stand-in on unchanged, and the broker gives the model its message. |
+| `POST /api/webhooks/<name>` | The same 401 as a connector with no signing secret, before anything is decrypted, claimed or run. |
+| OAuth start and callback (`src/lib/connectors/oauth-flow.ts`) | Refused with `?oauth=disabled`. The callback refuses before the code is exchanged, so no grant is stored. |
+| Test Connection (`src/lib/connectors/test-connection.ts`) | Refused without calling the provider. |
+
+If the switch can't be read, none of these reaches the connector: the app
+context loads no connectors at all, and the others fail instead of going ahead.
+
+Activating an app does not check the switch. An app activated while a connector
+it requires is disabled runs, and its calls to that connector fail as above.
+
+**Credentials are kept.** Disabling doesn't touch `connector_configs`, or
+anyone's grant in `user_connector_oauth`, so enabling needs nothing entered
+again. That also means disabling is not a response to a leaked credential: an
+admin who suspects one revokes it at the provider and enters a new one. Disable
+and Enable are audited (§28).
+
 ---
 
 ## 20. Scheduled Jobs
@@ -1849,10 +1881,13 @@ would in fact survive, but retention that depends on a `WHERE` clause in another
 module is not a retention policy.
 
 Currently recorded: `connector.configure`, `connector.test`,
-`app.password.set`, `app.password.clear`, `app.activate`, `app.deactivate`,
-`app.missing`, `app.returned`, `app.job.run`, `app.job.enable`,
-`app.job.disable`, `scheduler.start`, `scheduler.stop`, `user.grant.add`,
-`user.grant.revoke`, `user.role.set`.
+`connector.disable`, `connector.enable`, `app.password.set`,
+`app.password.clear`, `app.activate`, `app.deactivate`, `app.missing`,
+`app.returned`, `app.job.run`, `app.job.enable`, `app.job.disable`,
+`scheduler.start`, `scheduler.stop`, `theme.apply`, `user.grant.add`,
+`user.grant.revoke`, `user.role.set`. `connector.disable` and
+`connector.enable` name the apps that declare the connector, in `details` as
+`requiredBy` and `optionalFor`.
 
 **The Scheduled Jobs page's actions.** Run now, Enable and Disable are
 `app.job.*` rows against the app, with the job in `details`. Start and Stop
