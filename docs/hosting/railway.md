@@ -95,6 +95,10 @@ release step in a container of it, and only then replaces the running
 deployment, waiting for `/api/health/ready`. A failed release step fails the
 deploy and leaves the previous one serving.
 
+The admin pages show the MixOS version and the commit the running deployment
+was built from, which Railway sets as `RAILWAY_GIT_COMMIT_SHA` on deploys from
+GitHub.
+
 ## Troubleshooting
 
 - **The release step can't connect, with a TLS or SSL error.** Set

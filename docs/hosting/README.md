@@ -47,6 +47,7 @@ apps you add are in the build.
 | `CRON_SECRET` | Yes | The bearer token the tick sends. Without it `/api/cron` refuses every call, and jobs never run. |
 | `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | For the first deploy | The release step creates this account if no account has the email. It never changes an existing one, so the variables are safe to leave set. |
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind and install from it. See [Fixing what an instance runs](#fixing-what-an-instance-runs). |
+| `MIXOS_COMMIT` | No | The commit the admin pages show beside the MixOS version. For the Docker image it's a build argument. See [Which build is running](#which-build-is-running). |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated domains allowed to sign in. Blank: any. |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | No | Web Push, for apps that send notifications. |
 
@@ -89,6 +90,11 @@ On those, the flags decide whether the catalogue can be browsed at all. They
 lock installs down on an instance that runs from a checkout.
 [docs/security-architecture.md](../security-architecture.md#turning-it-off)
 has the detail.
+
+Those deployments browse mixos.org. `MIXOS_REPOSITORY_URL`, which points a
+development checkout at another catalogue, is ignored there unless it names the
+deployment's own machine (`localhost`, `127.0.0.1`, `[::1]` or
+`host.docker.internal`), and the server log says when it is.
 
 ### The release step
 
@@ -141,6 +147,28 @@ recorded:
 
 The audit log records both, as `app.missing` and `app.returned`, with
 `release-step` as the actor.
+
+### Which build is running
+
+The admin pages show the MixOS version and the commit the deployment was built
+from, for example `MixOS 0.4.2 · commit 3e1f0a2`, so you can check that a deploy
+landed. Only admins see them.
+
+The version is `package.json`'s, stamped into every build. The commit comes from
+the host:
+
+| Host | Where the commit comes from |
+| --- | --- |
+| Docker Compose | `MIXOS_COMMIT=$(git rev-parse HEAD)` in front of the build command. See [docker-compose.md](docker-compose.md#upgrading). |
+| Coolify | `MIXOS_COMMIT=$SOURCE_COMMIT` in the resource's environment. See [docker-compose.md](docker-compose.md#coolify). |
+| Dokploy | Nothing maps it, so it shows as unknown. |
+| Render | `RENDER_GIT_COMMIT`, which Render sets. |
+| Railway | `RAILWAY_GIT_COMMIT_SHA`, which Railway sets on deploys from GitHub. |
+| Vercel | `VERCEL_GIT_COMMIT_SHA`, which Vercel sets. |
+
+The app takes the first of `MIXOS_COMMIT`, `VERCEL_GIT_COMMIT_SHA`,
+`RENDER_GIT_COMMIT` and `RAILWAY_GIT_COMMIT_SHA` that holds a commit SHA. An
+empty or malformed value is skipped. With none, the commit shows as unknown.
 
 ### The database role
 
