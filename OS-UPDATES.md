@@ -49,7 +49,7 @@ change, exactly as changing `AppManifest` is.
 
   The comparison is `<`, not `≠`: a database *ahead* of the image is the normal ordering (migrate, then deploy), and only the reverse is refused.
 - **What app migrations may contain.** `scripts/app-sql-policy.ts` is an allowlist: every statement in an app's migrations, every node of it, has to be something it names, and every function an expression calls has to be in `ALLOWED_FUNCTIONS`. Widening it widens what any installed app can leave in the database to run as the platform's role, so a change there gets the review a change to the platform schema gets. See `docs/security-architecture.md` §3.2.
-- **ESLint rules.** The `eslint.config.mjs` enforces security boundaries — apps cannot import the database client or connector modules directly. If you modify these rules, understand why they exist (see `docs/secure-edge-gateway-architecture.md`).
+- **App containment.** `src/lib/apps/import-policy.mjs` is the list of what app code may import, and `scripts/app-containment.ts` holds every app to it, and to the environment, network and HTML bans, on every build and every Registry install. `eslint.config.mjs` carries the same rules as editor feedback. If you modify them, understand why they exist (see `docs/secure-edge-gateway-architecture.md` and `docs/security-architecture.md` §24).
 - **Guide documentation.** If you add a new manifest field, hook, or developer-facing feature, update the relevant guide page (`src/components/apps/guide-tabs.tsx` or `src/components/connectors/connector-guide-tabs.tsx`) — or, for a theme-system change, the matching file under `docs/themes/`.
 
 ## Key files

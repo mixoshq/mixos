@@ -60,6 +60,7 @@ import {
   validateHookWiring,
 } from "./hook-checks";
 import { formatFindings, scanAppContainment } from "./app-containment";
+import { isScannedFile } from "../src/lib/apps/import-policy.mjs";
 import {
   validateConnectorMethods,
   validateConnectorTelemetry,
@@ -193,6 +194,42 @@ function countPages(dir: string): number {
     }
   }
   return n;
+}
+
+/**
+ * The entry points the registry makes loadable that the containment scan did
+ * not read, relative to the app. Empty for a clean app.
+ *
+ * The scan reads an app's source and refuses any import of a file it skipped,
+ * but an entry point is loaded by the platform, not imported by the app: a
+ * widget's `component`, a page, a job, a sync, a service, an MCP tool or
+ * `hooks.ts`. Each is named by the manifest or found on disk, so each is held
+ * to the same rule here. Routes are checked before the generator imports them,
+ * in scanApiRoutes().
+ */
+function unscannedEntryPoints(appDir: string, manifest: AppManifest): string[] {
+  const real = fs.realpathSync(appDir);
+  const entries: string[] = ["hooks.ts", "widgets.ts", ...manifest.widgets.map((w) => w.component)];
+  for (const [dir, names] of [
+    ["jobs", manifest.schedules.map((s) => s.name)],
+    ["sync", manifest.sync.map((s) => s.name)],
+    ["services", manifest.provides.map((s) => s.name)],
+    ["mcp", manifest.mcp.map((t) => t.name)],
+  ] as const) {
+    for (const name of names) entries.push(`${dir}/${name}.ts`, `${dir}/${name}.tsx`);
+  }
+  const pages = (dir: string, prefix: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) pages(path.join(dir, entry.name), `${prefix}${entry.name}/`);
+      else if (entry.name === "Main.tsx" || entry.name === "Main.ts") entries.push(`${prefix}${entry.name}`);
+    }
+  };
+  if (fs.existsSync(path.join(appDir, "pages"))) pages(path.join(appDir, "pages"), "pages/");
+
+  return entries.filter((rel) => {
+    const full = path.resolve(appDir, rel);
+    return fs.existsSync(full) && !isScannedFile(real, fs.realpathSync(full));
+  });
 }
 
 /**
@@ -439,6 +476,14 @@ async function scanApiRoutes(
         throw new FatalManifestError(
           `apps/${slug}/api/${routePath}/route.ts: optional catch-all segments (${optionalCatchAll}) are not supported. ` +
             `Use a required catch-all ([...name]) instead.`,
+        );
+      }
+
+      // A route in a directory the containment scan skips (a dot-directory,
+      // say) is code nobody judged, and importing it here would run it.
+      if (!isScannedFile(fs.realpathSync(appDir), fs.realpathSync(routeFile))) {
+        throw new AppRejectedError(
+          `api/${segments.join("/")}/route.ts is in a directory the containment scan does not read, so it cannot be a route.`,
         );
       }
 
@@ -1533,6 +1578,15 @@ async function scanApps(): Promise<AppManifest[]> {
         ...(pageVisibility ? { pageVisibility } : {}),
         ...(apiVisibility ? { apiVisibility } : {}),
       };
+
+      const unscanned = unscannedEntryPoints(appDir, manifest);
+      if (unscanned.length > 0) {
+        throw new AppRejectedError(
+          `the platform would load ${unscanned.join(", ")}, which the containment scan does not read: ` +
+            `code in a dot-directory, in assets/, plans/, migrations/ or screenshots/, or outside the app. ` +
+            `Move it beside the rest of the app's source.`,
+        );
+      }
 
       copyScreenshots(manifest.screenshots, "apps", entry.name, appDir);
       copyBrandLogos(manifest.branding, entry.name, appDir);

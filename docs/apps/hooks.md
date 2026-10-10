@@ -65,8 +65,9 @@ registrations on the next request. Adding `hooks.ts` for the first time, or
 changing `branding` in `app.json`, changes the generated registry, so restart
 `npm run dev`, which regenerates it.
 
-`hooks.ts` runs server-side and is held to the same import rules as the rest of
-`apps/**`: no connectors, no database.
+`hooks.ts` runs server-side and imports from the same list as the rest of the
+app (see [What an app can import](./architecture.md#what-an-app-can-import)): no
+connectors, no database.
 
 **Brand hooks must be registered here.** The other hooks can still be
 registered elsewhere for now.
@@ -75,9 +76,11 @@ registered elsewhere for now.
 
 Register listeners in `hooks.ts`, and fire hooks from server code with
 `context.hooks`. Both are registrars attributed to your app, which is what
-prefixes your hook names and checks cross-app consent. The bare `hooks` export
-of `@/lib/hooks` belongs to no app, so it takes core hooks only. A registrar
-has four methods:
+prefixes your hook names and checks cross-app consent. The hook system itself
+is not app code's to import: `@/lib/hooks` belongs to no app and can make a
+registrar for any of them, so the build refuses it at runtime.
+`import type { HookRegistrar } from "@/lib/hooks"` is fine. A registrar has four
+methods:
 
 - `hooks.addAction(name, callback, priority?)` — register a callback for an action hook
 - `hooks.addFilter(name, callback, priority?)` — register a callback for a filter hook

@@ -28,8 +28,10 @@
 // The client has full access to every table in `public`, and its role is a
 // member of every app's role, so `.schema()` reaches any app's tables too. It
 // must never be constructed in code that reaches the browser — it lives behind
-// server components, server actions and route handlers, and the ESLint rules in
-// eslint.config.mjs keep app code from importing it at all.
+// server components, server actions and route handlers. App code cannot import
+// it at all: it is not on the app import list (src/lib/apps/import-policy.mjs),
+// which the registry generator enforces on every build and every Registry
+// install.
 import { sql } from "./client";
 import { DbClient } from "./query";
 
