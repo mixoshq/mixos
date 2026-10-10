@@ -40,6 +40,14 @@ just pulled.
   both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
   new app, and the old slug keeps the old data. Migration 0010; run
   `npm run db:local` to apply it.
+- **Two platform migrations can't share a number.** The ledger records a
+  migration by its number, so the release step and `npm run db:migrate` applied
+  one of two files with the same number and silently skipped the other. Now
+  they apply nothing, the build and `npm run dev:docker` stop, and Danger fails
+  a PR that adds a number already on `main`, each naming both files and the
+  next free number. If a merge brings in a migration with your number, rename
+  yours to the next free number and change its `platform_schema_version` value
+  to match.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 
