@@ -12,6 +12,10 @@
  *
  * ── THE ORDER OF OPERATIONS IS THE SECURITY MODEL ───────────────────────────
  *
+ * Before the lock: the kind's install flag, then `assertInstallable` (not a
+ * built deployment, a writable folder, a generator to run). Then, under the
+ * `repository.register` lock, with the target directory confirmed absent:
+ *
  * 1.  Ask mixos.org how to install → commit, download URL, content hash.
  * 2.  Refuse a yanked release unless the admin has been shown why and insisted.
  * 3.  Download from GitHub, pinned to the commit, through the host allowlist.
@@ -23,6 +27,10 @@
  * 9.  Run the project registry generator — the authoritative validation.
  * 10. If the generator rejected it, remove the directory and regenerate again,
  *     so a failed registration leaves the instance exactly as it was.
+ *
+ * Steps 7, 8 and 10 each begin by confirming the lock is still this
+ * registration's (`lease.assertHeld()`, see `installExtension`), and stop
+ * without touching the disk when it is not.
  *
  * Steps 3–5 are ordered that way deliberately: nothing untrusted touches the
  * filesystem before the hash has been checked. An extract-then-verify pipeline
@@ -51,7 +59,7 @@ import { spawn } from "child_process";
 import { fetchInstallManifest } from "./client";
 import { fetchExtensionTree } from "./fetch-source";
 import { verifyContentHash } from "./content-hash";
-import { withPlatformLock } from "../platform/lock";
+import { LockLostError, withPlatformLock, type PlatformLease } from "../platform/lock";
 import { satisfiesMinimum } from "../platform/version";
 import type { TarEntry } from "./tar";
 import { isVerifiableHash, type ExtensionKind, type InstallManifest } from "./types";
@@ -188,7 +196,9 @@ export class InstallError extends Error {
       | "invalid-package"
       | "rejected-by-registry"
       | "generator-failed"
-      | "write-failed",
+      | "write-failed"
+      | "lock-lost"
+      | "lock-unconfirmed",
     /** The generator's own output, when it is what refused. */
     readonly detail?: string,
   ) {
@@ -459,11 +469,24 @@ function preflight(kind: ExtensionKind, slug: string, entries: TarEntry[]): void
  * The staging directory is dot-prefixed because the generator skips entries
  * beginning with `.`, so even a crash between write and rename leaves nothing
  * that a later build will try to read.
+ *
+ * Each of the two steps starts by confirming the lease: writing, which first
+ * clears what an earlier run left in the staging directory, and the rename.
+ * Neither check sits inside a cleanup path. A registration that has lost the
+ * lock may share that staging directory with the one that holds it now, so it
+ * leaves it as a crash would, for the next registration of the slug to clear.
+ *
+ * Exported for its tests; `runInstall` is the only caller.
  */
-async function writeTree(dir: string, entries: TarEntry[]): Promise<void> {
+export async function writeTree(
+  dir: string,
+  entries: TarEntry[],
+  lease: PlatformLease,
+): Promise<void> {
   const staging = path.join(path.dirname(dir), `.installing-${path.basename(dir)}`);
-  await fs.rm(staging, { recursive: true, force: true });
 
+  await fence(lease, "Nothing was written.");
+  await fs.rm(staging, { recursive: true, force: true });
   try {
     for (const entry of entries) {
       const target = path.resolve(staging, entry.path);
@@ -480,13 +503,58 @@ async function writeTree(dir: string, entries: TarEntry[]): Promise<void> {
       // the mode of a file it places in the checkout can set the setuid bit.
       await fs.writeFile(target, entry.data, { mode: 0o644 });
     }
+  } catch (err) {
+    await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+    throw asWriteFailure(err);
+  }
+
+  await fence(lease, "Nothing was moved into place.");
+  try {
     await fs.rename(staging, dir);
   } catch (err) {
     await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
-    if (err instanceof InstallError) throw err;
+    throw asWriteFailure(err);
+  }
+}
+
+function asWriteFailure(err: unknown): InstallError {
+  if (err instanceof InstallError) return err;
+  return new InstallError(
+    `Could not write to disk: ${err instanceof Error ? err.message : String(err)}`,
+    "write-failed",
+  );
+}
+
+/**
+ * `lease.assertHeld()`, with a failure turned into what the admin is told: why
+ * this stopped, and `left`, what is on disk at the point it did.
+ *
+ * Two failures, said apart. `lock-lost` is a lease that has passed to someone
+ * else. `lock-unconfirmed` is a check that could not reach the database, which
+ * stops the registration at the same point, because an unconfirmed lease is
+ * not one to change the disk under.
+ */
+async function fence(lease: PlatformLease, left: string, detail?: string): Promise<void> {
+  try {
+    await lease.assertHeld();
+  } catch (err) {
+    if (err instanceof LockLostError) {
+      throw new InstallError(
+        `This registration was paused for longer than its lock lasts (a laptop going ` +
+          `to sleep can do that), so another registration may hold the lock now. It ` +
+          `stopped here rather than change files the other one may be using. ${left}`,
+        "lock-lost",
+        detail,
+      );
+    }
+    // The database's own words stay in the log: they can name hosts and roles.
+    console.error("[repository] could not confirm the register lock:", err);
     throw new InstallError(
-      `Could not write to disk: ${err instanceof Error ? err.message : String(err)}`,
-      "write-failed",
+      `This registration could not confirm with the database that it still holds ` +
+        `its lock, so it stopped here rather than risk changing files another ` +
+        `registration may be using. ${left}`,
+      "lock-unconfirmed",
+      detail,
     );
   }
 }
@@ -560,9 +628,10 @@ const GENERATOR_TIMEOUT_MS = 120_000;
  *
  * tsx's CLI runs the script in a child process of its own. A kill aimed at the
  * CLI alone leaves that child running with these pipes open, so the run never
- * settles. Signalling the group ends the CLI, the script and anything either
- * started. One consequence: a Ctrl-C to the dev server does not reach a run
- * already in progress, which finishes on its own.
+ * settles — and the register lock, renewed for as long as the run lasts, would
+ * never be released. Signalling the group ends the CLI, the script and anything
+ * either started. One consequence: a Ctrl-C to the dev server does not reach a
+ * run already in progress, which finishes on its own.
  *
  * Not on Windows, which has no process groups to signal and where `detached`
  * opens a console window. MixOS runs there only inside WSL.
@@ -706,19 +775,37 @@ export async function resolveInstall(
  *
  * The lock is instance-wide rather than per-slug because the contended resource
  * is the generated registry, which every kind and every slug shares.
+ *
+ * ── AND WHY EVERY DISK CHANGE CHECKS IT FIRST ───────────────────────────────
+ *
+ * The lock is a lease (src/lib/platform/lock.ts) that anyone may take once it
+ * has gone 15 minutes without renewal, and a registration can be paused for
+ * longer than that: a laptop running `next dev` goes to sleep mid-download,
+ * wakes up and carries on. So the lease renews itself every minute while this
+ * runs, and `lease.assertHeld()` comes before writing the staging tree, before
+ * the rename and before the rollback. A registration that finds the lock gone
+ * stops there with `lock-lost`, says what it left on disk, and cleans nothing
+ * up: what it would remove may be the new holder's.
+ *
+ * Renewal holds the lock for as long as this runs, so everything here has a
+ * time limit: the repository and GitHub requests, and the generator, whose
+ * whole process group `spawnCapture` ends at the limit.
  */
 export async function installExtension(
   kind: ExtensionKind,
   slug: string,
   options: InstallOptions = {},
 ): Promise<InstallResult> {
-  // Before the lock: a kind this instance does not install should not hold up
-  // anyone else's registration while it is refused.
+  // Before the lock: a kind this instance does not install, or a deployment
+  // that cannot register anything, should not hold up anyone else's
+  // registration while it is refused.
   if (!installEnabled(kind)) {
     throw new InstallError(installDisabledMessage(kind), "disabled");
   }
-  return withPlatformLock("repository.register", () =>
-    runInstall(kind, slug, options),
+  await assertInstallable(kind);
+
+  return withPlatformLock("repository.register", (lease) =>
+    runInstall(kind, slug, options, lease),
   );
 }
 
@@ -726,9 +813,8 @@ async function runInstall(
   kind: ExtensionKind,
   slug: string,
   options: InstallOptions,
+  lease: PlatformLease,
 ): Promise<InstallResult> {
-  await assertInstallable(kind);
-
   const { dir, rel } = resolveInstallDir(kind, slug);
 
   // Refuse to overwrite. Upgrading in place is a different operation with a
@@ -795,13 +881,24 @@ async function runInstall(
 
   preflight(kind, slug, entries);
 
-  await writeTree(dir, entries);
+  // Steps 7 and 8, each fenced by the lease (see writeTree).
+  await writeTree(dir, entries, lease);
 
   const registry = await regenerateRegistry(kind, slug);
   if (registry.ran && !registry.ok) {
     // Undo. Removing the directory is not enough on its own: the failed run may
     // already have rewritten src/generated, so the generator is run once more
     // to restore a registry that matches what is actually on disk.
+    //
+    // Only while the lock is still this registration's. Without it, another
+    // registration may be running the generator over these same files, so the
+    // admin is told what to clean up instead.
+    await fence(
+      lease,
+      `${rel} is still on disk and was not registered: delete it, then run ` +
+        `\`npm run registry\`.`,
+      registry.output,
+    );
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     await regenerateRegistry(kind, slug).catch(() => {});
 
