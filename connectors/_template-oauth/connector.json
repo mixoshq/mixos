@@ -34,7 +34,8 @@
     "docs": [
       {
         "label": "OAuth scopes reference",
-        "url": "https://docs.provider.example.com/oauth/scopes"
+        "url": "https://docs.provider.example.com/oauth/scopes",
+        "why": "Open it to confirm what each requested scope allows before approving the consent screen."
       }
     ]
   },

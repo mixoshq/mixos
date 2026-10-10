@@ -13,7 +13,7 @@ import type { BaseConnector } from "@/lib/connectors/types";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getDecryptedConfig } from "@/lib/connectors/config";
-import { getUserTokens } from "@/lib/connectors/user-config";
+import { initializeWithUserGrant } from "@/lib/connectors/user-grant";
 import { createScopedClient } from "./scoped-db";
 import { createNotificationsClient } from "./notifications";
 import { createServicesClient } from "./services";
@@ -208,39 +208,43 @@ async function loadTenantConnectors(
 
         The client id and secret still come from the tenant row — the
         application is registered once — and only the tokens are the person's
-        own. Two ways this legitimately produces nothing:
+        own. An access token that has expired is renewed here, before the
+        handler runs, so `configured` describes the grant as it is now. Three
+        ways this legitimately produces nothing:
 
           · no user in this context (a scheduled job, a public page). The build
             guard rejects a job declaring one, so reaching here means a surface
             that genuinely has no caller.
           · the user has never connected.
+          · the provider will no longer renew their grant (revoked, expired, or
+            never issued a refresh token). They connect again.
 
-        Either way the connector is OMITTED rather than handed over unusable.
+        Each way the connector is OMITTED rather than handed over unusable.
         An app already checks `context.connectors.x` for presence; a connector
         that is present and throws on first use is a worse contract than one
         that is absent, and the absence is the same shape the app must already
         handle for a connector an admin has not configured.
       */
-      if (connectorManifest(connName)?.userScoped) {
+      const declared = connectorManifest(connName);
+      if (declared?.userScoped) {
         if (!userId) {
           console.warn(
             `[${logTag}] "${connName}" is user-scoped and this context has no user — omitted`,
           );
           continue;
         }
-        let userTokens: Record<string, string> | null = null;
         try {
-          userTokens = await getUserTokens(userId, connName);
+          const connected = await initializeWithUserGrant(instance, {
+            userId,
+            manifest: declared,
+            tenantCredentials: tenantCreds,
+          });
+          if (!connected) continue; // no usable grant — nothing to hand over
         } catch (err) {
-          console.error(`[${logTag}] getUserTokens failed for "${connName}":`, err);
-          continue;
-        }
-        if (!userTokens) continue; // not connected — nothing to hand over
-
-        try {
-          await instance.initialize({ ...(tenantCreds ?? {}), ...userTokens });
-        } catch (err) {
-          console.error(`[${logTag}] ${connName}.initialize() threw:`, err);
+          console.error(
+            `[${logTag}] "${connName}": the user's grant could not be loaded:`,
+            err,
+          );
           continue;
         }
 
@@ -265,7 +269,9 @@ async function loadTenantConnectors(
           console.error(`[${logTag}] ${connName}.initialize() threw:`, err);
           continue;
         }
-      } else {
+      } else if (declared?.credentialFields.length !== 0) {
+        // A connector declaring no credential fields needs none, so having no
+        // row is its normal state rather than something to warn about.
         console.warn(
           `[${logTag}] no decrypted credentials for "${connName}" — connector will report as unconfigured`,
         );

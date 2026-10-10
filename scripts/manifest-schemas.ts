@@ -980,6 +980,23 @@ const connectorDocLinkSchema = z.strictObject({
     .refine((u) => u.startsWith("https://"), "must be an https:// URL"),
 });
 
+/**
+ * A `setup.docs` entry: reference material shown below the checklist, not a
+ * step. `why` is required because a link inside a step is explained by the
+ * sentence around it, and this one has nothing around it — "Gmail API scopes"
+ * does not tell an admin whether they need it now, later or never. If its
+ * author cannot say when someone would open it, the link should not ship.
+ */
+const connectorReferenceLinkSchema = connectorDocLinkSchema.extend({
+  why: z
+    .string()
+    .min(1)
+    .max(
+      300,
+      "a tooltip, not an essay — say when someone would open this link",
+    ),
+});
+
 const connectorSetupStepSchema = z
   .strictObject({
     /**
@@ -1092,7 +1109,7 @@ const connectorSetupSchema = z.strictObject({
   steps: z.array(connectorSetupStepSchema).min(1),
   notes: connectorSetupNotesSchema.optional(),
   /** Reference material — scope tables, API docs. Not steps to carry out. */
-  docs: z.array(connectorDocLinkSchema).optional(),
+  docs: z.array(connectorReferenceLinkSchema).optional(),
 });
 
 /**
@@ -1180,6 +1197,12 @@ export const RawConnectorManifestSchema = z
     /** Where a user reports a problem with the connector. */
     connectorSupportUrl: listingUrlSchema.optional(),
     setup: connectorSetupSchema.optional(),
+    /**
+     * What an admin enters. Omit it only for a connector that needs no
+     * credentials (auth.strategy "none") — that one is ready as soon as it is
+     * installed, and the cross-field check below rejects any other strategy
+     * without it.
+     */
     credentialFields: z.array(credentialFieldSchema).optional(),
     authors: z.array(authorSchema).optional(),
     telemetry: z.array(connectorTelemetryEventSchema).optional(),
@@ -1226,6 +1249,21 @@ export const RawConnectorManifestSchema = z
           `exactly one setup step must set "showRedirectUri": true (found ${redirectSteps.length}). ` +
           "A three-legged connector cannot be configured without registering the redirect URI upstream.",
         path: ["setup", "steps"],
+      });
+    }
+
+    // A connector that declares no credential fields asks for nothing, and the
+    // platform treats it as ready as soon as it is installed — a public API.
+    // One that authenticates cannot be that: with no field there is nothing an
+    // admin could ever enter, so it could never make a call.
+    const strategy = m.auth?.strategy ?? "none";
+    if ((m.credentialFields ?? []).length === 0 && strategy !== "none") {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `auth.strategy "${strategy}" needs a credential, but credentialFields is empty. ` +
+          `Declare the fields an admin fills in; only a connector with auth.strategy "none" may omit them.`,
+        path: ["credentialFields"],
       });
     }
 
