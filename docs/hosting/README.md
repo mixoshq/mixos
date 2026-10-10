@@ -132,7 +132,8 @@ platform schema the build expects and every app migration the build carries,
 so point the platform's health check there. On a host that waits for it, a
 deploy that skips the release step, or whose release step failed, does not
 serve errors. On one that doesn't, a platform schema behind the build shows
-[the maintenance page](#the-maintenance-page) instead. On Vercel the release
+[the maintenance page](#the-maintenance-page) instead, and an app whose own
+migrations are behind says it is being updated. On Vercel the release
 step is part of the production build, so a failed one fails the build and the
 previous deployment keeps serving.
 
@@ -152,9 +153,15 @@ database: `node ops/release.cjs` in the image, or
 `DATABASE_URL='<connection string>' npm run release` from a checkout. The
 instance serves again within 30 seconds, with no restart.
 
-App migrations behind don't close the instance. Readiness reports them as
-`"reason": "app-migrations-behind"`, the log names the files, and the same
-release step applies them.
+An app whose own migrations are behind doesn't close the instance. Only that
+app waits: its pages show a plain "Being updated" page, and its API routes
+answer 503 with `Retry-After: 30`, both saying "This app is being updated. Try
+again shortly." Its scheduled jobs wait too, and stay due. Every other app and
+page serves as usual. Readiness reports it as
+`"reason": "app-migrations-behind"`, and the server log names the app and its
+files in a line starting `Serving "being updated" for`. The same release step
+applies them, and the app serves again within 30 seconds. An app an admin has
+switched off answers as it always does.
 
 On a host that waits for readiness before it switches traffic, visitors keep
 the previous version and never see the page.

@@ -268,10 +268,14 @@ view-model your UI renders and strip everything that only exists to be looked at
 The broker rejects with a code, delivered to the model as a readable tool result
 (not a protocol error — that would be invisible to it and just abort the turn):
 
-`NOT_FOUND` · `NOT_EXPOSED` · `NOT_CONSENTED` · `FORBIDDEN_USER` · `NO_HANDLER` ·
-`INVALID_INPUT` · `TIMEOUT` (30s) · `PAYLOAD_TOO_LARGE` (1 MB) · `TOOL_ERROR`
+`NOT_FOUND` · `NOT_EXPOSED` · `NOT_CONSENTED` · `FORBIDDEN_USER` · `APP_UPDATING` ·
+`NO_HANDLER` · `INVALID_INPUT` · `TIMEOUT` (30s) · `PAYLOAD_TOO_LARGE` (1 MB) ·
+`TOOL_ERROR`
 
 Your thrown errors become `TOOL_ERROR`, passed through `safeErrorMessage()`.
+`APP_UPDATING` means your app's own migrations are behind this build: a call
+answers "This app is being updated. Try again shortly.", and your tools are
+left out of the tool list until the migrations are applied.
 
 ## What the operator sees
 
