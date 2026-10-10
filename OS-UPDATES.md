@@ -64,7 +64,7 @@ change, exactly as changing `AppManifest` is.
 | Auth & middleware | `src/lib/auth/session.ts`, `src/proxy.ts` |
 | Hook system | `src/lib/hooks/hook-system.ts` |
 | Build identity | `src/generated/build-info.ts` (generated), `src/lib/platform/version.ts` |
-| Schema gate | `src/lib/platform/schema-version.ts`, `src/app/api/health/ready/route.ts` |
+| Schema gate | `src/lib/platform/schema-version.ts`, `src/lib/platform/app-migrations.ts`, `src/app/api/health/ready/route.ts` |
 | Instance-wide locks | `src/lib/platform/lock.ts` |
 | Database migrations | `supabase/migrations/` |
 | Security architecture | `docs/secure-edge-gateway-architecture.md` |

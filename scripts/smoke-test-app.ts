@@ -20,6 +20,7 @@
 
 import { promises as fs } from "fs";
 import path from "path";
+import { isConnectorErrorEnvelope } from "../src/lib/connectors/response";
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const PORT = process.env.PORT ?? "3000";
@@ -58,7 +59,11 @@ type Outcome =
   | "OK_NOT_CONNECTED"
   /** 2xx with `{}`, `[]`, or null body. Could be valid; could be a shape bug. */
   | "OK_EMPTY"
-  /** 503 — the `configured` guard fired. Expected when an admin hasn't set creds. */
+  /**
+   * 503 — the `configured` guard fired, or the connector call failed as
+   * unconfigured and the route let it propagate. Expected when an admin hasn't
+   * set creds.
+   */
   | "UNCONFIGURED_TENANT"
   /** 401 — no/invalid session cookie reached the gateway. */
   | "UNAUTHENTICATED"
@@ -315,7 +320,12 @@ function classify(status: number, body: unknown, route: RouteInfo): Outcome {
       : undefined;
 
   if (status >= 500) {
-    if (route.unguardedConnectors.length > 0) return "GUARD_MISMATCH";
+    // A connector failure the route let propagate comes back as that
+    // connector's envelope — the documented way to handle one — so a missing
+    // `configured` guard is not what went wrong.
+    if (route.unguardedConnectors.length > 0 && !isConnectorErrorEnvelope(body)) {
+      return "GUARD_MISMATCH";
+    }
     if (errorField && /unauthor|invalid_grant|forbidden|scope|token/i.test(errorField)) {
       return "AUTH_ERROR";
     }

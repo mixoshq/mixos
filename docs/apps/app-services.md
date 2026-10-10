@@ -46,7 +46,8 @@ export default async function listResources(
 ) {
   // ctx is PROVIDER-scoped: ctx.db / ctx.connectors are the provider's.
   // ctx.user is the acting user (audience "user") or null (audience "app").
-  // ctx.caller.appSlug names the requesting app.
+  // ctx.caller.appSlug names the requesting app; ctx.caller.readOnly is true
+  // when an MCP tool asked, and then writes are refused.
   if (!ctx.db) return { resources: [] };
   // ... authorize in YOUR OWN terms, read YOUR data, return a plain object.
 }
@@ -123,6 +124,12 @@ bytes to an unauthenticated viewer the consumer has already authorized.
   services client that can call **only `audience: "app"`** services (there's no
   user, so `audience: "user"` requests are denied with `NO_USER`). The public
   route must authorize its own viewer before calling.
+- **Read-only for MCP tools** — when the request comes from an MCP tool, the
+  handler runs read-only, as the tool does: `ctx.db` refuses writes at runtime
+  (its type is unchanged) and only connector methods declared as reads can be
+  called. `ctx.caller.readOnly` is `true`, so a handler that normally writes —
+  an audit row, a cache fill — can skip it. A write it attempts anyway fails the
+  request with `PROVIDER_ERROR`.
 
 ## Errors
 

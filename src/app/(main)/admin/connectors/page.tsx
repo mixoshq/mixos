@@ -16,7 +16,8 @@ import {
   recordConnectorVerified,
   saveConnectorConfig,
 } from "@/lib/connectors/config";
-import { connectorConfigState } from "@/lib/connectors/status";
+import { registryConfigState } from "@/lib/connectors/status";
+import { getUserTokens } from "@/lib/connectors/user-config";
 import { getConnectorLog, grantedScopes } from "@/lib/connectors/access";
 import { getScopeStatus } from "@/lib/connectors/scope-status";
 import { getConnectorDependents } from "@/lib/connectors/dependents";
@@ -52,6 +53,23 @@ const OAUTH_MESSAGES: Record<string, { tone: "ok" | "warn"; text: string }> = {
   unsupported: { tone: "warn", text: "This connector does not use OAuth." },
 };
 
+/**
+ * The signed-in admin's own grant for a user-scoped connector, or null. A grant
+ * that cannot be read is reported as absent: this page is a status view, and
+ * one unreadable row must not take it down.
+ */
+async function ownGrant(
+  userId: string,
+  connectorName: string,
+): Promise<Record<string, string> | null> {
+  try {
+    return await getUserTokens(userId, connectorName);
+  } catch (err) {
+    console.error(`[connectors] ${connectorName}: own grant unreadable:`, err);
+    return null;
+  }
+}
+
 export default async function ConnectorsAdminPage({
   searchParams,
 }: {
@@ -77,10 +95,16 @@ export default async function ConnectorsAdminPage({
       // isConnectorConfigured(), which answers "does a row exist" — so a
       // three-legged connector whose admin saved a client ID and never pressed
       // Connect rendered as Configured while the runtime refused every call.
-      // connectorConfigState() is the same function HttpConnector.configured
-      // uses, which is what keeps the two from disagreeing again.
+      // registryConfigState() applies the rule HttpConnector.configured uses,
+      // which is what keeps the two from disagreeing again.
       const credentials = await getDecryptedConfig(c.name);
-      const state = connectorConfigState(c.auth, credentials);
+      const state = registryConfigState(c, credentials);
+      // The grant this page reports on. A user-scoped connector's tenant row
+      // never holds one — each person's is their own — so the grant an admin
+      // can connect, test with and inspect here is their own.
+      const grant = c.userScoped
+        ? await ownGrant(adminUser.id, c.name)
+        : credentials;
       // Whether Test Connection has ever actually succeeded. A separate fact
       // from `state`, which only knows what is stored: a connector can hold a
       // complete, valid-looking credential set that the upstream rejects.
@@ -88,12 +112,15 @@ export default async function ConnectorsAdminPage({
       // Three separate facts, kept separate: what the provider granted, and
       // what has actually run. Neither is the other's evidence.
       const access = {
-        ...grantedScopes(credentials),
+        ...grantedScopes(grant),
         log: await getConnectorLog(c.name),
       };
       // Cached, never fetched during render: a page load must not depend on a
       // third party's docs site being up. The admin refreshes it explicitly.
-      const scopeStatus = await getScopeStatus(c.name);
+      const scopeStatus = await getScopeStatus(
+        c.name,
+        c.userScoped ? adminUser.id : null,
+      );
       // Static, from the manifests — no query, and it counts apps that are
       // shipped rather than only those an admin has switched on.
       const dependents = getConnectorDependents(c.name);
@@ -112,7 +139,7 @@ export default async function ConnectorsAdminPage({
 
       // Only booleans, an expiry timestamp and the declared scopes leave the
       // server — never a token, and never the client secret.
-      const expiresRaw = Number(credentials?.[TOKEN_KEYS.expiresAt] ?? 0);
+      const expiresRaw = Number(grant?.[TOKEN_KEYS.expiresAt] ?? 0);
       let redirectUri: string | null = null;
       try {
         redirectUri = redirectUriFor(c.name);
@@ -131,8 +158,7 @@ export default async function ConnectorsAdminPage({
         dependents,
         oauth: {
           connected: Boolean(
-            credentials?.[TOKEN_KEYS.refresh] ||
-            credentials?.[TOKEN_KEYS.access],
+            grant?.[TOKEN_KEYS.refresh] || grant?.[TOKEN_KEYS.access],
           ),
           expiresAt:
             Number.isFinite(expiresRaw) && expiresRaw > 0 ? expiresRaw : null,
@@ -183,7 +209,7 @@ export default async function ConnectorsAdminPage({
     // blank fields are skipped above, so an empty form is a legal no-op that
     // must not read as success.
     const stored = await getDecryptedConfig(connectorName);
-    return connectorConfigState(connector.auth, stored) !== "unconfigured";
+    return registryConfigState(connector, stored) !== "unconfigured";
   }
 
   async function testConnector(
@@ -194,7 +220,10 @@ export default async function ConnectorsAdminPage({
     // the page-level check above does not protect it.
     const session = await requireReadOnlySession();
     const tester = await requireAdmin(session);
-    const outcome = await runConnectorTest(connectorName);
+    // A user-scoped connector is tested with the tester's own grant.
+    const outcome = await runConnectorTest(connectorName, {
+      userId: tester.id,
+    });
     await recordAdminAction(
       { id: tester.id, email: tester.email },
       {

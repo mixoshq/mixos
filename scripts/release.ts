@@ -14,47 +14,59 @@
 // that are no longer in this build's registry, with their grants, installs and
 // widgets — the same thing `npm run migrate:apps` does on every local boot.
 //
+// Each step takes the same lock and re-reads what it is about to change once it
+// holds it (scripts/migration-lock.ts), so two release steps at once — two
+// instances booting, a deploy overlapping a manual run — take turns and both
+// succeed.
+//
 // WHERE IT RUNS. From a checkout, `npm run release`. Inside the production
 // image it is bundled to ops/release.cjs (`npm run build:ops`, run by the
 // Dockerfile), because the image carries compiled output and no tsx, so the
 // same step works as a Render or Railway pre-deploy command and as the
-// one-shot `migrate` service in docker-compose.selfhost.yml:
+// one-shot `migrate` service in deploy/docker-compose.yml:
 //
 //   node ops/release.cjs
 //
-// The readiness probe refuses traffic until step 1 has caught the database up
-// to the schema this build expects (src/lib/platform/schema-version.ts), so a
-// deploy that skips this step stays out of rotation rather than serving errors.
+// WHAT IT READS. The environment it is started with, and nothing else — not
+// scripts/load-env.ts, not any .env file. Those files describe a development
+// database, and a development checkout is exactly where someone types
+// `DATABASE_URL='<production>' npm run release`. Filling in whatever the shell
+// left out from them would pair production's URL with development's
+// PGSSLMODE=disable and INITIAL_ADMIN_* (the committed local login, from
+// .env.docker). So a run whose environment names no database stops, rather
+// than finding one in a file.
+//
+// The readiness probe refuses traffic until steps 1 and 2 have caught the
+// database up to this build — its platform schema version
+// (src/lib/platform/schema-version.ts) and every app migration it carries
+// (src/lib/platform/app-migrations.ts) — so on a host that waits for it, a
+// deploy that skips or fails this step stays out of rotation rather than
+// serving errors.
 
 import path from "path";
-import { createPgClient } from "../src/lib/db/pg-options";
-import { missingPlatformKeys } from "../src/lib/env/keys";
+import { createPgClient, databaseNamed } from "../src/lib/db/pg-options";
+import { missingDeploymentSecrets, missingPlatformKeys } from "../src/lib/env/keys";
 import { installFlagProblems } from "../src/lib/repository/policy";
 import { seedAdmin } from "./admin-seed";
 import { migrateAppSchemas } from "./app-migrations";
-import { loadEnv } from "./load-env";
 import { migratePlatform } from "./platform-migrations";
-
-loadEnv();
 
 const ROOT = path.resolve(__dirname, "..");
 
 /**
  * Configuration the app needs and this step does not. Reported rather than
  * enforced: the release step can legitimately run somewhere that holds only
- * the database URL, and the app fails closed on each missing key on its own.
- * But on a hosting platform this runs with the service's own environment, so
- * it is the earliest point a typo can be caught — before the deploy goes live.
+ * the database URL — a laptop running it for Vercel — and the app fails closed
+ * on each missing key on its own. But on a hosting platform this runs with the
+ * service's own environment, so it is the earliest point a typo can be caught —
+ * before the deploy goes live.
  */
 function reportMissingConfiguration(): void {
-  const missing = [
-    ...missingPlatformKeys().map((m) => `${m.env}: ${m.reason}`),
-    ...(["AUTH_SECRET", "CRON_SECRET"] as const)
-      .filter((name) => !process.env[name])
-      .map((name) => `${name} is not set.`),
-  ];
+  const missing = [...missingDeploymentSecrets(), ...missingPlatformKeys()].map(
+    (m) => `${m.env}: ${m.reason}`,
+  );
   if (missing.length > 0) {
-    console.warn("\nThe app will not work until these are set:");
+    console.warn("\nNot set here. The app needs each one wherever it runs:");
     for (const line of missing) console.warn(`  - ${line}`);
     console.warn("Generate the keys with: npm run keys:generate");
   }
@@ -69,6 +81,16 @@ function reportMissingConfiguration(): void {
 }
 
 async function main() {
+  if (!databaseNamed()) {
+    console.error(
+      "No database to release to: DATABASE_URL is not set.\n" +
+        "The release step reads only its own environment, never a .env file in the checkout, " +
+        "so name the database in the command:\n\n" +
+        "  DATABASE_URL='<connection string>' npm run release",
+    );
+    process.exit(1);
+  }
+
   // One line per server notice, instead of postgres.js's default object dump.
   const sql = createPgClient({ max: 1, onnotice: (n) => console.log(`  (${n.message})`) });
   try {

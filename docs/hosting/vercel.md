@@ -37,7 +37,9 @@ own server with TLS.
    It applies the platform schema and the app migrations, then creates the
    admin account. Prefer the provider's direct, unpooled connection string
    here when there is one (Neon sets `DATABASE_URL_UNPOOLED`), though a
-   transaction pooler works too.
+   transaction pooler works too. It reads only what the command gives it,
+   never your checkout's `.env` files, so a local `.env.local` can't change
+   which database it migrates or how it connects.
 5. **Deploy.**
 
 [`vercel.json`](../../vercel.json) registers the scheduler tick, `/api/cron`
@@ -48,10 +50,12 @@ and the next tick picks up where the last one stopped.
 
 ## Upgrades
 
-When a change brings a migration, run `npm run release` against production
-before promoting the deployment, and run it again if you skip a version. The
-readiness probe, `/api/health/ready`, answers 503 while the database is behind
-the build, so a monitor or a deployment check can catch a missed step.
+When a change brings a migration, run the release step against production
+before promoting the deployment, as in step 4
+(`DATABASE_URL='<the connection string>' npm run release`), and run it again if
+you skip a version. The readiness probe, `/api/health/ready`, answers 503 while
+the database is behind the build, in its platform schema or its app migrations,
+so a monitor or a deployment check can catch a missed step.
 
 Vercel's build doesn't run migrations by itself, and shouldn't. Preview
 deployments share the build, and a migration that ran on every preview build
@@ -59,7 +63,7 @@ would run against whatever database that preview points at.
 
 ## Moving from an existing Vercel and Supabase deployment
 
-Nothing about the database changes. Deploy this version, run `npm run release`
-(or `npm run db:push` as before; both read the same migration ledger), and then
-delete `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from the Vercel project.
-Nothing reads them any more.
+Nothing about the database changes. Deploy this version, run the release step
+as in step 4 (or `npm run db:push` as before; both read the same migration
+ledger), and then delete `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from
+the Vercel project. Nothing reads them any more.

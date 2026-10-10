@@ -6,7 +6,8 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { appRegistry } from "@/generated/app-registry";
-import { getUserById, hasAppGrant } from "@/lib/apps/access";
+import { getUserById, hasAppGrant, isAppActive } from "@/lib/apps/access";
+import { canOpenAppPage } from "@/lib/apps/page-access";
 import { loadAppPage } from "@/lib/apps/loader";
 import TrackAppOpen from "@/components/analytics/track-app-open";
 
@@ -35,8 +36,12 @@ export default async function AppPage({ params }: Props) {
   // preference, not authorization — and has no global-app short-circuit, so it
   // redirected every user of every global app away from a page they were
   // entitled to. The API mount was corrected in the same change; a page and its
-  // own API answering differently is worse than either answer alone.
-  const allowed = await hasAppGrant(dbUser.id, appSlug);
+  // own API answering differently is worse than either answer alone. A page
+  // whose `pageVisibility` accepts `signed-in` needs no grant, as on the API.
+  const allowed = await canOpenAppPage(manifest, path.join("/"), dbUser.id, {
+    hasAppGrant,
+    isAppActive,
+  });
   if (!allowed) redirect("/");
 
   const PageComponent = await loadAppPage(appSlug, path);

@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import { assertValidCron } from "../src/lib/apps/cron";
+import { JOB_TIMEOUT_MS, MAX_SYNC_BUDGET_MS } from "../src/lib/apps/job-limits";
 import {
   SCREENSHOT_DIR,
   SCREENSHOT_MAX_COUNT,
@@ -129,6 +130,25 @@ const scheduleSchema = cadenceSchema.extend({ name: z.string().min(1) });
 const roleSchema = z.strictObject({
   key: z.string().min(1),
   label: z.string().min(1),
+});
+
+/**
+ * A role key is what a grant stores and what `roles` on a route names, so two
+ * roles sharing one would be a single role with two labels — and the admin
+ * dropdown would offer both.
+ */
+const rolesSchema = z.array(roleSchema).superRefine((roles, ctx) => {
+  const seen = new Set<string>();
+  roles.forEach((role, i) => {
+    if (seen.has(role.key)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `duplicate role key "${role.key}" — role keys must be unique within the app`,
+        path: [i, "key"],
+      });
+    }
+    seen.add(role.key);
+  });
 });
 
 /**
@@ -372,9 +392,19 @@ const syncDefinitionSchema = z.strictObject({
   // sibling fields from inside a nested object.
   source: z.string().min(1),
   window: syncWindowSchema,
-  // The scheduler ticks every 5 minutes, so a budget beyond one tick can never
-  // be honoured — it would simply be truncated at runtime with no signal.
-  budgetMs: z.number().int().min(1_000).max(300_000),
+  // The scheduler abandons a run at JOB_TIMEOUT_MS, so a budget has to end
+  // early enough for the page in flight and the state write to finish before
+  // then. See MAX_SYNC_BUDGET_MS.
+  budgetMs: z
+    .number()
+    .int()
+    .min(1_000)
+    .max(
+      MAX_SYNC_BUDGET_MS,
+      `budgetMs may be at most ${MAX_SYNC_BUDGET_MS}: the scheduler stops a run at ` +
+        `${JOB_TIMEOUT_MS}ms, and the budget has to leave room for the last page ` +
+        `and the state write before then`,
+    ),
 });
 
 /**
@@ -463,11 +493,11 @@ const connectorTelemetryEventSchema = z.strictObject({
    * Declared here, the platform can. The MCP context wraps `ctx.connectors` and
    * throws on a method marked `mutates`, so a read-only tool calling a write is
    * a runtime error rather than a blocking review finding somebody has to catch.
+   * A method that is not declared at all cannot be called from a tool either.
    *
-   * Defaults to `false`, which is safe for the wrong reason and stated here so
-   * nobody mistakes it for a guarantee: an UNDECLARED method is invisible to
-   * this check entirely. Declaring a connector's writes is what buys the
-   * enforcement.
+   * Defaults to `false`, which is not a guarantee: a method that writes but is
+   * declared without `mutates` is treated as a read. Declaring a connector's
+   * writes is what buys the enforcement.
    */
   mutates: z.boolean().optional(),
 });
@@ -732,7 +762,7 @@ export const RawAppManifestSchema = z
     // key resolves to a real file on disk (which a schema can't check).
     pageVisibility: z.record(z.string(), acceptedAuths).optional(),
     apiVisibility: z.record(z.string(), acceptedAuths).optional(),
-    roles: z.array(roleSchema).optional(),
+    roles: rolesSchema.optional(),
     defaultRole: z.string().min(1).optional(),
     telemetry: z.array(appTelemetryEventSchema).optional(),
     // App Services. Each `provides[].name` is verified on disk by the generator
@@ -772,6 +802,17 @@ export const RawAppManifestSchema = z
           path: ["pageVisibility", key],
         });
       }
+    }
+
+    // A sync keeps its watermark in the app's scoped database, which exists
+    // only with `database: true`. Without it every run fails on its first line.
+    if ((m.sync?.length ?? 0) > 0 && m.database !== true) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          'a sync keeps its watermark in the app\'s scoped database — set "database": true',
+        path: ["sync"],
+      });
     }
   });
 
@@ -980,6 +1021,23 @@ const connectorDocLinkSchema = z.strictObject({
     .refine((u) => u.startsWith("https://"), "must be an https:// URL"),
 });
 
+/**
+ * A `setup.docs` entry: reference material shown below the checklist, not a
+ * step. `why` is required because a link inside a step is explained by the
+ * sentence around it, and this one has nothing around it — "Gmail API scopes"
+ * does not tell an admin whether they need it now, later or never. If its
+ * author cannot say when someone would open it, the link should not ship.
+ */
+const connectorReferenceLinkSchema = connectorDocLinkSchema.extend({
+  why: z
+    .string()
+    .min(1)
+    .max(
+      300,
+      "a tooltip, not an essay — say when someone would open this link",
+    ),
+});
+
 const connectorSetupStepSchema = z
   .strictObject({
     /**
@@ -1092,7 +1150,7 @@ const connectorSetupSchema = z.strictObject({
   steps: z.array(connectorSetupStepSchema).min(1),
   notes: connectorSetupNotesSchema.optional(),
   /** Reference material — scope tables, API docs. Not steps to carry out. */
-  docs: z.array(connectorDocLinkSchema).optional(),
+  docs: z.array(connectorReferenceLinkSchema).optional(),
 });
 
 /**
@@ -1180,6 +1238,12 @@ export const RawConnectorManifestSchema = z
     /** Where a user reports a problem with the connector. */
     connectorSupportUrl: listingUrlSchema.optional(),
     setup: connectorSetupSchema.optional(),
+    /**
+     * What an admin enters. Omit it only for a connector that needs no
+     * credentials (auth.strategy "none") — that one is ready as soon as it is
+     * installed, and the cross-field check below rejects any other strategy
+     * without it.
+     */
     credentialFields: z.array(credentialFieldSchema).optional(),
     authors: z.array(authorSchema).optional(),
     telemetry: z.array(connectorTelemetryEventSchema).optional(),
@@ -1226,6 +1290,21 @@ export const RawConnectorManifestSchema = z
           `exactly one setup step must set "showRedirectUri": true (found ${redirectSteps.length}). ` +
           "A three-legged connector cannot be configured without registering the redirect URI upstream.",
         path: ["setup", "steps"],
+      });
+    }
+
+    // A connector that declares no credential fields asks for nothing, and the
+    // platform treats it as ready as soon as it is installed — a public API.
+    // One that authenticates cannot be that: with no field there is nothing an
+    // admin could ever enter, so it could never make a call.
+    const strategy = m.auth?.strategy ?? "none";
+    if ((m.credentialFields ?? []).length === 0 && strategy !== "none") {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `auth.strategy "${strategy}" needs a credential, but credentialFields is empty. ` +
+          `Declare the fields an admin fills in; only a connector with auth.strategy "none" may omit them.`,
+        path: ["credentialFields"],
       });
     }
 

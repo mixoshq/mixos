@@ -62,7 +62,7 @@ Declares the connector's metadata and what credentials it needs. These fields ap
 | `name` | ✅ | Unique identifier for the connector. Used in app.json and internally. | `"name": "my-service"` |
 | `displayName` | ✅ | Human-readable name shown in the Connector Registry. | `"displayName": "My Service"` |
 | `description` |  | Brief description of what this connector integrates with. | `"description": "Connector for the My Service API"` |
-| `credentialFields` | ✅ | Array of credential fields the admin must provide. |  |
+| `credentialFields` |  | Array of credential fields the admin must provide. Omit it only for a connector that needs no credentials (`auth.strategy` `none`), which is ready as soon as it is installed. |  |
 | `credentialFields[].key` | ✅ | Property name used to access this credential in the connector's initialize method. | `"key": "apiKey"` |
 | `credentialFields[].label` | ✅ | Label shown in the admin configuration form. | `"label": "API Key"` |
 | `credentialFields[].type` | ✅ | Either `text` for visible input or `password` for masked input. | `"type": "password"` |
@@ -104,7 +104,7 @@ export default class MyServiceConnector implements BaseConnector {
 
 A connector method that a scheduled job or a multi-page backfill will call has obligations beyond returning data. Get these wrong and the job times out, or keeps burning API quota after the platform has already abandoned it.
 
-**Accept an `AbortSignal` and compose it with your own timeout.** A job passes `ctx.signal`; a route passes `request.signal`. Either way the method must stop when the caller gives up, *and* still enforce its own per-request ceiling:
+**Accept an `AbortSignal` and compose it with your own timeout.** A job and a route both pass `ctx.signal`. Either way the method must stop when the caller gives up, *and* still enforce its own per-request ceiling:
 
 ```ts
 async getCalendarEvents(opts: { /* … */ signal?: AbortSignal }) {
@@ -143,7 +143,7 @@ Connector credentials are managed entirely through the admin UI:
 - An admin configures credentials in **Administration → Connector Registry**
 - Credentials are encrypted at rest in the database
 - When an app context is built, credentials are decrypted and passed to `initialize()`
-- If a connector has no saved credentials, it will still be available in `context.connectors` but `configured` will be `false`
+- If a connector has no saved credentials, it will still be available in `context.connectors` but `configured` will be `false` — unless it declares no credential fields at all, in which case there is nothing to save and it is ready
 
 ## User-Scoped (Per-User) Connectors
 
@@ -157,11 +157,11 @@ Some connectors authenticate each logged-in user against an external IdP (e.g. S
 
 A connector declares this itself: **`"userScoped": true` in its `connector.json`**. There is no inference from the class, and no naming convention — the manifest field is the whole answer, and the schema requires `auth.strategy` to be `oauth2_authorization_code` alongside it, since a shared API key cannot represent "each person's own account".
 
-When it is set, each request merges the **logged-in user's** stored access token into the credentials passed to `initialize()`, refreshing on the fly if needed; the client id and secret stay tenant-wide, so the *application* is registered once and only the *grant* is personal. When it is absent, the connector is tenant-scoped and the admin-configured shared credentials are passed straight through. The flag is read in [`src/lib/apps/context.ts`](../../src/lib/apps/context.ts) when the context is built, and in the OAuth [start](../../src/app/api/connectors/%5Bname%5D/oauth/start/route.ts) and [callback](../../src/app/api/connectors/%5Bname%5D/oauth/callback/route.ts) routes, which use it to decide whether `requireAdmin()` applies and where the resulting grant is stored.
+When it is set, each request merges the **logged-in user's** stored access token into the credentials passed to `initialize()`, renewing it first if it has expired; the client id and secret stay tenant-wide, so the *application* is registered once and only the *grant* is personal. When it is absent, the connector is tenant-scoped and the admin-configured shared credentials are passed straight through. The flag is read in [`src/lib/apps/context.ts`](../../src/lib/apps/context.ts) when the context is built, and in the OAuth [start](../../src/app/api/connectors/%5Bname%5D/oauth/start/route.ts) and [callback](../../src/app/api/connectors/%5Bname%5D/oauth/callback/route.ts) routes, which use it to decide whether `requireAdmin()` applies and where the resulting grant is stored.
 
 ### Required UX pattern
 
-When a user-scoped connector reports `configured: false`, the user has not connected their account yet. Your API route must return a 200 response with `{ connected: false }` rather than a 503 — and the widget must render a Connect prompt linking to `/account/connections`. The 503 "not configured" pattern is reserved for **tenant-scoped** connectors (where the admin hasn't entered credentials).
+When a user-scoped connector is absent from `context.connectors`, the user has no usable grant: they have not connected their account yet, or the provider will no longer renew the grant they had. Your API route must return a 200 response with `{ connected: false }` rather than a 503 — and the widget must render a Connect prompt linking to `/account/connections`. The 503 "not configured" pattern is reserved for **tenant-scoped** connectors (where the admin hasn't entered credentials).
 
 ```ts
 // apps/<slug>/api/<thing>/route.ts
@@ -202,7 +202,7 @@ if (data.connected === false) {
 - **Never** read `public.user_connector_oauth` directly from app code. Always go through `context.connectors.<name>` so the platform's session/state checks run first.
 - **Never** call the platform OAuth routes (`/api/connectors/<name>/oauth/*`) from app code. The Connect button on `/account/connections` is the only entry point.
 - The widget must skeleton-load like any other (per [widgets.md](./widgets.md)). The connect prompt is the *post-load* state when `connected === false`, not the loading state.
-- Token refresh is automatic. If `getValidUserAccessToken` can't refresh, the connector reports `configured: false` and your code naturally falls into the connect prompt path.
+- Token refresh is automatic: an expired access token is renewed before your handler runs (`getValidUserTokens` in `src/lib/connectors/user-config.ts`), and one that expires mid-request is renewed against the same person's grant. If it can't be renewed, the connector is absent from `context.connectors`, exactly as for someone who never connected, and `if (!slack?.configured)` falls into the connect prompt path.
 
 ### How to make a connector user-scopable
 
