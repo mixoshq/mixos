@@ -10,11 +10,13 @@
 //   3. The first admin, only if it does not exist  (scripts/admin-seed.ts)
 //
 // Step 3 runs only when INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD are both
-// set, and never touches an account that already exists. Step 2 removes apps
-// that are no longer in this build's registry, with their grants, installs and
-// widgets — the same thing `npm run migrate:apps` does on every local boot — and
-// runs each app's migrations as that app's own role, in its own schema, once
-// every pending statement has passed scripts/app-sql-policy.ts.
+// set, and never touches an account that already exists. Step 2 marks apps that
+// are no longer in this build's registry as missing and keeps everything they
+// had, brings back any that returned (switched off, if their files changed while
+// they were gone; scripts/sync-app-registry.ts) — the same thing `npm run
+// migrate:apps` does on every local boot — and runs each app's migrations as
+// that app's own role, in its own schema, once every pending statement has
+// passed scripts/app-sql-policy.ts.
 //
 // Each step takes the same lock and re-reads what it is about to change once it
 // holds it (scripts/migration-lock.ts), so two release steps at once — two

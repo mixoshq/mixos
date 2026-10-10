@@ -6,6 +6,7 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 import noLowContrastTokenPairs from "./eslint-rules/no-low-contrast-token-pairs.mjs";
+import appImports from "./eslint-rules/app-imports.mjs";
 
 /**
  * Why each containment ban exists, worded the same as the registry generator's
@@ -18,6 +19,13 @@ const CONTAINMENT = {
   html: "Apps must not render markup they did not author. Render Markdown with <Markdown> from @/components/ui/markdown.",
   code: "Apps must not run a string as code.",
 };
+
+/**
+ * Every file an app can run, whatever it is written in. A rule scoped to
+ * `{ts,tsx}` alone would wave a `.js` or `.mjs` file straight past it, and the
+ * generator's scan reads all of these.
+ */
+const APP_SOURCE = "apps/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}";
 
 const PALETTE_MESSAGE =
   "Raw palette colours dodge the contrast guarantee. Use semantic tokens: text-foreground, text-muted-foreground, text-success, text-warning, text-destructive, bg-card, bg-muted, bg-primary. See docs/apps/ux.md#color--contrast.";
@@ -79,181 +87,26 @@ const eslintConfig = defineConfig([
     // and linted at its source in scripts/.
     "ops/**",
   ]),
-  // ── Security: prevent apps from bypassing the edge gateway ──
-  // App widgets and pages must NOT import DB or connector modules directly.
-  // Only app API routes (apps/**/api/**), service handlers (apps/**/services/**),
-  // scheduled job handlers (apps/**/jobs/**), and the server-only data builders
-  // they delegate to (apps/**/lib/server/**) are allowed to use connectors — all
-  // run server-side behind the authenticated gateway. The lib/server/services
-  // modules import connectors as `import type` only (erased at build time) and are
-  // never imported by client pages/widgets.
+  // ── Security: what app code may import ──
   //
-  // Jobs belong to this tier by construction: the platform scheduler invokes them
-  // with a user-less SystemAppContext that carries tenant connectors, and they are
-  // unreachable from the browser. They were omitted here originally, which is why
-  // every job that types a connector off `ctx` reported a false positive.
+  // App code imports its own files, the platform modules on a published list
+  // and a few packages, and nothing else; it loads no module any other way
+  // (`require`, `module`, a computed `import()`, `import.meta`, a bundler's own
+  // loader); it calls callAppRoute only with its own slug; and it writes to
+  // nothing it imported. An import is judged by the file it lands on, so no
+  // spelling (`@/lib/db/../db/client`, a relative path into src/) gets round it.
+  //
+  // This replaces three `no-restricted-imports` blocks, a denylist of spellings
+  // that had to restate itself in every tier because flat config replaces a
+  // rule's options. The rule runs src/lib/apps/import-policy.mjs, the same code
+  // the registry generator runs on every build and every Registry install
+  // (scripts/app-containment.ts), so the editor and the build cannot drift.
+  // The page/widget → lib/server tier rule moved into the policy unchanged.
+  // See docs/plans/20261007_0153-app-import-allowlist.md.
   {
-    files: ["apps/**/*.{ts,tsx}"],
-    ignores: [
-      "apps/**/api/**",
-      "apps/**/lib/server/**",
-      "apps/**/services/**",
-      "apps/**/mcp/**",
-      "apps/**/jobs/**",
-    ],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["@/lib/db", "@/lib/db/*"],
-              message:
-                "Direct DB access is not allowed in app code. Use createAppClient() from @/lib/apps/sdk to call your API routes instead.",
-            },
-            {
-              group: ["@connectors/*"],
-              message:
-                "Direct connector imports are not allowed in app code. Connectors are available via AppContext in your API route handlers.",
-            },
-            {
-              group: ["@/lib/connectors/*"],
-              message:
-                "Direct connector utility imports are not allowed in app code. Use createAppClient() from @/lib/apps/sdk.",
-            },
-            {
-              group: ["@/lib/apps/services", "@/lib/apps/context"],
-              message:
-                "The App Services broker and context builder are platform-internal. Use the injected context.services client from your API route/service handler instead.",
-            },
-            {
-              group: ["@/lib/apps/scoped-db"],
-              // The NAMES, not the module: `import type { ScopedClient }` is how
-              // an app types a handler that receives `context.db`, and a type
-              // cannot construct anything. It is the factory that must not be
-              // reachable.
-              importNames: ["createScopedClient", "createReadOnlyScopedClient"],
-              message:
-                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for that app's schema, so an app could name another app and read or write its tables. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
-            },
-          ],
-        },
-      ],
-    },
-  },
-  // ── Security: a page or widget must not reach its app's own server tier ──
-  //
-  // `apps/**/lib/server/**` is allowlisted to import connectors, which is what
-  // makes it the app's server tier. A page importing it reaches connectors and
-  // the database WITHOUT passing the gateway — no auth-tier resolution, no role
-  // gate, no input or output validation, no budget, no telemetry. That is the
-  // second authorization surface Phase 1 existed to delete, and the reason
-  // `docs/secure-edge-gateway-architecture.md` and `eslint.config.mjs`
-  // contradicted each other for so long.
-  //
-  // A server page gets its data the same way a browser does — through its own
-  // declared route:
-  //
-  //   const { items } = await callAppRoute("my-app", "GET /items", { limit: 20 });
-  //
-  // Same pipeline, no network hop. See docs/apps/api-routes.md#server-components.
-  {
-    files: ["apps/**/pages/**/*.{ts,tsx}", "apps/**/widgets/**/*.{ts,tsx}"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["**/lib/server/**", "**/lib/server"],
-              message:
-                'A page or widget must not import its app\'s server tier — that reaches connectors and the DB without the gateway (no roles, no validation, no budget, no telemetry). Server pages: await callAppRoute(slug, "GET /path", input). Widgets: createAppClient(appSlug).call(...).',
-            },
-            {
-              group: [
-                "@/lib/db",
-                "@/lib/db/*",
-                "@connectors/*",
-                "@/lib/connectors/*",
-              ],
-              message:
-                "Direct DB or connector access is not allowed in a page or widget. Go through your app's declared routes.",
-            },
-            // RESTATED, not inherited. ESLint flat config REPLACES a rule's
-            // options rather than merging them, so this block overrides the
-            // `apps/**` one above wholesale. Anything omitted here is permitted
-            // in pages and widgets — which is how the most client-facing tier
-            // ended up the only one able to import the context builder.
-            {
-              group: ["@/lib/apps/services", "@/lib/apps/context"],
-              message:
-                "The App Services broker and context builder are platform-internal and server-only. A page or widget must not import them: use callAppRoute() from a server page, or createAppClient() from a widget.",
-            },
-            {
-              group: ["@/lib/apps/scoped-db"],
-              // The NAMES, not the module: `import type { ScopedClient }` is how
-              // an app types a handler that receives `context.db`, and a type
-              // cannot construct anything. It is the factory that must not be
-              // reachable.
-              importNames: ["createScopedClient", "createReadOnlyScopedClient"],
-              message:
-                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for that app's schema, so an app could name another app and read or write its tables. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
-            },
-          ],
-        },
-      ],
-    },
-  },
-  // ── Security: server-side app code (routes, service handlers, lib/server, mcp) ──
-  // These run behind the gateway and may import connectors (type-only), but must
-  // NOT touch the RAW DB client — that bypasses per-app scoping and could read
-  // another app's tables. RLS is enabled on every table but grants nothing to
-  // anyone: the platform connects as the tables' owner, which RLS does not
-  // apply to, so table-name scoping is the only isolation there is. Read your
-  // own data via `context.db`
-  // (scoped) and other apps' data via `context.services` (the App Services
-  // broker). The broker/context builders themselves stay platform-internal.
-  //
-  // MCP tool handlers (apps/**/mcp/**) belong to this tier too: they are server
-  // code invoked by the MCP broker with a read-only context. The raw DB client
-  // would hand them write access the whole feature is designed to withhold.
-  {
-    files: [
-      "apps/**/api/**/*.{ts,tsx}",
-      "apps/**/lib/server/**/*.{ts,tsx}",
-      "apps/**/services/**/*.{ts,tsx}",
-      "apps/**/mcp/**/*.{ts,tsx}",
-      "apps/**/jobs/**/*.{ts,tsx}",
-    ],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["@/lib/db", "@/lib/db/*"],
-              message:
-                "Apps must not use the raw DB client — it bypasses per-app scoping. Use context.db (your data) and context.services (other apps' data).",
-            },
-            {
-              group: ["@/lib/apps/services", "@/lib/apps/context"],
-              message:
-                "The App Services broker and context builder are platform-internal. Use the injected context.services client instead.",
-            },
-            {
-              group: ["@/lib/apps/scoped-db"],
-              // The NAMES, not the module: `import type { ScopedClient }` is how
-              // an app types a handler that receives `context.db`, and a type
-              // cannot construct anything. It is the factory that must not be
-              // reachable.
-              importNames: ["createScopedClient", "createReadOnlyScopedClient"],
-              message:
-                "Do not construct a scoped DB client. `createScopedClient(slug)` takes ANY slug and builds a full-access client for that app's schema, so an app could name another app and read or write its tables. Use the injected `context.db`, which the gateway pins to your own app. (`import type { ScopedClient }` is fine.)",
-            },
-          ],
-        },
-      ],
-    },
+    files: [APP_SOURCE],
+    plugins: { "mixos-apps": { rules: { "app-imports": appImports } } },
+    rules: { "mixos-apps/app-imports": "error" },
   },
   // ── Design system: apps use semantic colour tokens, never raw palette ──
   // Two rules, one reason.
@@ -323,10 +176,15 @@ const eslintConfig = defineConfig([
   // that holds. Keep the two lists in step. See
   // docs/plans/20261005_2150-app-escapes.md.
   //
+  // How code is LOADED — `require`, `module`, `import()` and the rest — is the
+  // import policy's, and mixos-apps/app-imports above reports it with the scan's
+  // own words.
+  //
   // Only this block sets these rules for apps/**, so nothing here is replaced
-  // by a later block's options.
+  // by a later block's options. Every app source extension, `.js` included,
+  // because the scan reads every one.
   {
-    files: ["apps/**/*.{ts,tsx}"],
+    files: [APP_SOURCE],
     rules: {
       "no-restricted-properties": [
         "error",
@@ -353,11 +211,16 @@ const eslintConfig = defineConfig([
         { name: "EventSource", message: CONTAINMENT.network },
         { name: "XMLHttpRequest", message: CONTAINMENT.network },
       ],
-      "react/no-danger": "error",
       "no-eval": "error",
       "no-implied-eval": "error",
       "no-new-func": "error",
     },
+  },
+  // react/no-danger, for the same files less `.cjs`: the React plugin is only
+  // registered for the extensions eslint-config-next lints.
+  {
+    files: ["apps/**/*.{ts,tsx,mts,cts,js,jsx,mjs}"],
+    rules: { "react/no-danger": "error" },
   },
   // ── Design system: apps compose from the primitives, not from raw elements ──
   //

@@ -40,13 +40,13 @@ jobs:
       # errors were outstanding; those are fixed and the count is zero, so the
       # exemption is gone.
       #
-      # This matters more than a style gate. `eslint.config.mjs` is where the
-      # client/server boundary is enforced — no raw `fetch` in app code, no
-      # `process.env`, no connector or DB client outside the server tier, no
-      # constructing a scoped DB client for another app's prefix. Every one of
-      # those is an `error`, and while this step could not fail a PR, all of them
-      # were advisory. docs/security-architecture.md §3.3 calls this layer "Build
-      # fails on violation"; this line is what makes that sentence true.
+      # This matters more than a style gate. `eslint.config.mjs` carries the app
+      # containment rules — no raw `fetch` or `process.env` in app code, no
+      # import off the app import list — and the design-system rules, every one
+      # an `error`. The registry generator enforces the containment rules again
+      # on every build and every Registry install (scripts/app-containment.ts),
+      # so for those this step is the earlier warning; the design-system rules
+      # are enforced here and nowhere else.
       #
       # Warnings stay non-fatal: eslint exits non-zero on errors only.
       - name: Lint

@@ -605,14 +605,24 @@ export async function migrateAppSchemas(
   const appsDir = options.appsDir ?? APPS_DIR;
 
   console.log("Syncing the app registry into public.apps...");
-  const sync = await syncAppRegistry(sql, apps);
+  const sync = await syncAppRegistry(sql, apps, appsDir);
   console.log(`  ${sync.upserted} app(s) in the registry`);
-  for (const slug of sync.removed) {
-    // Loud, because the cascade behind this line deletes that app's grants,
-    // installs, password and dashboard widgets.
+  // Reported as it happens, so whoever reads a deploy's log learns that an app
+  // left the build from the log, not from the first person who can't open it.
+  for (const slug of sync.missing) {
     console.log(
-      `  ${slug}: no longer in the registry — removed, along with its grants, installs, password and widgets`,
+      `  ${slug}: not in this build — marked missing; its activation, grants, settings and data are kept`,
     );
+  }
+  for (const { slug, codeChanged } of sync.returned) {
+    console.log(
+      codeChanged
+        ? `  ${slug}: back in the build with different code — inactive until an admin activates it`
+        : `  ${slug}: back in the build, unchanged`,
+    );
+  }
+  if (sync.stillMissing.length > 0) {
+    console.log(`  still missing, data kept: ${sync.stillMissing.join(", ")}`);
   }
 
   console.log("\nApplying app migrations...");

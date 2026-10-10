@@ -171,13 +171,16 @@ export function connectorErrorEnvelope(
 }
 
 /**
- * The envelope as a Response, for code that owns its own Response — a `raw`
- * route, a server action:
+ * The envelope as a Response, for platform code that owns its own Response,
+ * such as a server action. App code cannot import this module: an app's
+ * `raw: true` route calls `ctx.connectorErrorResponse(err)`, which the route
+ * pipeline binds to the caller's real admin flag (`RouteRuntime` in
+ * src/lib/apps/route.ts), so the app never chooses it:
  *
  *   try {
- *     return Response.json(await context.connectors.acme.listThings());
+ *     return Response.json(await ctx.connectors.acme.listThings());
  *   } catch (err) {
- *     return connectorErrorResponse(err, { isAdmin: context.user?.isAdmin });
+ *     return ctx.connectorErrorResponse(err);
  *   }
  *
  * A `defineRoute` handler does not need it: a ConnectorError it lets propagate

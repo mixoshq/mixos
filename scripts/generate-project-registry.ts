@@ -60,6 +60,7 @@ import {
   validateHookWiring,
 } from "./hook-checks";
 import { formatFindings, scanAppContainment } from "./app-containment";
+import { isScannedFile } from "../src/lib/apps/import-policy.mjs";
 import {
   validateConnectorMethods,
   validateConnectorTelemetry,
@@ -130,6 +131,7 @@ const CONNECTOR_REGISTRY_FILE = path.resolve(
 );
 const THEMES_DIR = path.resolve(__dirname, "../themes");
 const MIGRATIONS_DIR = path.resolve(__dirname, "../supabase/migrations");
+const PACKAGE_JSON_FILE = path.resolve(__dirname, "../package.json");
 const BUILD_INFO_FILE = path.resolve(OUTPUT_DIR, "build-info.ts");
 const THEME_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "theme-registry.ts");
 const THEMES_CSS_FILE = path.resolve(OUTPUT_DIR, "themes.css");
@@ -193,6 +195,42 @@ function countPages(dir: string): number {
     }
   }
   return n;
+}
+
+/**
+ * The entry points the registry makes loadable that the containment scan did
+ * not read, relative to the app. Empty for a clean app.
+ *
+ * The scan reads an app's source and refuses any import of a file it skipped,
+ * but an entry point is loaded by the platform, not imported by the app: a
+ * widget's `component`, a page, a job, a sync, a service, an MCP tool or
+ * `hooks.ts`. Each is named by the manifest or found on disk, so each is held
+ * to the same rule here. Routes are checked before the generator imports them,
+ * in scanApiRoutes().
+ */
+function unscannedEntryPoints(appDir: string, manifest: AppManifest): string[] {
+  const real = fs.realpathSync(appDir);
+  const entries: string[] = ["hooks.ts", "widgets.ts", ...manifest.widgets.map((w) => w.component)];
+  for (const [dir, names] of [
+    ["jobs", manifest.schedules.map((s) => s.name)],
+    ["sync", manifest.sync.map((s) => s.name)],
+    ["services", manifest.provides.map((s) => s.name)],
+    ["mcp", manifest.mcp.map((t) => t.name)],
+  ] as const) {
+    for (const name of names) entries.push(`${dir}/${name}.ts`, `${dir}/${name}.tsx`);
+  }
+  const pages = (dir: string, prefix: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) pages(path.join(dir, entry.name), `${prefix}${entry.name}/`);
+      else if (entry.name === "Main.tsx" || entry.name === "Main.ts") entries.push(`${prefix}${entry.name}`);
+    }
+  };
+  if (fs.existsSync(path.join(appDir, "pages"))) pages(path.join(appDir, "pages"), "pages/");
+
+  return entries.filter((rel) => {
+    const full = path.resolve(appDir, rel);
+    return fs.existsSync(full) && !isScannedFile(real, fs.realpathSync(full));
+  });
 }
 
 /**
@@ -439,6 +477,14 @@ async function scanApiRoutes(
         throw new FatalManifestError(
           `apps/${slug}/api/${routePath}/route.ts: optional catch-all segments (${optionalCatchAll}) are not supported. ` +
             `Use a required catch-all ([...name]) instead.`,
+        );
+      }
+
+      // A route in a directory the containment scan skips (a dot-directory,
+      // say) is code nobody judged, and importing it here would run it.
+      if (!isScannedFile(fs.realpathSync(appDir), fs.realpathSync(routeFile))) {
+        throw new AppRejectedError(
+          `api/${segments.join("/")}/route.ts is in a directory the containment scan does not read, so it cannot be a route.`,
         );
       }
 
@@ -1534,6 +1580,15 @@ async function scanApps(): Promise<AppManifest[]> {
         ...(apiVisibility ? { apiVisibility } : {}),
       };
 
+      const unscanned = unscannedEntryPoints(appDir, manifest);
+      if (unscanned.length > 0) {
+        throw new AppRejectedError(
+          `the platform would load ${unscanned.join(", ")}, which the containment scan does not read: ` +
+            `code in a dot-directory, in assets/, plans/, migrations/ or screenshots/, or outside the app. ` +
+            `Move it beside the rest of the app's source.`,
+        );
+      }
+
       copyScreenshots(manifest.screenshots, "apps", entry.name, appDir);
       copyBrandLogos(manifest.branding, entry.name, appDir);
 
@@ -1835,19 +1890,36 @@ function expectedAppMigrations(apps: readonly AppManifest[]): { slug: string; fi
 }
 
 /**
+ * This checkout's MixOS version: `package.json`'s, the one place it lives.
+ *
+ * Refused here unless it is `X.Y.Z` (with an optional pre-release or build
+ * suffix), so a build never carries a version that extensions' `requiresMixOS`
+ * floors cannot be compared against (src/lib/platform/version.ts).
+ */
+function packageVersion(): string {
+  const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON_FILE, "utf-8")) as { version?: unknown };
+  const version = typeof pkg.version === "string" ? pkg.version.trim() : "";
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(
+      `package.json's "version" must be X.Y.Z, optionally with a pre-release suffix ` +
+        `(found ${JSON.stringify(pkg.version)}). It is the MixOS version this build ` +
+        `reports, and the one extensions' requiresMixOS floors are compared against.`,
+    );
+  }
+  return version;
+}
+
+/**
  * The build-time facts the running server cannot work out for itself.
  *
- * Everything else about build identity is a RUNTIME variable, and deliberately:
- * `MIXOS_RELEASE` already carries the tag and is stamped into the runner stage
- * by the tag build (see the Dockerfile, and `isReleaseBuild` in
- * src/lib/repository/client.ts). Baking a second copy of the version in here
- * would create two sources of truth for one fact, and the one in the generated
- * file would be the stale one — it is written by the builder stage, which never
- * sees the runner stage's ARG.
+ * The version comes from `package.json`, and is stamped on every build: every
+ * host runs this generator before compiling, and `package.json` is in every
+ * build context, so a checkout and every kind of deployment know their version
+ * the same way. There is no runtime variable for it, so nothing can disagree.
  *
- * The schema version is different. It is derived from `supabase/migrations/`,
- * and that directory is not copied into the runner image at all, so the number
- * has to travel with the build or not exist.
+ * The schema version is derived from `supabase/migrations/`, and that directory
+ * is not copied into the runner image at all, so the number has to travel with
+ * the build or not exist.
  *
  * So is the list of app migrations the readiness probe waits for. `apps/` is in
  * the Docker image, but a serverless function sees a repository file only if
@@ -1856,19 +1928,24 @@ function expectedAppMigrations(apps: readonly AppManifest[]): { slug: string; fi
  * NOTE: no timestamp and no commit here. Every value in this file is stable for
  * a given checkout, so re-running the generator rewrites an identical file and
  * the dev server has nothing to recompile. A timestamp — or a git SHA, which
- * moves on every commit — would invalidate that on every `predev`.
+ * moves on every commit — would invalidate that on every `predev`. The commit
+ * is read at runtime instead (`mixosCommit` in src/lib/platform/version.ts).
  */
 function writeBuildInfo(apps: readonly AppManifest[], report = true): void {
+  const version = packageVersion();
   const schema = expectedSchemaVersion();
   const appMigrations = expectedAppMigrations(apps);
 
   const output = `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
 //
-// Derived from supabase/migrations/ and apps/*/migrations/ at build time, so the
-// running server knows what it was built against without reading either. See
-// src/lib/platform/schema-version.ts and src/lib/platform/app-migrations.ts for
-// what this gates, and src/lib/platform/version.ts for the runtime half of
-// build identity.
+// Derived from package.json, supabase/migrations/ and apps/*/migrations/ at
+// build time, so the running server knows what it was built from without
+// reading any of them. See src/lib/platform/version.ts for the version and the
+// commit, and src/lib/platform/schema-version.ts and
+// src/lib/platform/app-migrations.ts for what the migrations gate.
+
+/** This build's MixOS version: package.json's \`version\`. */
+export const MIXOS_VERSION = ${JSON.stringify(version)};
 
 /** Highest migration number in supabase/migrations/ at build time. */
 export const EXPECTED_SCHEMA_VERSION = ${schema};
@@ -1880,7 +1957,8 @@ export const EXPECTED_APP_MIGRATIONS: readonly { slug: string; file: string }[] 
   fs.writeFileSync(BUILD_INFO_FILE, output, "utf-8");
   if (report) {
     console.log(
-      `Build stamp: expected schema version ${schema}, ${appMigrations.length} app migration(s)`,
+      `Build stamp: MixOS ${version}, expected schema version ${schema}, ` +
+        `${appMigrations.length} app migration(s)`,
     );
   }
 }
