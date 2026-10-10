@@ -35,13 +35,13 @@ change, exactly as changing `AppManifest` is.
 
 - **Backwards compatibility.** Will this break existing apps, connectors, or themes? Check how `AppManifest`, `WidgetProps`, `BaseConnector`, `AppContext`, and `ThemeManifest` are used across all apps and themes. A token removed from the contract in `src/lib/themes/tokens.ts` breaks **every** theme at once.
 - **Registry generation.** If you change `AppManifest`, `ConnectorManifest`, or `ThemeManifest` types, update `scripts/generate-project-registry.ts` to match and run `npm run dev` to regenerate.
-- **Database migrations.** New migrations in `supabase/migrations/` run in alphabetical order. Use a numbered prefix (e.g., `0010_my_change.sql`) and test against the local Docker stack (`npm run db:local`) and a plain Postgres (`npm run db:migrate`) first. Keep them portable: MixOS runs on any Postgres 13+, so a statement that names a Supabase-only role or schema (`anon`, `authenticated`, `service_role`, `auth.*`) has to be skipped where those do not exist — see the guarded grants in `0005_app_schema_columns.sql`.
+- **Database migrations.** New migrations in `supabase/migrations/` run in alphabetical order. Use a numbered prefix (e.g., `0011_my_change.sql`) and test against the local Docker stack (`npm run db:local`) and a plain Postgres (`npm run db:migrate`) first. Keep them portable: MixOS runs on any Postgres 13+, so a statement that names a Supabase-only role or schema (`anon`, `authenticated`, `service_role`, `auth.*`) has to be skipped where those do not exist — see the guarded grants in `0005_app_schema_columns.sql`.
 
   **Every new migration must bump `platform_schema_version` to its own number, as its last statement:**
 
   ```sql
   insert into public.platform_settings (key, value)
-  values ('platform_schema_version', '10')
+  values ('platform_schema_version', '11')
   on conflict (key) do update set value = excluded.value, updated_at = now();
   ```
 
@@ -49,7 +49,7 @@ change, exactly as changing `AppManifest` is.
 
   The comparison is `<`, not `≠`: a database *ahead* of the image is the normal ordering (migrate, then deploy), and only the reverse is refused.
 - **What app migrations may contain.** `scripts/app-sql-policy.ts` is an allowlist: every statement in an app's migrations, every node of it, has to be something it names, and every function an expression calls has to be in `ALLOWED_FUNCTIONS`. Widening it widens what any installed app can leave in the database to run as the platform's role, so a change there gets the review a change to the platform schema gets. See `docs/security-architecture.md` §3.2.
-- **ESLint rules.** The `eslint.config.mjs` enforces security boundaries — apps cannot import the database client or connector modules directly. If you modify these rules, understand why they exist (see `docs/secure-edge-gateway-architecture.md`).
+- **App containment.** `src/lib/apps/import-policy.mjs` is the list of what app code may import, and `scripts/app-containment.ts` holds every app to it, and to the environment, network and HTML bans, on every build and every Registry install. `eslint.config.mjs` carries the same rules as editor feedback. If you modify them, understand why they exist (see `docs/secure-edge-gateway-architecture.md` and `docs/security-architecture.md` §24).
 - **Guide documentation.** If you add a new manifest field, hook, or developer-facing feature, update the relevant guide page (`src/components/apps/guide-tabs.tsx` or `src/components/connectors/connector-guide-tabs.tsx`) — or, for a theme-system change, the matching file under `docs/themes/`.
 
 ## Key files
@@ -64,7 +64,7 @@ change, exactly as changing `AppManifest` is.
 | Registry generation | `scripts/generate-project-registry.ts` |
 | Auth & middleware | `src/lib/auth/session.ts`, `src/proxy.ts` |
 | Hook system | `src/lib/hooks/hook-system.ts` |
-| Build identity | `src/generated/build-info.ts` (generated), `src/lib/platform/version.ts` |
+| Build identity | `src/generated/build-info.ts` (generated: the version, from `package.json`), `src/lib/platform/version.ts` (the version, the commit and `requiresMixOS`), `src/lib/platform/build.ts` (built deployment or checkout) |
 | Schema gate | `src/lib/platform/schema-version.ts`, `src/lib/platform/app-migrations.ts`, `src/app/api/health/ready/route.ts` |
 | Instance-wide locks | `src/lib/platform/lock.ts` |
 | Database migrations | `supabase/migrations/` |

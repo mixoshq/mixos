@@ -30,6 +30,8 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
 | Safe error helper    | `src/lib/safe-error.ts`                       |
 | Security headers     | `next.config.ts`                              |
+| App import policy    | `src/lib/apps/import-policy.mjs`              |
+| App containment scan | `scripts/app-containment.ts`                  |
 | ESLint restrictions  | `eslint.config.mjs`                           |
 | MCP endpoint         | `src/app/api/mcp/route.ts`                    |
 | MCP tool broker      | `src/lib/mcp/broker.ts`                       |
@@ -227,7 +229,7 @@ Output:     base64(IV) : base64(AuthTag) : base64(Ciphertext)
 
 | Threat                         | Mitigation                                             |
 |--------------------------------|--------------------------------------------------------|
-| Credentials in browser JS      | ESLint bans connector imports in client code           |
+| Credentials in browser JS      | No app code imports a connector at runtime; the build refuses it (§24) |
 | Credentials in API responses   | Connectors are server-only; SDK returns app data only  |
 | Credentials leaked via caching | Connector instances are stateless, never cached        |
 | Credentials at rest in DB      | AES-256-GCM with per-record random IV                  |
@@ -275,6 +277,20 @@ Result: boolean --> 403 if false
 
 Users can only reach app API routes for apps they hold a grant for. This is
 checked on **every request**, inside `resolveAuthTier`, before any app code runs.
+
+**The app has to be active, and in the running build.** `resolveAuthTier` and
+`hasAppGrant` refuse an app an admin has deactivated, or one the running build
+doesn't carry, before they read a grant (`isAppActive()` in
+[`src/lib/apps/access.ts`](../src/lib/apps/access.ts)). The second half matters
+because the release step keeps an app's row, and the grants, installs and
+widgets that hang off it, when the app leaves the build
+([`scripts/sync-app-registry.ts`](../scripts/sync-app-registry.ts)): a rollback
+or a build that skips an app no longer deletes them. A kept row could hand an
+old activation, and with it the old grants, to different code that comes back
+under the same slug, so the release step records a hash of each app's files.
+An app that returns with different files comes back inactive and flagged on
+Admin > Apps until an admin activates it; one that returns with the same files
+comes back as it left. Both are audited (§28).
 
 **Do not confuse this with `user_apps`.** That table records which apps a user has
 *installed* on their dashboard — a layout preference, not a permission. The
@@ -402,20 +418,21 @@ Three layers prevent client-side code from bypassing the gateway:
 +------------------------------------------------------------------+
 
 +------------------------------------------------------------------+
-| LAYER 2: ESLint Rules (eslint.config.mjs)                        |
+| LAYER 2: The import list (src/lib/apps/import-policy.mjs)        |
 |                                                                  |
-|  Client code (widgets, pages) CANNOT import:                     |
-|    - @/lib/db/*                                                  |
-|    - @connectors/*                                               |
-|    - @/lib/connectors/*                                          |
+|  App code imports its own files, a published list of platform    |
+|  modules and a few packages, and nothing else. So no app code,   |
+|  in any tier, can import:                                        |
+|    - @/lib/db*, or construct a scoped DB client                  |
+|    - @connectors/*, @/lib/connectors/* (types are fine)          |
+|    - the context builder, the services broker, the hook system   |
+|    - another app's code                                          |
+|  and a page or widget cannot import its own app's lib/server.    |
 |                                                                  |
-|  Restrictions are TIERED, and each tier RESTATES the whole set   |
-|  because ESLint flat config REPLACES a rule's options rather     |
-|  than merging them. An entry omitted from a later block is       |
-|  permitted there — which is how pages and widgets became the     |
-|  only tier able to import the context builder.                   |
-|                                                                  |
-|  Enforced: CI runs `npm run lint` as a BLOCKING step.            |
+|  Judged by the file an import resolves to, so no spelling gets   |
+|  round it. Enforced by the registry generator on every build     |
+|  and every Registry install (§24); ESLint runs the same code     |
+|  as feedback in an editor.                                       |
 +------------------------------------------------------------------+
 
 +------------------------------------------------------------------+
@@ -562,7 +579,7 @@ What the platform does between those two boxes, in order:
 | Per-app schemas      | Cross-app data access         | A schema and role per app; `ScopedClient` pinned to it | `scoped-db.ts`, `app-identifiers.ts` |
 | App migration checks | App SQL reaching past its app | Parsed against an allowlist, run as the app's role | `app-sql-policy.ts`, `app-migrations.ts` |
 | Notification scope   | Cross-app push spam           | `send()` filters recipients to users with the app | `notifications.ts` (`hasAppGrant`) |
-| ESLint import rules  | Client importing server code  | Build-time import restrictions               | `eslint.config.mjs`          |
+| App import list      | Capabilities past the manifest | Default-deny, by resolved file; a finding skips the app | `import-policy.mjs` (see §24) |
 | App containment scan | Secrets, egress, injection    | Syntax-tree scan; a finding skips the app    | `app-containment.ts` (see §24) |
 | SDK routing          | Direct DB/connector access    | All client calls go through `/api/apps/...`  | `sdk.ts`                     |
 | Safe error responses | Internal detail leakage       | `safeErrorMessage()` strips details in prod  | `safe-error.ts`, all routes  |
@@ -867,13 +884,13 @@ Entirely at the application layer:
   factory used to be importable from every app tier, including widgets, with no
   lint error; an app could have written
   `createScopedClient("other-app").table("secrets")` and read or written another
-  app's data. It is now a restricted import in all three tiers, by **name**
-  (`createScopedClient`, `createReadOnlyScopedClient`) so that
-  `import type { ScopedClient }` — how a handler types the client it is given —
-  still works.
-- The ESLint rules in [`eslint.config.mjs`](../eslint.config.mjs) stop app code
-  importing the raw client at all, so an app cannot hand-write SQL at runtime
-  that would sidestep its schema.
+  app's data. `@/lib/apps/scoped-db` is not on the app import list (§24), so no
+  app code can import it at runtime, while `import type { ScopedClient }`, how a
+  handler types the client it is given, still works: a type may come from
+  anywhere.
+- The same list stops app code importing the raw client at all, by any
+  spelling, so an app cannot hand-write SQL at runtime that would sidestep its
+  schema. The registry generator enforces it on every build and every install.
 
 ### Reachability of the database credential
 
@@ -1225,8 +1242,8 @@ tables is the worst outcome this feature could have:
    `insert`/`update`/`upsert`/`delete`.
 2. **Runtime** — the client is a `Proxy` that throws on those verbs and re-wraps
    itself across chained calls, so `as any` doesn't defeat it.
-3. **ESLint** — `apps/**/mcp/**` cannot import `@/lib/db*`, the App Services
-   broker, or the context builder.
+3. **The import list** — no app code, `mcp/` included, can import `@/lib/db*`,
+   the App Services broker, or the context builder. The build refuses it (§24).
 
 4. **Connector declaration** — a connector marks each method `mutates: true` in
    its `telemetry` list, and the MCP context wraps `ctx.connectors` in a proxy
@@ -1364,6 +1381,8 @@ route's own 401 is what an operator needs to see.
 no database touch. `/api/health/ready` returns `ok` or `unavailable` with a 503;
 the caught error goes to `console.error` and never into the response body.
 Neither leaks version, commit, environment, or stack. Neither is rate-limited.
+The MixOS version and commit appear on the admin pages, to admins, and nowhere
+else.
 
 ---
 
@@ -1424,6 +1443,9 @@ sidecar locally.
   RETURNING id` row-locks the match, so two overlapping ticks cannot both run the
   same job. A lease older than `STALE_LEASE_MINUTES` is reclaimable, so a job
   whose process died does not stay claimed forever.
+- **Apps not in the build** keep their job rows, with each job's enabled switch,
+  for when they come back (§3.1). A tick runs only jobs of active apps the
+  running build carries.
 - The tick also performs GC: `rate_buckets` older than an hour, route telemetry,
   expired webhook replay markers, and `app_unlock_failures` older than twice the
   lockout window (§21).
@@ -1563,14 +1585,22 @@ it and rolls it back — if the code references:
   through the `Markdown` primitive (`src/components/ui/markdown.tsx`), which
   drops raw HTML;
 - `eval` or `Function`, which is how every rule above would otherwise be routed
-  around.
+  around;
+- an import off the app import list, or any other way of loading code. See
+  [What app code can import](#what-app-code-can-import) below.
 
 A name read off `globalThis`, `window`, `self` or `global` counts the same as
-the bare identifier. A name built at runtime is refused outright, whether it
-indexes one of those objects or names the module in a `require()` or `import()`
-(a relative template path such as `./locales/${lang}` excepted). A local
-variable that happens to be called `fetch` is not a finding: the scan resolves
-each name, and only one that resolves to nothing in the app is a global.
+the bare identifier, and so does one read off `window.top` or
+`globalThis.global`, which are the global object again. A name built at runtime
+that indexes one of those objects is refused outright, and so is the global
+object handed on (`const g = globalThis`, `Reflect.get(window, …)`,
+`const { process } = globalThis`), because a name read off it later cannot be
+seen. A local variable that happens to be called `fetch` is not a finding: the
+scan resolves each name, and only one that nothing in the app binds at runtime
+is a global. A declaration the compiler erases does not bind it:
+`declare const process`, a `declare global` block or a type-only import leaves
+the running code reaching the real global, so it is refused like the bare
+name.
 
 **This is not a sandbox.** The scan reads syntax. Code determined to evade it
 can assemble a name at runtime or reach the same object through another module.
@@ -1586,6 +1616,67 @@ could read the keys to the whole instance. The one remaining escape,
 `raw-response`, lets a route return its own Response and loosens nothing in this
 section.
 
+### What app code can import
+
+An app gets what its manifest declares, through `context`. That holds only
+while `context` is the only way in, and an import is another way in: a module
+that sends a push to any user, reads any app's settings or mints an API key is
+a capability without its declaration. So the same scan holds every import to a
+list ([`src/lib/apps/import-policy.mjs`](../src/lib/apps/import-policy.mjs),
+rendered in [`docs/apps/architecture.md`](apps/architecture.md#what-an-app-can-import)):
+
+- **Default-deny.** App code imports its own files, the platform modules on the
+  list (from some of them, only the names listed) and `react`, `zod`,
+  `lucide-react`, `next/link`, `next/navigation` and `next/font/*`. No Node
+  built-in, `fs` and `child_process` included; no other package; no other
+  platform module. A new module under `src/` is closed to apps the day it is
+  written.
+- **Judged by where it lands.** Each specifier is resolved as the build resolves
+  it, through relative paths, the tsconfig `paths` aliases and symlinks, and the
+  file it lands on decides. `@/lib/db/../db/client` and a relative path into
+  `src/` are refused like `@/lib/db`. A path out of the app is refused even to a
+  module on the list, which apps reach by its `@/` name. A connector, or another
+  app's code, may be imported for its types only.
+- **Types from anywhere.** `import type` and its inline and `typeof import()`
+  forms are erased before anything runs. `tsconfig.json` leaves
+  `verbatimModuleSyntax` off, which is what keeps `import { type A }` erased
+  whole, and a test pins it.
+- **Nothing it cannot read.** `require`, `module`, a bundler's own loader
+  globals, the module wrapper's `arguments`, `import x = require()`,
+  `import.meta`, an `import()` of anything but the app's own file by a string
+  literal, and a URL specifier are refused. So is an import of code the scan
+  does not read (a dot-directory, the app's `assets/`, `plans/`, `migrations/`
+  or `screenshots/`, a `.d.ts`), and so are a symbolic link, `node_modules/` or
+  `package.json` anywhere in the app tree, each of which changes what an import
+  loads without the scan seeing it. Every entry point the generator registers —
+  routes, pages, widgets, `hooks.ts`, jobs, syncs, services and MCP tools — must
+  be a file the scan read, and a route is checked before the generator imports
+  it.
+- **Read-only.** A write through anything imported from outside the app is
+  refused: a property assignment, `delete`, `++`, or
+  `Object.defineProperty`/`defineProperties`/`assign`/`setPrototypeOf` and
+  `Reflect.set`/`defineProperty`/`deleteProperty`/`setPrototypeOf` on an
+  imported binding. Every app shares those module instances with the platform.
+- **`callAppRoute` runs the app's own routes** (§25).
+
+**No escape hatch here either.** A function worth granting one app is either safe
+for every app, and is added to the list for all of them by a reviewed change,
+or it is a capability, and belongs on `context` behind a manifest declaration.
+ESLint runs the same policy code in an editor (`mos-apps/app-imports`), so the
+two cannot disagree.
+
+**What it does not stop.** The import rules read syntax too, and three things
+lie outside what syntax shows:
+
+- reaching a privileged object through what `context` hands over. The scan
+  cannot see where an object leads, so `context` must carry no privileged
+  references;
+- writing to a shared module by an indirect route: an alias of the imported
+  binding, an object returned from it, or a prototype reached through an
+  instance. Only the direct forms above are refused;
+- an allowlisted function misused with valid arguments, which is what the
+  review of each new entry is for.
+
 ---
 
 ## 25. In-Process Route Calls
@@ -1598,6 +1689,15 @@ server-side and platform-owned.
 It is **not** an authorization bypass: it re-runs `resolveAuthTier` against the
 page's own session, the role gate, and input/output validation, and it records
 the same telemetry row.
+
+It is **bound to the calling app at build time.** Run with another app's slug
+it would execute that app's routes, mutations included, as the current user,
+with no `provides`/`consumes` declaration on either side: a second cross-app
+channel beside App Services (§23). So the containment scan accepts
+`callAppRoute` only as a direct call whose first argument is the app's own slug
+as a string literal, and refuses every other use of the binding: a variable
+slug, a spread, an alias, a re-export, `.call` or `.apply`. Another app's data
+comes through App Services.
 
 It **deliberately skips all three rate limiters**, because the page render is
 already bounded by the request that triggered it and charging a user's API budget
@@ -1687,8 +1787,17 @@ would in fact survive, but retention that depends on a `WHERE` clause in another
 module is not a retention policy.
 
 Currently recorded: `connector.configure`, `connector.test`,
-`app.password.set`, `app.password.clear`, `user.grant.add`,
-`user.grant.revoke`, `user.role.set`.
+`app.password.set`, `app.password.clear`, `app.activate`, `app.deactivate`,
+`app.missing`, `app.returned`, `user.grant.add`, `user.grant.revoke`,
+`user.role.set`.
+
+**Rows the release step writes.** `app.missing` (an app left the build) and
+`app.returned` (it came back, with whether its files changed and both hashes)
+come from the release step's registry sync, not from a person, so `actor_id` is
+null and `actor_email` is `release-step`, which can't be an address. They are
+written in the sync's own transaction, so the change and its record commit
+together: rule 2 is about not failing an admin's action, and here a failed write
+fails the step before anything it would have recorded is committed.
 
 **The review checklist item for any new admin action**: call `recordAdminAction`
 alongside `requireAdmin`. Nothing upstream does either for you.
@@ -1886,7 +1995,8 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   happens to the data and grants the installed one already has.
 - **Run from a built artifact.** `checkInstallable()` refuses up front when
   `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
-  `output: "standalone"` tree, which its server `chdir`s to before listening.
+  `output: "standalone"` tree, which its server `chdir`s to before listening
+  (`isBuiltDeployment()`, `src/lib/platform/build.ts`).
 
   This check has to be a marker rather than a capability probe, because the
   capability probe passes and the capability is absent.
@@ -1913,7 +2023,7 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   execs a source file, and an archive that can set the mode of a file it places
   in the checkout can set the setuid bit.
 
-### A released build always searches mixos.org
+### A built deployment searches mixos.org
 
 `MIXOS_REPOSITORY_URL` decides where an instance gets the checksums it verifies
 every download against. **Whoever chooses the catalogue chooses what "verified"
@@ -1922,24 +2032,15 @@ project, and the one most likely to be set to something local and left there.
 
 It legitimately points at a laptop: `http://localhost:4321` for a host checkout
 of the mixos.org site, `http://host.docker.internal:4321` from inside the Docker
-stack. Both are right there and catastrophic in a release, so the value is
-gated on the way out by four layers:
+stack. Both are right there and wrong on a deployment, so the value is gated on
+the way out by four layers:
 
 | Layer | Where | Catches |
 | --- | --- | --- |
 | Pre-commit review | `dangerfile.ts` (`fail`) | A PR that pins it in a committed file |
-| CI | `npm run verify:repository-url`, blocking in `ci.yml` | The same, on every push — before a tag exists |
-| Runtime lock | `repositoryBaseUrl()` | A release built or deployed with it set anyway |
+| CI | `npm run verify:repository-url`, blocking in `ci.yml` | The same, on every push |
+| Runtime lock | `repositoryBaseUrl()` | A built deployment with it set anyway, in a committed file or in its own environment |
 | Default | `DEFAULT_REPOSITORY_URL` | Everything else |
-
-**The runtime lock is inert until a production build sets `MIXOS_RELEASE`.**
-The `Dockerfile` declares the `ARG` for the image path, but this repository
-deploys on Vercel, where nothing sets the variable today — so the first three
-layers are what actually hold, and a deployed instance would still honour an
-override applied to its own environment. The step that closes it is
-[`docs/plans/20260921_0842-release-versioning.md`](plans/20260921_0842-release-versioning.md):
-`next.config.ts` derives `MIXOS_RELEASE` from `package.json` when
-`VERCEL_ENV` is `production`.
 
 Only the scanned files matter, and the list is explicit rather than a glob:
 `.env.docker`, `docker-compose.yml` and the two Dockerfiles. `.env.local` is
@@ -1948,23 +2049,24 @@ travel. A **commented** example is not flagged — both env files carry one show
 the localhost form on purpose, and a check whose fix is "delete the
 documentation" is a check people learn to bypass.
 
-**The runtime lock keys on `MIXOS_RELEASE`, not `NODE_ENV`.** That variable
-carries the tag (`v1.2.0`) and is stamped by the tag-triggered build, nothing
-else. `npm run docker:prod` runs the production-parity profile with
-`NODE_ENV=production`, and that profile exists precisely so a developer can
-exercise a production shape locally — including against a local catalogue.
-Keying on `NODE_ENV` would take that away to catch a case it does not actually
-identify.
+**The runtime lock covers every built deployment**, by the marker
+`checkInstallable()` refuses on (`isBuiltDeployment()`,
+`src/lib/platform/build.ts`): `VERCEL` set, or a standalone `server.js` at the
+working directory, which is the Docker image on every host. There it ignores the
+override unless the value names the deployment's own machine, one of the four
+hosts in [the transport rule](#the-transport-carrying-the-checksum). That
+exception is what lets `npm run docker:prod`, the production image run locally,
+browse a local copy of the site. Keying the lock on `NODE_ENV` would take that
+profile away to catch a case `NODE_ENV` does not identify.
 
-When a release does carry an override, it is **ignored and logged, not
-refused**. A release that fails to boot over a stray environment variable is a
-worse outcome than one that quietly uses the right catalogue, and there is no
-branch here where refusing to start is safer: the correct value is known.
+An ignored override is **logged, not refused**. A deployment that fails to boot
+over a stray environment variable is a worse outcome than one that quietly uses
+the right catalogue, and there is no branch here where refusing to start is
+safer: the correct value is known.
 
-The one thing none of this constrains is a deployment's own environment after
-the fact — an operator who sets the variable on a released instance gets the
-warning and mixos.org. That is the intended end state: **all installs search
-mixos.org, and the override is a development affordance.**
+A source checkout honours the override, because developing the platform against
+another catalogue is what it is for. That is the intended end state: **every
+deployment searches mixos.org, and the override is a development affordance.**
 
 ### The transport carrying the checksum
 

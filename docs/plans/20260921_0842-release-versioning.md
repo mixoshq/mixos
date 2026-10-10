@@ -2,8 +2,13 @@
 
 **Status:** amended on 10 October 2026. The release process is built:
 `/mixos deploy release` and `scripts/release-prep.ts`. Decision 4 is
-superseded: the version is stamped into every build rather than set in Vercel
-production. Written on 21 September 2026 as "Release versioning on Vercel".
+superseded, and with it the `next.config.ts` change: every build, on every
+host, stamps `package.json`'s version into `src/generated/build-info.ts`, and
+`MIXOS_RELEASE` is no longer read. The repository-URL lock covers every built
+deployment. The commit comes from `MIXOS_COMMIT` or the host's own variable:
+see `src/lib/platform/version.ts` and
+[`docs/hosting/README.md`](../hosting/README.md#which-build-is-running).
+Written on 21 September 2026 as "Release versioning on Vercel".
 **Scope:** platform — `scripts/release-prep.ts`, `.claude/skills/mixos/`,
 `package.json`, `CHANGELOG.md` (created by the first release), README,
 `docs/hosting/`
@@ -144,4 +149,5 @@ and mixos.org's own pages on upgrading and releasing.
 - After the first release, on `main`: `git describe --abbrev=0` names
   `v0.1.0`, `git cat-file -t v0.1.0` prints `tag`, and the GitHub Release's
   notes are the `CHANGELOG.md` section. A fork that runs `git merge v0.1.0`
-  gets a `Merge tag 'v0.1.0'` commit.
+  gets a `Merge tag 'v0.1.0'` commit, and once deployed its admin pages show
+  `MixOS 0.1.0`.

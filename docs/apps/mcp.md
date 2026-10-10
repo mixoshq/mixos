@@ -203,7 +203,7 @@ never authorize on it.
 |---|---|
 | **Type** | `ctx.db` has no `insert` / `update` / `upsert` / `delete`. Compile error. |
 | **Runtime** | The scoped client is a Proxy that throws on those verbs, surviving `as any` and every `.select().eq()` hop. |
-| **ESLint** | `apps/**/mcp/**` can't import `@/lib/db*`, the App Services broker, or the context builder. |
+| **Imports** | No app code can import `@/lib/db*`, the App Services broker, or the context builder. The build refuses the app, and ESLint flags it in an editor. |
 | **Connectors** | A tool can call only the methods a connector declares as reads. A method declared `mutates`, or one it doesn't declare at all (`request()` included), throws. |
 | **App Services** | A provider reached through `ctx.services` runs read-only too: its `db` refuses writes and its connectors are narrowed the same way. |
 

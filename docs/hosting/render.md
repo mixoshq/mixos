@@ -73,6 +73,9 @@ step in it, and switches traffic once `/api/health/ready` answers. If
 the release step fails, the deploy fails and the previous version keeps
 serving. The pre-deploy logs say why.
 
+The admin pages show the MixOS version and the commit the running deploy was
+built from, which Render sets as `RENDER_GIT_COMMIT`.
+
 ## Troubleshooting
 
 - **The deploy fails at the health check.** Open the pre-deploy logs. If the
