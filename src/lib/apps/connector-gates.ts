@@ -5,6 +5,7 @@
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { isConnectorConfigured } from "@/lib/connectors/config";
+import { connectorConfigState } from "@/lib/connectors/status";
 
 /**
  * UX gate that pre-empts confusing runtime failures by refusing to register an
@@ -21,10 +22,18 @@ interface MissingConnector {
   displayName: string;
 }
 
-function lookupConnector(name: string): { displayName: string } | null {
+function lookupConnector(
+  name: string,
+): { displayName: string; needsNothing: boolean } | null {
   const c = connectorRegistry.find((c) => c.name === name);
   if (!c) return null;
-  return { displayName: c.displayName };
+  return {
+    displayName: c.displayName,
+    // A connector that asks for no credentials (a public API) is usable as
+    // soon as it is installed, and has no row until it is first verified.
+    needsNothing:
+      connectorConfigState(c.auth, null, c.credentialFields) === "ready",
+  };
 }
 
 /**
@@ -47,7 +56,8 @@ export async function getMissingTenantConfigConnectors(
   const checks = await Promise.all(
     app.connectors.map(async (name) => {
       const meta = lookupConnector(name);
-      const configured = await isConnectorConfigured(name);
+      const configured =
+        meta?.needsNothing === true || (await isConnectorConfigured(name));
       if (!configured) {
         return {
           name,
