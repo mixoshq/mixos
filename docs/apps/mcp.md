@@ -287,9 +287,8 @@ never has to opt into seeing it. In **Administration → Analytics**:
   Every app exposing tools is listed, so a `0` means "reachable by a model but
   never used", not "missing".
 - **Select your app** — per-tool call counts (including declared-but-never-called
-  tools), a daily trend, which connected client drove the requests, and which
-  users were asking. Your app appears in the selector on the strength of its
-  `mcp` block alone.
+  tools), a daily trend, and which users were asking. Your app appears in the
+  selector on the strength of its `mcp` block alone.
 
 Use it to spot the two failure modes docs can't catch: a tool nobody calls
 (usually a weak `description`), and a tool called far more than expected (usually
