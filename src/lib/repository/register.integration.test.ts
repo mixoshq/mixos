@@ -29,6 +29,7 @@ import path from "node:path";
 import postgres, { type Sql } from "postgres";
 import { migratePlatform } from "../../../scripts/platform-migrations";
 import { filesHash, hashFileTree } from "./content-hash";
+import { INSTALL_RECORD_FILE, serializeInstallRecord } from "./install-record";
 import { pendingLocation, writeSidecar, type PendingKind } from "./pending";
 import type { TarEntry } from "./tar";
 
@@ -88,21 +89,27 @@ describe("npm run register, against a real Postgres", { skip }, () => {
     const where = pendingLocation(root, kind, slug);
     fs.mkdirSync(where.folder, { recursive: true });
     for (const e of TREE) fs.writeFileSync(path.join(where.folder, e.path), e.data);
+    fs.writeFileSync(
+      path.join(where.folder, INSTALL_RECORD_FILE),
+      serializeInstallRecord({
+        source: "https://mixos.org",
+        kind,
+        slug,
+        version: "1.2.0",
+        gitTag: "v1.2.0",
+        commitSha: "e".repeat(40),
+        contentHash: hashFileTree(TREE),
+        filesHash: filesHash(TREE),
+        repository: { owner: "acme", name: slug, subpath: null },
+        requiresMixOS: null,
+      }),
+    );
     writeSidecar(where.sidecar, {
       kind,
       slug,
-      source: "https://mixos.org",
-      version: "1.2.0",
-      gitTag: "v1.2.0",
-      commitSha: "e".repeat(40),
-      contentHash: hashFileTree(TREE),
-      filesHash: filesHash(TREE),
-      requiresMixOS: null,
       yankedAccepted: false,
       installedAt: "2026-10-11T09:00:00.000Z",
       installedBy: "admin@example.com",
-      fileCount: 1,
-      byteCount: TREE[0].data.length,
       check: { verdict: "accepted", deferred: [] },
     });
   }

@@ -6,9 +6,16 @@
 // it). The work itself is src/lib/repository/register.ts: this reads the
 // arguments, asks before anything a person should agree to, and prints.
 //
+// After a registration it prints the hand-back (src/lib/repository/hand-back.ts):
+// what to commit and how. It also asks git, read-only, whether the checkout's
+// ignore rules would leave any of the new files out of the commit
+// (ignoredByGit()), which the admin pages can't, because the server never runs
+// git.
+//
 // Library only. Exported for its tests, which give it a checkout, a stand-in
 // generator and their own input and output.
 
+import { spawnSync } from "child_process";
 import os from "os";
 import type { AdminActor } from "../src/lib/apps/admin-audit";
 import { cliActorName } from "../src/lib/apps/audit-actors";
@@ -18,8 +25,11 @@ import {
   pidRunning,
   readCheckoutLock,
 } from "../src/lib/platform/checkout-lock";
+import { handBackLines, type IgnoredPath } from "../src/lib/repository/hand-back";
+import { folderFiles } from "../src/lib/repository/install-record";
 import {
   MIXOS_DIR,
+  liveLocation,
   listPendingInstalls,
   pathExists,
   pendingLocation,
@@ -119,6 +129,42 @@ export function printable(text: string): string {
   );
 }
 
+/**
+ * The files of the registered folder `folder` (repo-relative) that git would
+ * leave out of `git add <folder>`, by this checkout's ignore rules, each with
+ * the rule that does it. `files` are paths in the folder.
+ *
+ * Read-only: `git check-ignore`, which changes nothing. Empty when this isn't
+ * a git work tree or git can't be run, since there is then no `git add` to
+ * warn about. A rule that starts with `!` keeps a file in, and is skipped.
+ * `run` is for tests.
+ */
+export function ignoredByGit(
+  root: string,
+  folder: string,
+  files: readonly string[],
+  run: typeof spawnSync = spawnSync,
+): IgnoredPath[] {
+  if (files.length === 0) return [];
+  const result = run("git", ["check-ignore", "--verbose", "-z", "--stdin"], {
+    cwd: root,
+    input: `${files.map((f) => `${folder}/${f}`).join("\0")}\0`,
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "pipe"],
+    timeout: 10_000,
+  });
+  // 0: some are ignored. 1: none are. Anything else: no answer.
+  if (result.error || (result.status !== 0 && result.status !== 1)) return [];
+  const fields = String(result.stdout ?? "").split("\0");
+  const out: IgnoredPath[] = [];
+  for (let i = 0; i + 3 < fields.length; i += 4) {
+    const [source, line, pattern, pathname] = fields.slice(i, i + 4);
+    if (!pathname || !pattern || pattern.startsWith("!")) continue;
+    out.push({ path: pathname, rule: `${source}:${line}:${pattern}` });
+  }
+  return out;
+}
+
 /** The audit's name for whoever runs this: `cli:<os user>@<hostname>`. */
 export function cliActor(): AdminActor {
   let user: string | undefined;
@@ -148,6 +194,8 @@ export interface CliOptions {
   generator?: string;
   /** Stops a registration at its next safe point (Ctrl-C). */
   signal?: AbortSignal;
+  /** Tests: what runs `git check-ignore`. */
+  git?: typeof spawnSync;
 }
 
 /** Run one command. Returns the exit code: 0 done, 1 refused or failed, 2 a usage error. */
@@ -196,6 +244,14 @@ export async function runCli(args: readonly string[], options: CliOptions): Prom
             ` from commit ${result.commitSha.slice(0, 12)}.`,
         );
         say(result.nextStep);
+        const live = liveLocation(options.root, result.kind, result.slug);
+        const ignored = ignoredByGit(
+          options.root,
+          live.rel,
+          folderFiles(live.dir).map((f) => f.path),
+          options.git,
+        );
+        for (const line of handBackLines(result.handBack, { isApp: result.kind === "app", ignored })) say(line);
         return 0;
       }
     }
@@ -219,7 +275,8 @@ function list(root: string, say: (line: string) => void): number {
     const s = p.sidecar;
     say(
       `  ${p.kind}/${p.slug}` +
-        (s ? ` ${s.version}, installed ${new Date(s.installedAt).toLocaleString(undefined, { hour12: false })} by ${s.installedBy}` : ""),
+        (p.record ? ` ${p.record.version}` : "") +
+        (s ? `${p.record ? "," : ""} installed ${new Date(s.installedAt).toLocaleString(undefined, { hour12: false })} by ${s.installedBy}` : ""),
     );
     say(p.problem ? `    ${p.problem}` : `    npm run register -- ${p.kind}/${p.slug}`);
   }

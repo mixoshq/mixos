@@ -24,6 +24,12 @@ import { cliActorName } from "../apps/audit-actors";
 import { tryAcquireCheckoutLock, readCheckoutLock } from "../platform/checkout-lock";
 import { filesHash, hashFileTree } from "./content-hash";
 import {
+  INSTALL_RECORD_FILE,
+  readInstallRecord,
+  serializeInstallRecord,
+  type InstallRecord,
+} from "./install-record";
+import {
   pendingLocation,
   readSidecar,
   writeSidecar,
@@ -158,28 +164,46 @@ const options = (extra: Partial<Parameters<typeof registerPending>[2]> = {}) => 
 const file = (p: string, data: string): TarEntry => ({ path: p, mode: 0o644, data: Buffer.from(data) });
 const ACME = [file("app.json", '{"name":"Acme"}\n'), file("api/items/route.ts", "export {};\n")];
 
-/** A pending install, as install leaves one. */
-function pend(kind: PendingKind, slug: string, entries: TarEntry[] = ACME, fields: Partial<PendingSidecar> = {}) {
-  const where = pendingLocation(root, kind, slug);
-  for (const e of entries) {
-    fs.mkdirSync(path.dirname(path.join(where.folder, e.path)), { recursive: true });
-    fs.writeFileSync(path.join(where.folder, e.path), e.data, { mode: 0o644 });
-  }
-  writeSidecar(where.sidecar, {
+/** The install record install writes for `entries` as `kind`/`slug`. */
+function recordFor(kind: PendingKind, slug: string, entries: TarEntry[], fields: Partial<InstallRecord> = {}): InstallRecord {
+  return {
+    source: "https://mixos.org",
     kind,
     slug,
-    source: "https://mixos.org",
     version: "1.2.0",
     gitTag: "v1.2.0",
     commitSha: "c".repeat(40),
     contentHash: hashFileTree(entries),
     filesHash: filesHash(entries),
+    repository: { owner: "acme", name: "mixos-apps", subpath: `apps/${slug}` },
     requiresMixOS: null,
+    ...fields,
+  };
+}
+
+/** A pending install, as install leaves one: the tree with its record, and the sidecar beside it. */
+function pend(
+  kind: PendingKind,
+  slug: string,
+  entries: TarEntry[] = ACME,
+  { record = {}, ...fields }: Partial<PendingSidecar> & { record?: Partial<InstallRecord> } = {},
+) {
+  const where = pendingLocation(root, kind, slug);
+  fs.mkdirSync(where.folder, { recursive: true });
+  for (const e of entries) {
+    fs.mkdirSync(path.dirname(path.join(where.folder, e.path)), { recursive: true });
+    fs.writeFileSync(path.join(where.folder, e.path), e.data, { mode: 0o644 });
+  }
+  fs.writeFileSync(
+    path.join(where.folder, INSTALL_RECORD_FILE),
+    serializeInstallRecord(recordFor(kind, slug, entries, record)),
+  );
+  writeSidecar(where.sidecar, {
+    kind,
+    slug,
     yankedAccepted: false,
     installedAt: "2026-10-11T09:00:00.000Z",
     installedBy: "admin@example.com",
-    fileCount: entries.length,
-    byteCount: entries.reduce((s, e) => s + e.data.length, 0),
     check: { verdict: "accepted", deferred: ["apps/acme/widgets.ts: later"] },
     ...fields,
   });
@@ -205,7 +229,7 @@ function rejectedWith(code: string) {
 // ── Register ────────────────────────────────────────────────────────────────
 
 describe("Register", () => {
-  test("moves a pending app into place and registers it, then deletes its record", async () => {
+  test("moves a pending app into place with its install record and registers it, then deletes its sidecar", async () => {
     const where = pend("app", "acme");
     const result = await registerPending("app", "acme", options());
 
@@ -216,9 +240,27 @@ describe("Register", () => {
     assert.equal(exists("apps/acme/app.json"), true);
     assert.equal(fs.existsSync(where.folder), false);
     assert.equal(fs.existsSync(where.sidecar), false);
-    assert.match(result.nextStep, /commit apps\/acme and deploy/);
+    // The record moved with the folder, to be committed with it.
+    assert.deepEqual(readInstallRecord(path.join(root, "apps", "acme")), { state: "ok", record: recordFor("app", "acme", ACME) });
+    assert.deepEqual(result.record, recordFor("app", "acme", ACME));
+    assert.match(result.nextStep, /^Registered to apps\/acme: the registry generator loaded its code and accepted it\. It is off until/);
     // No lock left behind.
     assert.equal(readCheckoutLock(root).exists, false);
+  });
+
+  test("hands back what to commit: the files with sizes, a message from the record, and the commands", async () => {
+    pend("app", "acme");
+    const { handBack } = await registerPending("app", "acme", options());
+    assert.equal(handBack.folder, "apps/acme");
+    assert.deepEqual(
+      handBack.files.map((f) => f.path),
+      [INSTALL_RECORD_FILE, "api/items/route.ts", "app.json"],
+    );
+    assert.equal(handBack.fileCount, 3);
+    assert.equal(handBack.commitMessage.split("\n")[0], "feat(acme): add app acme 1.2.0 from mixos.org");
+    assert.match(handBack.commitMessage, /^Registry-Files-Hash: sha256-/m);
+    assert.match(handBack.commands, /^git switch -c add-app-acme\ngit add apps\/acme\n/);
+    assert.equal(handBack.sourceUrl, `https://github.com/acme/mixos-apps/tree/${"c".repeat(40)}/apps/acme`);
   });
 
   test("runs the generator once, under its own checkout lock by token, with PATH and TMPDIR only", async () => {
@@ -327,8 +369,8 @@ describe("Register", () => {
     assert.equal(exists("apps/acme"), false);
   });
 
-  test("requiresMixOS above this checkout's version is refused before anything moves", async () => {
-    pend("app", "acme", ACME, { requiresMixOS: "999.0.0" });
+  test("requiresMixOS above this checkout's version, from the record, is refused before anything moves", async () => {
+    pend("app", "acme", ACME, { record: { requiresMixOS: "999.0.0" } });
     await assert.rejects(registerPending("app", "acme", options()), rejectedWith("incompatible"));
     assert.equal(exists("apps/acme"), false);
     assert.deepEqual(runs(), []);
@@ -350,6 +392,69 @@ describe("Register", () => {
       err instanceof RegisterError && err.code === "unregistrable" && /--discard/.test(err.message),
     );
     await assert.rejects(registerPending("theme", "aurora", options()), rejectedWith("not-pending"));
+  });
+
+  test("refuses a pending folder whose install record is missing, unreadable or another's, and moves nothing", async () => {
+    const missing = pend("app", "missing");
+    fs.rmSync(path.join(missing.folder, INSTALL_RECORD_FILE));
+    await assert.rejects(registerPending("app", "missing", options()), (err: unknown) =>
+      err instanceof RegisterError &&
+      err.code === "unregistrable" &&
+      /has no install record/.test(err.message) &&
+      /npm run register -- app\/missing --discard. and install it again/.test(err.message),
+    );
+
+    const unreadable = pend("app", "unreadable");
+    fs.writeFileSync(path.join(unreadable.folder, INSTALL_RECORD_FILE), '{"version":"latest"}');
+    await assert.rejects(registerPending("app", "unreadable", options()), (err: unknown) =>
+      err instanceof RegisterError && err.code === "unregistrable" && /can't be read/.test(err.message),
+    );
+
+    pend("app", "borrowed", ACME, { record: { slug: "other" } });
+    await assert.rejects(registerPending("app", "borrowed", options()), (err: unknown) =>
+      err instanceof RegisterError && err.code === "unregistrable" && /it records app\/other, not app\/borrowed/.test(err.message),
+    );
+
+    for (const slug of ["missing", "unreadable", "borrowed"]) assert.equal(exists(`apps/${slug}`), false, slug);
+    assert.deepEqual(runs(), []);
+  });
+
+  test("refuses a pending install an earlier version made, with no record in its folder", async () => {
+    const where = pend("app", "acme");
+    fs.rmSync(path.join(where.folder, INSTALL_RECORD_FILE));
+    // What its sidecar held then: the release's facts.
+    fs.writeFileSync(
+      where.sidecar,
+      JSON.stringify({
+        ...JSON.parse(fs.readFileSync(where.sidecar, "utf8")),
+        source: "https://mixos.org",
+        version: "1.2.0",
+        gitTag: "v1.2.0",
+        commitSha: "c".repeat(40),
+        contentHash: hashFileTree(ACME),
+        filesHash: filesHash(ACME),
+        requiresMixOS: null,
+        fileCount: ACME.length,
+        byteCount: 30,
+      }),
+    );
+    await assert.rejects(registerPending("app", "acme", options()), (err: unknown) =>
+      err instanceof RegisterError &&
+      err.code === "unregistrable" &&
+      /installed by an earlier version of MixOS/.test(err.message) &&
+      /--discard. and install it again/.test(err.message),
+    );
+    assert.equal(exists("apps/acme"), false);
+  });
+
+  test("the files hash leaves the record out: editing the record alone changes nothing it checks", async () => {
+    const where = pend("app", "acme");
+    // A hand edit to the record changes what it says, not the files it was checked against.
+    const file = path.join(where.folder, INSTALL_RECORD_FILE);
+    fs.writeFileSync(file, serializeInstallRecord(recordFor("app", "acme", ACME, { version: "1.2.1" })));
+    const result = await registerPending("app", "acme", options());
+    assert.equal(result.version, "1.2.1");
+    assert.equal(result.filesHash, filesHash(ACME));
   });
 
   test("is off with the kind's install flag", async () => {
