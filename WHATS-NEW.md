@@ -137,6 +137,12 @@ just pulled.
   **App updating**. Every other app serves, and readiness still reports
   `app-migrations-behind`. It serves again within 30 seconds of the release
   step, or of `npm run migrate:apps` after you add a migration locally.
+- **An install's check reads routes.** A Registry install reads each route's
+  `defineRoute({...})` options from its source, without running it, and
+  refuses a bare handler, a role the app doesn't declare, or `raw: true`
+  without its escape, in the build's own words. Options it can't read as
+  written, such as ones built from a variable, a spread or another file, are
+  listed as checked at registration, which loads the route.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's
