@@ -4,6 +4,8 @@
 #
 #   1. Stamp `lastUpdated` on every app/connector/theme manifest the commit
 #      touches, and re-stage it so the date ships with the change it describes.
+#      A merge or cherry-pick stamps only what it changes itself, not what it
+#      brings in as the other side has it — see scripts/stamp-updated.ts.
 #   2. Validate app/connector/theme manifests (and rebuild the gitignored
 #      src/generated/*.ts). The generator schema-validates every app.json /
 #      connector.json / theme.json — and compiles each theme.css against the
@@ -22,7 +24,9 @@
 set -euo pipefail
 
 # Only run when a manifest/structure under apps/, connectors/ or themes/ is part
-# of this commit — keeps unrelated commits fast.
+# of this commit — keeps unrelated commits fast. On a merge this includes what
+# the merge brings in, so those manifests are validated even when none is
+# stamped.
 #
 # core.quotePath=false matters: by default git C-quotes a non-ASCII path
 # (`"apps/a/na\303\257ve.txt"`), which starts with a double quote and so fails
