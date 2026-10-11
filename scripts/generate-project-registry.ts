@@ -65,7 +65,13 @@ import {
   type ContainmentFinding,
 } from "./app-containment";
 import { isScannedFile } from "../src/lib/apps/import-policy.mjs";
-import { routeContract } from "./route-contracts";
+import {
+  declaresRawResponse,
+  rawResponseRefusal,
+  routeContract,
+  undeclaredRoleProblems,
+} from "./route-contracts";
+import { readRoutesStatically } from "./route-reader";
 import {
   validateConnectorMethods,
   validateConnectorTelemetry,
@@ -504,8 +510,10 @@ function findRouteFiles(appDir: string, slug: string): RouteFile[] {
  * argument for keeping module scope free of side effects — which is already
  * true of every module in this codebase, whose clients are all constructed
  * lazily — not an argument for a contract nobody can check. It is also why an
- * install's `--check` never gets here: it lists each route as deferred, to be
- * read when the app is registered.
+ * install's `--check` never gets here. It reads what it can of each route from
+ * the AST instead (scripts/route-reader.ts), holds that to three of the rules
+ * here, in the same words, and lists the rest as deferred, to be checked when
+ * the app is registered.
  */
 async function importRouteContracts(
   slug: string,
@@ -550,18 +558,12 @@ function validateRouteContracts(
   declaredRoles: { key: string }[],
   apiVisibility: Record<string, RouteAuth[]> | undefined,
 ): void {
-  const roleKeys = new Set(declaredRoles.map((r) => r.key));
-
   for (const contract of contracts) {
     for (const m of contract.methods) {
-      for (const role of m.roles) {
-        if (!roleKeys.has(role)) {
-          throw new FatalManifestError(
-            `apps/${slug}/api/${contract.path || "index"}/route.ts: ${m.method} requires role "${role}", ` +
-              `which the app does not declare in \`roles\`. No user can ever hold it, so the route would 403 forever.`,
-          );
-        }
-      }
+      // The first role the app does not declare. An install's check reads the
+      // same rule off the route's source (scripts/route-reader.ts).
+      const [undeclared] = undeclaredRoleProblems(slug, contract.path, m.method, m.roles, declaredRoles);
+      if (undeclared) throw new FatalManifestError(undeclared);
 
       // Roles require `session`, and the build is where that has to be caught.
       //
@@ -1406,7 +1408,8 @@ function findingProblem(slug: string, f: ContainmentFinding): string {
  * Every check on one app that reads its files and runs none of its code, in
  * the order the build runs them, ending in its registry entry less what only
  * the code can say. A build runs this and then loadAppCode(); an install's
- * `--check` runs only this, on the staged copy.
+ * `--check` runs this on the staged copy, then reads its routes' source in
+ * place of loadAppCode() (checkStagedApp()).
  *
  * `slug` is the folder's name, and messages name files where they will live,
  * as apps/<slug>/…, whichever folder is being read. The containment scan and
@@ -1607,16 +1610,11 @@ async function loadAppCode(app: AppText): Promise<AppManifest> {
   const rawRoutes = routes.flatMap((route) =>
     route.methods
       .filter((m) => m.raw)
-      .map((m) => `${m.method} /${route.path}`),
+      .map((m) => ({ routePath: route.path, method: m.method })),
   );
-  const declaresRaw = app.manifest.escapes.some((e) => e.rule === "raw-response");
-  if (rawRoutes.length > 0 && !declaresRaw) {
-    throw new AppRejectedError(
-      `${rawRoutes.join(", ")} ${rawRoutes.length === 1 ? "returns its" : "return their"} own Response ` +
-        `(\`raw: true\`), which needs { "rule": "raw-response", "reason": "…" } under \`escapes\` in app.json.`,
-    );
-  }
-  if (rawRoutes.length === 0 && declaresRaw) {
+  const refusal = rawResponseRefusal(slug, rawRoutes, app.manifest.escapes);
+  if (refusal) throw new AppRejectedError(refusal.message, refusal.problems);
+  if (rawRoutes.length === 0 && declaresRawResponse(app.manifest.escapes)) {
     // Not a refusal — the declaration costs nothing — but a stale one tells
     // a reviewer something about the app that is no longer true.
     console.warn(
@@ -2356,6 +2354,10 @@ export function getTheme(slug: string): ThemeManifest {
    - for an app, readAppText(): the containment scan and the import allowlist,
      `app.json` against its schema, the SQL check on its migrations, and the
      file and text checks;
+   - for an app's routes, the `defineRoute` options each `route.ts` writes out,
+     read from its source (scripts/route-reader.ts): a bare handler, a role the
+     app does not declare and `raw: true` without its escape are refused, by
+     the build's own rules and in its words;
    - for a connector or a theme, readConnector() or readTheme(): everything the
      build checks, since none of it runs code;
    - and the checks that span extensions (App Services and hook wiring, schema
@@ -2364,8 +2366,11 @@ export function getTheme(slug: string): ThemeManifest {
      its own, an app that consumes another app's service would fail them.
 
   What it leaves out is the point of it. It imports none of the extension's
-  code, so `widgets.ts` and each `route.ts` are listed as deferred: they are
-  checked at registration, which loads them. It writes nothing to
+  code, so what only the code can say is listed as deferred, with the reason,
+  and checked at registration, which loads it: `widgets.ts`, and any route
+  options the reader cannot read as written (built from a variable, a spread,
+  a call or another file, say). Registration also loads every route and checks
+  the rest of its contract, such as its schemas. The check writes nothing to
   src/generated/ or public/, and does not stamp the build. The install path
   runs it with PATH and TMPDIR as its whole environment (generatorEnv()).
 
@@ -2511,23 +2516,26 @@ function readRegistered(registryDir: string): Registered {
   };
 }
 
-/** The deferred list for an app: what the check would have to import to read. */
-function appDeferred(app: AppText): string[] {
+/**
+ * The deferred list for an app: what the check would have to import to read.
+ * `routes` is what the route reader could not read; `widgets.ts`, whose config
+ * fields are built by helpers, is never read.
+ */
+function appDeferred(app: AppText, routes: readonly string[]): string[] {
   const out: string[] = [];
   if (app.hasWidgetsTs) {
     out.push(
       `apps/${app.slug}/widgets.ts: the widget config fields it builds are checked at registration, which loads it.`,
     );
   }
-  for (const { routePath } of app.routeFiles) {
-    out.push(
-      `apps/${app.slug}/api/${routePath || "index"}/route.ts: its defineRoute contract is checked at registration, which loads it.`,
-    );
-  }
-  return out;
+  return [...out, ...routes];
 }
 
-/** One staged app: readAppText() and the checks across apps, with nothing loaded. */
+/**
+ * One staged app: readAppText(), each route's `defineRoute` options as its
+ * source writes them (scripts/route-reader.ts), and the checks across apps,
+ * with nothing loaded.
+ */
 async function checkStagedApp(dir: string, slug: string, registered: Registered): Promise<Judgement> {
   const findings = scanAppContainment(dir);
   if (findings.length > 0) {
@@ -2555,6 +2563,13 @@ async function checkStagedApp(dir: string, slug: string, registered: Registered)
     return { problems, deferred: [] };
   }
 
+  // The three route rules a route's source decides, by the build's own rules
+  // and in its words: a bare handler, an undeclared role, `raw: true` without
+  // its escape. What the reader cannot read waits for registration.
+  const routes = readRoutesStatically(dir, slug, app.routeFiles, app.manifest);
+  const deferred = appDeferred(app, routes.deferred);
+  if (routes.problems.length > 0) return { problems: routes.problems, deferred };
+
   // The registered apps, with this one in place of any registered entry of the
   // same slug: what the build would register once it is installed.
   const apps = [...registered.apps.filter((a) => a.slug !== slug), app.manifest];
@@ -2562,9 +2577,9 @@ async function checkStagedApp(dir: string, slug: string, registered: Registered)
     validateAppsTogether(apps);
     validateUserScopedUsage(apps, registered.connectors);
   } catch (err) {
-    return { problems: [errorText(err)], deferred: appDeferred(app) };
+    return { problems: [errorText(err)], deferred };
   }
-  return { problems: [], deferred: appDeferred(app) };
+  return { problems: [], deferred };
 }
 
 /** One staged connector: readConnector(), then user-scoped use by the registered apps. */
