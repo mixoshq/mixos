@@ -32,9 +32,10 @@
  *
  * The sidecar holds only what is about this checkout's pending install, and is
  * never committed: who installed it and when, whether they accepted a release
- * its publisher withdrew, and the check's verdict. While a registration is
- * under way it also records that registration's holder, so one that died
- * midway can be told from one still running.
+ * its publisher withdrew, the check's verdict, and what install left out of the
+ * package (./left-out.ts). While a registration is under way it also records
+ * that registration's holder, so one that died midway can be told from one
+ * still running.
  */
 
 import { randomUUID } from "node:crypto";
@@ -48,6 +49,7 @@ import {
   type InstallRecord,
   type RecordRead,
 } from "./install-record";
+import { LeftOutSchema } from "./left-out";
 import { SlugSchema, type ExtensionKind } from "./types";
 
 /** The kinds that wait in pending. A theme registers when it is installed. */
@@ -176,6 +178,8 @@ export const PendingSidecarSchema = z.strictObject({
     verdict: z.literal("accepted"),
     deferred: z.array(z.string()),
   }),
+  /** What install left out of the package, by name. Absent when it left out nothing. */
+  leftOut: LeftOutSchema.optional(),
   /** Present only while a registration is under way, or after one died midway. */
   register: RegisteringSchema.optional(),
 });

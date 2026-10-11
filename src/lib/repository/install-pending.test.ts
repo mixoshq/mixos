@@ -12,7 +12,9 @@
  * and GitHub are a stubbed `fetch`, and the register lock's database a stubbed
  * pool, so nothing leaves the machine and no database is needed. The checkout
  * is a temporary folder whose `scripts/`, `src/` and `node_modules/` link to
- * this repository's, which the check only reads.
+ * this repository's, which the check only reads. Register, for a package
+ * install left files out of, runs in a second checkout with a stand-in
+ * generator.
  */
 
 import { after, before, describe, test } from "node:test";
@@ -46,17 +48,56 @@ after(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// Register runs the registry generator, which writes src/generated/, and this
+// checkout's src/ is this repository's. So Register runs in a checkout of its
+// own, `aside`, with a stand-in that registers every folder in apps/.
+const aside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mixos-install-pending-register-")));
+for (const dir of ["apps", "connectors"]) fs.mkdirSync(path.join(aside, dir));
+const generatorDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mixos-install-pending-generator-")));
+const STAND_IN = path.join(generatorDir, "stand-in.mjs");
+fs.writeFileSync(
+  STAND_IN,
+  `import fs from "node:fs";
+const list = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => !n.startsWith(".")) : []);
+fs.mkdirSync("src/generated", { recursive: true });
+fs.writeFileSync("src/generated/app-registry.ts", JSON.stringify(list("apps").map((slug) => ({ slug })), null, 2));
+fs.writeFileSync("src/generated/connector-registry.ts", JSON.stringify(list("connectors").map((name) => ({ name })), null, 2));
+`,
+);
+after(() => {
+  fs.rmSync(aside, { recursive: true, force: true });
+  fs.rmSync(generatorDir, { recursive: true, force: true });
+});
+
+/** Every file under `dir`, by its path there, sorted. */
+function filesIn(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (rel: string) => {
+    for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+      const p = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(p);
+      else out.push(p);
+    }
+  };
+  walk("");
+  return out.sort();
+}
+
 // ── the register lock's database ────────────────────────────────────────────
 
 /** Each statement the lock ran, by its first words. */
 const statements: string[] = [];
-(globalThis as { __pg?: unknown }).__pg = async (strings: TemplateStringsArray, ...values: unknown[]) => {
-  const text = strings.join("?").replace(/\s+/g, " ").trim();
-  statements.push(text.split(" ").slice(0, 3).join(" "));
-  if (text.startsWith("insert into public._platform_locks")) return [{ holder: values[1] }];
-  if (text.startsWith("update public._platform_locks")) return [{ held: 1 }];
-  return [];
-};
+(globalThis as { __pg?: unknown }).__pg = Object.assign(
+  async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const text = strings.join("?").replace(/\s+/g, " ").trim();
+    statements.push(text.split(" ").slice(0, 3).join(" "));
+    if (text.startsWith("insert into public._platform_locks")) return [{ holder: values[1] }];
+    if (text.startsWith("update public._platform_locks")) return [{ held: 1 }];
+    return [];
+  },
+  // Register's audit row passes its details through this.
+  { json: (value: unknown) => ({ json: value }) },
+);
 
 // ── the catalogue and GitHub ────────────────────────────────────────────────
 
@@ -142,6 +183,29 @@ const FIXTURES: Record<string, { kind: Kind; entries: TarEntry[]; manifest?: Rec
     }),
   },
   "probe-conn": { kind: "connector", entries: connectorTree("probe-conn") },
+  // A .gitignore at the root, a nested .gitattributes and a .GitIgnore in
+  // another case: install leaves all three out.
+  ignores: {
+    kind: "app",
+    entries: files({
+      "app.json": '{"name":"Ignores"}\n',
+      "api/items/route.ts": ROUTE,
+      ".gitignore": "node_modules/\n*.log\n",
+      "lib/.gitattributes": "*.ts -diff\n",
+      "lib/util.ts": "export const answer = 42;\n",
+      "assets/.GitIgnore": "*\n",
+    }),
+  },
+  // A .git folder and a .registry.json beside a .gitignore: still refused.
+  "git-dir": {
+    kind: "app",
+    entries: files({
+      "app.json": '{"name":"Git dir"}\n',
+      ".gitignore": "dist/\n",
+      "vendor/.git/config": "[core]\n",
+      "lib/.registry.json": "{}\n",
+    }),
+  },
   // A bare handler: the check refuses it.
   bare: {
     kind: "app",
@@ -306,6 +370,91 @@ describe("an install from the Registry", { concurrency: false }, () => {
     assert.equal(exists(".mixos/pending/connectors/probe-conn/.registry.json"), true);
     assert.equal(exists(".mixos/pending/connectors/probe-conn.json"), true);
     assert.equal(result.record.kind, "connector");
+  });
+
+  test("leaves out a .gitignore and a .gitattributes at any depth, in any case, and hashes what it wrote", async () => {
+    const { installExtension } = await install();
+    const { readSidecar, pendingLocation } = await pendingModule();
+    const { folderFilesHash, readInstallRecord } = await import("./install-record");
+    const { filesHash, hashFileTree } = await import("./content-hash");
+
+    const result = await installExtension("app", "ignores", { installedBy: "admin@example.com" });
+    const where = pendingLocation(root, "app", "ignores");
+
+    // None of the three is written, nor assets/, which held only one of them.
+    assert.deepEqual(filesIn(where.folder), [".registry.json", "api/items/route.ts", "app.json", "lib/util.ts"]);
+    assert.equal(fs.existsSync(path.join(where.folder, "assets")), false);
+    assert.deepEqual(result.leftOut, { ".gitignore": 2, ".gitattributes": 1 });
+    assert.equal(result.fileCount, 3);
+
+    // The content hash is the package's as published, the three included, and
+    // it was verified before they were left out. The files hash is over what
+    // was written, which is what the folder recomputes.
+    const all = FIXTURES.ignores.entries;
+    const written = all.filter((e) => !/(^|\/)\.git(ignore|attributes)$/i.test(e.path));
+    assert.equal(written.length, 3);
+    const read = readInstallRecord(where.folder);
+    assert.equal(read.state, "ok");
+    const record = read.state === "ok" ? read.record : null;
+    assert.equal(record?.contentHash, hashFileTree(all));
+    assert.equal(record?.filesHash, filesHash(written));
+    assert.notEqual(record?.filesHash, filesHash(all));
+    assert.equal(folderFilesHash(where.folder), record?.filesHash);
+    assert.equal(result.filesHash, record?.filesHash);
+
+    // The sidecar keeps what was left out, for Register to say again.
+    const sidecar = readSidecar(where.sidecar);
+    assert.deepEqual(sidecar.state === "ok" && sidecar.sidecar.leftOut, { ".gitignore": 2, ".gitattributes": 1 });
+  });
+
+  test("Register's files hash check passes for it, and the generator finds it unmodified", async () => {
+    const { registerPending } = await import("./register");
+    const { pendingLocation } = await pendingModule();
+    const { scanRegistryInstalls } = await import("../../../scripts/generate-project-registry");
+
+    // What install left in pending, moved as it is into the other checkout.
+    const from = pendingLocation(root, "app", "ignores");
+    const to = pendingLocation(aside, "app", "ignores");
+    fs.mkdirSync(path.dirname(to.folder), { recursive: true });
+    fs.cpSync(from.folder, to.folder, { recursive: true });
+    fs.copyFileSync(from.sidecar, to.sidecar);
+
+    const result = await registerPending("app", "ignores", {
+      actor: { id: null, email: "cli:tester@test-host" },
+      via: "cli",
+      root: aside,
+      generator: STAND_IN,
+      notice: () => {},
+    });
+    assert.equal(result.installPath, "apps/ignores");
+    assert.deepEqual(result.leftOut, { ".gitignore": 2, ".gitattributes": 1 });
+    const live = path.join(aside, "apps", "ignores");
+    assert.deepEqual(filesIn(live), [".registry.json", "api/items/route.ts", "app.json", "lib/util.ts"]);
+
+    // The generator's check, as it runs on every build.
+    const { installs, warnings } = scanRegistryInstalls([{ kind: "app", slug: "ignores", dir: live }]);
+    assert.equal(installs.length, 1);
+    assert.equal(installs[0].modified, false);
+    assert.deepEqual(
+      warnings.filter((w) => /no longer matches|differs from/.test(w)),
+      [],
+    );
+  });
+
+  test("a .git and a .registry.json are still refused beside a .gitignore, with nothing written", async () => {
+    const { installExtension, InstallError } = await install();
+    await assert.rejects(
+      installExtension("app", "git-dir"),
+      (err: unknown) =>
+        err instanceof InstallError &&
+        err.code === "invalid-package" &&
+        /^"vendor\/\.git" makes git treat the folder it is in as a repository of its own/m.test(err.detail ?? "") &&
+        /^"lib\/\.registry\.json" is named like the install record/m.test(err.detail ?? "") &&
+        (err.detail ?? "").split("\n").length === 2,
+    );
+    assert.equal(exists(".mixos/pending/apps/git-dir"), false);
+    assert.equal(exists(".mixos/pending/apps/git-dir.json"), false);
+    assert.deepEqual(fs.readdirSync(path.join(root, ".mixos", "staging", "apps")), []);
   });
 
   test("a release whose answer the record can't hold is refused before anything is downloaded", async () => {
