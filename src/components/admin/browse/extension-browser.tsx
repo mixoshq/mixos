@@ -23,7 +23,7 @@ import {
   type ExtensionSummary,
   type SortKey,
 } from "@/lib/repository/types";
-import Notice from "../pending/notice";
+import Notice from "@/components/ui/notice";
 import ReviewDialog, { type PendingTarget } from "../pending/review-dialog";
 import ExtensionCard from "./extension-card";
 import RegisterDialog from "./register-dialog";

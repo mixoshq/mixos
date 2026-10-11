@@ -144,6 +144,7 @@ const STAR_EXPORTS: Record<string, string[]> = {
   "@/components/ui/input": ["Checkbox", "Input", "Select", "Switch", "Textarea"],
   "@/components/ui/markdown": ["Markdown"],
   "@/components/ui/menu": ["ContextMenu", "Menu"],
+  "@/components/ui/notice": ["default"],
   "@/components/ui/pagination": ["Button", "Pagination"],
   "@/components/ui/section-card": ["AddRow", "NumberField", "SaveRow", "SectionCard", "TextField", "numStr", "toNum"],
   "@/components/ui/skeleton": ["Skeleton"],
