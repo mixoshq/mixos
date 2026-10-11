@@ -80,7 +80,7 @@ import {
 import { fetchInstallManifest, repositoryBaseUrl } from "./client";
 import { fetchExtensionTree } from "./fetch-source";
 import { filesHash, verifyContentHash } from "./content-hash";
-import { isBuiltDeployment } from "../platform/build";
+import { BUILT_DEPLOYMENT_NOTICE, isBuiltDeployment } from "../platform/build";
 import {
   CheckoutLockLostError,
   describeCheckoutLockHolder,
@@ -317,6 +317,12 @@ export interface Installability {
   ok: boolean;
   /** Why not, phrased for an admin rather than for a log. */
   reason?: string;
+  /**
+   * Which refusal it is. `built-deployment` is the design rather than a
+   * fault, and pages show it as information; the others are a checkout that
+   * can't do what it should, and read as a warning.
+   */
+  code?: "disabled" | "built-deployment" | "not-writable" | "no-generator";
 }
 
 /**
@@ -331,7 +337,7 @@ export async function checkInstallable(kind: ExtensionKind): Promise<Installabil
   // because it is a decision rather than a property of the environment, and it
   // holds whatever the environment could do.
   if (!installEnabled(kind)) {
-    return { ok: false, reason: installDisabledMessage(kind) };
+    return { ok: false, reason: installDisabledMessage(kind), code: "disabled" };
   }
 
   /*
@@ -355,17 +361,12 @@ export async function checkInstallable(kind: ExtensionKind): Promise<Installabil
     `src/generated/*.ts` under a running server changes nothing until the next
     build. Registering is an operation on a source checkout. There is no
     arrangement of a shipped artifact that makes it work.
+
+    So it is said as what it is, the way a deployment works, in an information
+    tone: not "cannot", which reads as a deployment that is broken.
   */
   if (isBuiltDeployment()) {
-    return {
-      ok: false,
-      reason:
-        "This instance is running a built artifact, so it cannot register extensions. " +
-        "Registering copies source into the checkout and re-runs the build-time registry " +
-        "generator, and a compiled deployment has neither the toolchain to run it nor a " +
-        "build to pick up the result. Browse from here, then register on a machine with " +
-        "a writable checkout and deploy what it produces.",
-    };
+    return { ok: false, reason: BUILT_DEPLOYMENT_NOTICE, code: "built-deployment" };
   }
 
   // Where this install writes: `.mixos/` for an app or a connector, which
@@ -376,10 +377,9 @@ export async function checkInstallable(kind: ExtensionKind): Promise<Installabil
     return {
       ok: false,
       reason:
-        `This deployment cannot install extensions: ${folder} is not writable. ` +
-        `Installing copies source into the checkout and runs the build-time ` +
-        `registry generator, which a read-only or serverless filesystem cannot do. ` +
-        `Install on a machine with a writable checkout and deploy the result.`,
+        `This server can't write to ${folder} in its checkout, and installing writes there. ` +
+        `Install in a checkout where it can, commit, and deploy.`,
+      code: "not-writable",
     };
   }
   try {
@@ -388,9 +388,9 @@ export async function checkInstallable(kind: ExtensionKind): Promise<Installabil
     return {
       ok: false,
       reason:
-        "This deployment cannot register extensions: the registry generator is not " +
-        "present in the running image, so a newly written extension could never be " +
-        "validated or picked up.",
+        "The registry generator isn't in this checkout, and installing runs its check. " +
+        "Install in a full checkout of your repository, commit, and deploy.",
+      code: "no-generator",
     };
   }
   return { ok: true };
@@ -1537,9 +1537,9 @@ function assertNotPending(kind: ExtensionKind, slug: string, where: PendingLocat
   }
   if (pathExists(where.folder) || read.state !== "missing") {
     throw new InstallError(
-      `${slug} is already installed and waiting in ${where.rel}/. Register it with ` +
-        `\`npm run register -- ${kind}/${slug}\`, or discard it with ` +
-        `\`npm run register -- ${kind}/${slug} --discard\`.`,
+      `${slug} is already installed and waiting in ${where.rel}/. Register or discard it in ` +
+        `Admin > ${kind === "app" ? "Apps" : "Connectors"}, or with ` +
+        `\`npm run register -- ${kind}/${slug}\` or \`npm run register -- ${kind}/${slug} --discard\`.`,
       "already-installed",
     );
   }

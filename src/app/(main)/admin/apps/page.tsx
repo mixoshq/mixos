@@ -15,6 +15,7 @@ import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
 import AppRegistryList from "@/components/admin/app-registry-list";
 import AppsNotInBuild from "@/components/admin/apps-not-in-build";
 import BrandConflicts from "@/components/admin/brand-conflicts";
+import PendingInstalls from "@/components/admin/pending/pending-installs";
 import { getActiveTheme } from "@/lib/themes/active";
 
 export default async function AppsAdminPage() {
@@ -93,6 +94,7 @@ export default async function AppsAdminPage() {
           </a>
         </div>
       </div>
+      <PendingInstalls kind="app" />
       <BrandConflicts
         apps={appRegistry}
         activeBySlug={activeBySlug}

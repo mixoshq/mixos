@@ -22,6 +22,8 @@ import {
   type ExtensionSummary,
   type SortKey,
 } from "@/lib/repository/types";
+import Notice from "../pending/notice";
+import ReviewDialog, { type PendingTarget } from "../pending/review-dialog";
 import ExtensionCard from "./extension-card";
 import RegisterDialog from "./register-dialog";
 
@@ -51,7 +53,9 @@ export default function ExtensionBrowser({
   repositoryOrigin,
   repositoryOverridable,
   installedSlugs,
+  pendingSlugs,
   installable,
+  installableTone,
 }: {
   kind: ExtensionKind;
   /** Origin of the repository being browsed, for links out to its listings. */
@@ -65,21 +69,26 @@ export default function ExtensionBrowser({
   repositoryOverridable: boolean;
   /** Already on this instance. Server-rendered from the generated registry. */
   installedSlugs: string[];
-  /** `null` when this deployment can register; the reason it cannot otherwise. */
+  /** Installed into `.mixos/pending/` and not registered yet. */
+  pendingSlugs: string[];
+  /** `null` when this deployment can install; why it doesn't otherwise. */
   installable: string | null;
+  /**
+   * `info` for a built deployment, which doesn't install by design; `warning`
+   * for a checkout that can't, which is something to fix.
+   */
+  installableTone: "info" | "warning";
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("relevance");
   const [page, setPage] = useState(1);
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
   const [pending, startTransition] = useTransition();
-  // The extension to install, and whether the admin asked for it to be
-  // activated in the same step (apps only — see ExtensionCard).
-  const [chosen, setChosen] = useState<{
-    extension: ExtensionSummary;
-    activate: boolean;
-  } | null>(null);
+  // The extension to install, then the pending install to review and register.
+  const [chosen, setChosen] = useState<ExtensionSummary | null>(null);
+  const [reviewing, setReviewing] = useState<PendingTarget | null>(null);
   const [installed, setInstalled] = useState(() => new Set(installedSlugs));
+  const [pendingNow, setPendingNow] = useState(() => new Set(pendingSlugs));
 
   // Guards against an earlier, slower search overwriting a later one — the
   // classic out-of-order-response bug, which a debounce alone does not prevent.
@@ -111,8 +120,8 @@ export default function ExtensionBrowser({
   return (
     <>
       {installable && (
-        <div className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground">
-          {installable}
+        <div className="mb-4">
+          <Notice tone={installableTone}>{installable}</Notice>
         </div>
       )}
 
@@ -208,8 +217,14 @@ export default function ExtensionBrowser({
                 extension={e}
                 repositoryOrigin={repositoryOrigin}
                 installedSlugs={installed}
-                onInstall={(extension, activate) =>
-                  setChosen({ extension, activate })
+                pendingSlugs={pendingNow}
+                onInstall={setChosen}
+                onReview={(extension) =>
+                  setReviewing({
+                    kind: extension.kind as PendingTarget["kind"],
+                    slug: extension.slug,
+                    name: extension.name,
+                  })
                 }
               />
             ))}
@@ -242,13 +257,32 @@ export default function ExtensionBrowser({
 
       {/* Keyed so each choice gets a fresh dialog — see the effect inside it. */}
       <RegisterDialog
-        key={
-          chosen ? `${chosen.extension.kind}/${chosen.extension.slug}` : "none"
-        }
-        extension={chosen?.extension ?? null}
-        activateAfterInstall={chosen?.activate ?? false}
+        key={chosen ? `install:${chosen.kind}/${chosen.slug}` : "install:none"}
+        extension={chosen}
+        notInstallable={installable ? { message: installable, tone: installableTone } : null}
         onClose={() => setChosen(null)}
-        onRegistered={(slug) => setInstalled((s) => new Set(s).add(slug))}
+        onInstalled={(extension, pending) => {
+          if (pending) setPendingNow((s) => new Set(s).add(extension.slug));
+          else setInstalled((s) => new Set(s).add(extension.slug));
+        }}
+        onReview={(target) => {
+          setChosen(null);
+          setReviewing(target);
+        }}
+      />
+      {/* An app or a connector installed into pending: review, then Register. */}
+      <ReviewDialog
+        key={reviewing ? `review:${reviewing.kind}/${reviewing.slug}` : "review:none"}
+        target={reviewing}
+        onClose={() => setReviewing(null)}
+        onRegistered={(slug) => {
+          setPendingNow((s) => {
+            const next = new Set(s);
+            next.delete(slug);
+            return next;
+          });
+          setInstalled((s) => new Set(s).add(slug));
+        }}
       />
     </>
   );
