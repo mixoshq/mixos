@@ -90,6 +90,16 @@ import {
   buildCheckVerdict,
   serializeCheckVerdict,
 } from "../src/lib/repository/check-verdict";
+import { DEFAULT_REPOSITORY_URL } from "../src/lib/repository/client";
+import {
+  FolderReadError,
+  INSTALL_RECORD_FILE,
+  folderFilesHash,
+  readInstallRecord,
+  recordMismatch,
+  type RegistryInstall,
+} from "../src/lib/repository/install-record";
+import { sourceHost } from "../src/lib/repository/provenance";
 import {
   CheckoutLockHeldError,
   CheckoutLockLostError,
@@ -165,6 +175,7 @@ const BUILD_INFO_FILE = path.resolve(OUTPUT_DIR, "build-info.ts");
 const THEME_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "theme-registry.ts");
 const THEMES_CSS_FILE = path.resolve(OUTPUT_DIR, "themes.css");
 const THEME_TOKENS_FILE = path.resolve(OUTPUT_DIR, "theme-tokens.json");
+const REGISTRY_INSTALLS_FILE = path.resolve(OUTPUT_DIR, "registry-installs.ts");
 const PUBLIC_THEMES_DIR = path.resolve(__dirname, "../public/themes");
 // NOT public/connectors: `/connectors/*` is already a signed-in page route
 // (/connectors/guide), so assets served from there redirect to /login for
@@ -1984,6 +1995,140 @@ function validateUserScopedUsage(
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Installs from a Registry                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** One extension this run accepted, and where its folder is. */
+interface AcceptedExtension {
+  kind: RegistryInstall["kind"];
+  slug: string;
+  dir: string;
+}
+
+/** Files macOS Finder writes into any folder it shows. */
+const FINDER_FILE = ".DS_Store";
+
+/**
+ * The extensions this build accepted that were installed from a Registry, from
+ * the install record, `.registry.json`, at the root of each one's folder
+ * (src/lib/repository/install-record.ts). Every kind, in kind then slug order.
+ *
+ * A folder with no record is a local extension, and isn't listed. Neither is
+ * one whose record can't be read or names another kind or slug: that is a
+ * warning, and the extension is built and loaded as a local one. So is a
+ * record from a catalogue other than mixos.org, which is for development.
+ *
+ * Each listed folder's files are hashed again, the record left out, and
+ * compared with the record's `filesHash`: `modified` is true when they differ,
+ * because the folder was edited after it was installed.
+ *
+ * Returns the warnings rather than printing them, for its tests. Exported for
+ * them; main() is the caller.
+ */
+function scanRegistryInstalls(extensions: readonly AcceptedExtension[]): {
+  installs: RegistryInstall[];
+  warnings: string[];
+} {
+  const installs: RegistryInstall[] = [];
+  const warnings: string[] = [];
+  const order = { app: 0, connector: 1, theme: 2 } as const;
+  const sorted = [...extensions].sort((a, b) => order[a.kind] - order[b.kind] || a.slug.localeCompare(b.slug));
+
+  for (const { kind, slug, dir } of sorted) {
+    const folder = `${kind === "app" ? "apps" : kind === "connector" ? "connectors" : "themes"}/${slug}`;
+    const file = `${folder}/${INSTALL_RECORD_FILE}`;
+    const read = readInstallRecord(dir);
+    if (read.state === "missing") continue;
+    if (read.state === "invalid") {
+      warnings.push(`${file} can't be read (${read.reason}), so ${folder}/ is treated as a local extension.`);
+      continue;
+    }
+    const mismatch = recordMismatch(read.record, kind, slug);
+    if (mismatch) {
+      warnings.push(`${file} isn't this folder's: ${mismatch}. ${folder}/ is treated as a local extension.`);
+      continue;
+    }
+    const record = read.record;
+
+    let modified: boolean;
+    try {
+      modified = folderFilesHash(dir) !== record.filesHash;
+    } catch (err) {
+      // A link, or anything else install never writes: the folder has changed.
+      if (!(err instanceof FolderReadError)) throw err;
+      modified = true;
+    }
+    if (modified) {
+      const from = `${record.version} from ${sourceHost(record.source)}`;
+      warnings.push(
+        finderFilesOnly(dir, record.filesHash)
+          ? `${folder}/ differs from its ${INSTALL_RECORD_FILE} only by ${FINDER_FILE} files, which macOS Finder ` +
+              `writes, so it counts as modified locally. Delete them to clear it: ` +
+              `find ${folder} -name ${FINDER_FILE} -delete`
+          : `${folder}/ no longer matches its ${INSTALL_RECORD_FILE}: its files changed after ${from} was installed. ` +
+              `It counts as modified locally.`,
+      );
+    }
+    if (record.source !== DEFAULT_REPOSITORY_URL) {
+      warnings.push(
+        `${folder}/ was installed from ${record.source}, not ${DEFAULT_REPOSITORY_URL}. Another catalogue is ` +
+          `for development: install it from mixos.org before you ship it.`,
+      );
+    }
+
+    installs.push({
+      kind,
+      slug,
+      version: record.version,
+      gitTag: record.gitTag,
+      commitSha: record.commitSha,
+      source: record.source,
+      repository: record.repository,
+      requiresMixOS: record.requiresMixOS,
+      modified,
+    });
+  }
+  return { installs, warnings };
+}
+
+/** Whether `dir` would match `filesHash` but for the Finder files in it. */
+function finderFilesOnly(dir: string, filesHash: string): boolean {
+  const finder: string[] = [];
+  const walk = (at: string) => {
+    for (const entry of fs.readdirSync(at, { withFileTypes: true })) {
+      const full = path.join(at, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === FINDER_FILE) finder.push(full);
+    }
+  };
+  try {
+    walk(dir);
+    if (finder.length === 0) return false;
+    return folderFilesHash(dir, (full) => finder.includes(full)) === filesHash;
+  } catch {
+    return false;
+  }
+}
+
+/** Write `src/generated/registry-installs.ts`, which every deployment reads. Written even when empty. */
+function writeRegistryInstalls(installs: readonly RegistryInstall[]): void {
+  fs.writeFileSync(
+    REGISTRY_INSTALLS_FILE,
+    `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+//
+// The extensions in this build installed from a Registry, from the install
+// record, .registry.json, in each one's folder (src/lib/repository/install-record.ts).
+// A folder with no record, or with one that isn't its own, is local and isn't
+// listed. "modified" is true when its files no longer match its record.
+import type { RegistryInstall } from "@/lib/repository/install-record";
+
+export const registryInstalls: RegistryInstall[] = ${JSON.stringify(installs, null, 2)};
+`,
+    "utf-8",
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Build stamp                                                               */
 /* -------------------------------------------------------------------------- */
 
@@ -2344,6 +2489,20 @@ export function getTheme(slug: string): ThemeManifest {
 
   console.log(
     `Generated theme registry with ${themes.length} theme(s); fallback is "${fallbackTheme}"`,
+  );
+
+  // Where each accepted extension came from, from its install record.
+  console.log("\nReading install records...");
+  const { installs, warnings } = scanRegistryInstalls([
+    ...apps.map((a) => ({ kind: "app" as const, slug: a.slug, dir: path.join(APPS_DIR, a.slug) })),
+    ...connectors.map((c) => ({ kind: "connector" as const, slug: c.name, dir: path.join(CONNECTORS_DIR, c.name) })),
+    ...themes.map((t) => ({ kind: "theme" as const, slug: t.slug, dir: path.join(THEMES_DIR, t.slug) })),
+  ]);
+  for (const warning of warnings) console.warn(`  ${warning}`);
+  writeRegistryInstalls(installs);
+  console.log(
+    `Generated registry installs with ${installs.length} extension(s) installed from a Registry` +
+      (installs.some((i) => i.modified) ? `, ${installs.filter((i) => i.modified).length} modified locally` : ""),
   );
 }
 
@@ -2834,6 +2993,7 @@ export {
   runFullGenerator,
   scanApps,
   scanConnectors,
+  scanRegistryInstalls,
   scanThemes,
   type CheckKind,
   type Judgement,
