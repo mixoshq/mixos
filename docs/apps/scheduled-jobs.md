@@ -267,7 +267,9 @@ schedule (interval or cron), last run, status/error, next-due, an
 **enable/disable toggle**, and a **Run now** button. Disabling a job stops it on
 the next tick without a redeploy — the safety valve for a misbehaving job. An
 inactive app's jobs show as **App inactive** and don't run, on the tick or by
-Run now.
+Run now. While an app's own migrations are behind this build, its jobs show as
+**App updating** and don't run either; they stay due, so they run on the first
+tick after the migrations are applied.
 
 ## What drives the tick
 

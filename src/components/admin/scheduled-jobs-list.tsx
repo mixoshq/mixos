@@ -27,10 +27,12 @@ export interface JobView {
   appSlug: string;
   appName: string;
   /**
-   * False when an admin has switched the app off. None of its jobs run then,
-   * on the tick or by Run now, which the server refuses too.
+   * Whether the app gate lets the app's jobs run: `inactive` when an admin has
+   * switched the app off, `updating` while its own migrations are behind this
+   * build. None of its jobs run then, on the tick or by Run now, which the
+   * server refuses too; an updating app's jobs stay due for when it is back.
    */
-  appActive: boolean;
+  appState: "active" | "inactive" | "updating";
   jobName: string;
   /** Interval cadence in minutes, or null when the job uses `cron`. */
   intervalMinutes: number | null;
@@ -358,10 +360,12 @@ export default function ScheduledJobsList({
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {j.appActive ? (
+                      {j.appState === "active" ? (
                         <StatusBadge status={j.lastStatus} running={j.running} />
                       ) : (
-                        <StatusPill tone="warning">App inactive</StatusPill>
+                        <StatusPill tone="warning">
+                          {j.appState === "updating" ? "App updating" : "App inactive"}
+                        </StatusPill>
                       )}
                       {j.lastStatus === "error" && j.lastError && (
                         <p
@@ -376,7 +380,7 @@ export default function ScheduledJobsList({
                       className="px-4 py-3 text-muted-foreground"
                       suppressHydrationWarning
                     >
-                      {j.enabled && j.appActive ? nextDue(j.nextRunAt) : "—"}
+                      {j.enabled && j.appState === "active" ? nextDue(j.nextRunAt) : "—"}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
@@ -391,7 +395,7 @@ export default function ScheduledJobsList({
                             name="jobName"
                             value={j.jobName}
                           />
-                          <RunNowButton disabled={j.running || !j.appActive} />
+                          <RunNowButton disabled={j.running || j.appState !== "active"} />
                         </form>
                         <form action={setEnabledAction}>
                           <input
