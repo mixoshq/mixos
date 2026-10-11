@@ -196,7 +196,7 @@ test("a connector's review: its code, and what its manifest says it reaches", ()
 test("the release's floor, met and not", () => {
   pend("app", "met", ACME, { record: { requiresMixOS: "0.0.1" } });
   const met = reviewPendingInstall(root, "app", "met").requiresMixOS;
-  assert.deepEqual(met, { declared: "0.0.1", current: mixosVersion(), met: true, checked: true, reason: null });
+  assert.deepEqual(met, { declared: "0.0.1", current: mixosVersion(), where: "checkout", met: true, checked: true, reason: null });
 
   pend("app", "unmet", ACME, { record: { requiresMixOS: "999.0.0" } });
   const unmet = reviewPendingInstall(root, "app", "unmet");

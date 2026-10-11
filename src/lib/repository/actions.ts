@@ -29,6 +29,8 @@ import { recordAdminAction } from "@/lib/apps/admin-audit";
 import { safeErrorMessage } from "@/lib/safe-error";
 import { CheckoutLockHeldError } from "@/lib/platform/checkout-lock";
 import { LockUnavailableError } from "@/lib/platform/lock";
+import { floorVerdict } from "@/lib/platform/version";
+import type { FloorVerdict } from "@/lib/platform/version-floor";
 import {
   RepositoryError,
   fetchExtension,
@@ -138,7 +140,13 @@ export async function searchRepositoryAction(input: {
 /* -------------------------------------------------------------------------- */
 
 export type ResolveOutcome =
-  | { ok: true; manifest: InstallManifest; listing: Extension | null }
+  | {
+      ok: true;
+      manifest: InstallManifest;
+      listing: Extension | null;
+      /** The release's floor against this build: install refuses one that isn't met. */
+      floor: FloorVerdict;
+    }
   | { ok: false; message: string; code?: string; listing: Extension | null };
 
 /**
@@ -168,11 +176,8 @@ export async function resolveInstallAction(input: {
   const listing = await fetchExtension(input.kind, input.slug).catch(() => null);
 
   try {
-    return {
-      ok: true,
-      manifest: await resolveInstall(input.kind, input.slug, input.version),
-      listing,
-    };
+    const manifest = await resolveInstall(input.kind, input.slug, input.version);
+    return { ok: true, manifest, listing, floor: floorVerdict(manifest.requiresMixOS) };
   } catch (err) {
     if (err instanceof InstallError) {
       return { ok: false, message: err.message, code: err.code, listing };
