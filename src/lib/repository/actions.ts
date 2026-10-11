@@ -27,6 +27,7 @@ import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
 import { recordAdminAction } from "@/lib/apps/admin-audit";
 import { safeErrorMessage } from "@/lib/safe-error";
+import { CheckoutLockHeldError } from "@/lib/platform/checkout-lock";
 import { LockUnavailableError } from "@/lib/platform/lock";
 import {
   RepositoryError,
@@ -188,10 +189,10 @@ export async function resolveInstallAction(input: {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Register                                                                   */
+/*  Install                                                                    */
 /* -------------------------------------------------------------------------- */
 
-export type RegisterOutcome =
+export type InstallOutcome =
   | { ok: true; result: InstallResult }
   | {
       ok: false;
@@ -203,20 +204,22 @@ export type RegisterOutcome =
     };
 
 /**
- * Download, verify, validate and install one extension.
+ * Download, verify, check and install one extension: an app or a connector
+ * into `.mixos/pending/`, where it waits for Register, and a theme into
+ * `themes/`.
  *
- * Audited either way. A refused registration is at least as interesting as a
- * successful one: `repository.register.rejected` with `reason: "checksum"` is
- * the row that says someone was served bytes that did not match what the
- * catalogue published, and `reason: "disabled"` is a call that reached a kind
- * this instance does not install — which no page leads to.
+ * Audited either way. A refused install is at least as interesting as a
+ * successful one: `<kind>.install.rejected` with `reason: "checksum"` is the
+ * row that says someone was served bytes that did not match what the catalogue
+ * published, and `reason: "disabled"` is a call that reached a kind this
+ * instance does not install — which no page leads to.
  */
-export async function registerExtensionAction(input: {
+export async function installExtensionAction(input: {
   kind: ExtensionKind;
   slug: string;
   version?: string;
   allowYanked?: boolean;
-}): Promise<RegisterOutcome> {
+}): Promise<InstallOutcome> {
   const actor = await adminActor();
   const target = `${KIND_SEGMENT[input.kind]}/${input.slug}`;
 
@@ -224,10 +227,11 @@ export async function registerExtensionAction(input: {
     const result = await installExtension(input.kind, input.slug, {
       version: input.version,
       allowYanked: input.allowYanked,
+      installedBy: actor.email,
     });
 
     await recordAdminAction(actor, {
-      action: `${input.kind}.register`,
+      action: `${input.kind}.install`,
       targetType: input.kind,
       targetId: input.slug,
       details: {
@@ -238,10 +242,19 @@ export async function registerExtensionAction(input: {
         // The verified hash, recorded so "which bytes did this instance
         // actually install" is answerable later without re-downloading.
         contentHash: result.contentHash,
+        // What Register checks the pending folder against.
+        filesHash: result.filesHash,
         installPath: result.installPath,
+        pending: result.pending,
+        // The check's verdict. What it deferred is listed in the pending
+        // install's sidecar; the row says how much there was.
+        verdict: "accepted",
+        deferred: result.deferred.length,
         fileCount: result.fileCount,
         byteCount: result.byteCount,
-        registryValidated: result.registry.ok,
+        // A theme registers as it installs; nothing else has run the
+        // generator yet.
+        registryValidated: result.registry?.ok ?? null,
         yankedAccepted: input.allowYanked === true,
       },
     });
@@ -255,7 +268,7 @@ export async function registerExtensionAction(input: {
     const failure = describeFailure(err);
 
     await recordAdminAction(actor, {
-      action: `${input.kind}.register.rejected`,
+      action: `${input.kind}.install.rejected`,
       targetType: input.kind,
       targetId: input.slug,
       details: {
@@ -275,13 +288,19 @@ export async function registerExtensionAction(input: {
 /** Map a thrown error onto something the UI can render honestly. */
 function describeFailure(err: unknown): { code: string; message: string; detail?: string } {
   // Not a failure of the extension or the repository — someone else is already
-  // registering. Its own code so the UI can offer "try again" rather than the
+  // installing or registering. Its own code so the UI can offer "try again" rather than the
   // tone the rest of this list deserves. Nothing has been downloaded or written.
   if (err instanceof LockUnavailableError) {
     return {
       code: "locked",
       message: "Another administrator is installing or registering. Try again in a moment.",
     };
+  }
+  // The same, from the checkout lock: another install or registration in this
+  // checkout, or a registry generator run, which `npm run dev` and
+  // `npm run registry` start. Its message names the holder.
+  if (err instanceof CheckoutLockHeldError) {
+    return { code: "locked", message: err.message };
   }
   if (err instanceof ContentHashMismatch) {
     return {
@@ -294,7 +313,7 @@ function describeFailure(err: unknown): { code: string; message: string; detail?
         "The package downloaded from GitHub is not the package the repository " +
         "published a checksum for, so nothing was written to this instance. " +
         "Either the release was changed after it was published, or the download " +
-        "was altered in transit. Do not register this until the publisher has " +
+        "was altered in transit. Do not install this until the publisher has " +
         "cut a new release.",
       detail: `expected ${err.expected}\nreceived ${err.actual}`,
     };
@@ -313,6 +332,6 @@ function describeFailure(err: unknown): { code: string; message: string; detail?
   }
   return {
     code: "unknown",
-    message: safeErrorMessage(err, "Registration failed."),
+    message: safeErrorMessage(err, "The install failed."),
   };
 }
