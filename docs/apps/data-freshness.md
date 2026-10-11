@@ -32,7 +32,10 @@ export default defineSync<Call>({
     return { items: page.calls, nextCursor: page.cursor };
   },
   upsert: async (ctx, calls) => {
-    for (const c of calls) await ctx.db!.table("calls").upsert(toRow(c), { onConflict: "id" });
+    const { error } = await ctx.db!
+      .table("calls")
+      .upsert(calls.map(toRow), { onConflict: "id" });
+    if (error) throw error; // fails the run, so the watermark stays put
   },
 });
 ```
@@ -43,14 +46,16 @@ That is the whole app. The platform owns:
 | --- | --- |
 | The cursor | Lives inside one run's loop and is **never handed to you**. There is nowhere to persist it, which is what makes the 19-day bug unrepresentable rather than merely documented. |
 | The watermark | Advances **only** on a window that actually drained. An interrupted run costs nothing, because the writes are upserts. |
-| The budget | Checked at every page boundary against both the clock and `ctx.signal` — the deadline alone misses an admin abort, the signal alone fires only once you have overrun. |
+| The budget | Checked at every page boundary against both the clock and `ctx.signal`: the deadline stops the run before it overruns, and the signal, which fires only once it has, is the backstop. |
 | Window tuning | Halved when a window does not drain, relaxed back toward the default when it does, and the size persisted so a shrink survives the tick boundary. Relaxing matters as much as shrinking. |
 | The empty guard | A drained window that reaches the present and returned nothing does **not** advance the watermark — an upstream outage returns zero rows, not an error, and writing that through blanks every card. The next tick reads it again, grown by the time since. An empty window that ends in the past does advance: it can never grow, so holding it would stop the sync for good. |
 | The state table | `_sync_state` is created for you by `npm run migrate:apps`. You never write a migration for it, and it has **no cursor column**. |
 
-A sync appears at **Administration → Scheduled Jobs** like any other job — same
-atomic claim, same enable/disable toggle, same run history — because it *is* one,
-under a reserved `sync:` name.
+A sync runs like any other job — same tick, same atomic claim, same run history
+in `public.app_job_runs` — because it *is* one, under a reserved `sync:` name.
+It doesn't appear on **Administration → Scheduled Jobs**, which lists the jobs
+in `schedules`, so it has no toggle or **Run now** there. Pausing the scheduler,
+or deactivating the app, keeps it from running.
 
 Everything below is still worth reading: it is why the platform does what it
 does, and it is the reference for the cases a declared sync does not cover (a
@@ -86,7 +91,7 @@ Most timeouts are a tier mistake — deep history attempted on a cron tick.
 | Tier | Cadence | Scope | Where it lives |
 | --- | --- | --- | --- |
 | Steady state | Every tick | The **recent** window only | `jobs/<name>.ts` |
-| Catch-up | Successive ticks | Whatever the watermark hasn't reached | The same job, returning `hasMore` |
+| Catch-up | Successive ticks | Whatever the watermark hasn't reached | The same job; each tick resumes from the watermark |
 | Deep history | Once, or on request | All time | An ops Job, or a user-driven stepped backfill |
 
 A steady-state job should pull weeks, not years. Give the incremental path a
@@ -179,7 +184,7 @@ job touches it:
 
 ```ts
 /** Upsert a partial `sync_state`; unlisted columns keep their stored values. */
-async function writeState(db: ScopedDb, patch: Record<string, unknown>) {
+async function writeState(db: ScopedClient, patch: Record<string, unknown>) {
   await db.table("sync_state").upsert({ id: 1, ...patch }, { onConflict: "id" });
 }
 ```
@@ -190,8 +195,8 @@ async function writeState(db: ScopedDb, patch: Record<string, unknown>) {
 
 When the upstream is small and every read wants either one entity or all of them,
 one row holding a JSONB map beats one row per entity. The scoped client has no
-joins and no `in()`, so a per-entity table means an N+1 read on a path that is
-already fanning out to a connector.
+joins, so a per-entity table read alongside related rows takes a query per table
+and a join in code, on a path that is already fanning out to a connector.
 
 ```sql
 -- migrations/012_customer_health_snapshot.sql
@@ -314,10 +319,20 @@ import { createSwrCache } from "@/lib/apps/swr-cache";
 
 export const { getCached, peekCached, deleteCached } = createSwrCache({
   namespace: "<slug>",        // namespaces the process-local coalescing maps
+  userScoped: false,          // one payload for everyone; see below
   softTtlMs: 5 * 60 * 1000,   // serve as-is below this
   hardTtlMs: 60 * 60 * 1000,  // rebuild synchronously above this
 });
 ```
+
+`userScoped` is required and has no default, because a wrong guess serves one
+person's data to another. Set it to `false` when the payload is the same for
+everyone, as a tenant-scoped connector's answer is. Set it to `true` when the
+payload is one person's, such as anything built from a
+[user-scoped connector](connectors.md#user-scoped-per-user-connectors): every
+`getCached`, `peekCached` and `deleteCached` call must then pass
+`{ userId: context.user.id }`, which goes into the key, and a call without one
+throws rather than caching.
 
 One instance per app is the invariant, not a style preference. The TTLs and the
 `namespace` have to be identical for every caller of a given key, or two routes
@@ -378,10 +393,12 @@ is now wrong:
 await deleteCached(ctx.db, BOOK_CACHE_KEY);
 ```
 
-The shim has no `.like()`, so wildcard invalidation is impossible and **cache-key
-layout is a design decision**. Keys you will need to invalidate as a set should be
-enumerable; for keys that aren't (`detail:<companyId>:<dealId>`), rely on the soft
-TTL and say so in a comment.
+`deleteCached` drops one exact key. A `.delete().like("cache_key", "detail:%")` on
+the table does remove a set, but it skips the in-flight invalidation
+`deleteCached` does, so a build already running can write its old payload back.
+So **cache-key layout is a design decision**. Keys you will need to invalidate as
+a set should be enumerable; for keys that aren't (`detail:<companyId>:<dealId>`),
+rely on the soft TTL and say so in a comment.
 
 ### Delete exactly what you refetched
 

@@ -39,17 +39,25 @@ flowchart TD
 Record from an **API route** or a scheduled **job** via `context.telemetry`. Guard for the capability the same way you guard `context.db` / `context.notifications`.
 
 ```ts
-export async function POST(request: Request, { context }: { context: AppContext }) {
-  // ... do the work ...
+// apps/my-app/api/reports/route.ts
+import { z } from "zod";
+import { defineRoute } from "@/lib/apps/route";
 
-  // Best-effort: never throws, never blocks the response.
-  await context.telemetry?.track("report_generated", {
-    format: "pdf",
-    pageCount: 12,
-  });
+export const POST = defineRoute({
+  summary: "Generate a report.",
+  output: z.object({ ok: z.boolean() }),
+  handler: async (context) => {
+    // ... do the work ...
 
-  return NextResponse.json({ ok: true });
-}
+    // Best-effort: never throws, never blocks the response.
+    await context.telemetry?.track("report_generated", {
+      format: "pdf",
+      pageCount: 12,
+    });
+
+    return { ok: true };
+  },
+});
 ```
 
 - **First arg** — the event name. Must be one of the events declared in `app.json`; an undeclared name is dropped.
@@ -59,19 +67,21 @@ export async function POST(request: Request, { context }: { context: AppContext 
 
 ## Recording usage from the browser (client)
 
-For usage that only happens client-side (a widget interaction, a page view within the app), use the `track()` helper from the apps SDK — the same place as `enablePushNotifications()`. It POSTs to a platform ingest route that validates your session and checks the event against your manifest. Widgets and pages must **never** write telemetry directly to the database or import server modules; they go through the SDK helper, exactly as they call their own API routes via `createAppClient(appSlug)`.
+For usage that only happens client-side (a widget interaction, a page view within the app), use the `track()` helper from the apps SDK — the same place as `enablePushNotifications()`. It POSTs to a platform ingest route that validates your session and checks the event against your manifest. The route also requires the user to hold your app's grant (everyone holds a `global` app) and your app to be able to run: active, and not being updated. A refused event isn't recorded, even from a page that `pageVisibility` opens to any signed-in user. Widgets and pages must **never** write telemetry directly to the database or import server modules; they go through the SDK helper, exactly as they call their own API routes via `createAppClient(appSlug)`.
 
 ```tsx
 "use client";
+import { Button } from "@/components/ui/button";
 import { track } from "@/lib/apps/sdk";
 import type { WidgetProps } from "@/lib/hooks/types";
 
 function ExportButton({ appSlug }: WidgetProps) {
-  // Pass your appSlug (widgets/pages receive it in props). Fire-and-forget.
+  // Fire-and-forget. A widget gets its appSlug in props. A page gets no props,
+  // so it passes its own slug as a literal: track("my-app", …).
   return (
-    <button onClick={() => track(appSlug, "report_generated", { format: "pdf" })}>
+    <Button onClick={() => track(appSlug, "report_generated", { format: "pdf" })}>
       Export
-    </button>
+    </Button>
   );
 }
 ```
@@ -87,7 +97,7 @@ Events are visible to admins under **Administration → Analytics**. Selecting y
 - top users.
 
 If your app also declares [MCP tools](mcp.md), the same view adds an MCP section
-(per-tool request counts, trend, by-client, and top users). Those rows are
+(per-tool request counts, trend, and top users). Those rows are
 recorded for you — MCP calls are **not** declared like events are, because an app
 doesn't choose to be read by a model. An app with `mcp` and no `telemetry` still
 appears in the selector, showing only the MCP section.
@@ -99,11 +109,12 @@ Events are recorded in a platform-owned table, `public.telemetry_events`:
 | Column | Notes |
 | --- | --- |
 | `id` | uuid |
-| `source_type` | `'app'` \| `'connector'` |
+| `source_type` | `'app'` for your events. The platform records its own rows here too: `'connector'`, `'service'`, `'mcp'` and `'route'` |
 | `source_slug` | the app slug (for app events) |
-| `caller_app_slug` | null for app events (used by connector telemetry) |
+| `caller_app_slug` | null for app events. The calling app on connector and service rows; the MCP client's OAuth client id on MCP rows |
 | `event_name` | the declared event name |
 | `user_id` | nullable (null for system/job and public-surface events) |
+| `outcome`, `error_category` | null for app events; how a connector call went (`ok` or `error`, and the error's category) |
 | `properties` | `jsonb` — your dimensions bag |
 | `created_at` | timestamptz |
 

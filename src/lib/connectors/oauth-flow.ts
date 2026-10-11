@@ -4,6 +4,7 @@
 
 import { connectorRegistry } from "@/generated/connector-registry";
 import { requireAdmin } from "@/lib/apps/access";
+import { recordAdminAction, type AdminActor } from "@/lib/apps/admin-audit";
 import type { SessionPayload } from "@/lib/auth/session";
 import { getDecryptedConfig, saveConnectorTokens } from "./config";
 import { isConnectorError } from "./errors";
@@ -97,7 +98,9 @@ export interface OAuthFinish {
 
 /**
  * Finish the consent round trip: verify it, exchange the code, and merge the
- * resulting tokens into the connector's encrypted credentials.
+ * resulting tokens into the connector's encrypted credentials. A tenant
+ * connector's new grant is recorded in the admin audit log, as
+ * `connector.connect`.
  *
  * The outcome is reported as a coarse status, never as the provider's own
  * error text — those bodies routinely name the tenant, the account, and
@@ -143,11 +146,13 @@ export async function finishConnectorOAuth(opts: {
 
     A tenant flow carries no owner and stays admin-only, checked here rather
     than at the top so a user-scoped callback is not rejected for the wrong
-    reason.
+    reason. That admin is who the audit row names.
   */
   const userScoped = connector.userScoped === true;
+  let admin: AdminActor | null = null;
   if (!userScoped) {
-    await requireAdmin(session);
+    const dbUser = await requireAdmin(session);
+    admin = { id: dbUser.id, email: dbUser.email };
   } else if (!flow.userId || flow.userId !== session.user.id) {
     return finish("state");
   }
@@ -162,6 +167,7 @@ export async function finishConnectorOAuth(opts: {
   ];
   const credentials = (await getDecryptedConfig(name)) ?? {};
 
+  let granted: string[];
   try {
     const tokens = await exchangeAuthorizationCode({
       policy,
@@ -179,6 +185,7 @@ export async function finishConnectorOAuth(opts: {
     } else {
       await saveConnectorTokens(name, tokens);
     }
+    granted = splitScopes(tokens.scope);
 
     // Snapshot what the provider actually granted, against what the manifest
     // documents. This is the only moment the answer can change.
@@ -190,7 +197,7 @@ export async function finishConnectorOAuth(opts: {
       await recordScopeStatus({
         connectorName: name,
         scopes: policy.scopes ?? [],
-        granted: splitScopes(tokens.scope),
+        granted,
         userId: userScoped ? session.user.id : null,
       });
     } catch (err) {
@@ -203,6 +210,19 @@ export async function finishConnectorOAuth(opts: {
       isConnectorError(err) ? `${err.category} (HTTP ${err.status})` : err,
     );
     return finish("exchange-failed");
+  }
+
+  // A tenant grant is an admin acting for everyone, so it is audited, with the
+  // scopes the provider granted and never a token. Only once it is stored, and
+  // never able to fail it (recordAdminAction swallows its own errors). A
+  // person's own grant, for a user-scoped connector, is theirs and isn't.
+  if (admin) {
+    await recordAdminAction(admin, {
+      action: "connector.connect",
+      targetType: "connector",
+      targetId: name,
+      details: { scopes: granted },
+    });
   }
 
   return {

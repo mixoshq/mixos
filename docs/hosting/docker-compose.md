@@ -147,8 +147,10 @@ On Dokploy the admin pages show the commit as unknown, since nothing passes
 
 ## What runs where
 
-`docker compose ps` should show `db` and `app` healthy, `cron` up, and
-`migrate` exited with code 0. `cron` logs one line per tick:
+`docker compose -f deploy/docker-compose.yml ps -a` should show `db` and `app`
+healthy, `cron` up, and `migrate` exited with code 0. Without `-a` it lists
+only running containers, and `migrate` doesn't appear. `cron` logs one line per
+tick:
 
 ```
 [cron] 2026-10-06T03:55:38Z GET /api/cron -> 200
