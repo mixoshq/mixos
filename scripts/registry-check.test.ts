@@ -34,6 +34,7 @@ import {
   scanThemes,
   type Registered,
 } from "./generate-project-registry";
+import { bareHandlerProblem, rawResponseRefusal, undeclaredRoleProblems } from "./route-contracts";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -251,6 +252,29 @@ describe("--check, run as an install runs it", () => {
 
     dirs.badApp = stage("broken", { "app.json": JSON.stringify({ name: "Broken", sidebar: true }) });
 
+    // Routes whose source says what the build will make of them, and one whose
+    // options it cannot read. Each says so if it is ever imported.
+    const route = (name: string, rel: string, body: string) =>
+      stage(name, {
+        "app.json": JSON.stringify({ name, roles: [{ key: "viewer", label: "Viewer" }] }),
+        [rel]:
+          `import { z } from "zod";\nimport { defineRoute } from "@/lib/apps/route";\n` +
+          `console.log("${IMPORTED} ${rel}");\n${body}`,
+      });
+    const json = `output: z.object({ ok: z.boolean() }), handler: async () => ({ ok: true })`;
+    dirs.bareRoute = route("bare", "api/hello/route.ts", `export async function GET() {\n  return new Response("hi");\n}\n`);
+    dirs.ghostRoute = route("ghost", "api/secret/route.ts", `export const GET = defineRoute({ roles: ["ghost"], ${json} });\n`);
+    dirs.rawRoute = route(
+      "raw",
+      "api/file/route.ts",
+      `export const GET = defineRoute({ raw: true, handler: async () => new Response("x") });\n`,
+    );
+    dirs.unreadRoute = route(
+      "opaque",
+      "api/items/route.ts",
+      `const options = { roles: ["viewer"], ${json} };\nexport const GET = defineRoute(options);\n`,
+    );
+
     // A connector whose code writes to the disk when it is imported. The
     // generator never imports a connector, and the check is no exception.
     dirs.goodConnector = stageConnector("probe-conn");
@@ -285,6 +309,10 @@ describe("--check, run as an install runs it", () => {
       ["goodApp", () => checkExtension("app", dirs.goodApp, { registryDir: empty })],
       ["fsApp", () => checkExtension("app", dirs.fsApp, { registryDir: empty })],
       ["badApp", () => checkExtension("app", dirs.badApp, { registryDir: empty })],
+      ["bareRoute", () => checkExtension("app", dirs.bareRoute, { registryDir: empty })],
+      ["ghostRoute", () => checkExtension("app", dirs.ghostRoute, { registryDir: empty })],
+      ["rawRoute", () => checkExtension("app", dirs.rawRoute, { registryDir: empty })],
+      ["unreadRoute", () => checkExtension("app", dirs.unreadRoute, { registryDir: empty })],
       ["goodConnector", () => checkExtension("connector", dirs.goodConnector, { registryDir: empty })],
       ["badConnector", () => checkExtension("connector", dirs.badConnector, { registryDir: empty })],
       ["goodTheme", () => checkExtension("theme", dirs.goodTheme)],
@@ -310,13 +338,35 @@ describe("--check, run as an install runs it", () => {
     for (const dir of WATCHED) watched.after.push(snapshot(path.join(ROOT, dir)));
   });
 
-  test("a good app is accepted, its routes and widgets.ts left to registration", () => {
+  test("a good app is accepted, its route read from its source and widgets.ts left to registration", () => {
     const o = outcomes.goodApp;
     assert.equal(o.ran, true, o.output);
     assert.equal(o.accepted, true, o.problems.join("\n"));
     assert.deepEqual(o.deferred, [
       "apps/acme/widgets.ts: the widget config fields it builds are checked at registration, which loads it.",
-      "apps/acme/api/items/route.ts: its defineRoute contract is checked at registration, which loads it.",
+    ]);
+  });
+
+  test("a route its source shows breaking the build's rules is refused, in the build's words", () => {
+    const expected: Record<string, string[]> = {
+      bareRoute: [bareHandlerProblem("bare", "hello", "GET")],
+      ghostRoute: undeclaredRoleProblems("ghost", "secret", "GET", ["ghost"], [{ key: "viewer" }]),
+      rawRoute: rawResponseRefusal("raw", [{ routePath: "file", method: "GET" }], [])!.problems,
+    };
+    for (const [name, problems] of Object.entries(expected)) {
+      const o = outcomes[name];
+      assert.equal(o.ran, true, o.output);
+      assert.equal(o.accepted, false, name);
+      assert.deepEqual(o.problems, problems, name);
+    }
+  });
+
+  test("a route whose options the check cannot read is accepted, and left to registration with the reason", () => {
+    const o = outcomes.unreadRoute;
+    assert.equal(o.ran, true, o.output);
+    assert.equal(o.accepted, true, o.problems.join("\n"));
+    assert.deepEqual(o.deferred, [
+      "apps/opaque/api/items/route.ts: GET's options are in a variable, so its contract is checked at registration, which loads it.",
     ]);
   });
 
@@ -481,14 +531,47 @@ describe("checkStaged", () => {
     assert.match(problems[0], /^apps\/Not_A-Slug: /);
   });
 
-  test("a route's contract is left to registration, which loads it, whatever the file holds", async () => {
-    const { problems, deferred } = await checkStaged(
+  test("a route is read from its source: a bare handler is refused, and options it cannot read wait for registration", async () => {
+    const bare = await checkStaged(
       "app",
       stage("x", { "app.json": '{"name":"X"}', "api/index/route.ts": "export async function GET() {}\n" }),
       none(),
     );
-    assert.deepEqual(problems, []);
-    assert.deepEqual(deferred, ["apps/x/api/index/route.ts: its defineRoute contract is checked at registration, which loads it."]);
+    assert.deepEqual(bare, { problems: [bareHandlerProblem("x", "", "GET")], deferred: [] });
+
+    const opaque = await checkStaged(
+      "app",
+      stage("x", {
+        "app.json": '{"name":"X"}',
+        "api/index/route.ts":
+          'import { defineRoute } from "@/lib/apps/route";\nimport { options } from "../../lib/options";\n' +
+          "export const GET = defineRoute(options);\n",
+        "lib/options.ts": "export const options = {};\n",
+      }),
+      none(),
+    );
+    assert.deepEqual(opaque, {
+      problems: [],
+      deferred: [
+        "apps/x/api/index/route.ts: GET's options are imported from another file, so its contract is checked at registration, which loads it.",
+      ],
+    });
+  });
+
+  test("a route problem is reported with what was left to registration", async () => {
+    const { problems, deferred } = await checkStaged(
+      "app",
+      stage("x", {
+        "app.json": '{"name":"X"}',
+        "widgets.ts": "export default {};\n",
+        "api/index/route.ts": "export const GET = async () => new Response();\n",
+      }),
+      none(),
+    );
+    assert.deepEqual(problems, [bareHandlerProblem("x", "", "GET")]);
+    assert.deepEqual(deferred, [
+      "apps/x/widgets.ts: the widget config fields it builds are checked at registration, which loads it.",
+    ]);
   });
 
   test("a consumer is accepted against a registered provider that allows it, and refused by one that does not", async () => {
