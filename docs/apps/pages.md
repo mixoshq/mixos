@@ -6,7 +6,7 @@ Pages are full-screen views that render when a user opens your app. They live in
 
 ## Root Page
 
-Every app needs a `pages/Main.tsx` file. This is the entry point that renders at `/apps/your-app-folder`.
+`pages/Main.tsx` is the entry point that renders at `/apps/your-app-folder`. Pages are optional: an app with only widgets has no `pages/` directory.
 
 ```tsx
 // apps/my-app/pages/Main.tsx
@@ -37,7 +37,7 @@ apps/my-app/
         Main.tsx          → /apps/my-app/reports/monthly
 ```
 
-Each `Main.tsx` is a standalone React component. There is no shared layout between nested pages — each page controls its own full layout.
+Each `Main.tsx` is a standalone React component. There is no shared layout between nested pages — each page controls its own full layout. Paths are literal: there are no dynamic segments (a folder named `[id]` is not one), and a page receives no props.
 
 ## Navigation Between Pages
 
@@ -62,20 +62,35 @@ export default function MyAppPage() {
 
 ## Server vs Client Components
 
-Pages are server components by default. Add `"use client"` at the top if you need client-side interactivity (state, effects, event handlers). You can also mix server and client components using standard React patterns.
+Pages are server components by default. Add `"use client"` at the top if you need client-side interactivity (state, effects, event handlers). You can also mix server and client components using standard React patterns. A server page gets its data from its own routes with `callAppRoute`; see [API Routes](./api-routes.md#server-components).
 
 ```tsx
-// Server component (default) — can fetch data directly
-export default async function ReportsPage() {
-  const data = await fetchReports();
-  return <ReportTable data={data} />;
-}
+// apps/my-app/pages/reports/Main.tsx — a server component (the default)
+import { callAppRoute } from "@/lib/apps/call";
 
-// Client component — for interactivity
+export default async function ReportsPage() {
+  const { reports } = await callAppRoute<{ reports: Report[] }>("my-app", "GET /reports");
+  return <ReportList reports={reports} />;
+}
+```
+
+```tsx
+// apps/my-app/pages/settings/Main.tsx — a client component, for interactivity
 "use client";
+
+import { useState } from "react";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+
 export default function SettingsPage() {
   const [value, setValue] = useState("");
-  return <input value={value} onChange={(e) => setValue(e.target.value)} />;
+  return (
+    <Field label="Display name">
+      {(field) => (
+        <Input {...field} value={value} onChange={(e) => setValue(e.target.value)} />
+      )}
+    </Field>
+  );
 }
 ```
 
@@ -89,6 +104,7 @@ Client pages that fetch data must show skeleton placeholders while loading — n
 import { useEffect, useState } from "react";
 import { createAppClient } from "@/lib/apps/sdk";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TableSkeleton } from "@/components/ui/data-table";
 
 export default function MyPage() {
   const [data, setData] = useState<Data | null>(null);
@@ -105,15 +121,7 @@ export default function MyPage() {
     return (
       <div className="p-6">
         <Skeleton className="h-8 w-48 mb-6" />
-        <div className="rounded-lg border border-border bg-card">
-          {Array.from({ length: 6 }, (_, i) => (
-            <div key={i} className="flex items-center gap-4 border-b px-4 py-3">
-              <Skeleton className="h-4 flex-1" />
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-4 w-16" />
-            </div>
-          ))}
-        </div>
+        <TableSkeleton columns={3} rows={6} />
       </div>
     );
   }
@@ -131,26 +139,27 @@ export default function MyPage() {
 
 ## Public and Password-Protected Pages
 
-Pages are **private by default** — they live under `/apps/<slug>/...` and require a signed-in user with the app installed. To make a page reachable without sign-in, declare it in `app.json` under `pageVisibility`:
+Pages are **private by default** — they live under `/apps/<slug>/...` and require a signed-in user who holds the app's grant (a `global` app is granted to everyone). To change who can open a page, declare it in `app.json` under `pageVisibility`:
 
 ```json
 {
   "pageVisibility": {
-    "": "public",
-    "report/[id]": "password",
-    "admin": "private"
+    "": ["public"],
+    "report": ["password"],
+    "directory": ["signed-in"]
   }
 }
 ```
 
-Keys are POSIX paths relative to `apps/<slug>/pages/`, without leading or trailing slashes. The empty string `""` refers to the root page (`pages/Main.tsx`). Anything not listed defaults to `"private"`. The registry generator verifies every key resolves to a real `Main.tsx` on disk and aborts the build otherwise.
+Keys are POSIX paths relative to `apps/<slug>/pages/`, without leading or trailing slashes. The empty string `""` refers to the root page (`pages/Main.tsx`). Each value is a non-empty array of the auths the page accepts: `session`, `signed-in`, `password` or `public` (`key` is API-only, and the build rejects it on a page). Anything not listed accepts `["session"]`. The registry generator verifies every key resolves to a real `Main.tsx` on disk and aborts the build otherwise.
 
 ### Where they're served
 
-| Visibility | URL | Layout | Auth |
+| Auth | URL | Layout | Who can open it |
 | --- | --- | --- | --- |
-| `private` (default) | `/apps/<slug>/...` | Full MixOS chrome (menu bar, providers) | Signed-in user with the app installed |
-| `public` | `/p/<slug>/...` | **Minimal — no menu bar, no chrome** | None |
+| `session` (default) | `/apps/<slug>/...` | Full MixOS chrome (menu bar, providers) | A signed-in user who holds the app's grant |
+| `signed-in` | `/apps/<slug>/...` | Full MixOS chrome (menu bar, providers) | Any signed-in user, grant or not |
+| `public` | `/p/<slug>/...` | **Minimal — no menu bar, no chrome** | Anyone |
 | `password` | `/p/<slug>/...` | **Minimal — no menu bar, no chrome** (unlock form shown first) | App-wide password set by the installer; 24h cookie |
 
 Both `public` and `password` pages render on the same minimal shell. Once a visitor enters the correct password, the rendered page is indistinguishable from a fully public one.
@@ -160,7 +169,8 @@ Both `public` and `password` pages render on the same minimal shell. Once a visi
 Public and password-protected pages run as **server components without a logged-in user**:
 
 - There is no `dbUser` in the rendering environment. Don't call `requireServerSession()` or read `auth()` — they will redirect.
-- Calls from these pages to your own API routes need to target the **public API surface** (`/api/p/<slug>/...`) and the API route itself must be declared in `apiVisibility`. See [API Routes](./api-routes.md#public-and-password-protected-routes).
+- Get data the way any server page does: from your own routes, with `callAppRoute` (see [API Routes](./api-routes.md#server-components)). It resolves the caller from the tiers `/api/apps/<slug>/…` serves, `session`, `signed-in` and `public`, so for a visitor without a session the route must accept `public`. A route that accepts `public` answers anyone at `/api/p/<slug>/…`, whatever the visibility of the page that calls it.
+- A route that accepts only `password` or `key` can't be called from a page: `callAppRoute` doesn't resolve those tiers, and `createAppClient` always calls `/api/apps/<slug>/…`, which doesn't serve them.
 - Pages are served with `<meta name="robots" content="noindex, nofollow">` by default. They are reachable from the public internet but won't be crawled.
 - The platform CSP currently sets `frame-ancestors 'self'`, so public pages cannot be embedded in third-party iframes. Loosening this is a future, per-app opt-in.
 

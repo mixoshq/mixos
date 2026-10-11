@@ -30,10 +30,11 @@ themes/
 | `license` |  | SPDX identifier or expression for the theme's licence, or `UNLICENSED` for something not redistributable. Validated as a shape, not against the full SPDX list — which still rejects the mistake worth rejecting: prose. `"MIT License"` fails the build; `"MIT"` passes. | `"license": "MPL-2.0"` |
 | `themeUrl` |  | Where the theme lives for someone who wants to read about it — a homepage, a docs site, a repository directory. Absolute `https://` only: these render as links on pages served over https, and an author never sees the downgrade because their own dev server is http. | `"themeUrl": "https://example.com/x"` |
 | `themeSupportUrl` |  | Where a user takes a problem with the theme — an issue tracker, a support page. Same `https://` rule. Kept separate from `themeUrl` because "read about it" and "something is broken" are different destinations, and collapsing them sends bug reports to a marketing page. | `"themeSupportUrl": "https://example.com/x/issues"` |
-| `authors` |  | Array of `{ name, email }`. Only the name is published on mixos.org. | `"authors": [{ "name": "Jane Doe" }]` |
+| `authors` |  | Array of `{ name, email }`, both required. Only the name is published on mixos.org. | `"authors": [{ "name": "Jane Doe", "email": "jane@example.com" }]` |
 | `fonts` |  | Font faces the theme ships, each `{ family, file, weight, style, display }`. See [Assets](assets.md). | |
-| `assets` |  | `{ logo?, favicon?, appIcon192?, appIcon512? }` — paths inside `assets/`. `logo` is the default mark, which apps may replace. See [Assets](assets.md#logo-and-wordmark). | |
+| `assets` |  | `{ logo?, favicon?, appIcon192?, appIcon512?, preview? }` — paths inside `assets/`. `logo` is the default mark, which apps may replace; `preview` is the admin picker's thumbnail. See [Assets](assets.md#logo-and-wordmark). | |
 | `branding` |  | `{ name?, menuBarLogo?, loginLogo? }` — the brand slots this theme **claims**. A claimed slot is final: no app's brand filter runs for it. Logos are paths inside `assets/`; `name` is one line, up to 40 characters. See [Assets](assets.md#claiming-the-brand). | `"branding": { "name": "Acme Workspace" }` |
+| `screenshots` |  | Images for the theme's catalogue listing, `[{ file, alt?, caption? }]`, with files under `themes/<slug>/screenshots/`. Not a replacement for `assets.preview`. The build verifies each one and fills in its URL and measured size. See [Assets](assets.md#screenshots). | `"screenshots": [{ "file": "screenshots/dashboard.png" }]` |
 | `surfaces` |  | Allowlisted `.mix-*` surfaces this theme styles. Cross-checked against `theme.css` in both directions, so it can neither under-report a theme's reach nor carry a stale entry. | |
 | `escapes` |  | Declared exceptions to platform guarantees. | |
 | `lastUpdated` |  | Tool-written by the pre-commit stamp. Never hand-edited. | |
@@ -73,7 +74,7 @@ Every installed theme is bundled. Switching the active one is a row in `platform
 
 ## Selection
 
-One theme is active for the entire install, chosen by an admin at `/admin/themes`. There is no per-user override, and that is a deliberate simplification rather than a missing feature: the sign-in page, the public `/api/p/` app surfaces, and the favicon all have to render correctly with no current user to read a preference from.
+One theme is active for the entire install, chosen by an admin at `/admin/themes`. There is no per-user override, and that is a deliberate simplification rather than a missing feature: the sign-in page, the public `/p/` app pages, and the favicon all have to render correctly with no current user to read a preference from.
 
 **There is no mode axis.** A theme declares exactly one palette, so the theme slug is the whole appearance decision — `mixos` is light, `mixos-dark` is dark, and an admin picks one.
 

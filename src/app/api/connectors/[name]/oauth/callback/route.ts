@@ -13,9 +13,10 @@ import {
 import { finishConnectorOAuth } from "@/lib/connectors/oauth-flow";
 
 /**
- * Finish the tenant OAuth consent flow: verify the round trip, exchange the
- * code, and merge the resulting tokens into the connector's encrypted
- * credentials. The checks and the writes are in
+ * Finish a connector's OAuth consent flow: verify the round trip, exchange the
+ * code, and store the resulting tokens, encrypted: in the connector's
+ * credentials for a tenant connector, or as the user's own grant for a
+ * user-scoped one. The checks and the writes are in
  * src/lib/connectors/oauth-flow.ts.
  *
  * Outcomes are reported to the admin as a coarse `?oauth=` status, never as the

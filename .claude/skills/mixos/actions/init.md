@@ -586,8 +586,8 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
    > "Welcome to the real world. It sucks! You're gonna love it!"
 
 4. Then orient them, briefly:
-   - **Not sure what to build?** Run **`/mixos help`** — it explains how apps and
-     connectors relate and recommends what to build.
+   - **Not sure what to build?** Run **`/mixos help`** — it explains how apps,
+     connectors and themes fit together and recommends what to build.
    - **`/mixos app`** builds something under `apps/`; **`/mixos connector`** builds
      an integration under `connectors/`; **`/mixos theme`** changes how the whole
      install looks, under `themes/`; **`/mixos deploy`** makes the branch and
@@ -610,9 +610,7 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
      database and starts over.
    - **Connector API keys are not environment variables.** An admin enters them
      in the UI at http://localhost:3000/admin/connectors and MixOS encrypts them
-     in the database. The real keys live in the team's **MixOS 1Password vault** —
-     request access from Anthony (amix@gmail.com), and never share them.
-     This isn't needed to boot MixOS; it can wait.
+     in the database. This isn't needed to boot MixOS; it can wait.
    - **Platform encryption keys are already set for local dev.** The Docker path
      reads them from the committed `.env.docker`, which is fine because that file
      is dev-only and the values are fixed on purpose — they decrypt data already
