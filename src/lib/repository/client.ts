@@ -6,11 +6,12 @@
  * The HTTP client for the mixos.org repository — the only module that knows
  * mixos.org has URLs.
  *
- * Three calls:
+ * Four calls, all through `requestJson`:
  *
- *   GET /api/v1/search                → a page of SUMMARIES
- *   GET /api/v1/<kind>/<slug>         → one full listing
- *   GET /api/v1/<kind>/<slug>/install → an InstallManifest
+ *   GET  /api/v1/search                → a page of SUMMARIES
+ *   GET  /api/v1/<kind>/<slug>         → one full listing
+ *   GET  /api/v1/<kind>/<slug>/install → an InstallManifest
+ *   POST /api/v1/updates               → the update check's answer
  *
  * ── WHY SEARCH AND DETAIL ARE SEPARATE CALLS ────────────────────────────────
  *
@@ -46,11 +47,15 @@ import {
   InstallManifestSchema,
   KIND_SEGMENT,
   PageSchema,
+  UpdateCheckResponseSchema,
+  UpdateResultSchema,
   type Extension,
   type ExtensionKind,
   type ExtensionPage,
   type InstallManifest,
   type ListQuery,
+  type UpdateItem,
+  type UpdateResult,
 } from "./types";
 
 /**
@@ -207,6 +212,12 @@ export class RepositoryError extends Error {
     message: string,
     readonly failure: RepositoryFailure,
     readonly status?: number,
+    /**
+     * How long the repository asked to be left alone, from a `Retry-After` on
+     * an answer that wasn't a success. mixos.org sends one with the 503 its
+     * operator's switch answers while the API is off.
+     */
+    readonly retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "RepositoryError";
@@ -255,16 +266,57 @@ function withinCatalogue(target: URL, catalogue: URL): boolean {
   );
 }
 
-/** GET one catalogue endpoint and parse its JSON. Every call below goes through here. */
-async function getJson(path: string, params?: URLSearchParams): Promise<unknown> {
-  const url = new URL(path, repositoryBaseUrl());
-  if (params) url.search = params.toString();
+/** What one request to the catalogue sends, beyond its path. */
+export interface CatalogueRequest {
+  /** GET unless said otherwise. A POST sends `body` as JSON, and is never redirected. */
+  method?: "GET" | "POST";
+  /** The query string. */
+  params?: URLSearchParams;
+  /** A POST's body, sent as JSON. */
+  body?: unknown;
+}
+
+/**
+ * Ask the catalogue one thing and parse its JSON answer.
+ *
+ * Every call in this module goes through here, and so should any added later,
+ * such as the list of MixOS releases (`GET /api/v1/mixos/releases`): this is
+ * where the https rule (`repositoryBaseUrl`), the 8-second timeout, the 4 MB
+ * cap and the redirect rules live. `path` is absolute, `/api/v1/…`, and must
+ * stay on the catalogue's origin: one that resolves elsewhere, such as
+ * `//elsewhere.example/…`, is refused before anything is sent.
+ *
+ * REDIRECTS. A GET follows at most three, each only within the catalogue's own
+ * origin (`withinCatalogue`). A POST follows none, and any 3xx answer to one is
+ * a failure: a 307 or 308 would send its body again, to wherever the answer
+ * chose, and a 301, 302 or 303 would turn it into a GET without its body. The
+ * update check's body is this instance's ID and what it runs, which goes to the
+ * catalogue or nowhere.
+ *
+ * Whatever goes wrong is a `RepositoryError`: no answer, or no complete answer
+ * in time, is `unreachable`; an answer that isn't a success is `status`, with
+ * `retryAfterSeconds` when it carried a `Retry-After`; an answer over the cap,
+ * or not JSON, is `malformed`.
+ */
+export async function requestJson(path: string, request: CatalogueRequest = {}): Promise<unknown> {
+  const method = request.method ?? "GET";
+  const base = repositoryBaseUrl();
+  const url = new URL(path, base);
+  if (url.origin !== base) {
+    throw new RepositoryError(`${path} is not a path on the repository at ${base}.`, "config");
+  }
+  if (request.params) url.search = request.params.toString();
+
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (method === "POST") headers["content-type"] = "application/json";
 
   // One timeout for the whole exchange: every redirect, and the body read below.
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   const res = await fetchCheckingRedirects(url, {
     init: () => ({
-      headers: { accept: "application/json" },
+      method,
+      headers,
+      body: method === "POST" ? JSON.stringify(request.body ?? null) : undefined,
       // Catalogue answers are advisory and change; nothing downstream trusts a
       // cached copy, since what is actually trusted is the content hash.
       cache: "no-store",
@@ -273,6 +325,14 @@ async function getJson(path: string, params?: URLSearchParams): Promise<unknown>
     // Neither the target nor any part of it goes in the message: it is the
     // other end's choice, and can be long or made to mislead.
     check: (target, status) => {
+      if (method !== "GET") {
+        throw new RepositoryError(
+          `The repository at ${url.origin} answered ${method} ${path} with a redirect (${status}). ` +
+            `A ${method} to the catalogue is never redirected.`,
+          "status",
+          status,
+        );
+      }
       if (!withinCatalogue(target, url)) {
         throw new RepositoryError(
           `The repository at ${url.origin} redirected ${path} elsewhere. ` +
@@ -303,13 +363,14 @@ async function getJson(path: string, params?: URLSearchParams): Promise<unknown>
       `The repository answered ${res.status} for ${path}.`,
       "status",
       res.status,
+      parseRetryAfter(res.headers.get("retry-after")),
     );
   }
 
   // Read as text with a length check rather than calling res.json() directly:
   // the point is to stop before parsing something enormous, and json() has
   // already buffered the whole body by the time it could be measured.
-  const body = await readBounded(res, MAX_RESPONSE_BYTES);
+  const body = await readBounded(res, MAX_RESPONSE_BYTES, path);
   try {
     return JSON.parse(body) as unknown;
   } catch {
@@ -320,14 +381,44 @@ async function getJson(path: string, params?: URLSearchParams): Promise<unknown>
   }
 }
 
-/** Reads a response body, aborting once it exceeds `limit` bytes. */
-async function readBounded(res: Response, limit: number): Promise<string> {
+/**
+ * `Retry-After`, as seconds from now: a number of seconds, or an HTTP date.
+ * Undefined when absent or unreadable, and never negative. How far to trust it
+ * is the caller's decision; the update check waits at most a day.
+ */
+export function parseRetryAfter(header: string | null, now: number = Date.now()): number | undefined {
+  const value = header?.trim();
+  if (!value) return undefined;
+  if (/^\d+$/.test(value)) return Number(value);
+  // Every HTTP date starts with the day's name. `Date.parse` alone would also
+  // read "-5" or "1.5" as dates.
+  if (!/^[A-Za-z]{3}/.test(value)) return undefined;
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? undefined : Math.max(0, Math.ceil((at - now) / 1000));
+}
+
+/**
+ * Reads a response body, aborting once it exceeds `limit` bytes. A body that
+ * stops arriving, or doesn't finish within the request's timeout, is
+ * `unreachable`: the answer never came.
+ */
+async function readBounded(res: Response, limit: number, path: string): Promise<string> {
   const reader = res.body?.getReader();
   if (!reader) return "";
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
-    const { done, value } = await reader.read();
+    let chunk: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunk = await reader.read();
+    } catch (err) {
+      throw new RepositoryError(
+        `The repository stopped answering ${path} before it finished: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+        "unreachable",
+      );
+    }
+    const { done, value } = chunk;
     if (done) break;
     total += value.byteLength;
     if (total > limit) {
@@ -370,7 +461,7 @@ export async function searchRepository(query: ListQuery): Promise<ExtensionPage>
   if (query.pageSize) params.set("pageSize", String(query.pageSize));
   if (query.featured !== undefined) params.set("featured", String(query.featured));
 
-  const raw = await getJson("/api/v1/search", params);
+  const raw = await requestJson("/api/v1/search", { params });
   const parsed = PageSchema.safeParse(raw);
   if (!parsed.success) {
     throw new RepositoryError(
@@ -401,7 +492,7 @@ export async function fetchExtension(
   kind: ExtensionKind,
   slug: string,
 ): Promise<Extension> {
-  const raw = await getJson(`/api/v1/${KIND_SEGMENT[kind]}/${encodeURIComponent(slug)}`);
+  const raw = await requestJson(`/api/v1/${KIND_SEGMENT[kind]}/${encodeURIComponent(slug)}`);
   const parsed = ExtensionSchema.safeParse(raw);
   if (!parsed.success) {
     throw new RepositoryError(
@@ -436,9 +527,9 @@ export async function fetchInstallManifest(
   const params = new URLSearchParams();
   if (version) params.set("version", version);
 
-  const raw = await getJson(
+  const raw = await requestJson(
     `/api/v1/${KIND_SEGMENT[kind]}/${encodeURIComponent(slug)}/install`,
-    params,
+    { params },
   );
   const parsed = InstallManifestSchema.safeParse(raw);
   if (!parsed.success) {
@@ -460,4 +551,53 @@ export async function fetchInstallManifest(
     );
   }
   return parsed.data;
+}
+
+/** mixos.org's answer to an update check, with the entries that parsed. */
+export interface UpdateCheckAnswer {
+  /** When mixos.org answered, as it says. Display only. */
+  checkedAt: string | null;
+  items: UpdateResult[];
+}
+
+/**
+ * The update check: ask the catalogue about the extensions this instance
+ * installed from it (`POST /api/v1/updates`, run by ./update-check.ts).
+ *
+ * The body is built here, field by field: the instance ID, and each item's
+ * kind, slug and version. Nothing else, whatever else the caller's objects
+ * hold: no MixOS version, no URL, nothing about users or data.
+ *
+ * The answer is read leniently. An entry that doesn't parse is dropped, as
+ * mixos.org drops a malformed item from the request, and which entries came
+ * back is for the caller to check: `keepAnswersFor()` in ./updates.ts keeps an
+ * answer only for an item that was sent, at the version sent.
+ */
+export async function checkUpdates(
+  instanceId: string,
+  items: readonly UpdateItem[],
+): Promise<UpdateCheckAnswer> {
+  const raw = await requestJson("/api/v1/updates", {
+    method: "POST",
+    body: {
+      instanceId,
+      items: items.map(({ kind, slug, version }) => ({ kind, slug, version })),
+    },
+  });
+  const parsed = UpdateCheckResponseSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new RepositoryError(
+      `The repository's update check answer did not match the expected shape: ${parsed.error.issues
+        .slice(0, 3)
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; ")}`,
+      "malformed",
+    );
+  }
+  const answered: UpdateResult[] = [];
+  for (const entry of parsed.data.items) {
+    const result = UpdateResultSchema.safeParse(entry);
+    if (result.success) answered.push(result.data);
+  }
+  return { checkedAt: parsed.data.checkedAt ?? null, items: answered };
 }
