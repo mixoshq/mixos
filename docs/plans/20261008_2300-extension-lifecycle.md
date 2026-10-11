@@ -330,13 +330,20 @@ Every move between these and the live folders is a `rename` on one filesystem, s
      the archive is what runs (`install.ts:463-492@runtime-10`);
    - a path holding C0 or C1 control characters, DEL, or Unicode bidi controls (U+202A to U+202E,
      U+2066 to U+2069), which can rewrite what the CLI and the dialogs print;
-   - `.gitattributes` or `.gitignore` at any depth. They change what the operator's repository
-     records and how its review shows the files (`-diff`, `linguist-generated`, or a tracked file
-     the operator's `git add` would skip).
-4. Compute `filesHash`: the content hash's serialisation over the same entries with every file mode
-   read as 644. `writeTree()` writes every file 0644 while the content hash records the execute
-   bit (`content-hash.ts:97@runtime-10`), so only a mode-blind hash can be recomputed from the
-   folder later. Then add `.registry.json` to the in-memory tree (1.5).
+   - a `.git` file or folder at any depth, which makes git treat the folder holding it as a
+     repository of its own.
+
+   `.gitattributes` and `.gitignore` at any depth change what the operator's repository records
+   and how its review shows the files (`-diff`, `linguist-generated`, or a tracked file the
+   operator's `git add` would skip). Most extension repositories have a `.gitignore`, so install
+   leaves both out rather than refuse the package (owner decision, 11 October 2026): neither is
+   written, nothing else about its path is checked, and mixos.org's publish check skips them too.
+   The content hash is checked over the package as published, before they are left out.
+4. Compute `filesHash`: the content hash's serialisation over the entries install writes, those
+   left out not included, with every file mode read as 644. `writeTree()` writes every file 0644
+   while the content hash records the execute bit (`content-hash.ts:97@runtime-10`), so only a
+   mode-blind hash can be recomputed from the folder later. Then add `.registry.json` to the
+   in-memory tree (1.5).
 5. Write the tree to `.mixos/staging/<kind>/<slug>/`, every file 0644.
 6. Run `generate-project-registry.ts --check <kind> <dir> --verdict-file <path>` on the staging
    folder, with `env: generatorEnv()` (`PATH` and `TMPDIR`). The check treats the staged folder as
@@ -1032,8 +1039,9 @@ text keeps a package to a handful of requests; the number of binary files on thi
   generator child still gets only `PATH` and `TMPDIR`, but the dev server then loads the app with
   its full environment, which the review prompt says (owner decision 1 accepted a button for this).
 - **What review sees is what runs.** Preflight refuses paths that collide after case folding or
-  NFC normalisation, control and bidi characters in paths, and git control files. Register refuses
-  a pending folder whose `filesHash` changed after install. The check's verdict comes from a file
+  NFC normalisation, control and bidi characters in paths, and `.git`; install leaves out
+  `.gitignore` and `.gitattributes`, which the content hash still covers. Register refuses a
+  pending folder whose `filesHash` changed after install. The check's verdict comes from a file
   the parent names, never from the child's output.
 - **Provenance can't be forged by a publisher:** preflight refuses a package that ships
   `.registry.json`. A hand-edited file only changes which notices show, and `filesHash` lets
@@ -1081,8 +1089,9 @@ Unit (`npm test`):
   staged app that imports `@apps/<own-slug>/…` and consumes a registered app's service is
   accepted.
 - `preflight()` refuses `api/report/route.ts` beside `API/report/route.ts`, an NFC and NFD pair, a
-  path with a newline, a C1 control or a bidi control, and `.gitattributes` or `.gitignore` at any
-  depth.
+  path with a newline, a C1 control or a bidi control, and a `.git` at any depth. A package with a
+  `.gitignore` and a nested `.gitattributes`, in any case, installs without them, and its
+  `filesHash` matches the folder.
 - The generator skips dot folders in all three scans.
 - `filesHash`: equal for a tree with and without execute bits; Register refuses a pending folder
   edited after install; `scanRegistryInstalls()` sets `modified` for an edited folder.

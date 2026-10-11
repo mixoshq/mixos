@@ -2195,9 +2195,10 @@ taken (below), nothing of that slug may be in place or waiting in pending, and:
 4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
 5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
 6. Pre-flight: the manifest exists, parses and is for this slug, and every
-   path lands on disk as what it names (below). Then the files hash, and the
-   install record, `.registry.json`, added to the tree (see
-   **The install record**)
+   path lands on disk as what it names (below). Then any `.gitignore` or
+   `.gitattributes` is left out (below), the files hash is computed over what
+   is written, and the install record, `.registry.json`, is added to the tree
+   (see **The install record**)
 7. Check the locks, then write to `.mixos/staging/<kind dir>/<slug>/`,
    never to the target
 8. CHECK IT WITHOUT RUNNING IT: generate-project-registry.ts --check reads
@@ -2231,14 +2232,24 @@ would make the two differ (`pathProblems()`, `src/lib/repository/install.ts`):
 - a path holding a control character (C0, DEL or C1), a Unicode bidi control or
   a line separator, any of which can change how the path prints in a terminal
   or in the dialogs. A refusal shows each one escaped, as `\u{202E}`;
-- a `.gitattributes`, `.gitignore` or `.git` at any depth. Each changes what the
-  operator's repository records when the extension is committed, or how a
-  review shows it: an attribute can hide a diff or mark files as generated, an
-  ignore rule can keep a file the extension runs out of the commit, and a `.git`
-  makes git treat the folder as a repository of its own;
+- a `.git` file or folder at any depth. Git treats the folder holding it as a
+  repository of its own, so the operator's commit would not hold that folder's
+  files;
 - a file or folder named `.registry.json`, in any case, at any depth. That is
   the install record's name, and only an install writes one, from what it
   verified.
+
+**Install leaves out `.gitignore` and `.gitattributes`** rather than refuse
+them, since most extension repositories have a `.gitignore` at the top. A file
+with either name, at any depth and in any case, is never written, and nothing
+else about its path is checked. Git reads both from the tree it adds, so either
+would change what the operator's repository records, or how a review shows it:
+an attribute can hide a diff or mark files as generated, and an ignore rule can
+keep a file the extension runs out of the commit. The content hash is checked
+first, over the package as published; the files hash is over what is written.
+The install result, `npm run register` and the audit row say what was left out
+(`src/lib/repository/left-out.ts`). mixos.org's publish check skips the same
+files, and refuses the paths listed above.
 
 ### What runs, and when
 
@@ -2299,8 +2310,9 @@ An app or a connector from the Registry is not part of the build until someone
 registers it. Install leaves it in `.mixos/pending/<kind dir>/<slug>/`, with its
 install record inside it (see **The install record**), and a sidecar beside it,
 `<slug>.json`, holding what is about this checkout's install only: who
-installed it and when, whether they accepted a withdrawn release, and the
-check's verdict and what it deferred. The sidecar is never committed.
+installed it and when, whether they accepted a withdrawn release, the check's
+verdict and what it deferred, and what install left out. The sidecar is never
+committed.
 
 Register has two entry points, which do the same thing under both locks (below):
 the **Register** button on Admin > Apps and Admin > Connectors, which comes after
@@ -2311,12 +2323,14 @@ pending. Either way, in the checkout:
 1. The pending folder, its install record and its sidecar exist, and nothing
    is where it would go. The **files hash**, recomputed from the folder with
    the record left out, matches the record's. It is the content hash's
-   serialisation over the same files with every mode read as 644: install
-   writes every file 0644, so the content hash, which records the execute bit,
-   can't be recomputed from disk. A folder with a file changed, added or
-   removed since install, or a link in it, is refused, so what runs is what was
-   verified and checked. A pending install from before installs kept a record
-   has none, and is refused: discard it and install it again.
+   serialisation over the files install wrote, with every mode read as 644:
+   install writes every file 0644 and leaves out any `.gitignore` or
+   `.gitattributes`, so the content hash, which records the execute bit and
+   covers the package as published, can't be recomputed from disk. A folder
+   with a file changed, added or removed since install, or a link in it, is
+   refused, so what runs is what was verified and checked. A pending install
+   from before installs kept a record has none, and is refused: discard it and
+   install it again.
 2. The release's `requiresMixOS`, from the record, holds for the version this
    checkout builds.
 3. The sidecar records the registration (the checkout lock's token, the pid and
@@ -2557,6 +2571,10 @@ are both in the hash — without paths, a tree with two files renamed past each
 other hashes the same; without lengths, the boundary between one file's bytes and
 the next path is ambiguous and two different trees can be made to collide.
 
+It covers the package as published, any `.gitignore` and `.gitattributes`
+included. Install checks it before it leaves those out, and the files hash, which
+Register and the generator recompute from the folder, covers what was written.
+
 **mixos.org's spec names the format but not the serialisation.** Two ends that
 agree on `sha256-<base64>` and disagree on how a tree becomes bytes produce a
 mismatch on every honest package, which is indistinguishable from an attack and
@@ -2576,11 +2594,11 @@ review, Register, Discard and Activate in this checkout
 (`src/lib/repository/actions.ts`, `src/lib/repository/pending-actions.ts`). The
 pages' own gates guard the render only, and the actions are reachable without
 ever loading them. Both outcomes are audited (§28): `app.install` records the
-version, commit, verified hash, files hash, where it went and the check's
-verdict; `app.install.rejected` records the reason. A rejection is the more
-interesting row — `reason: "checksum"` says someone was served bytes that did
-not match what the catalogue published. The buttons' Register and Discard rows
-name the signed-in admin, with `via: "button"`.
+version, commit, verified hash, files hash, where it went, the check's verdict
+and what install left out; `app.install.rejected` records the reason. A
+rejection is the more interesting row — `reason: "checksum"` says someone was
+served bytes that did not match what the catalogue published. The buttons'
+Register and Discard rows name the signed-in admin, with `via: "button"`.
 
 `npm run register` is a shell in the checkout, not a signed-in admin: anyone who
 can run it can already change the checkout's code. Its rows record no user id,
