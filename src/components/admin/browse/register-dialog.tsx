@@ -4,7 +4,6 @@
 
 "use client";
 
-import { setAppActiveAction } from "@/lib/apps/admin-actions";
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -28,9 +27,16 @@ import type {
   InstallManifest,
 } from "@/lib/repository/types";
 import { KIND_LABEL } from "@/lib/repository/types";
+import StatusNotice from "../pending/notice";
+import type { PendingTarget } from "../pending/review-dialog";
 
 /**
- * The confirmation step, and the only place registration is started from.
+ * The confirmation step for an install from the catalogue.
+ *
+ * An app or a connector installs into `.mixos/pending/`, where none of its
+ * code runs, and its result leads to the review that comes before Register
+ * (../pending/review-dialog.tsx). A theme has no code, and registers as it
+ * installs.
  *
  * ── WHY THIS IS A DIALOG AND NOT A ONE-CLICK BUTTON ─────────────────────────
  *
@@ -52,21 +58,25 @@ import { KIND_LABEL } from "@/lib/repository/types";
  */
 export default function RegisterDialog({
   extension,
-  activateAfterInstall = false,
+  notInstallable = null,
   onClose,
-  onRegistered,
+  onInstalled,
+  onReview,
 }: {
   extension: ExtensionSummary | null;
   /**
-   * Turn the app on as part of installing it ("Install & Activate"). Only
-   * apps have this switch, and only an install that succeeded gets this far —
-   * activating something that failed to land would leave the instance
-   * pointing at code it does not have.
+   * Why this deployment doesn't install, when it doesn't: the dialog still
+   * shows the release, and says this in place of offering to install it.
    */
-  activateAfterInstall?: boolean;
+  notInstallable?: { message: string; tone: "info" | "warning" } | null;
   onClose: () => void;
-  /** Told the identifier so the grid can flip the tile to "Installed". */
-  onRegistered: (slug: string) => void;
+  /**
+   * Told once it is installed, and whether it waits in pending, so the grid
+   * can flip the tile: to "Installed" for a theme, to the review otherwise.
+   */
+  onInstalled: (extension: ExtensionSummary, pending: boolean) => void;
+  /** Go on to the review of the pending install, which leads to Register. */
+  onReview: (target: PendingTarget) => void;
 }) {
   const [manifest, setManifest] = useState<InstallManifest | null>(null);
   const [listing, setListing] = useState<Extension | null>(null);
@@ -74,7 +84,6 @@ export default function RegisterDialog({
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<InstallOutcome | null>(null);
   const [acceptYanked, setAcceptYanked] = useState(false);
-  const [activateError, setActivateError] = useState<string | null>(null);
 
   const slug = extension?.slug ?? null;
   const kind = extension?.kind ?? null;
@@ -115,33 +124,12 @@ export default function RegisterDialog({
         version: manifest?.version,
         allowYanked: acceptYanked,
       });
-      // An app installed into pending is not in the build yet, so there is
-      // nothing to activate until it is registered; the outcome says so.
-      if (res.ok && activateAfterInstall && kind === "app" && !res.result.pending) {
-        try {
-          await setAppActiveAction(slug, true);
-        } catch (err) {
-          // The install DID happen; only the switch failed. Saying so beats
-          // reporting the whole thing as a failure and having the admin
-          // install it a second time.
-          setActivateError(
-            err instanceof Error ? err.message : "Could not activate the app.",
-          );
-        }
-      }
       setOutcome(res);
-      if (res.ok) onRegistered(slug);
+      if (res.ok && extension) onInstalled(extension, res.result.pending);
     } finally {
       setBusy(false);
     }
-  }, [
-    kind,
-    slug,
-    manifest?.version,
-    acceptYanked,
-    onRegistered,
-    activateAfterInstall,
-  ]);
+  }, [kind, slug, extension, manifest?.version, acceptYanked, onInstalled]);
 
   if (!extension || !kind) return null;
 
@@ -169,9 +157,27 @@ export default function RegisterDialog({
       }
       size="lg"
       footer={
-        outcome && !locked ? (
+        outcome?.ok && outcome.result.pending ? (
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              Later
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() =>
+                onReview({
+                  kind: outcome.result.kind as PendingTarget["kind"],
+                  slug: outcome.result.slug,
+                  name: extension.name,
+                })
+              }
+            >
+              Review and register
+            </Button>
+          </>
+        ) : (outcome && !locked) || notInstallable ? (
           <Button variant="primary" onClick={onClose}>
-            Done
+            {notInstallable && !outcome ? "Close" : "Done"}
           </Button>
         ) : (
           <>
@@ -191,12 +197,13 @@ export default function RegisterDialog({
         )
       }
     >
+      {notInstallable && !outcome && (
+        <div className="mb-5">
+          <StatusNotice tone={notInstallable.tone}>{notInstallable.message}</StatusNotice>
+        </div>
+      )}
       {outcome ? (
-        <OutcomePanel
-          outcome={outcome}
-          activateError={activateError}
-          activateAsked={activateAfterInstall}
-        />
+        <OutcomePanel outcome={outcome} />
       ) : resolveError ? (
         <div className="space-y-4">
           <Notice
@@ -230,7 +237,7 @@ export default function RegisterDialog({
         </p>
       ) : (
         <div className="space-y-5">
-          {yanked && (
+          {yanked && !notInstallable && (
             <Notice
               tone="warning"
               icon={<AlertTriangle className="h-4 w-4" aria-hidden />}
@@ -297,14 +304,20 @@ export default function RegisterDialog({
                 </Row>
               )}
               <Row label="Installs to">
-                <code className="font-mono text-xs">
-                  {kind === "connector"
-                    ? "connectors"
-                    : kind === "theme"
-                      ? "themes"
-                      : "apps"}
-                  /{manifest.slug}
-                </code>
+                {kind === "theme" ? (
+                  <code className="font-mono text-xs">themes/{manifest.slug}</code>
+                ) : (
+                  <>
+                    <code className="font-mono text-xs">
+                      .mixos/pending/{kind === "connector" ? "connectors" : "apps"}/
+                      {manifest.slug}
+                    </code>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      until you register it
+                    </span>
+                  </>
+                )}
               </Row>
             </dl>
           </section>
@@ -400,33 +413,11 @@ function Notice({
  * as another red box saying "failed" would waste the only signal this pipeline
  * exists to produce.
  */
-function OutcomePanel({
-  outcome,
-  activateError,
-  activateAsked,
-}: {
-  outcome: InstallOutcome;
-  /** Set when the install landed but "Install & Activate" could not finish. */
-  activateError: string | null;
-  /** "Install & Activate" was chosen, which a pending install can't do yet. */
-  activateAsked: boolean;
-}) {
+function OutcomePanel({ outcome }: { outcome: InstallOutcome }) {
   if (outcome.ok) {
     const r = outcome.result;
     return (
       <div className="space-y-4">
-        {/* The install is what this panel reports; a failed activation is a
-            separate, smaller fact — and one with an obvious next step, which
-            is why it names where to finish the job. */}
-        {activateError && (
-          <Notice
-            tone="warning"
-            icon={<XCircle className="h-4 w-4" aria-hidden />}
-          >
-            Installed, but could not activate it: {activateError} Turn it on
-            from the Apps page.
-          </Notice>
-        )}
         <Notice
           tone="success"
           icon={<CheckCircle2 className="h-4 w-4" aria-hidden />}
@@ -435,12 +426,17 @@ function OutcomePanel({
             Checksum verified and{" "}
             {r.pending || r.registry?.ok ? "registry checks passed" : "written to disk"}.
           </p>
-          <p className="mt-1">{r.nextStep}</p>
-          {r.pending && activateAsked && (
+          {r.pending ? (
             <p className="mt-1">
-              It isn&apos;t active yet. Activate it in Admin &gt; Apps once it is
-              registered.
+              It is waiting in <code className="font-mono text-xs">{r.installPath}/</code>,
+              where none of its code has run. Review what it will run, then
+              register it: here, from{" "}
+              {r.kind === "app" ? "Admin > Apps" : "Admin > Connectors"} later, or
+              with <code className="font-mono text-xs">npm run register -- {r.kind}/{r.slug}</code>{" "}
+              in this checkout.
             </p>
+          ) : (
+            <p className="mt-1">{r.nextStep}</p>
           )}
         </Notice>
         <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-sm">

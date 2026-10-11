@@ -192,10 +192,11 @@ export async function filterActiveApps(slugs: string[]): Promise<string[]> {
  * Set by an admin on the Apps page. Inactive apps are refused everywhere.
  *
  * An upsert rather than an update, because the row is normally written by the
- * registry sync and an app installed from the catalogue is activated before
- * that sync has run — "Install & Activate" would otherwise update zero rows
- * and report success for nothing. The manifest supplies the columns the sync
- * would have; a slug with no manifest is refused by the caller.
+ * registry sync and an app registered from the catalogue can be activated
+ * before that sync has run — "Activate in this checkout", straight after
+ * Register, would otherwise update zero rows and report success for nothing.
+ * The manifest supplies the columns the sync would have; a slug with no
+ * manifest is refused by the caller.
  */
 export async function setAppActive(
   slug: string,
