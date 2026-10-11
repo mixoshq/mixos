@@ -1662,10 +1662,11 @@ encrypted at rest and decrypted here and nowhere else.
 Lint flags the environment in the editor, but lint runs on pull requests to this
 repository and nowhere else, so for an extension installed from the Registry it
 would be advice. The rule that holds is in the registry generator, which runs on
-every build and as step 9 of every install (§31). Before it loads any of an
-app's code, it reads the syntax tree of every source file under `apps/<slug>/`
-(`scripts/app-containment.ts`) and skips the app — on the install path, rejects
-it and rolls it back — if the code references:
+every build and in every install's check (§31), on the staged copy, before the
+install puts anything in place. Before it loads any of an app's code, it reads
+the syntax tree of every source file in the app's folder
+(`scripts/app-containment.ts`) and skips the app — on the install path, the
+check rejects it, and it never reaches `apps/` — if the code references:
 
 - `process` in any form: `process.env`, `globalThis.process`, an import of
   `process` or `node:process`;
@@ -1994,14 +1995,19 @@ directory must not exist, and:
 3. Download from GitHub, PINNED TO THE COMMIT, through the host allowlist
 4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
 5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
-6. Pre-flight the manifest: it exists, it parses, it is for this slug
-7. Check the lock, then write to `.installing-<slug>` beside the target,
-   never to the target
-8. Check the lock, then rename into place — the first moment the tree is live
-9. Run scripts/generate-project-registry.ts — the authoritative validation,
-   containment scan included (§24)
-10. If it was rejected, check the lock, then remove the directory and
-    regenerate, so a failed registration leaves the instance exactly as it was
+6. Pre-flight: the manifest exists, parses and is for this slug, and every
+   path lands on disk as what it names (below)
+7. Check the lock, then write to `.installing-<slug>/<slug>/` beside the
+   target, never to the target
+8. CHECK IT WITHOUT RUNNING IT: generate-project-registry.ts --check reads
+   the staged copy and imports none of it (below). Rejected, or no verdict:
+   check the lock, delete the staged copy, stop
+9. Check the lock, then rename into place — the first moment the tree is live
+10. Run scripts/generate-project-registry.ts, which loads the extension's
+    code for the first time
+11. If it left the extension out or stopped, check the lock, then remove the
+    directory and regenerate, so a failed registration leaves the instance
+    exactly as it was
 ```
 
 **Nothing untrusted touches the filesystem before step 5.** That is why the tar
@@ -2011,11 +2017,66 @@ then depends on its cleanup being correct for that not to matter. It also means
 the path rules are ours rather than differing between GNU tar and bsdtar, which
 is what this project runs on in Docker and in development respectively.
 
+**What is reviewed is what lands.** A reviewer reads the source on GitHub; what
+runs is what lands on this disk. So step 6 also refuses a package whose paths
+would make the two differ (`pathProblems()`, `src/lib/repository/install.ts`):
+
+- two paths, or two folders, that differ only in case or Unicode normalisation,
+  such as `api/report/route.ts` beside `API/report/route.ts`. A case-insensitive
+  disk, the default on macOS and Windows, stores them as one, and of two files
+  the one written last is the one that runs;
+- a path holding a control character (C0, DEL or C1), a Unicode bidi control or
+  a line separator, any of which can change how the path prints in a terminal
+  or in the dialogs. A refusal shows each one escaped, as `\u{202E}`;
+- a `.gitattributes`, `.gitignore` or `.git` at any depth. Each changes what the
+  operator's repository records when the extension is committed, or how a
+  review shows it: an attribute can hide a diff or mark files as generated, an
+  ignore rule can keep a file the extension runs out of the commit, and a `.git`
+  makes git treat the folder as a repository of its own.
+
+### What runs, and when
+
+**Nothing the package ships runs before step 10.** Step 8 is the registry
+generator in check mode, `generate-project-registry.ts --check <kind> <dir>
+--verdict-file <path>`, on the staged copy. It treats that copy as the
+extension's own folder, the folder's name as its slug, and runs every check that
+reads text: the manifest against its schema, the containment scan and the
+import rules (§24), the SQL check on an app's migrations (§3.2), the file and
+text checks, and the checks that span extensions — App Services and hook
+wiring, schema and role clashes, user-scoped connectors in scheduled jobs — over
+the manifests already registered in `src/generated/`, with this one added. It
+reads those registered manifests as text, too.
+
+What it leaves out is the point of it. It imports none of the extension's code,
+so an app's `widgets.ts` and the `defineRoute` contract in each `route.ts` are
+listed in the verdict as deferred, checked at registration, which loads them. A
+connector's and a theme's checks never load code, so the check runs all of them.
+It writes nothing to `src/generated/` or `public/`, and does not stamp the build.
+
+**The verdict is a file.** The check writes one verdict,
+`{"verdict":"accepted"|"rejected","problems":[…],"deferred":[…]}`, to a path in a
+directory the installing process makes for it, and the install accepts it only
+when the check exited 0 and that directory holds exactly one well-formed verdict
+(`checkExtension()`). Each problem names its file. What the check prints is shown
+to the admin and never parsed: it repeats file names and manifest strings, which
+the package chooses, so a line of it could be made to read as a verdict.
+
+**A generator an install starts gets `PATH` and `TMPDIR`, and nothing else**
+(`generatorEnv()`), for the check and for step 10 alike. The server's own
+environment, `DATABASE_URL`, `AUTH_SECRET` and `CONNECTOR_ENCRYPTION_KEY` among
+it, never reaches either run.
+
+**Staged copies are never scanned.** The staging folder is dot-prefixed, and the
+generator skips every dot-prefixed folder in `apps/`, `connectors/` and
+`themes/`, as it skips `_template`. A staged copy, or one a crash left behind,
+is never imported or registered, and the next install of the same slug clears
+it.
+
 ### The register lock is a lease, renewed and fenced
 
 Two registrations at once would run two generators over the same
 `src/generated/*.ts` files, and one's rollback could land on top of the other's
-success. So steps 1 to 10 run under one instance-wide lock, `repository.register`
+success. So steps 1 to 11 run under one instance-wide lock, `repository.register`
 ([`src/lib/platform/lock.ts`](../src/lib/platform/lock.ts)): a row in
 `_platform_locks` rather than a Postgres advisory lock, because a session
 advisory lock does not survive a transaction pooler. An admin who registers
@@ -2030,15 +2091,15 @@ mid-download, and carry on when it wakes, by which time another may hold the
 lock. Three rules cover that:
 
 - **The holder renews the lease every minute** while it works, so a slow but
-  live registration never loses it, the generator run in step 9 included. That
-  makes its own time limits the lock's: the repository and GitHub requests time
-  out, and a generator run is ended after 120 seconds, the processes it started
-  included.
-- **The lock is checked before the disk changes.** Steps 7, 8 and 10 begin with
-  `assertHeld()`, `update _platform_locks set acquired_at = now() where name =
-  $1 and holder = $2 returning 1`, which renews the lease only while the row
-  still holds this acquisition's random token. Step 9 runs straight after step
-  8's check.
+  live registration never loses it, the generator runs in steps 8 and 10
+  included. That makes its own time limits the lock's: the repository and
+  GitHub requests time out, and a generator run is ended after 120 seconds, the
+  processes it started included.
+- **The lock is checked before the disk changes.** Steps 7, 9 and 11, and
+  deleting a staged copy the check refused, begin with `assertHeld()`,
+  `update _platform_locks set acquired_at = now() where name = $1 and holder =
+  $2 returning 1`, which renews the lease only while the row still holds this
+  acquisition's random token. Step 10 runs straight after step 9's check.
 - **A holder that has lost the lock stops without touching the disk**, cleanup
   included: by then the staging directory, or the registry it would regenerate,
   may be the new holder's. The admin is told what was left on disk, and the
@@ -2164,13 +2225,18 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   build. Registering is an operation on a source checkout; no arrangement of a
   shipped artifact makes it work.
 
-  Relatedly, `RegistryOutcome.brokenToolchain` now separates the two failures
-  everywhere. A non-zero exit from the generator is never its verdict on one
-  extension — per-item problems are `Skipping <dir>/ — ...` warnings and the run
-  still exits 0, because one bad app must not break everyone else's build.
-- **Carry the archive's file modes.** Everything is written `0644`. Nothing here
-  execs a source file, and an archive that can set the mode of a file it places
-  in the checkout can set the setuid bit.
+  Relatedly, a check that could not judge is never reported as a judgement. The
+  check's verdict is a file (see **What runs, and when**): a check that exits
+  non-zero, runs out of time or leaves no well-formed verdict has judged
+  nothing, and the admin is told this checkout could not complete it, as
+  `generator-failed`. A rejection is a verdict that lists its problems, as
+  `rejected-by-registry`. After a passing check, step 10 can still leave the
+  extension out, for what only its code shows, which is a rejection; or stop
+  with a non-zero exit, which could be the extension's code or the checkout, and
+  is reported as either.
+- **Carry the archive's file modes.** Everything is written `0644`: an archive
+  that can set the mode of a file it places in the checkout can set the setuid
+  bit, and no file an extension ships is a program to execute.
 
 ### A built deployment searches mixos.org
 

@@ -225,8 +225,9 @@ type or another app's `services/types` is fine.
 
 **The build enforces it.** The registry generator reads every app's source
 before it loads any of it, on every build and every Registry install, and skips
-an app that imports anything else. On the install path that rejects the app and
-rolls it back. ESLint shows the same findings in an editor, from the same code
+an app that imports anything else. An install checks the downloaded copy first,
+and rejects such an app before it reaches `apps/`. ESLint shows the same
+findings in an editor, from the same code
 ([`src/lib/apps/import-policy.mjs`](../../src/lib/apps/import-policy.mjs)). Each
 finding names the file, the line, the import and what to use instead.
 
