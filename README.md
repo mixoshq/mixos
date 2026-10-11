@@ -334,7 +334,8 @@ a directory with a valid manifest is the whole installation step.
 **From the Registry.** In a checkout, Admin > Apps, Connectors and Themes can
 browse [mixos.org](https://mixos.org) and install from it. An installed app or
 connector waits in `.mixos/pending/`, where nothing runs it, until you register
-it:
+it: with **Review and register** on Admin > Apps or Admin > Connectors, which
+first shows what will run, or in a terminal:
 
 ```bash
 npm run register                        # what is waiting
@@ -592,7 +593,7 @@ path needs and explains the release step. Deploy your fork, so the apps you add
 are in the build. To make an instance run only what it was deployed with, set
 `INSTALL_APPS`, `INSTALL_CONNECTORS` or `INSTALL_THEMES` to `false`: the
 catalogue's Browse pages and its install actions go away for that kind, and
-`npm run register` won't register it
+Register, from the page or `npm run register`, won't register it
 ([details](docs/hosting/README.md#fixing-what-an-instance-runs)).
 
 Before exposing a deployment publicly, read

@@ -2080,6 +2080,11 @@ written in the sync's own transaction, so the change and its record commit
 together: rule 2 is about not failing an admin's action, and here a failed write
 fails the step before anything it would have recorded is committed.
 
+**Rows the Register and Discard buttons write.** The same actions from Admin >
+Apps and Admin > Connectors name the signed-in admin, with `via: "button"` in
+`details`. A Register the page refuses on a built deployment, before any lock,
+is `<kind>.register.rejected` with `reason: "unsupported-environment"`.
+
 **Rows `npm run register` writes.** Registering, discarding and recovering run
 in a shell in the checkout, where nobody has signed in, so their rows have a
 null `actor_id`, `actor_email` `cli:<os user>@<hostname>`, and `via: "cli"` in
@@ -2160,11 +2165,12 @@ block a release.
 
 `/admin/{apps,connectors,themes}/browse` lets an admin search mixos.org and copy
 an extension into this instance's own source tree. An app or a connector waits
-in `.mixos/pending/` until someone registers it with `npm run register`, which
-is when its code first runs; a theme, which has no code, is registered as it is
-installed. This is the only path by which code an admin did not write reaches
-`apps/`, `connectors/` or `themes/`, so the whole of it is worth stating in one
-place.
+in `.mixos/pending/` until someone registers it, with the Register button on
+Admin > Apps or Admin > Connectors after reading what will run, or with
+`npm run register`. That is when its code first runs. A theme, which has no
+code, is registered as it is installed. This is the only path by which code an
+admin did not write reaches `apps/`, `connectors/` or `themes/`, so the whole of
+it is worth stating in one place.
 
 **The trust model is that mixos.org is an index, not a package host.** It stores
 metadata and identity; GitHub stores code. This instance asks mixos.org *what* to
@@ -2290,8 +2296,11 @@ commit, its content hash and its files hash, the floor it declares, the check's
 verdict and what it deferred, and who installed it and when. The sidecar is
 about this checkout's install and is never committed.
 
+Register has two entry points, which do the same thing under both locks (below):
+the **Register** button on Admin > Apps and Admin > Connectors, which comes after
+a review of what will run (see **The review before Register**), and
 `npm run register -- <kind>/<slug>`, or the slug alone when only one kind has it
-pending, registers it in the checkout, under both locks (below):
+pending. Either way, in the checkout:
 
 1. The pending folder and its sidecar exist, and nothing is where it would go.
    The **files hash**, recomputed from the folder, matches the sidecar's. It is
@@ -2310,12 +2319,12 @@ pending, registers it in the checkout, under both locks (below):
    `src/generated/` matches the disk. If the generator registers it, the sidecar
    is deleted.
 6. It is audited as `<kind>.register`, or `<kind>.register.rejected` with the
-   reason (§28).
+   reason (§28), with `via: "button"` and the admin, or `via: "cli"`.
 
-`npm run register -- <kind>/<slug> --discard` deletes a pending install, folder
-and sidecar, under both locks, audited as `<kind>.discard`. The kind's install
-flag turns Register off with installing (see **Turning it off**); Discard still
-works.
+The **Discard** button, or `npm run register -- <kind>/<slug> --discard`, deletes
+a pending install, folder and sidecar, under both locks, audited as
+`<kind>.discard`. The kind's install flag turns Register off with installing
+(see **Turning it off**); Discard still works.
 
 **A registration that stops midway** (a crash, a Ctrl-C, a lock lost) leaves its
 record in the sidecar, and Register, Discard and install refuse that slug until
@@ -2333,6 +2342,55 @@ The files hash guards against a change after install by an editor, a tool or
 another process in the checkout. It is no defence against someone who can write
 to the checkout: they can write the sidecar too, or `apps/` itself.
 
+### The review before Register
+
+Admin > Apps and Admin > Connectors list what is waiting in `.mixos/pending/`,
+each with **Review and register** and **Discard**. The list is read without a
+lock; the buttons check everything again under both locks. A registration that
+stopped midway is listed with what to run (`npm run register -- --recover`), and
+offers neither.
+
+Register starts with a review, built from the pending install itself and read
+as text (`src/lib/repository/review.ts`). Nothing in it imports or runs the
+package's code:
+
+- **What will run, and when:** for an app, `hooks.ts`, `api/`, `widgets.ts`,
+  `jobs/` and `migrations/*.sql`, each with when it runs, then any other code
+  in the package; for a connector, its code. Registering runs the registry
+  generator, which loads the code for the first time, as the user the server
+  runs as, and the dev server then runs it with the server's full environment.
+  The review says so.
+- **What install's check left to registration,** from the sidecar's verdict.
+- **What the package's manifest declares** (egress, env, database, connectors,
+  services, hooks and MCP tools for an app; the hosts it reaches, its
+  credentials, per-user accounts and webhooks for a connector) **beside what
+  the publisher claims** on the catalogue for that version. The manifest is what
+  this instance enforces; the claims are labelled as the publisher's words.
+- **The release's `requiresMixOS`** against this checkout's version.
+- **A link to the source on GitHub at the commit install verified,** which a
+  moved tag or a later push can't change. The claims and the link come from the
+  catalogue the install came from, and only that one; when it can't be asked,
+  the review says so and points to the pending folder instead.
+- **What stands in the way:** files changed since install, a floor this
+  checkout doesn't meet, or a registration that stopped midway. Register would
+  refuse each, so the review offers no confirmation for them.
+
+The Register button stays off until the admin confirms they have read it. The
+action is sent the files hash the review showed, and Register refuses, under its
+locks, a pending install whose sidecar records a different one, as
+`changed-meanwhile`: what registers is what was reviewed, even if the slug was
+discarded and installed again in between.
+
+After Register, an app is still inactive. Its switch is a row in the database,
+and a checkout can share its database with other instances, so the result names
+the checkout's database host and offers **Activate in this checkout** only when
+that database is on this machine: a Unix socket, loopback, or
+`host.docker.internal` (`src/lib/db/locality.ts`), and only when the server runs
+what was registered without a rebuild (`next dev`). On any other database the
+result points to Admin > Apps on the instance that serves the app. The action
+checks the database again before it acts, and then applies Activate's own checks
+and audit row (`app.activate`).
+
 ### Two locks: the register lease and the checkout lock
 
 Two installs or registrations at once would run two generators over the same
@@ -2343,9 +2401,12 @@ success. So install, Register, Discard and recovery each run under two locks.
 ([`src/lib/platform/lock.ts`](../src/lib/platform/lock.ts)), is a row in
 `_platform_locks`, which every instance using the database shares, rather than a
 Postgres advisory lock, because a session advisory lock does not survive a
-transaction pooler. An admin who installs while it is held is told another
-install or registration is running and offered **Try again**, and the attempt
-is audited as `<kind>.install.rejected` with `reason: "locked"`.
+transaction pooler. An admin who installs, registers or discards while it is
+held is told "Another administrator is installing or registering. Try again in a
+moment." and offered **Try again**, and an install or a registration is audited
+as `<kind>.install.rejected` or `<kind>.register.rejected` with
+`reason: "locked"`. When it is the checkout lock that is held, the message names
+its holder instead, such as the registry generator `npm run dev` started.
 
 **The checkout lock**, `.mixos/lock`
 ([`src/lib/platform/checkout-lock.ts`](../src/lib/platform/checkout-lock.ts)),
@@ -2441,12 +2502,16 @@ one; adding a second should be a deliberate code change with a floor.
 ### Authorization and audit
 
 Every entry point in the admin pages is a server action that calls
-`requireAdmin()` itself (§9) — the browse page's own gate guards the render only,
-and the actions are reachable without ever loading it. Both outcomes are audited
-(§28): `app.install` records the version, commit, verified hash, files hash,
-where it went and the check's verdict; `app.install.rejected` records the
-reason. A rejection is the more interesting row — `reason: "checksum"` says
-someone was served bytes that did not match what the catalogue published.
+`requireAdmin()` itself, before it reads anything else (§9): install, the
+review, Register, Discard and Activate in this checkout
+(`src/lib/repository/actions.ts`, `src/lib/repository/pending-actions.ts`). The
+pages' own gates guard the render only, and the actions are reachable without
+ever loading them. Both outcomes are audited (§28): `app.install` records the
+version, commit, verified hash, files hash, where it went and the check's
+verdict; `app.install.rejected` records the reason. A rejection is the more
+interesting row — `reason: "checksum"` says someone was served bytes that did
+not match what the catalogue published. The buttons' Register and Discard rows
+name the signed-in admin, with `via: "button"`.
 
 `npm run register` is a shell in the checkout, not a signed-in admin: anyone who
 can run it can already change the checkout's code. Its rows record no user id,
@@ -2466,7 +2531,7 @@ merely hidden:
 | `/admin/<kind>/browse` | A 404, after the admin gate |
 | `searchRepositoryAction`, `resolveInstallAction` | Refused, before the repository is contacted |
 | `installExtensionAction` → `installExtension()` | Refused before the platform lock is taken, and audited as `<kind>.install.rejected` with `reason: "disabled"` — a row no page can produce |
-| `npm run register` | Registering a pending install of that kind is refused before the locks are taken, and audited as `<kind>.register.rejected`; `--discard` and `--recover` still work |
+| The Register button, `npm run register` | Registering a pending install of that kind is refused before the locks are taken, and audited as `<kind>.register.rejected`; Discard, `--discard` and `--recover` still work |
 | `checkInstallable()` | Reports the kind as not installable |
 
 Every layer checks for itself, for the reason the admin gate does (§9): the
@@ -2499,8 +2564,12 @@ below), so on those the flags decide only whether the catalogue can be browsed.
 - **Run from a built artifact.** `checkInstallable()` refuses up front when
   `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
   `output: "standalone"` tree, which its server `chdir`s to before listening
-  (`isBuiltDeployment()`, `src/lib/platform/build.ts`). Register refuses on the
-  same marker.
+  (`isBuiltDeployment()`, `src/lib/platform/build.ts`). Register, Discard and
+  the review refuse on the same marker, before any lock. Each says it as
+  information, not as a fault: "This deployment runs a build. Install and
+  register in a checkout of your repository, commit, and deploy." Browse still
+  shows the catalogue and each release there, with that sentence in place of the
+  install button.
 
   This check has to be a marker rather than a capability probe, because the
   capability probe can pass while the capability is absent.

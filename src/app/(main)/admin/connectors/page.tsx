@@ -27,6 +27,7 @@ import { TOKEN_KEYS, redirectUriFor } from "@/lib/connectors/oauth";
 import { runConnectorTest } from "@/lib/connectors/test-connection";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import ConnectorRegistryList from "@/components/admin/connector-registry-list";
+import PendingInstalls from "@/components/admin/pending/pending-installs";
 import { recordAdminAction, redactedKeys } from "@/lib/apps/admin-audit";
 
 /**
@@ -334,6 +335,7 @@ export default async function ConnectorsAdminPage({
           {notice.text}
         </div>
       )}
+      <PendingInstalls kind="connector" />
       <ConnectorRegistryList
         connectors={statuses}
         initialOpen={openConnector}

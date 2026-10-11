@@ -158,6 +158,18 @@ just pulled.
   **Breaking:** in the audit log an install is `<kind>.install`, and
   `<kind>.register` means registering a pending one; `npm run register`'s
   rows name `cli:<user>@<host>`, with no user id, and show as unverified.
+- **Register and Discard in Admin.** Admin > Apps and Admin > Connectors list
+  what is waiting in `.mixos/pending/`, with **Review and register** and
+  **Discard**. The review shows what will run (`hooks.ts`, `api/`,
+  `widgets.ts`, `jobs/` and migrations), what install's check left to
+  registration, the manifest's declarations beside the publisher's claims,
+  whether your MixOS version meets the release's floor, and a link to the
+  source at the installed commit. Register waits until you confirm you've read
+  it. Afterwards, **Activate in this checkout** is offered only when the
+  checkout's database is on the same machine; otherwise activate the app on the
+  instance that serves it. Browse no longer has Install & Activate, and a
+  deployment that runs a build says to install and register in a checkout,
+  commit, and deploy.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's
