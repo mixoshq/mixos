@@ -750,6 +750,14 @@ function ActivityPanel({ userId }: { userId: string }) {
                 </td>
                 <td className="py-1.5 text-muted-foreground">
                   {row.actorEmail}
+                  {!row.actorVerified && (
+                    <span
+                      className="ml-1 text-xs"
+                      title="Written without a sign-in, so nothing checked who it names."
+                    >
+                      (unverified)
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
