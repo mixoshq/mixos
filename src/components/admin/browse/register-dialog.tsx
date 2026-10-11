@@ -18,9 +18,9 @@ import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/input";
 import {
-  registerExtensionAction,
+  installExtensionAction,
   resolveInstallAction,
-  type RegisterOutcome,
+  type InstallOutcome,
 } from "@/lib/repository/actions";
 import type {
   Extension,
@@ -72,7 +72,7 @@ export default function RegisterDialog({
   const [listing, setListing] = useState<Extension | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<RegisterOutcome | null>(null);
+  const [outcome, setOutcome] = useState<InstallOutcome | null>(null);
   const [acceptYanked, setAcceptYanked] = useState(false);
   const [activateError, setActivateError] = useState<string | null>(null);
 
@@ -109,13 +109,15 @@ export default function RegisterDialog({
     if (!kind || !slug) return;
     setBusy(true);
     try {
-      const res = await registerExtensionAction({
+      const res = await installExtensionAction({
         kind,
         slug,
         version: manifest?.version,
         allowYanked: acceptYanked,
       });
-      if (res.ok && activateAfterInstall && kind === "app") {
+      // An app installed into pending is not in the build yet, so there is
+      // nothing to activate until it is registered; the outcome says so.
+      if (res.ok && activateAfterInstall && kind === "app" && !res.result.pending) {
         try {
           await setAppActiveAction(slug, true);
         } catch (err) {
@@ -183,14 +185,18 @@ export default function RegisterDialog({
               disabled={!manifest || blocked}
               onClick={register}
             >
-              {locked ? "Try again" : "Verify and register"}
+              {locked ? "Try again" : "Verify and install"}
             </Button>
           </>
         )
       }
     >
       {outcome ? (
-        <OutcomePanel outcome={outcome} activateError={activateError} />
+        <OutcomePanel
+          outcome={outcome}
+          activateError={activateError}
+          activateAsked={activateAfterInstall}
+        />
       ) : resolveError ? (
         <div className="space-y-4">
           <Notice
@@ -397,10 +403,13 @@ function Notice({
 function OutcomePanel({
   outcome,
   activateError,
+  activateAsked,
 }: {
-  outcome: RegisterOutcome;
+  outcome: InstallOutcome;
   /** Set when the install landed but "Install & Activate" could not finish. */
   activateError: string | null;
+  /** "Install & Activate" was chosen, which a pending install can't do yet. */
+  activateAsked: boolean;
 }) {
   if (outcome.ok) {
     const r = outcome.result;
@@ -424,9 +433,15 @@ function OutcomePanel({
         >
           <p className="font-medium">
             Checksum verified and{" "}
-            {r.registry.ok ? "registry checks passed" : "written to disk"}.
+            {r.pending || r.registry?.ok ? "registry checks passed" : "written to disk"}.
           </p>
           <p className="mt-1">{r.nextStep}</p>
+          {r.pending && activateAsked && (
+            <p className="mt-1">
+              It isn&apos;t active yet. Activate it in Admin &gt; Apps once it is
+              registered.
+            </p>
+          )}
         </Notice>
         <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-sm">
           <Row label="Installed to">
@@ -456,7 +471,7 @@ function OutcomePanel({
   if (outcome.code === "locked") {
     return (
       <Notice tone="neutral" icon={<Clock className="h-4 w-4" aria-hidden />}>
-        <p className="font-medium">Not registered yet</p>
+        <p className="font-medium">Not installed yet</p>
         <p className="mt-1">{outcome.message}</p>
       </Notice>
     );
@@ -476,7 +491,7 @@ function OutcomePanel({
         }
       >
         <p className="font-medium">
-          {isChecksum ? "Checksum verification failed" : "Not registered"}
+          {isChecksum ? "Checksum verification failed" : "Not installed"}
         </p>
         <p className="mt-1">{outcome.message}</p>
       </Notice>
