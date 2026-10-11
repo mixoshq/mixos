@@ -13,7 +13,7 @@ A theme repaints every app in the install at once. That is why it is the most co
 ## Hard invariants (the things agents most often get wrong)
 
 1. **Folder name *is* the slug.** It ends up in a CSS attribute selector (`[data-theme="<slug>"]`), so use lowercase letters, digits and hyphens. Do not put a `slug` field in `theme.json` — the platform derives it from the folder name.
-2. **Underscore-prefixed folders are templates** (`themes/_template/`). The registry skips them. Never ship a real theme with a leading underscore.
+2. **Underscore-prefixed folders are templates** (`themes/_template/`). The registry skips them. Never ship a real theme with a leading underscore. It skips dot-prefixed folders too, such as `themes/.installing-<slug>/`, where a Registry install keeps its download while checking it, so never start a theme's folder name with a dot either.
 3. **A theme sets values; it never adds a utility.** The utility → variable mapping (`@theme inline`) lives in [`src/app/globals.css`](../src/app/globals.css) and is not themeable. That asymmetry is the whole point: `bg-card` means the same thing under every theme, which is what lets an app be written once and survive a rebrand untouched.
 4. **Tokens live in exactly one block: `:root`.** A theme is a single palette. A custom property anywhere else, or a non-custom-property inside that block, fails the build. `:root[data-mode="dark"]` is rejected with a message telling you to split it into its own theme — the light/dark mode axis was collapsed into the theme axis, so a dark look is a sibling theme an admin selects, never a second block. See [`../docs/plans/20260826_2041-single-palette-themes.md`](../docs/plans/20260826_2041-single-palette-themes.md).
 5. **The token set is closed.** Every name is in [`src/lib/themes/tokens.ts`](../src/lib/themes/tokens.ts) and rendered in [`docs/themes/tokens.md`](../docs/themes/tokens.md). An unknown token is a build error, because a typo'd property is not a no-op — it is a token that keeps its old value while you believe you changed it.
@@ -57,7 +57,7 @@ Creating an **app** instead? See [`../apps/AGENTS.md`](../apps/AGENTS.md). A **c
 
 From the repo root:
 
-1. `npx tsx scripts/generate-project-registry.ts` — schema-validates `theme.json`, validates and compiles `theme.css`, verifies every asset exists, and computes every contrast pair. Any violation aborts the whole build with a message pointing at the offending token or selector.
+1. `npx tsx scripts/generate-project-registry.ts` — schema-validates `theme.json`, validates and compiles `theme.css`, verifies every asset exists, and computes every contrast pair. Any violation aborts the whole build with a message pointing at the offending token or selector. A Registry install runs these same checks on its download before anything reaches `themes/`.
 2. `THEME_REPORT=1 npx tsx scripts/generate-project-registry.ts` — prints the full ratio table. Read it; a pair that scrapes past at 4.51:1 is worth a second look even though it passes.
 3. `npm run typecheck` and `npm run lint`. The lint rule `mos-design/no-low-contrast-token-pairs` reads your theme's tokens and re-derives per-element ratios — it catches the pairs the build cannot see, because whether `text-muted-foreground` lands on `bg-muted` is a property of the markup, not of the theme.
 4. `npm run build` — proves the CSS actually compiles through Tailwind and Lightning CSS.
