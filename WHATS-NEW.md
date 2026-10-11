@@ -119,6 +119,15 @@ just pulled.
   `deploy/docker-compose.yml` runs `app` and `migrate` on a read-only root
   filesystem, with Next's caches and `/tmp` on `tmpfs`. Something you add that
   writes at runtime needs a mount; see `docs/hosting/docker-compose.md`.
+- **An app whose migrations are behind waits on its own.** While the build
+  carries an app migration the database hasn't applied, none of that app's
+  code runs, and it alone says "This app is being updated. Try again shortly.":
+  its pages and API routes with a 503 and `Retry-After: 30`, `callAppRoute()`
+  as `UNAVAILABLE`, its MCP tools as `APP_UPDATING`, and its services as the
+  new `PROVIDER_UPDATING`. Its jobs wait and stay due, and Scheduled Jobs shows
+  **App updating**. Every other app serves, and readiness still reports
+  `app-migrations-behind`. It serves again within 30 seconds of the release
+  step, or of `npm run migrate:apps` after you add a migration locally.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's
