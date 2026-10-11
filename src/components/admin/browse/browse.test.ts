@@ -22,6 +22,7 @@ import { BUILT_DEPLOYMENT_NOTICE } from "@/lib/platform/build";
 import { provenanceOf, type Provenance } from "@/lib/repository/provenance";
 import ExtensionBrowser from "./extension-browser";
 import ExtensionCard from "./extension-card";
+import FloorNotice from "./floor-notice";
 import RegisterDialog from "./register-dialog";
 
 /** The app router a page has, which the review dialog's refresh needs. Nothing navigates here. */
@@ -96,6 +97,37 @@ test("its install dialog shows the release and the same notice, without offering
   assert.ok(seen.includes(BUILT_DEPLOYMENT_NOTICE));
   assert.match(seen, /Close/);
   assert.doesNotMatch(seen, /Verify and install/);
+});
+
+test("the install dialog says whether this checkout meets the release's floor", () => {
+  const floor = (declared: string | null, met: boolean, checked = declared !== null, where: "checkout" | "deployment" = "checkout") => ({
+    declared,
+    current: "0.1.0",
+    where,
+    met,
+    checked,
+    reason: null,
+  });
+  const shown = (f: ReturnType<typeof floor>, installable = true) =>
+    render(createElement(FloorNotice, { floor: f, installable }));
+
+  const met = shown(floor("0.1.0", true));
+  assert.equal(text(met).trim(), "Requires MixOS 0.1.0 or newer. This checkout runs 0.1.0, which meets it.");
+  assert.doesNotMatch(met, /data-tone/);
+
+  // Install refuses it, so it is a warning, with what to do.
+  const unmet = shown(floor("0.2.0", false));
+  assert.match(unmet, /data-tone="warning"/);
+  assert.equal(
+    text(unmet).trim(),
+    "Requires MixOS 0.2.0 or newer. This checkout runs 0.1.0, which doesn't meet it. Upgrade MixOS to install this release.",
+  );
+  // A built deployment doesn't install, so there's nothing to upgrade first.
+  const built = shown(floor("0.2.0", false, true, "deployment"), false);
+  assert.equal(text(built).trim(), "Requires MixOS 0.2.0 or newer. This deployment runs 0.1.0, which doesn't meet it.");
+
+  assert.equal(shown(floor(null, true)), "");
+  assert.match(text(shown(floor("soon", true, false))), /Its minimum MixOS version, "soon", isn't a version, so it isn't checked\./);
 });
 
 test("Browse has no Install & Activate, and a pending install's tile leads to its review", () => {

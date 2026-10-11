@@ -11,7 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { describeBuild, mixosCommit, mixosVersion, satisfiesMinimum } from "./version";
+import { describeBuild, floorVerdict, mixosCommit, mixosVersion, satisfiesMinimum } from "./version";
 
 const PACKAGE_VERSION = (
   JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../package.json"), "utf-8")) as {
@@ -152,4 +152,31 @@ test("a floor that is not a version allows, unchecked, and says so", () => {
   assert.equal(check.allowed, true);
   assert.equal(check.checked, false);
   assert.match(check.reason ?? "", /not enforced/);
+});
+
+// ── the verdict a dialog shows ──────────────────────────────────────────────
+
+test("a dialog's verdict is the floor against this build, worked out on the server", () => {
+  withEnv({ VERCEL: undefined }, () => {
+    assert.deepEqual(floorVerdict("0.0.1"), {
+      declared: "0.0.1",
+      current: PACKAGE_VERSION,
+      where: "checkout",
+      met: true,
+      checked: true,
+      reason: null,
+    });
+    const unmet = floorVerdict("999.0.0");
+    assert.equal(unmet.met, false);
+    assert.equal(unmet.checked, true);
+    assert.match(unmet.reason ?? "", /requires 999\.0\.0 or newer/);
+    assert.deepEqual(floorVerdict("  "), { declared: null, current: PACKAGE_VERSION, where: "checkout", met: true, checked: false, reason: null });
+    assert.equal(floorVerdict("soon").checked, false);
+  });
+});
+
+test("on a built deployment the verdict says so", () => {
+  withEnv({ VERCEL: "1" }, () => {
+    assert.equal(floorVerdict("0.0.1").where, "deployment");
+  });
 });
