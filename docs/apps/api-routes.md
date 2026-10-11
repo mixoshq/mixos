@@ -36,8 +36,7 @@ handler.
 | Who reads it | What they do with it |
 | --- | --- |
 | The registry generator | Rejects a role your app never declared; rejects a route with no `output` |
-| The gateway | Enforces the auth set and the roles *before* your code runs |
-| The proxy | Derives which paths are reachable without a session |
+| The gateway | Enforces the auth set and the roles *before* your code runs, and decides from the auth set which paths answer without a session |
 | The generated client | Types your widget's call from your schemas |
 | The admin page | Shows a human what this app exposes |
 
@@ -162,9 +161,9 @@ may read it. A stranger gets `public` too.
 | `signed-in` | Signed in; no grant needed | populated | `/api/apps/<slug>/…` |
 | `password` | The app's unlock cookie | `null` | `/api/p/<slug>/…` only |
 | `key` | A scoped API key | `null` | `/api/p/<slug>/…` only |
-| `public` | Nothing | `null` | `/api/p/<slug>/…` |
+| `public` | Nothing | `null` | `/api/apps/<slug>/…` and `/api/p/<slug>/…` |
 
-A route accepting `public` or `password` is **derived** into the `/api/p/` mount.
+A route accepting `public`, `password` or `key` is **derived** into the `/api/p/` mount.
 You do not declare it in two places; if you also set `apiVisibility` in
 `app.json`, the build requires the two to agree.
 
@@ -173,7 +172,7 @@ You do not declare it in two places; if you also set `apiVisibility` in
 - `/api/apps/<slug>/…` serves `session`, `signed-in`, and `public`. It serves
   `public` because a widget calling its own app always arrives here via
   `createAppClient`, including when the route it wants is deliberately public.
-- `/api/p/<slug>/…` serves `password` and `public`. A session-only route is a
+- `/api/p/<slug>/…` serves `password`, `key` and `public`. A session-only route is a
   **404** here, never a 401, so probing this surface cannot distinguish "exists
   but forbidden" from "no such route".
 - `password` and `key` are not reachable on `/api/apps/…` at all. The unlock
@@ -220,9 +219,10 @@ Two things to know:
   what your app's "approver" means, and silently granting every platform admin
   every app route would be a larger surprise than the occasional lockout. If
   admins should reach it, grant them the role.
-- **An anonymous tier can never satisfy a role.** A route that declares both
-  `roles` and an anonymous auth will 403 the anonymous caller. That combination
-  is almost always a mistake — decide whether the route is public or gated.
+- **Roles need `auth: ["session"]`.** The build rejects a route that declares
+  `roles` alongside any other auth, `signed-in` included. An anonymous caller
+  has no identity, and a `signed-in` caller was never granted the app, so
+  neither carries app roles. Decide whether the route is open or gated.
 
 Use `context.user.hasRole()` inside the handler for finer branching (which
 *fields* to include), not for the gate itself.
@@ -337,18 +337,26 @@ when the context is built.
 ```ts
 handler: async (context, input) => {
   if (!context.db) throw AppError.unavailable("This app has no database.");
-  const row = await context.db
+  const { data: row, error } = await context.db
     .table("items")
-    .insert({ name: input.name, owner: context.user.id });
+    .insert({ name: input.name, owner: context.user.id })
+    .select("id, name")
+    .single();
+  if (error?.code === "23505") throw AppError.conflict("That name is taken.");
+  if (error) throw error; // a 500; the pipeline keeps the driver message from the browser
   return { row };
 },
 ```
 
-Note that a declared `output` schema also catches the single most expensive
-surprise in this layer: `numeric` and `decimal` columns come back as **strings**.
-A route declaring `total: z.number()` fails immediately in development rather
-than shipping a `.toFixed is not a function` to production. See
-[Database](./database.md#numeric-and-decimal-come-back-as-strings).
+A query does not throw when the database refuses it: it resolves with
+`{ data, error }`, so check `error`. A write returns its rows only when you
+chain `.select()`. See [Database](./database.md#the-query-builder-in-full).
+
+A declared `output` schema also catches a type surprise from this layer. A
+route declaring `total: z.number()` over a value that arrives as a string fails
+in development rather than shipping a `.toFixed is not a function` to
+production. See [Database](./database.md#what-comes-back) for what each column
+type arrives as.
 
 ## File layout
 

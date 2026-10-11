@@ -173,14 +173,13 @@ export interface AppContext {
 }
 
 /**
- * Context passed to app API routes served on the public surface
- * (`/api/p/<slug>/...`) — i.e. routes whose manifest declares
- * `visibility: "public"` or `"password"`. There is no user. Connectors load
- * normally — every connector is tenant-scoped, so its credentials are
- * deployment-global and do not depend on a visitor identity. App routes
- * intended to be reachable publicly must declare
- * their handler with `{ context: PublicAppContext }` and not assume a
- * user identity; reading `context.user` is a type error.
+ * Context passed to app API routes that run without a user: the `password`,
+ * `key` and `public` tiers, served on the public surface (`/api/p/<slug>/...`)
+ * and, for `public`, on `/api/apps/<slug>/...` too. Tenant connectors load
+ * normally, since their credentials are deployment-global and do not depend on
+ * a visitor identity; a user-scoped connector is left out. A route that accepts
+ * one of these tiers gets this context typed into its handler by `defineRoute`,
+ * so reading `context.user` without a null check is a type error.
  *
  * A route handler here also gets `signal` and `connectorErrorResponse(err)`
  * from the pipeline (see `AppContext`). With no user, a connector error's
@@ -240,8 +239,10 @@ export interface SystemAppContext {
    * The scheduler records the run as `timeout` and stops waiting either way, so a
    * handler that ignores this keeps burning API quota and writing rows after it's
    * been abandoned — while the next tick starts a second copy alongside it. Any
-   * job that loops over external calls should pass it to `fetch`, and check
-   * `signal.aborted` between iterations, so abandonment actually ends the work.
+   * job that loops over external calls should pass it to each of them
+   * (`http.fetch(url, { signal })`, or a connector method that takes one), and
+   * check `signal.aborted` between iterations, so abandonment actually ends the
+   * work.
    * Always present; for non-scheduler callers it's a signal that never aborts.
    */
   signal: AbortSignal;

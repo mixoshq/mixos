@@ -9,10 +9,11 @@
 # we mean to change, rather than hand-writing a short one and inheriting
 # whatever tomorrow's defaults become.
 #
-# Every `enabled = false` below is a measured decision, not a guess. MixOS uses a
-# very narrow slice of Supabase — `createServiceClient()` (PostgREST over HTTP)
-# and a raw postgres.js pool, both documented in src/lib/db/server.ts. Each
-# disabled section names the evidence.
+# Every `enabled = false` below is a measured decision, not a guess. MixOS uses
+# one piece of Supabase: Postgres. Both of its data paths, `createServiceClient()`
+# (the query builder in src/lib/db/query.ts) and a raw postgres.js pool, connect
+# over DATABASE_URL, as src/lib/db/server.ts documents. Each disabled section
+# names the evidence.
 #
 # Ports match the frozen local contract: API 54321, DB 54322, Studio 54323.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -50,16 +51,14 @@ max_rows = 1000
 # default. Set to `true` to keep the legacy behaviour of auto-exposing new entities; this is
 # deprecated and the field is removed on 2026-10-30 once the always-revoked behaviour is permanent.
 #
-# REQUIRED, not optional. supabase/migrations/0001_initial.sql creates ~19
-# tables and issues no table-level GRANTs — it was written when PostgREST
-# auto-published the `public` schema. Without this flag `service_role` gets
-# `42501 permission denied for table` / HTTP 403 on every read, which surfaces
-# as a baffling error from supabase-js rather than an obvious misconfiguration.
-# Turning it on does NOT widen the anon surface: `anon` receives the GRANT but
-# RLS-with-no-policies still returns an empty set, which is exactly the model
-# 0001_initial.sql documents. Note the CLI's own comment above — this field is
-# removed on 2026-10-30. The durable fix is explicit `grant ... to service_role`
-# statements in the migration.
+# No longer needed by MixOS. It mattered when the app read through PostgREST
+# as `service_role`: supabase/migrations/0001_initial.sql issues no table-level
+# GRANTs, so without it every read was `42501 permission denied for table`. The
+# app now connects over DATABASE_URL as the tables' owner, which needs no
+# grants. Turning it on does NOT widen the anon surface: `anon` receives the
+# GRANT but RLS-with-no-policies still returns an empty set, which is exactly
+# the model 0001_initial.sql documents. Note the CLI's own comment above — this
+# field is removed on 2026-10-30, and MixOS has no reason to keep it.
 auto_expose_new_tables = true
 
 [api.tls]
