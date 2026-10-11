@@ -89,8 +89,12 @@ const DOTTED_VERSION =
 /** A release published from the website is named by its commit, abbreviated. */
 const HEX_VERSION = /^[0-9a-f]{7,40}$/;
 
-/** A version as a record holds one: dotted, or the hex of a commit. */
-function isRecordedVersion(version: string): boolean {
+/**
+ * A version as a record holds one: dotted, or the hex of a commit. The update
+ * check holds the catalogue's latest version to the same rule (./updates.ts):
+ * a release named any other way is one install would refuse to record.
+ */
+export function isRecordedVersion(version: string): boolean {
   return version.length <= 128 && (DOTTED_VERSION.test(version) || HEX_VERSION.test(version));
 }
 
