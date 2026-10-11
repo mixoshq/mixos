@@ -11,16 +11,16 @@
  * here, never a 401, so probing this surface cannot tell "exists but forbidden"
  * from "no such route".
  *
- * `key` is served here and nowhere else: `/api/apps` sits behind the proxy's
- * cookie-presence check, so a machine-to-machine caller carrying an API key and
- * no cookie would be redirected to /login before the dispatcher ever ran.
+ * `key` is served here and nowhere else: this is the mount for a caller with no
+ * session cookie, such as a machine-to-machine integration, and `/api/apps` is
+ * the one the browser SDK calls with its cookie.
  *
- * This path is in the proxy's public prefix list, so "no session cookie" is the
- * expected state and nothing upstream will have bounced the caller to /login.
- * Everything that gates access to a route therefore happens inside the
- * dispatcher.
+ * Neither mount is behind the proxy (src/proxy.ts, `config.matcher`), so nothing
+ * upstream checks for a cookie or bounces the caller to /login, and "no session
+ * cookie" is the expected state here. Everything that gates access to a route
+ * happens inside the dispatcher.
  */
-import { dispatchAppRoute, type HttpMethod } from "@/lib/apps/dispatch";
+import { appRouteOptions, dispatchAppRoute, type HttpMethod } from "@/lib/apps/dispatch";
 
 interface RouteContext {
   params: Promise<{ appSlug: string; slug?: string[] }>;
@@ -49,3 +49,4 @@ export const PATCH = (req: Request, ctx: RouteContext) =>
   handle(req, ctx, "PATCH");
 export const DELETE = (req: Request, ctx: RouteContext) =>
   handle(req, ctx, "DELETE");
+export const OPTIONS = (req: Request) => appRouteOptions(req);

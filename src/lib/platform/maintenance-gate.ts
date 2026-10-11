@@ -6,7 +6,9 @@
  * The maintenance response, and the parts of deciding on it that need no
  * database: what counts as behind, how long an answer is kept, which paths are
  * exempt, and what everything else gets. `./maintenance.ts` wires this to the
- * real checks, and `src/proxy.ts` runs it before anything else.
+ * real checks, and `src/proxy.ts` runs it before anything else, as the routes
+ * the proxy leaves out do for themselves: the app API gateway
+ * (`src/lib/apps/dispatch.ts`) and the webhook route.
  *
  * ── THE WHOLE INSTANCE ──────────────────────────────────────────────────────
  *

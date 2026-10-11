@@ -4,13 +4,14 @@
 
 /**
  * Is this instance behind its database? The answer `src/proxy.ts` acts on, on
- * every request it sees.
+ * every request it sees, and the routes it leaves out ask for themselves: the
+ * app API gateway (`src/lib/apps/dispatch.ts`) and the webhook route.
  *
  * It combines the two checks the readiness probe runs (`./schema-version.ts`):
  *
  *   - `platformBehind`: the platform schema is provably behind this build.
- *     While it is, the proxy answers everything but the health probes with the
- *     maintenance response (`./maintenance-gate.ts`).
+ *     While it is, everything but the health probes gets the maintenance
+ *     response (`./maintenance-gate.ts`).
  *   - `appsBehind`: the apps with a migration this build carries that the
  *     database hasn't applied. Each of them alone answers "This app is being
  *     updated": the app gate (`src/lib/apps/app-gate.ts`) holds back its code,
