@@ -4,7 +4,7 @@ This guide is the baseline for how an app should *feel*. The other guides tell y
 
 For **how a screen is organised** — where settings live, how pages relate, what survives a Back button — see [`app-shell.md`](app-shell.md). This file is the floor; that one is the pattern catalog.
 
-The platform ships a design system (Tailwind + a fixed set of CSS variables in [`src/app/globals.css`](../../src/app/globals.css)). **Build with those tokens, not hardcoded colors.** That is what keeps every app coherent and what makes contrast work for free.
+The platform ships a design system: Tailwind, plus a fixed set of colour tokens whose values come from the active theme (`themes/<slug>/theme.css`). **Build with those tokens, not hardcoded colors.** That is what keeps every app coherent and what makes contrast work for free.
 
 ---
 
@@ -24,10 +24,13 @@ become components have:
 | A `useEffect` fetch + three booleans | [`useAppQuery`](../../src/lib/apps/use-app-query.ts) + [`AsyncView`](../../src/components/ui/async-view.tsx) | Shipping a surface with no loading, empty, or error state. |
 | `dangerouslySetInnerHTML` / `innerHTML` | [`Markdown`](../../src/components/ui/markdown.tsx) | Script in text you did not write. Raw HTML in the source is dropped and `javascript:` links are blanked. |
 
-**All of these are lint-enforced for `apps/**`.** A raw `<button>`, `<input>`,
-`<select>`, `<textarea>` or `<table>` in an app is a build error, as is a literal
+**Lint enforces most of these for `apps/**`.** A raw `<button>`, `<input>`,
+`<select>`, `<textarea>` or `<table>` in an app is a lint error, as is a literal
 copy of the card shell. The HTML sinks are refused twice over: by lint, and by the
-registry generator, which will not register an app that uses one.
+registry generator, which will not register an app that uses one. `IconButton`'s
+`label` is required by its type. `Badge` and `useAppQuery` are convention:
+nothing flags a status token picked by hand or a `useEffect` fetch. Lint runs in
+CI, not in `next build`, so run `npm run lint` before you push.
 
 ### The async pair
 
@@ -62,8 +65,8 @@ the boolean version can represent and no UI ever handles.
 ## Non-negotiables (the things to get right every time)
 
 1. **Every async surface has a loading state, and it mirrors the final layout.** Never show bare `Loading…` text or a lone centered spinner. Use `Skeleton` from [`@/components/ui/skeleton`](../../src/components/ui/skeleton.tsx) shaped like the content it's replacing — a chart skeleton is a big block, a table skeleton is repeated rows, a stat is a small block. (This is also app invariant #10.)
-2. **Use semantic color tokens, never raw hex or palette Tailwind colors.** `text-emerald-600` and `#888` are not tokens. This is lint-enforced for `apps/**` — see [Color & contrast](#color--contrast).
-3. **Every state is designed, and each names its cause.** Loading, empty, error, and "not connected" each get a deliberate UI — and the three *different* reasons a screen can be empty get three different messages. A blank card when there's no data is a bug. Use the components in [`@/components/ui/app-states`](../../src/components/ui/app-states.tsx).
+2. **Use semantic color tokens, never raw hex or palette Tailwind colors.** `text-emerald-600` and `#888` are not tokens. Lint fails a palette colour in `apps/**`; nothing checks a raw hex, so that one is on you. See [Color & contrast](#color--contrast).
+3. **Every state is designed, and each names its cause.** Loading, empty, error, and "not connected" each get a deliberate UI — and the three *different* reasons a screen can be empty get three different messages. A blank card when there's no data is a bug. Use the components in [`@/components/ui/app-states`](../../src/components/ui/app-states.tsx) and, for "not connected", [`ConnectorErrorState`](../../src/components/ui/connector-error-state.tsx).
 4. **Never block the UI without feedback.** Buttons that trigger work show a pending state and disable to prevent double-submits. Don't freeze the page on a fetch.
 5. **Don't shift layout after load.** The skeleton should occupy the same space the loaded content will, so nothing jumps when data arrives.
 
@@ -132,14 +135,14 @@ Guidelines:
 
 ## Color & contrast
 
-Pull from the tokens defined in [`src/app/globals.css`](../../src/app/globals.css). Every foreground below is designed to read clearly on its matching surface:
+Pull from the semantic tokens. [`src/app/globals.css`](../../src/app/globals.css) maps each utility to a token, and the active theme (`themes/<slug>/theme.css`) sets its value. The theme build verifies every pair below, in each theme:
 
 | Use | Surface | Text on it |
 | --- | --- | --- |
 | Page / widget body | `bg-background` | `text-foreground` |
 | Card / panel | `bg-card` | `text-card-foreground` |
 | Primary action | `bg-primary` | `text-primary-foreground` |
-| Secondary / subtle | `bg-secondary` / `bg-muted` | `text-secondary-foreground` / `text-muted-foreground` |
+| Secondary / subtle | `bg-secondary` | `text-secondary-foreground` — or `text-muted-foreground` on a page |
 | Success | `bg-success` | `text-success-foreground` — or `text-success` on a page |
 | Warning | `bg-warning` | `text-warning-foreground` — or `text-warning` on a page |
 | Destructive / error | `bg-destructive` | `text-destructive-foreground` — or `text-destructive` on a page |
@@ -159,7 +162,7 @@ Measured, light theme, tint composited over `bg-card`:
 | --- | --- | --- |
 | `text-muted-foreground` on `bg-muted` / `bg-secondary` / `bg-accent` | 4.34:1 | ✗ |
 | `text-muted-foreground` on `bg-muted/50` | 4.55:1 | ✓ (barely) |
-| `text-foreground` on `bg-muted` | 18.26:1 | ✓ |
+| `text-foreground` on `bg-muted` | 16.30:1 | ✓ |
 | `text-destructive` on `bg-muted` | 4.41:1 | ✗ |
 | `text-warning` on `bg-muted` | 4.58:1 | ✓ |
 | `text-success` on `bg-success/10` | 4.78:1 | ✓ |
@@ -176,7 +179,7 @@ It earns its keep on new code too. Promoting it immediately caught two elements 
 
 The three fixes, in order of preference:
 
-1. **Drop the tint.** `text-destructive` on the page background is 4.85:1. The tint was rarely carrying meaning the label wasn't already carrying.
+1. **Drop the tint.** `text-destructive` on the page background is 4.83:1. The tint was rarely carrying meaning the label wasn't already carrying.
 2. **Use the fill's own foreground.** `bg-destructive text-destructive-foreground` is verified. A solid status strip is both compliant and louder than a wash — which is usually what you wanted from the wash.
 3. **Carry the meaning somewhere other than colour** — a `StatusDot`, a label — and let the text be `text-foreground`.
 
@@ -185,7 +188,7 @@ The three fixes, in order of preference:
 ```tsx
 <p className="text-muted-foreground/70">      {/* 2.71:1 */}
 <p className="text-muted-foreground/50">      {/* 1.96:1 */}
-<span className="text-foreground opacity-50"> {/* 3.75:1 */}
+<span className="text-foreground opacity-50"> {/* 3.41:1 */}
 ```
 
 `muted-foreground` **is** the quiet step on the ladder. Dimming it produces text that is quieter than the design system has a name for, which is the point at which it stops being readable — and the numbers above are all on white, the most forgiving ground there is.
@@ -204,7 +207,7 @@ The rule that resolves it: **sample the fill when the fills are distinguishable 
 
 The tokens above all carry a **judgement** — success, warning, destructive. A lot of colour in an app doesn't: chart series, category chips, column accents, lane markers. Colour there says *"this is a different one"*, not *"this one is bad"*.
 
-For that, use the categorical ramp — six hues that each clear AA as text on the page background, and step to lighter values in dark mode so a series keeps its identity across themes:
+For that, use the categorical ramp — six hues that each clear AA as text on the page background, and step to lighter values in `mixos-dark` so a series keeps its identity across themes:
 
 ```tsx
 const TILE_TINTS = [
@@ -214,14 +217,14 @@ const TILE_TINTS = [
 ];
 ```
 
-**Don't tint past 10% if the text on it is the same token.** This snippet said `/15` until the contrast rule was written and measured it: `text-cat-N` on `bg-cat-N/15` passes for `cat-1` through `cat-4` and **fails for `cat-5` (4.42:1) and `cat-6` (4.09:1)**. Which is the worst possible failure mode for a ramp meant to be assigned by index — the first four categories look fine and the fifth and sixth quietly don't, so a list that grows from four items to six breaks without anyone touching the styling.
+**Don't tint past 8% if the text on it is the same token.** This snippet said `/15` until the contrast rule was written and measured it: under `mixos`, `text-cat-N` on `bg-cat-N/15` passes for four of the six hues and **fails for `cat-3` (4.42:1) and `cat-6` (4.09:1)**. Which is the worst possible failure mode for a ramp meant to be assigned by index — whether a category fails depends on its position, so a list that grows from two items to three breaks without anyone touching the styling.
 
-The headroom, measured, is the maximum alpha at which `text-cat-N` still clears 4.5:1 on `bg-cat-N/alpha`:
+The headroom under `mixos`, measured, is the maximum alpha at which `text-cat-N` still clears 4.5:1 on `bg-cat-N/alpha` (`mixos-dark` has more for every hue):
 
 | | cat-1 | cat-2 | cat-3 | cat-4 | cat-5 | cat-6 |
 | --- | --- | --- | --- | --- | --- | --- |
-| As text on the page | 6.70:1 | 6.98:1 | 5.93:1 | 6.04:1 | 5.47:1 | 4.99:1 |
-| Max self-tint at AA | 24% | 25% | 18% | 17% | 14% | **8%** |
+| As text on the page | 5.93:1 | 5.70:1 | 5.47:1 | 6.04:1 | 6.70:1 | 4.99:1 |
+| Max self-tint at AA | 18% | 15% | 14% | 17% | 24% | **8%** |
 
 **`/8` is the strongest tint that clears AA for all six** (`cat-6` lands at 4.52:1; at `/10` it is already 4.39:1). Use `/8` whenever the ramp index is dynamic. Go higher only for a specific hue you have measured, and only where that index cannot shift.
 
@@ -235,7 +238,7 @@ Rules of thumb:
 
 - **Body text must clear WCAG AA (4.5:1); large/bold text must clear 3:1.** The status tokens above are verified in both directions — as text on the page, and as a surface under their own foreground. If you go off-palette, compute the ratio; don't eyeball it.
 - **`muted-foreground` is for secondary text only** (captions, labels, timestamps) — never for primary content or anything a user has to act on. Don't stack it with a tiny size: muted at `text-[10px]` is unreadable twice over.
-- **Don't communicate state with color alone.** Use `StatusDot` / `StatusPill` from [`@/components/ui/status`](../../src/components/ui/status.tsx) — both require a `label`, so the text alternative isn't something a reviewer has to remember to ask for.
+- **Don't communicate state with color alone.** Use `StatusDot` or `StatusPill` from [`@/components/ui/status`](../../src/components/ui/status.tsx) — `StatusDot` requires a `label`, and `StatusPill` requires its text as `children`, so the text alternative isn't something a reviewer has to remember to ask for.
 - **Never hardcode `#fff` / `#000`, `text-gray-*`, or any `text-<palette>-<n>`.** They dodge the contrast guarantees. `bg-white` and `bg-gray-50` as a *surface* are the same mistake — use `bg-card` / `bg-muted`.
   - The exception is **alpha over a known ground**: `bg-white/10` as a hover state on a navy panel, or `bg-black/70` as a modal scrim, are fine. The rule targets opaque fills that pretend to be a theme surface.
 - **Don't restyle focus rings away.** Keyboard focus must stay visible (the `ring` token).
@@ -252,12 +255,12 @@ It is lint-enforced for `apps/**` **and `src/**`**. The platform exempted itself
 
 **Two things you inherit for free, so don't re-implement them:**
 
-- **The page ground and the default ink.** `body` carries `background-color: var(--background)` and `color: var(--foreground)`. Anything that just renders text is already correct in both modes; setting a colour is for when you mean something other than "body text".
-- **The surface ladder.** `--background`, `--muted` (recessed: content areas, wells, stripes), `--card` (raised: panels, widgets) and `--accent` (hover) are four distinguishable rungs. Every theme is responsible for keeping them apart, which is what lets a form control on `bg-background` read as a control inside a `bg-card` panel without an app doing anything.
+- **The page ground and the default ink.** `body` carries `background-color: var(--background)` and `color: var(--foreground)`. Anything that just renders text is already correct under every theme; setting a colour is for when you mean something other than "body text".
+- **The surface ladder.** `--background`, `--muted` (recessed: content areas, wells, stripes), `--card` (raised: panels, widgets) and `--accent` (hover) are four rungs a theme should keep apart, so that a form control on `bg-background` reads as a control inside a `bg-card` panel without an app doing anything. The theme build doesn't check this: `mixos` paints `--background` and `--card` the same white and `--muted` and `--accent` the same slate, and leaves borders to separate them, while `mixos-dark` has four distinct rungs.
 
 ## Empty, error & not-connected states
 
-Each of these is a real screen a user will hit. All four live in [`@/components/ui/app-states`](../../src/components/ui/app-states.tsx).
+Each of these is a real screen a user will hit. `EmptyState`, `ErrorState` and `PendingState` live in [`@/components/ui/app-states`](../../src/components/ui/app-states.tsx). The not-connected screen is `ConnectorErrorState`, from [`@/components/ui/connector-error-state`](../../src/components/ui/connector-error-state.tsx), which `AsyncView` renders for you when a connector call fails.
 
 **Empty states must name their cause.** These are three different problems with three different fixes, and one generic "No results" box tells the user which one they're in: none.
 
@@ -287,7 +290,7 @@ Each of these is a real screen a user will hit. All four live in [`@/components/
 
 ## Spacing, type & motion
 
-- **Lean on the type scale and spacing utilities** rather than custom pixel values — consistency reads as quality. Use the `font-sans` (Roboto) stack the platform sets; don't pull in a competing font without reason.
+- **Lean on the type scale and spacing utilities** rather than custom pixel values — consistency reads as quality. Use the `font-sans` stack the active theme sets (Inter in both shipped themes); don't pull in a competing font without reason.
 - **Respect the card radius** (widgets live in `rounded-lg` cards). Match it on inner surfaces so things nest cleanly.
 - **Keep motion subtle and fast** (~150–300ms, ease-out). Animate to communicate (a value updating, a panel opening), never to decorate. Honor `prefers-reduced-motion` — gate non-essential animation behind it.
 - **Touch/click targets are at least ~36–40px tall.** Don't ship tap targets only a few pixels high.
@@ -320,12 +323,12 @@ The middle case — *"it matters to someone, sometimes"* — is the one that kee
 - [ ] Every fetch has a layout-matching `Skeleton`, not "Loading…" or a bare spinner.
 - [ ] User-triggered refetches say what they're loading.
 - [ ] Colors come from semantic tokens; no raw hex, no `text-<palette>-<n>`, no opaque `bg-white` / `bg-gray-*`.
-- [ ] No `dark:` variants — colours fork in `globals.css`, not here.
+- [ ] No `dark:` variants — colours fork in the theme, not here.
 - [ ] No same-element token pair below the floor, and no dimmed colour token — `mos-design/no-low-contrast-token-pairs` reports zero for the files you touched. See [Verified pairs](#verified-pairs-two-legal-tokens-can-make-an-illegal-element).
 - [ ] Nothing meaningful lives only in a `title=` attribute.
 - [ ] Skeletons reproduce the card chrome, not only the content blocks.
 - [ ] Empty states name their cause; error and not-connected states are designed and were actually viewed.
-- [ ] Status is never colour-only (`StatusDot` / `StatusPill` with a label).
+- [ ] Status is never colour-only (`StatusDot` with a `label`, or `StatusPill` with text).
 - [ ] Buttons that do work show a pending/disabled state.
 - [ ] Read-only users see controls **omitted**, not disabled — see [`app-shell.md`](app-shell.md#permission-aware-ui).
 - [ ] No layout shift between skeleton and loaded content.

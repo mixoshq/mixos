@@ -44,6 +44,15 @@ just pulled.
   the dialog says so and offers **Try again**. If an install is paused for more
   than 15 minutes (a laptop asleep mid-download) and another starts meanwhile,
   the paused one stops before its next write and says what it left on disk.
+- **Registry installs are checked before they land.** An install stages the
+  download and checks it with `generate-project-registry.ts --check`, which
+  reads its files, runs none of its code, and writes its verdict to a file the
+  install names. A refused extension never reaches `apps/`, `connectors/` or
+  `themes/`. A generator an install starts gets only `PATH` and `TMPDIR` from
+  the environment. Installs also refuse a package with paths that differ only
+  in case or Unicode form, a control or bidi character in a path, or a
+  `.gitattributes`, `.gitignore` or `.git` at any depth. The generator now
+  skips folders whose names start with a dot.
 - **Every build knows its version.** The admin pages show it with the commit,
   e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
   into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
@@ -119,6 +128,15 @@ just pulled.
   `deploy/docker-compose.yml` runs `app` and `migrate` on a read-only root
   filesystem, with Next's caches and `/tmp` on `tmpfs`. Something you add that
   writes at runtime needs a mount; see `docs/hosting/docker-compose.md`.
+- **An app whose migrations are behind waits on its own.** While the build
+  carries an app migration the database hasn't applied, none of that app's
+  code runs, and it alone says "This app is being updated. Try again shortly.":
+  its pages and API routes with a 503 and `Retry-After: 30`, `callAppRoute()`
+  as `UNAVAILABLE`, its MCP tools as `APP_UPDATING`, and its services as the
+  new `PROVIDER_UPDATING`. Its jobs wait and stay due, and Scheduled Jobs shows
+  **App updating**. Every other app serves, and readiness still reports
+  `app-migrations-behind`. It serves again within 30 seconds of the release
+  step, or of `npm run migrate:apps` after you add a migration locally.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's

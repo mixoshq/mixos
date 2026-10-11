@@ -2,7 +2,7 @@
 
 ## Overview
 
-Apps can send **Web Push** notifications — OS-level notifications delivered through a background service worker, so they reach a user even when no MixOS tab is focused (or open) — by setting `"notifications": true` in `app.json`. This gives the app a `context.notifications` client in its API routes.
+Apps can send **Web Push** notifications — OS-level notifications delivered through a background service worker, so they reach a user even when no MixOS tab is focused (or open) — by setting `"notifications": true` in `app.json`. This gives the app a `context.notifications` client in its API routes and scheduled jobs.
 
 ```json
 // app.json
@@ -21,7 +21,7 @@ flowchart TD
     OPTIN["user opts in<br/>(SDK helper)"] --> SUB["browser subscribes"]
     SUB --> STORE["platform stores<br/>the subscription"]
 
-    ROUTE["app API route"] --> SEND["context.notifications.send({ userIds, … })"]
+    ROUTE["app API route or job"] --> SEND["context.notifications.send({ userIds, … })"]
     SEND --> PUSH["web-push"]
     PUSH --> SW["service worker"]
     SW --> OSN["OS notification"]
@@ -30,7 +30,7 @@ flowchart TD
 ```
 
 1. A user opts in once (per browser) via the SDK helper — this grants permission and registers a subscription.
-2. From an **API route**, the app calls `context.notifications.send(...)` with the recipient user ids.
+2. From an **API route** or a **scheduled job**, the app calls `context.notifications.send(...)` with the recipient user ids.
 3. The platform looks up each recipient's stored subscriptions and delivers the push. The platform service worker shows the notification and routes clicks.
 
 ## Opting a user in (client)
@@ -39,19 +39,22 @@ A user must grant notification permission and subscribe before they can receive 
 
 ```tsx
 "use client";
+import { Button } from "@/components/ui/button";
 import {
   enablePushNotifications,
   getPushPermission,
   isPushSupported,
 } from "@/lib/apps/sdk";
+import { useClientValue } from "@/lib/use-client-value";
 
 function EnableAlertsButton() {
-  if (!isPushSupported() || getPushPermission() !== "default") return null;
-  return (
-    <button onClick={() => enablePushNotifications()}>
-      🔔 Enable notifications
-    </button>
+  // Browser-only checks, read without a hydration mismatch.
+  const canAsk = useClientValue(
+    () => isPushSupported() && getPushPermission() === "default",
+    false,
   );
+  if (!canAsk) return null;
+  return <Button onClick={() => enablePushNotifications()}>Enable notifications</Button>;
 }
 ```
 
@@ -59,25 +62,31 @@ function EnableAlertsButton() {
 
 ## Sending (server)
 
-Send from an API route via `context.notifications`. Guard for the capability the same way you guard `context.db`.
+Send from an API route or a scheduled job via `context.notifications`. Guard for the capability the same way you guard `context.db`.
 
 ```ts
-export async function POST(request: Request, { context }: { context: AppContext }) {
-  if (!context.notifications) {
-    return NextResponse.json({ error: "Notifications not enabled" }, { status: 500 });
-  }
+// apps/my-app/api/lunch/route.ts
+import { z } from "zod";
+import { defineRoute, AppError } from "@/lib/apps/route";
 
-  const { sent } = await context.notifications.send({
-    userIds: ["<user-uuid>", "..."], // who to notify
-    title: "🍕 Lunch has arrived!",
-    body: "Lunch is here — head to the kitchen!",
-    url: "/apps/my-app",              // opened/focused on click
-    tag: "lunch",                     // optional: coalesces in the OS tray
-    // icon: "/web-app-manifest-192x192.png" (optional)
-  });
+export const POST = defineRoute({
+  summary: "Tell people lunch has arrived.",
+  output: z.object({ sent: z.number() }),
+  handler: async (context) => {
+    if (!context.notifications) throw AppError.unavailable("Notifications are not enabled.");
 
-  return NextResponse.json({ sent });
-}
+    const { sent } = await context.notifications.send({
+      userIds: ["<user-uuid>", "..."], // who to notify
+      title: "Lunch has arrived!",
+      body: "Lunch is here — head to the kitchen!",
+      url: "/apps/my-app",              // opened/focused on click
+      tag: "lunch",                     // optional: coalesces in the OS tray
+      // icon: "/icon-192.png" (optional)
+    });
+
+    return { sent };
+  },
+});
 ```
 
 ### Payload fields
@@ -95,7 +104,7 @@ export async function POST(request: Request, { context }: { context: AppContext 
 
 ## Recipient scoping
 
-`send()` only delivers to users who actually have your app — global apps reach everyone; otherwise recipients are filtered to users with an explicit grant. You can't push to a user who doesn't have your app, even if you pass their id. Send from **API routes only** (the public route surface has no `context.notifications`).
+`send()` only delivers to users who actually have your app — global apps reach everyone; otherwise recipients are filtered to users with an explicit grant. You can't push to a user who doesn't have your app, even if you pass their id. Send from **API routes and scheduled jobs**: a request that resolves to the `public`, `password` or `key` tier gets no `context.notifications`, and neither do service handlers or MCP tools.
 
 ## Limits
 
@@ -107,4 +116,4 @@ export async function POST(request: Request, { context }: { context: AppContext 
 
 ## Configuration (platform operators)
 
-Web Push requires VAPID keys. Generate a pair with `npx web-push generate-vapid-keys` and set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` (a `mailto:`/`https:` contact) in the Vercel project's environment variables for production, or in `.env.docker` for the local Docker stack (compose loads it into every service — see [docs/local-docker.md](../local-docker.md)). A host `.env.local` reaches the dev container only through the bind mount and never reaches the production image, since `.dockerignore` excludes `.env*` from the build context. If unset, `context.notifications.send()` is a no-op-safe error and the opt-in returns `"not-configured"`.
+Web Push requires VAPID keys. Generate a pair with `npx web-push generate-vapid-keys` and set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` (a `mailto:`/`https:` contact) in your host's environment variables for production (see [Hosting](../hosting/README.md#environment)), or in `.env.docker` for the local Docker stack (compose loads it into every service — see [docs/local-docker.md](../local-docker.md)). A host `.env.local` reaches the dev container only through the bind mount and never reaches the production image, since `.dockerignore` excludes `.env*` from the build context. If they're unset, the opt-in returns `"not-configured"`, and `context.notifications.send()` throws whenever a recipient has your app, so catch it where a missing push shouldn't fail the request or job.

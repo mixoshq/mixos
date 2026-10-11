@@ -5,9 +5,10 @@
 /**
  * ESLint rule: no-low-contrast-token-pairs
  *
- * WHY THIS EXISTS. `src/app/globals.css` verifies every semantic colour token
- * "in BOTH directions — as text on the page background, and as a surface
- * carrying its own foreground." What it never verified is **token on token**.
+ * WHY THIS EXISTS. The theme build (`scripts/theme-css.ts`, run by the
+ * registry generator) verifies every semantic colour token in both directions:
+ * as text on the page background, and as a surface carrying its own
+ * foreground. What it never verifies is **token on token**.
  * So two individually-legal tokens can combine into an element that fails
  * WCAG AA, and the existing colour rule — which matches token *names* — sees
  * nothing wrong, because nothing is wrong with either name.
