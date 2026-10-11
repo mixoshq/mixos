@@ -50,9 +50,9 @@ just pulled.
   install names. A refused extension never reaches `apps/`, `connectors/` or
   `themes/`. A generator an install starts gets only `PATH` and `TMPDIR` from
   the environment. Installs also refuse a package with paths that differ only
-  in case or Unicode form, a control or bidi character in a path, or a
-  `.gitattributes`, `.gitignore` or `.git` at any depth. The generator now
-  skips folders whose names start with a dot.
+  in case or Unicode form, a control or bidi character in a path, or a `.git`
+  at any depth, and leave out any `.gitignore` or `.gitattributes`. The
+  generator now skips folders whose names start with a dot.
 - **Every build knows its version.** The admin pages show it with the commit,
   e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
   into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
@@ -211,6 +211,13 @@ just pulled.
   redirects, and only within the catalogue's own origin. Any other redirect,
   such as one to another host or from https to http, is refused with an error
   naming the catalogue.
+- **Fix:** an extension whose repository has a `.gitignore` can be installed.
+  Installs refused a package with a `.gitignore` or `.gitattributes` at any
+  depth; now they leave those files out, in any case, and install the rest.
+  The content hash is still checked over the package as published, and the
+  files hash in `.registry.json` covers what was written. The install result,
+  `npm run register` and the install's audit row say what was left out. A
+  `.git` or a `.registry.json` is still refused.
 
 ## 2026-10-07
 
