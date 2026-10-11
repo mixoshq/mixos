@@ -6,10 +6,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   INSTALL_FLAG,
+  UPDATE_CHECK_FLAG,
+  flagProblems,
   installDisabledMessage,
   installEnabled,
-  installFlagProblems,
   parseInstallFlag,
+  updateCheckEnabled,
 } from "./policy";
 import type { ExtensionKind } from "./types";
 
@@ -73,11 +75,53 @@ test("the refusal message is safe to build from an unknown kind", () => {
 });
 
 test("unrecognised values are reported for the release step", () => {
-  withEnv({ INSTALL_APPS: "flase", INSTALL_CONNECTORS: "false", INSTALL_THEMES: undefined }, () => {
-    const problems = installFlagProblems();
-    assert.equal(problems.length, 1);
-    assert.match(problems[0], /^INSTALL_APPS=/);
-  });
+  withEnv(
+    { INSTALL_APPS: "flase", INSTALL_CONNECTORS: "false", INSTALL_THEMES: undefined, MIXOS_UPDATE_CHECK: undefined },
+    () => {
+      const problems = flagProblems();
+      assert.equal(problems.length, 1);
+      assert.match(problems[0], /^INSTALL_APPS=/);
+    },
+  );
+});
+
+test("MIXOS_UPDATE_CHECK: unset is on", () => {
+  assert.equal(UPDATE_CHECK_FLAG, "MIXOS_UPDATE_CHECK");
+  for (const value of [undefined, "", "  "]) {
+    withEnv({ MIXOS_UPDATE_CHECK: value }, () => assert.equal(updateCheckEnabled(), true, String(value)));
+  }
+  for (const value of ["true", "1", "yes", "ON"]) {
+    withEnv({ MIXOS_UPDATE_CHECK: value }, () => assert.equal(updateCheckEnabled(), true, value));
+  }
+});
+
+test("MIXOS_UPDATE_CHECK: false, 0 and off are off, and nothing is reported", () => {
+  for (const value of ["false", "0", "off", "no", "FALSE"]) {
+    withEnv({ MIXOS_UPDATE_CHECK: value, INSTALL_APPS: undefined, INSTALL_CONNECTORS: undefined, INSTALL_THEMES: undefined }, () => {
+      assert.equal(updateCheckEnabled(), false, value);
+      assert.deepEqual(flagProblems(), [], value);
+    });
+  }
+});
+
+test("MIXOS_UPDATE_CHECK: a typo is off, and reported as update checks being off", () => {
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+  try {
+    withEnv({ MIXOS_UPDATE_CHECK: "flase", INSTALL_APPS: undefined, INSTALL_CONNECTORS: undefined, INSTALL_THEMES: undefined }, () => {
+      assert.equal(updateCheckEnabled(), false);
+      const problems = flagProblems();
+      assert.equal(problems.length, 1);
+      assert.match(problems[0], /^MIXOS_UPDATE_CHECK="flase" is not true or false/);
+      assert.match(problems[0], /update checks are off/);
+      assert.doesNotMatch(problems[0], /installing/);
+    });
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /MIXOS_UPDATE_CHECK=/);
 });
 
 test("the install pipeline refuses a disabled kind before it locks or downloads anything", async () => {
