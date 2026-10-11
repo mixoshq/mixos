@@ -33,7 +33,8 @@
  *
  * A checkout of unreleased work carries the last release's number, so an
  * extension whose floor is newer is refused there too. To try one, bump
- * `package.json` locally.
+ * `package.json` locally, and don't commit it: only a release PR changes the
+ * version, and `/mixos deploy` leaves the bump out.
  *
  * ── THE COMMIT IS READ AT RUNTIME ───────────────────────────────────────────
  *
