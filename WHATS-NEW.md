@@ -254,6 +254,14 @@ just pulled.
   it." **Breaking:** a checkout or a deploy that carries such an extension no
   longer builds. To try one before its MixOS is released, bump `package.json`
   locally, and don't ship the extension until that release is merged.
+- **Withdrawn releases reach the instances running them.** Once a day the tick
+  asks mixos.org about the extensions installed from it. Admin > Apps,
+  Connectors and Themes then show a release its publisher withdrew, with the
+  reason and, for an app, a **Deactivate** button; a newer release; a listing
+  no longer published; and when mixos.org last answered. It sends a random
+  instance ID and each extension's kind, slug and version, nothing else, and
+  acts on nothing. `MIXOS_UPDATE_CHECK=false` turns it off. See
+  `docs/hosting/README.md#what-mixos-sends-to-mixosorg`.
 
 ## 2026-10-07
 
