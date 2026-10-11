@@ -23,13 +23,15 @@
  *      redirects to `codeload.github.com`, so redirects cannot simply be
  *      refused — but a followed redirect is a second URL chosen by someone
  *      else, and `fetch`'s automatic following would apply none of the above to
- *      it.
+ *      it. So they are followed by hand (`./redirects`, which the catalogue
+ *      client shares), with checks 1 and 2 run on each.
  *
  * The bytes never reach the filesystem here. They are decompressed and read in
  * memory so the hash can be verified before anything is written — see
  * `content-hash.ts` and `install.ts`.
  */
 
+import { MAX_REDIRECTS, fetchCheckingRedirects } from "./redirects";
 import { gunzipBounded, readTar, DEFAULT_TAR_LIMITS, type TarEntry } from "./tar";
 
 /**
@@ -45,9 +47,6 @@ const ALLOWED_TARBALL_HOSTS = new Set([
   "api.github.com",
   "github.com",
 ]);
-
-/** api.github.com → codeload is one hop. Three is already generous. */
-const MAX_REDIRECTS = 3;
 
 /** Compressed transfer cap. The decompressed cap is `DEFAULT_TAR_LIMITS`. */
 const MAX_DOWNLOAD_BYTES = 32 * 1024 * 1024;
@@ -99,48 +98,35 @@ export function assertAllowedTarballUrl(raw: string, commitSha: string): URL {
 
 /** GET with redirects followed by hand, re-validating each hop. */
 async function fetchPinned(start: URL, commitSha: string): Promise<Response> {
-  let url = start;
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        redirect: "manual",
-        cache: "no-store",
-        headers: { accept: "application/gzip, application/octet-stream, */*" },
-        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-      });
-    } catch (err) {
-      throw new SourceFetchError(
+  const res = await fetchCheckingRedirects(start, {
+    init: () => ({
+      cache: "no-store",
+      headers: { accept: "application/gzip, application/octet-stream, */*" },
+      // Per request, so a slow redirect does not eat into the archive's own time.
+      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    }),
+    // The full check again, on the URL that would be requested next.
+    check: (target) => {
+      assertAllowedTarballUrl(target.href, commitSha);
+    },
+    unreachable: (url, err) =>
+      new SourceFetchError(
         `Could not download from ${url.hostname}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+      ),
+    tooManyRedirects: () =>
+      new SourceFetchError(`The download redirected more than ${MAX_REDIRECTS} times.`),
+  });
 
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get("location");
-      if (!location) {
-        throw new SourceFetchError(
-          `${url.hostname} answered ${res.status} with no redirect target.`,
-        );
-      }
-      // Re-run the full check on the new URL. Resolving against the current one
-      // handles a relative Location, which is legal and which GitHub does not
-      // currently use — but the parser should not be the thing relying on that.
-      url = assertAllowedTarballUrl(new URL(location, url).toString(), commitSha);
-      continue;
-    }
-
-    if (res.status === 404) {
-      throw new SourceFetchError(
-        `GitHub has no archive at commit ${commitSha.slice(0, 12)}. ` +
-          `The repository may have been made private, renamed, or force-pushed.`,
-      );
-    }
-    if (!res.ok) {
-      throw new SourceFetchError(`GitHub answered ${res.status} for the download.`);
-    }
-    return res;
+  if (res.status === 404) {
+    throw new SourceFetchError(
+      `GitHub has no archive at commit ${commitSha.slice(0, 12)}. ` +
+        `The repository may have been made private, renamed, or force-pushed.`,
+    );
   }
-  throw new SourceFetchError(`The download redirected more than ${MAX_REDIRECTS} times.`);
+  if (!res.ok) {
+    throw new SourceFetchError(`GitHub answered ${res.status} for the download.`);
+  }
+  return res;
 }
 
 /** Buffer a response body, refusing once it passes `limit`. */
