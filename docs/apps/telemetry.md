@@ -67,7 +67,7 @@ export const POST = defineRoute({
 
 ## Recording usage from the browser (client)
 
-For usage that only happens client-side (a widget interaction, a page view within the app), use the `track()` helper from the apps SDK — the same place as `enablePushNotifications()`. It POSTs to a platform ingest route that validates your session and checks the event against your manifest. Widgets and pages must **never** write telemetry directly to the database or import server modules; they go through the SDK helper, exactly as they call their own API routes via `createAppClient(appSlug)`.
+For usage that only happens client-side (a widget interaction, a page view within the app), use the `track()` helper from the apps SDK — the same place as `enablePushNotifications()`. It POSTs to a platform ingest route that validates your session and checks the event against your manifest. The route also requires the user to hold your app's grant (everyone holds a `global` app) and your app to be able to run: active, and not being updated. A refused event isn't recorded, even from a page that `pageVisibility` opens to any signed-in user. Widgets and pages must **never** write telemetry directly to the database or import server modules; they go through the SDK helper, exactly as they call their own API routes via `createAppClient(appSlug)`.
 
 ```tsx
 "use client";

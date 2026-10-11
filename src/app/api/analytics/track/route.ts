@@ -5,7 +5,7 @@
 import { NextResponse } from "next/server";
 import { getReadOnlySession } from "@/lib/auth/session";
 import { sql } from "@/lib/db/client";
-import { appRegistry } from "@/generated/app-registry";
+import { appNotFound, openAppFor } from "@/lib/analytics/ingest";
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +16,12 @@ const MAX_PROPERTIES_BYTES = 4096;
  * Records a client-side app telemetry event for the logged-in user. Fired by
  * the apps SDK `track()` helper from a widget or page (see lib/apps/sdk).
  *
- * Best-effort and tightly validated: the app slug must exist in the compile-time
- * registry, and the event name must be one the app actually declared in its
- * manifest `telemetry` list — so the table can't be stuffed with arbitrary
- * source/event keys from the browser. Server-side events go through
- * `context.telemetry` instead (see lib/apps/telemetry).
+ * Best-effort and tightly validated: the app must be one the user holds and
+ * whose code may run now, or the event gets the gateway's 404 and nothing is
+ * recorded (lib/analytics/ingest). The event name must be one the app actually
+ * declared in its manifest `telemetry` list — so the table can't be stuffed
+ * with arbitrary source/event keys from the browser. Server-side events go
+ * through `context.telemetry` instead (see lib/apps/telemetry).
  */
 export async function POST(request: Request) {
   const session = await getReadOnlySession();
@@ -37,10 +38,9 @@ export async function POST(request: Request) {
   const appSlug = typeof body?.appSlug === "string" ? body.appSlug : "";
   const event = typeof body?.event === "string" ? body.event : "";
 
-  const app = appRegistry.find((a) => a.slug === appSlug);
-  if (!app) {
-    return NextResponse.json({ error: "Invalid appSlug" }, { status: 400 });
-  }
+  // Before the event is looked at, so its answer can't say an app exists.
+  const app = await openAppFor(session.user.id, appSlug);
+  if (!app) return appNotFound();
   // Only events the app declared in its manifest are accepted.
   if (!app.telemetry.some((t) => t.name === event)) {
     return NextResponse.json({ error: "Undeclared event" }, { status: 400 });
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
     await sql`
       insert into public.telemetry_events
         (source_type, source_slug, event_name, user_id, properties)
-      values ('app', ${appSlug}, ${event}, ${session.user.id}, ${sql.json(
+      values ('app', ${app.slug}, ${event}, ${session.user.id}, ${sql.json(
         properties as Parameters<typeof sql.json>[0],
       )})
     `;
