@@ -53,8 +53,8 @@ export default function ReviewDialog({
 }: {
   target: PendingTarget | null;
   onClose: () => void;
-  /** Told once it is registered, so a list can mark it. */
-  onRegistered?: (slug: string) => void;
+  /** Told once it is registered, with its version, so a list can mark it. */
+  onRegistered?: (slug: string, version: string) => void;
 }) {
   const router = useRouter();
   const [review, setReview] = useState<ReviewOutcome | null>(null);
@@ -94,7 +94,7 @@ export default function ReviewDialog({
         reviewedFilesHash: review.review.release.filesHash,
       });
       setOutcome(res);
-      if (res.ok) onRegistered?.(slug);
+      if (res.ok) onRegistered?.(slug, res.result.version);
     } finally {
       setBusy(false);
     }

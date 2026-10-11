@@ -14,6 +14,7 @@ import {
   searchRepositoryAction,
   type SearchOutcome,
 } from "@/lib/repository/actions";
+import { sourceHost, type Provenance } from "@/lib/repository/provenance";
 import {
   KIND_LABEL,
   SORT_KEYS,
@@ -52,7 +53,7 @@ export default function ExtensionBrowser({
   kind,
   repositoryOrigin,
   repositoryOverridable,
-  installedSlugs,
+  installed: installedAtLoad,
   pendingSlugs,
   installable,
   installableTone,
@@ -67,8 +68,11 @@ export default function ExtensionBrowser({
    * an admin to a setting that is ignored.
    */
   repositoryOverridable: boolean;
-  /** Already on this instance. Server-rendered from the generated registry. */
-  installedSlugs: string[];
+  /**
+   * Already in this build, by slug, and where each came from. Server-rendered
+   * from the generated registries and the install records.
+   */
+  installed: Record<string, Provenance>;
   /** Installed into `.mixos/pending/` and not registered yet. */
   pendingSlugs: string[];
   /** `null` when this deployment can install; why it doesn't otherwise. */
@@ -87,7 +91,7 @@ export default function ExtensionBrowser({
   // The extension to install, then the pending install to review and register.
   const [chosen, setChosen] = useState<ExtensionSummary | null>(null);
   const [reviewing, setReviewing] = useState<PendingTarget | null>(null);
-  const [installed, setInstalled] = useState(() => new Set(installedSlugs));
+  const [installed, setInstalled] = useState(() => new Map(Object.entries(installedAtLoad)));
   const [pendingNow, setPendingNow] = useState(() => new Set(pendingSlugs));
 
   // Guards against an earlier, slower search overwriting a later one — the
@@ -116,6 +120,15 @@ export default function ExtensionBrowser({
   // The origin, not a hardcoded "mixos.org": an instance pointed at a local
   // checkout or a mirror should say where it is actually searching.
   const host = repositoryOrigin.replace(/^https?:\/\//, "");
+
+  /** Just installed (a theme) or registered here, from the catalogue being browsed. */
+  const installedNow = useCallback(
+    (slug: string, version: string) =>
+      setInstalled((m) =>
+        new Map(m).set(slug, { from: "catalogue", host: sourceHost(repositoryOrigin), version, modified: false }),
+      ),
+    [repositoryOrigin],
+  );
 
   return (
     <>
@@ -216,7 +229,7 @@ export default function ExtensionBrowser({
                 key={`${e.kind}/${e.slug}`}
                 extension={e}
                 repositoryOrigin={repositoryOrigin}
-                installedSlugs={installed}
+                installed={installed.get(e.slug) ?? null}
                 pendingSlugs={pendingNow}
                 onInstall={setChosen}
                 onReview={(extension) =>
@@ -261,9 +274,9 @@ export default function ExtensionBrowser({
         extension={chosen}
         notInstallable={installable ? { message: installable, tone: installableTone } : null}
         onClose={() => setChosen(null)}
-        onInstalled={(extension, pending) => {
+        onInstalled={(extension, pending, version) => {
           if (pending) setPendingNow((s) => new Set(s).add(extension.slug));
-          else setInstalled((s) => new Set(s).add(extension.slug));
+          else installedNow(extension.slug, version);
         }}
         onReview={(target) => {
           setChosen(null);
@@ -275,13 +288,13 @@ export default function ExtensionBrowser({
         key={reviewing ? `review:${reviewing.kind}/${reviewing.slug}` : "review:none"}
         target={reviewing}
         onClose={() => setReviewing(null)}
-        onRegistered={(slug) => {
+        onRegistered={(slug, version) => {
           setPendingNow((s) => {
             const next = new Set(s);
             next.delete(slug);
             return next;
           });
-          setInstalled((s) => new Set(s).add(slug));
+          installedNow(slug, version);
         }}
       />
     </>
