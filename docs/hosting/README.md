@@ -3,7 +3,9 @@
 A MixOS deployment is three things:
 
 1. **The server.** The image this repository's [`Dockerfile`](../../Dockerfile)
-   builds, or `npm ci && npm run build` on any Node 22+ host.
+   builds, or `npm ci && npm run build` on any Node 22+ host. Serve it behind
+   a proxy or platform that sets `X-Forwarded-For` or `X-Real-IP` to the
+   client's address.
 2. **A Postgres database, version 13 or later, from any provider.** A
    container, Render, Railway, Neon, Supabase, RDS, Cloud SQL: MixOS connects
    with one `DATABASE_URL` and uses nothing but Postgres itself. There is no

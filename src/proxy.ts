@@ -60,6 +60,8 @@ const PUBLIC_ROUTE_PREFIXES = [
   // silently. The signature check in src/lib/connectors/webhook.ts is the gate.
   // Note this is deliberately NOT /api/connectors, which stays session-gated —
   // the OAuth start/callback routes live there and must not become public.
+  // The matcher below also leaves `/api/webhooks/` out of the proxy entirely;
+  // this entry stays so that undoing that cannot send deliveries to /login.
   "/api/webhooks",
   // Scheduler tick — driven by Vercel Cron in production (vercel.json) and by
   // the compose `cron` sidecar locally. Authenticated by the timing-safe bearer
@@ -249,9 +251,15 @@ export const config = {
   // session, which is the theme-assets argument exactly — and, like
   // screenshots, only declared files are copied.
   //
-  // A path left out here is left out of both maintenance responses too, so
-  // leave out only files that are served without reading the database.
+  // A path left out here is left out of the maintenance response too, so leave
+  // out only files that are served without reading the database, or a route
+  // that runs the maintenance gate itself.
+  //
+  // `api/webhooks/` is that route. It is left out so that a delivery's body is
+  // read only by the route, which stops at its cap, and the route runs the
+  // maintenance gate first, as this file does
+  // (src/app/api/webhooks/[name]/route.ts).
   matcher: [
-    "/((?!_next/static|_next/image|themes/[^/]+/|connector-assets/|screenshots/|branding/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
+    "/((?!_next/static|_next/image|themes/[^/]+/|connector-assets/|screenshots/|branding/|api/webhooks/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
   ],
 };
