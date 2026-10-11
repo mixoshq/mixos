@@ -8,7 +8,8 @@ import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/db/server";
 import { requireServerSession } from "@/lib/auth/session";
 import { getUserById } from "@/lib/apps/access";
-import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { hashPassword } from "@/lib/auth/password";
+import { recheckOwnPassword, RECHECK_LIMITED_MESSAGE } from "@/lib/auth/recheck-limit";
 import { safeErrorMessage } from "@/lib/safe-error";
 import type { AccountActionState } from "@/lib/account/state";
 import { revokeUserSessions } from "@/lib/auth/revocation";
@@ -112,8 +113,16 @@ export async function updatePassword(
     if (dbUser.password_hash) {
       if (!current)
         return { error: "Enter your current password.", success: null };
-      const ok = await verifyPassword(current, dbUser.password_hash);
-      if (!ok)
+      // Limited per user, and charged before the hash. The admin's re-check
+      // in adminSetPassword draws on the same budget.
+      const recheck = await recheckOwnPassword(
+        session.user.id,
+        current,
+        dbUser.password_hash,
+      );
+      if (recheck === "limited")
+        return { error: RECHECK_LIMITED_MESSAGE, success: null };
+      if (recheck === "wrong")
         return { error: "Current password is incorrect.", success: null };
     }
 
