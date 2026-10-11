@@ -2751,6 +2751,15 @@ runs with `NODE_ENV=production` and is one of the profiles the entry exists to
 serve. In a real deployment the name does not resolve and the request simply
 fails to connect.
 
+**Redirects stay on the catalogue.** Search, listing and install-manifest
+requests follow at most three redirects, and only within the catalogue's own
+origin: the same scheme, host and port. They are followed by hand, by the code
+that follows a download's redirects (`src/lib/repository/redirects.ts`). Any
+other redirect, such as one to another host or from https to http, is refused
+before anything is sent to it, with an error that names the catalogue and not
+where the redirect pointed. The reason is the one above: whoever answers a
+followed redirect chooses the hash.
+
 ### State of the upstream
 
 The endpoints are live: `/api/v1/search`, `/api/v1/<kind>/<slug>` and
