@@ -114,6 +114,11 @@ just pulled.
   webhooks, Connect and Test Connection are refused. Its credentials are kept.
   The audit log records `connector.disable` and `connector.enable`, and now
   `theme.apply` too. See `docs/connectors/credentials.md`.
+- **The Docker image is read-only to the server.** Its files are owned by root,
+  so the server can't change its own code on any host, and
+  `deploy/docker-compose.yml` runs `app` and `migrate` on a read-only root
+  filesystem, with Next's caches and `/tmp` on `tmpfs`. Something you add that
+  writes at runtime needs a mount; see `docs/hosting/docker-compose.md`.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's
