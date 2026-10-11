@@ -76,7 +76,7 @@ the setup, and everything else follows from it.
                                            │  cron     (both profiles)         │
                                            └───────────────────────────────────┘
                                                     │
-                                                    └─► host.docker.internal:54321 / :54322
+                                                    └─► host.docker.internal:54322
 ```
 
 The Supabase containers are created by the **Supabase CLI**, not by
@@ -84,13 +84,12 @@ The Supabase containers are created by the **Supabase CLI**, not by
 `docker compose ps`, and `docker compose down` does not stop them. That is why
 `scripts/docker-down.ts` shuts down both orchestrators.
 
-Why not fold Postgres and PostgREST into compose and have one file? Because the
-CLI already owns the parts that are easy to get subtly wrong and painful to
-debug: the pinned image versions that match hosted Supabase, the JWT signing
-configuration PostgREST validates against, the Kong routes that make
-`/rest/v1/...` work, and the migration ledger. Hand-rolling those means owning
-version drift against production forever. `scripts/docker-up.ts` exists to make
-the two orchestrators look like one command.
+Why not fold Postgres into compose and have one file? Because the CLI already
+owns the parts that are easy to get subtly wrong and painful to debug: the
+pinned image versions that match hosted Supabase, Studio, and the migration
+ledger the release step shares. Hand-rolling those means keeping them in step
+by hand. `scripts/docker-up.ts` exists to make the two orchestrators look like
+one command.
 
 **`scripts/docker-up.ts` runs them in dependency order:**
 
@@ -113,10 +112,10 @@ exactly once.
 
 The same database has two names depending on who is asking:
 
-| Who is connecting | Supabase API | Postgres |
-|---|---|---|
-| Your terminal, host `npm run dev`, Studio, `psql` | `http://127.0.0.1:54321` | `127.0.0.1:54322` |
-| Anything inside a compose container | `http://host.docker.internal:54321` | `host.docker.internal:54322` |
+| Who is connecting | Postgres |
+|---|---|
+| Your terminal, host `npm run dev`, `psql` | `127.0.0.1:54322` |
+| Anything inside a compose container | `host.docker.internal:54322` |
 
 **Why.** The Supabase CLI puts its containers on its own Docker network,
 `supabase_network_mixos`, and *publishes* 54321/54322/54323 onto the host. Our
@@ -125,12 +124,12 @@ container is the app container itself — nothing is listening there. The
 containers instead go **out to the host's published ports and back in**, which
 `host.docker.internal` resolves to.
 
-Joining `supabase_network_mixos` from compose and talking to `kong:8000`
-directly would save that hop, and the aliases do exist. It is deliberately not
-done: the CLI creates and destroys that network on `supabase start` / `stop`, so
-a compose service attached to it fails to start whenever the CLI stack is down —
-a boot ordering dependency between two orchestrators, traded for one network
-hop.
+Joining `supabase_network_mixos` from compose and talking to the database
+container directly would save that hop, and the aliases do exist. It is
+deliberately not done: the CLI creates and destroys that network on
+`supabase start` / `stop`, so a compose service attached to it fails to start
+whenever the CLI stack is down — a boot ordering dependency between two
+orchestrators, traded for one network hop.
 
 **`host.docker.internal` does not resolve on its own.** Every compose service
 carries:
@@ -157,7 +156,7 @@ duplicated by hand, so they cannot drift apart.
 | Port | Service | Published by |
 |---|---|---|
 | 3000 | The MixOS app | compose (`app-dev` or `app`) |
-| 54321 | Supabase API — Kong, fronting PostgREST at `/rest/v1` | Supabase CLI |
+| 54321 | Supabase API (Kong and PostgREST). MixOS doesn't use it; Studio does | Supabase CLI |
 | 54322 | Postgres | Supabase CLI |
 | 54323 | Supabase Studio | Supabase CLI |
 

@@ -59,6 +59,51 @@ function constantTimeEquals(a: string, b: string): boolean {
 }
 
 /**
+ * The largest webhook body read: 5 MiB. The template connectors receive JSON
+ * event notices of a few kilobytes. The platform's other JSON payload caps, on
+ * App Services and route payloads, are 5 MB, and so is the most Shopify sends
+ * over HTTPS before it sends a link to the payload instead.
+ */
+export const MAX_WEBHOOK_BODY_BYTES = 5 * 1024 * 1024;
+
+/**
+ * The request body as text, read no further than `maxBytes`, or null when it
+ * is longer.
+ *
+ * A declared `content-length` over the cap is refused before a byte is read.
+ * A body with no length, or a wrong one, is read a chunk at a time and left at
+ * the first chunk that passes the cap: nothing after it is pulled. The reader
+ * is released, not cancelled, because cancelling the request's stream can
+ * destroy its socket, and the 413 with it.
+ *
+ * Decoded as `request.text()` decodes it, UTF-8 with a leading BOM dropped, so
+ * a signature checks out exactly as it did when the route read the whole body.
+ */
+export async function readCappedBody(
+  request: Request,
+  maxBytes: number,
+): Promise<string | null> {
+  if (Number(request.headers.get("content-length")) > maxBytes) return null;
+  if (!request.body) return "";
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > maxBytes) return null;
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
+/**
  * Verify signature and freshness. Does not touch the database — the replay
  * check is separate so a caller can decide when to claim the delivery.
  */

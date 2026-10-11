@@ -99,8 +99,11 @@ does, and call that route with `createAppClient()` (the same rule as connectors)
 A service handler may return a `Response` (e.g. a file/blob stream) instead of a
 plain object; the broker passes it through untouched (no JSON serialization or
 payload cap). A consumer's route can `return context.services.request<Response>(…)`
-directly. Handy for a public download/preview proxy that streams a provider's
-bytes to an unauthenticated viewer the consumer has already authorized.
+directly if it is a `raw: true` route, which `app.json` declares with the
+`raw-response` escape (see [API Routes](api-routes.md#raw-true)); any other route
+that returns a Response fails. Handy for a public download/preview proxy that
+streams a provider's bytes to an unauthenticated viewer the consumer has already
+authorized.
 
 ## Security guarantees (enforced by the broker)
 
@@ -135,10 +138,13 @@ bytes to an unauthenticated viewer the consumer has already authorized.
 
 `request()` rejects with a `ServiceRequestError` carrying a `code`:
 `NOT_FOUND`, `NOT_EXPOSED`, `NOT_DECLARED`, `FORBIDDEN`, `PROVIDER_INACTIVE`,
-`NO_USER`, `FORBIDDEN_USER`, `NO_HANDLER`, `TIMEOUT`, `PAYLOAD_TOO_LARGE`,
-`PROVIDER_ERROR`. `PROVIDER_INACTIVE` means an admin has switched the provider
-app off, whatever the service's audience.
+`PROVIDER_UPDATING`, `NO_USER`, `FORBIDDEN_USER`, `NO_HANDLER`, `TIMEOUT`,
+`PAYLOAD_TOO_LARGE`, `PROVIDER_ERROR`. `PROVIDER_INACTIVE` means an admin has
+switched the provider app off, whatever the service's audience.
 Handle it in your route and degrade gracefully (e.g. render an empty state).
+`PROVIDER_UPDATING` means the provider's own migrations are behind this build.
+It clears once they are applied, so say the data is coming back rather than
+gone, and try again later.
 
 ## Verify
 

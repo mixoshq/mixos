@@ -77,7 +77,7 @@ export default async function refreshCache(ctx: SystemAppContext): Promise<void>
 | Field | Value |
 | --- | --- |
 | `user` | Always `null` — a job runs for the app, not a person. Reading a user identity is a type error. |
-| `connectors` | The app's declared connectors. Every connector is tenant-scoped, so a job gets the same credentials any request would. Always check `connector?.configured` before calling. |
+| `connectors` | The app's declared connectors, with the same tenant-wide credentials any request gets. A job has no user, so it can't use a [user-scoped](../connectors/architecture.md#user-scoped-connectors) connector: the build fails an app that declares one alongside `schedules` or `sync`. Always check `connector?.configured` before calling. |
 | `db` | The scoped DB client if the app declares `"database": true`, else `null`. |
 | `notifications` | A real Web Push sender if the app declares `"notifications": true`, else `null`. |
 | `signal` | An `AbortSignal` aborted when the platform gives up on this run (the ~4-minute timeout). Always present. |
@@ -92,9 +92,10 @@ export default async function refreshCache(ctx: SystemAppContext): Promise<void>
   a fresh run.
 - **Respect `ctx.signal`.** Abandonment stops the platform *waiting* for you; it
   does not stop your code. A job that loops over external calls must pass
-  `ctx.signal` to `fetch` (and check `ctx.signal.aborted` between iterations),
-  or it will keep burning API quota and writing rows after being abandoned —
-  while the next tick runs a second copy alongside it.
+  `ctx.signal` to each of them (`ctx.http.fetch(url, { signal: ctx.signal })`,
+  or a connector method that takes one) and check `ctx.signal.aborted` between
+  iterations, or it will keep burning API quota and writing rows after being
+  abandoned — while the next tick runs a second copy alongside it.
 - **Budget by wall clock, not by item count.** If the work is a queue, stop at a
   deadline and leave the rest for the next tick (process the stalest first so it
   drains fairly). A count-based cap can't predict runtime when per-item cost
@@ -143,7 +144,8 @@ const outOfBudget = () => ctx.signal.aborted || Date.now() >= deadline;
 
 Call it between items, between stages, and between pages of a paginated read.
 `ctx.signal.aborted` alone is not enough (it fires only once you've already
-overrun); the deadline alone is not enough (it misses an admin-triggered abort).
+overrun); checking it as well costs nothing, and still stops a run whose
+deadline was set too generously.
 
 **Stop by breaking, not by throwing.** A deadline is a normal outcome, not a
 failure. Commit what finished, return a summary that says the run was truncated,
@@ -237,8 +239,8 @@ will recur every tick, and yielding to it forever starves everything downstream.
 
 ## How it runs
 
-1. Something outside the app GETs `/api/cron` every 5 minutes — Vercel Cron
-   in production, a compose sidecar locally. See
+1. Something outside the app GETs `/api/cron` every 5 minutes — your host's
+   scheduler in production, a compose sidecar locally. See
    [What drives the tick](#what-drives-the-tick).
 2. Each tick reconciles the manifest into `public.app_scheduled_jobs`. Each row
    carries a materialized `next_run_at` (the platform computes the next fire time
@@ -246,7 +248,7 @@ will recur every tick, and yielding to it forever starves everything downstream.
    now"). For every enabled job whose `next_run_at ≤ now()`, the tick
    **atomically claims** it (`UPDATE … WHERE next_run_at ≤ now() AND
    running_since IS NULL … RETURNING`). Cron invocations can overlap or be
-   delivered more than once; the claim guarantees a job runs **exactly once**
+   delivered more than once; the claim guarantees a job runs **at most once**
    per due window regardless.
 3. The claimed job runs with `buildSystemAppContext(slug)`; the result
    (`ok` / `error` / `timeout`, duration, error message) is written back, the
@@ -254,8 +256,9 @@ will recur every tick, and yielding to it forever starves everything downstream.
    history row is appended to `public.app_job_runs`.
 
 Reconciliation also **deletes** rows for jobs the manifest no longer declares.
-Their `public.app_job_runs` history survives under the old name, so a renamed or
-removed job can linger on the admin page as an orphaned entry.
+Their `public.app_job_runs` history survives under the old name, in the table
+only: the admin page lists the jobs the manifest declares, so a renamed or
+removed job's history no longer shows there.
 
 An app that leaves the build is different: its rows are kept, each with its
 enabled switch, and its jobs don't run until the app is back.
@@ -267,7 +270,9 @@ schedule (interval or cron), last run, status/error, next-due, an
 **enable/disable toggle**, and a **Run now** button. Disabling a job stops it on
 the next tick without a redeploy — the safety valve for a misbehaving job. An
 inactive app's jobs show as **App inactive** and don't run, on the tick or by
-Run now.
+Run now. While an app's own migrations are behind this build, its jobs show as
+**App updating** and don't run either; they stay due, so they run on the first
+tick after the migrations are applied.
 
 ## What drives the tick
 
@@ -280,8 +285,11 @@ torn down when idle, so a timer set 5 minutes out would rarely fire.
 Who that caller is depends on how you are running MixOS. **This is the part to get
 straight before you conclude a job "isn't running":**
 
-- **In production — Vercel Cron**, registered in `vercel.json` and authenticated
-  with `CRON_SECRET`.
+- **In production — your host's scheduler.** Each hosting path sets one up:
+  Vercel Cron from `vercel.json`, the `mixos-cron` cron job on Render, a `cron`
+  service on Railway, and the `cron` service in `deploy/docker-compose.yml` on
+  your own server. Each sends the same request with `CRON_SECRET`. See
+  [Hosting MixOS](../hosting/README.md).
 
 - **On the Docker workflow (`npm run dev:docker`, `npm run docker:prod`) — the
   compose `cron` sidecar.** It is declared with `profiles: ["dev", "prod"]`, so
@@ -306,9 +314,20 @@ straight before you conclude a job "isn't running":**
   just the Next.js server; there is no sidecar and no timer, so no job will ever
   become due on its own. Fire ticks by hand (below).
 
-One more thing worth knowing wherever you deploy: **Vercel's Hobby plan only
-allows daily cron schedules.** The 5-minute cadence requires a Pro plan; on
-Hobby, jobs bunch up and run once a day.
+Even when ticks arrive, jobs don't run in three cases, each shown on
+**Administration → Scheduled Jobs**:
+
+- **Scheduler paused.** The switch above the job list skips every tick while
+  it's off: `/api/cron` still answers `200`, but no job runs until an admin
+  clicks **Start tick**. **Run now** still works while it's paused.
+- **App inactive.** A job whose app is switched off doesn't run, on the tick or
+  by **Run now**, until an admin activates the app.
+- **App updating.** While the app's own migrations are behind this build, its
+  jobs don't run, on the tick or by **Run now**. They stay due, and run on the
+  first tick after the release step applies the migrations.
+
+On Vercel, the 5-minute tick needs a Pro plan: the Hobby plan allows only daily
+cron schedules. See [Vercel](../hosting/vercel.md).
 
 ## Local development
 

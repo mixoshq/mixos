@@ -123,12 +123,35 @@ just pulled.
   webhooks, Connect and Test Connection are refused. Its credentials are kept.
   The audit log records `connector.disable` and `connector.enable`, and now
   `theme.apply` too. See `docs/connectors/credentials.md`.
+- **The Docker image is read-only to the server.** Its files are owned by root,
+  so the server can't change its own code on any host, and
+  `deploy/docker-compose.yml` runs `app` and `migrate` on a read-only root
+  filesystem, with Next's caches and `/tmp` on `tmpfs`. Something you add that
+  writes at runtime needs a mount; see `docs/hosting/docker-compose.md`.
+- **An app whose migrations are behind waits on its own.** While the build
+  carries an app migration the database hasn't applied, none of that app's
+  code runs, and it alone says "This app is being updated. Try again shortly.":
+  its pages and API routes with a 503 and `Retry-After: 30`, `callAppRoute()`
+  as `UNAVAILABLE`, its MCP tools as `APP_UPDATING`, and its services as the
+  new `PROVIDER_UPDATING`. Its jobs wait and stay due, and Scheduled Jobs shows
+  **App updating**. Every other app serves, and readiness still reports
+  `app-migrations-behind`. It serves again within 30 seconds of the release
+  step, or of `npm run migrate:apps` after you add a migration locally.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's
   name, and the release step and the app no longer print it, password included.
 - **Fix:** sign-in attempts are limited on every route that checks a password,
   including Auth.js's own callback, and those routes share one budget per IP.
+- **Fix:** the password re-checks, webhooks and MCP bearer checks are limited,
+  and a wrong password takes as long for an email with no account as for one
+  with. "Change my password" and setting a user's password share one budget
+  per person, and a webhook body over 5 MiB is refused.
+- **Fix:** app API routes get request bodies over 10 MB whole. Up to 27 MB, a
+  body reaches a route on `/api/apps` or `/api/p` exactly as sent, and a larger
+  one gets a 413, with or without a `content-length`. Without a session cookie,
+  `/api/apps` now answers with a JSON 401 or 404 instead of a redirect to
+  `/login`.
 
 ## 2026-10-07
 

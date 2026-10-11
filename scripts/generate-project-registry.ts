@@ -1851,8 +1851,9 @@ function readConnector(connectorDir: string, name: string): ConnectorManifestOut
     );
   }
 
-  // Icon: proven to exist and to be a square >= 512x512 before anything
-  // references it, then copied out with the rest of the connector's assets.
+  // Icon: proven to exist, and to be a square >= 512x512 PNG/WebP or an SVG
+  // with a viewBox, before anything references it, then copied out with the
+  // rest of the connector's assets.
   // The registry contract first: a missing icon and a missing setup guide
   // are one report, not a build each.
   validateRegistryContract(name, raw);

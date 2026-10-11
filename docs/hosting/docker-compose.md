@@ -147,8 +147,10 @@ On Dokploy the admin pages show the commit as unknown, since nothing passes
 
 ## What runs where
 
-`docker compose ps` should show `db` and `app` healthy, `cron` up, and
-`migrate` exited with code 0. `cron` logs one line per tick:
+`docker compose -f deploy/docker-compose.yml ps -a` should show `db` and `app`
+healthy, `cron` up, and `migrate` exited with code 0. Without `-a` it lists
+only running containers, and `migrate` doesn't appear. `cron` logs one line per
+tick:
 
 ```
 [cron] 2026-10-06T03:55:38Z GET /api/cron -> 200
@@ -157,3 +159,26 @@ On Dokploy the admin pages show the commit as unknown, since nothing passes
 A `401` there means the app and the cron service disagree about `CRON_SECRET`,
 which can't happen while both read it from `deploy/.env`. A `000` means the app
 isn't answering; check `logs app`.
+
+## What's read-only
+
+The server can't change its own code. The image's files are owned by root and
+the server runs as the `node` user (uid 1000). Compose also runs `app` and
+`migrate` on a read-only root filesystem, so not even root inside the container
+can change them.
+
+`migrate` writes nothing. The app can write to three paths, each a `tmpfs` that
+lives in memory and empties when the container restarts:
+
+| Path | What writes there |
+| --- | --- |
+| `/app/.next/cache` | Next's cache of optimized images, from `/_next/image`. Next keeps it under half the mount's 256 MB. |
+| `/app/.next/server/route-cache` | Next's copy of the pre-rendered 404 page, once it has served or regenerated it. |
+| `/tmp` | Nothing in MixOS today. It's scratch space for libraries. |
+
+If you add something that writes files at runtime, give its path a mount of its
+own in `deploy/docker-compose.yml`: a `tmpfs` like the ones above, or a named
+volume for data that must outlive the container. Either one starts out owned by
+root, so hand it to the server's user: add `uid=1000,gid=1000` to a `tmpfs`, or
+`chown 1000:1000` a volume once. Without a mount, the write fails with
+`EROFS: read-only file system`.

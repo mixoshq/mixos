@@ -38,7 +38,8 @@
  * Caching here is a database layer, not an HTTP one. Don't reach for
  * `Cache-Control` or `revalidate` on an app route.
  *
- * SETUP. The app needs a `swr_cache` table (bare name; the platform prefixes it):
+ * SETUP. The app needs a `swr_cache` table (bare name; it lives in the app's own
+ * schema):
  *
  * ```sql
  * create table if not exists swr_cache (

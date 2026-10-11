@@ -33,19 +33,21 @@ import type { HookRegistrar } from "./types";
  * cannot both register the same new module.
  *
  * Only an app the app gate lets through is loaded (src/lib/apps/app-gate.ts):
- * importing `hooks.ts` runs its top-level code, and then its entrypoint, so an
- * inactive app's `hooks.ts` never runs. The gate is asked for each app on every
- * call, because the admin's switch can flip at any time and a process outlives
- * many flips: an app activated since the last call loads on this one, with no
- * restart.
+ * importing `hooks.ts` runs its top-level code, and then its entrypoint, so the
+ * `hooks.ts` of an inactive app, or of one whose own migrations are behind this
+ * build, never runs. The gate is asked for each app on every call, because the
+ * admin's switch can flip at any time and a process outlives many flips: an
+ * app activated, or brought up to date by the release step, since the last
+ * call loads on this one, with no restart.
  *
- * An app switched off after it loaded keeps its registrations, and they do not
- * run: dispatch asks the gate per request for each app with a listener on the
- * hook (installed below), and the brand filters check activation themselves
- * (src/lib/branding/resolve.ts). Activating it again lets them run. They are
- * not dropped here, because the gate reads a failed lookup as "off" too, and
- * dropping them on that would turn a database blip into the default brand on
- * every page, where `resolve.ts` would have served the last good one.
+ * An app the gate closes on after it loaded keeps its registrations, and they
+ * do not run: dispatch asks the gate per request for each app with a listener
+ * on the hook (installed below), and the brand filters check activation and
+ * the update themselves (src/lib/branding/resolve.ts). Once the gate opens
+ * again they run. They are not dropped here, because the gate reads a failed
+ * lookup as "off" too, and dropping them on that would turn a database blip
+ * into the default brand on every page, where `resolve.ts` would have served
+ * the last good one.
  */
 
 type Entrypoint = (hooks: HookRegistrar) => void;
