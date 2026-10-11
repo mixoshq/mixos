@@ -211,6 +211,22 @@ just pulled.
   redirects, and only within the catalogue's own origin. Any other redirect,
   such as one to another host or from https to http, is refused with an error
   naming the catalogue.
+- **A different extension under the same name starts off.** The release step
+  and `npm run migrate:apps` record where each app, connector and theme came
+  from: the catalogue and GitHub repository in its `.registry.json`, or local.
+  A new release from the same repository is an update and changes nothing.
+  Anything else, such as a local app reinstalled from the Registry or a
+  release from another repository, is caught at every release step. An app is
+  switched off, marked **Replaces a different extension** on Admin > Apps, and
+  loses its API keys; activating it needs its slug typed. A connector is
+  disabled, keeping its credentials, until an admin enables it by typing its
+  name. A theme's change is only recorded. The audit log records each as
+  `<kind>.identity.changed`, with both identities. Migration 0011; run
+  `npm run db:local` to apply it. **Breaking:** every app the database already
+  knows, and every connector with saved credentials, counts as local. Each one
+  installed from the Registry, before or after this change, is switched off
+  once at the first release step that carries it, and an app's API keys are
+  revoked.
 
 ## 2026-10-07
 
