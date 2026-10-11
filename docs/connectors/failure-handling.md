@@ -39,12 +39,16 @@ Let it propagate. A `defineRoute` handler does not catch a `ConnectorError`:
 ```ts
 import { z } from "zod";
 import { defineRoute } from "@/lib/apps/route";
+import type MyServiceConnector from "@connectors/my-service";
+
+const Item = z.object({ id: z.string(), name: z.string() });
 
 export const GET = defineRoute({
   output: z.object({ items: z.array(Item) }),
-  handler: async (context) => ({
-    items: await context.connectors["my-service"].listItems(),
-  }),
+  handler: async (context) => {
+    const myService = context.connectors["my-service"] as MyServiceConnector;
+    return { items: await myService.listItems() };
+  },
 });
 ```
 
@@ -57,7 +61,7 @@ The route pipeline answers with a stable envelope and the right HTTP status:
     "connector": "Acme Billing",
     "retryAfterMs": null,
     // admins only, omitted entirely for everyone else:
-    "adminHint": "Open Administration → Connector Registry and enter this connector's credentials.",
+    "adminHint": "Open Administration → Connectors and enter this connector's credentials.",
     "adminActionUrl": "/admin/connectors?connector=acme-billing"
   },
   // the platform's coarse code, beside the precise category
@@ -68,14 +72,19 @@ The route pipeline answers with a stable envelope and the right HTTP status:
 The admin fields are written server-side only when the caller is an admin: the
 pipeline reads `context.user.isAdmin`, which is what keeps internal detail away
 from ordinary users. A `raw: true` route that builds its own Response returns
-`ctx.connectorErrorResponse(err)` for the same envelope:
+`ctx.connectorErrorResponse(err)` for the same envelope (and its `app.json`
+declares the `raw-response` escape; see [API routes](../apps/api-routes.md#raw-true)):
 
 ```ts
+import { defineRoute } from "@/lib/apps/route";
+import type AcmeConnector from "@connectors/acme";
+
 export const GET = defineRoute({
   raw: true,
   handler: async (ctx) => {
+    const acme = ctx.connectors.acme as AcmeConnector;
     try {
-      return Response.json(await ctx.connectors.acme.listThings({ signal: ctx.signal }));
+      return Response.json(await acme.listThings({ signal: ctx.signal }));
     } catch (err) {
       return ctx.connectorErrorResponse(err);
     }
@@ -111,7 +120,9 @@ if (envelope) return <ConnectorErrorState envelope={envelope} onRetry={refetch} 
 The component splits on cause, not severity. `unconfigured`, `auth_failed`, and
 `forbidden` render **"Not connected"** with no Retry button — retrying a
 connector nobody has finished setting up is futile, and offering the button
-tells the user to keep trying something that will never start working. Everything
-else renders an error with Retry, and a wait hint when `retryAfterMs` is set.
+tells the user to keep trying something that will never start working.
+`not_found` and `invalid_request` render an error, also with no Retry: the same
+request gets the same answer. Everything else renders an error with Retry, and a
+wait hint when `retryAfterMs` is set.
 
 Admins additionally see the hint and a deep link to the Registry row.
