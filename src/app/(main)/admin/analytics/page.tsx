@@ -380,12 +380,12 @@ function Header({
   days: number;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Analytics</h1>
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         <SourceSelector
           current={currentSource}
           apps={TELEMETRY_APPS}
