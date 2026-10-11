@@ -60,6 +60,7 @@ import path from "path";
 import type { Sql, TransactionSql } from "postgres";
 import type { AppManifest } from "../src/lib/apps/types";
 import { appRegistry as builtRegistry } from "../src/generated/app-registry";
+import { RELEASE_STEP_ACTOR } from "../src/lib/apps/audit-actors";
 import { appCodeHash } from "./app-code-hash";
 import { takeMigrationLock } from "./migration-lock";
 
@@ -68,9 +69,10 @@ const APPS_DIR = path.join(path.resolve(__dirname, ".."), "apps");
 /**
  * Who `admin_audit_log` says wrote the release step's rows. No person did, so
  * `actor_id` is null, and this can't be an email address, so no reader takes
- * one of these rows for an admin's.
+ * one of these rows for an admin's. Readers label it unverified
+ * (src/lib/apps/audit-actors.ts, where it is defined).
  */
-export const RELEASE_STEP_ACTOR = "release-step";
+export { RELEASE_STEP_ACTOR };
 
 export interface ReturnedApp {
   slug: string;
