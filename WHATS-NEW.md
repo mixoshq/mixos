@@ -138,6 +138,11 @@ just pulled.
   and a wrong password takes as long for an email with no account as for one
   with. "Change my password" and setting a user's password share one budget
   per person, and a webhook body over 5 MiB is refused.
+- **Fix:** app API routes get request bodies over 10 MB whole. Up to 27 MB, a
+  body reaches a route on `/api/apps` or `/api/p` exactly as sent, and a larger
+  one gets a 413, with or without a `content-length`. Without a session cookie,
+  `/api/apps` now answers with a JSON 401 or 404 instead of a redirect to
+  `/login`.
 
 ## 2026-10-07
 
