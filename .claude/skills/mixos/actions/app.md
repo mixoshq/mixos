@@ -85,7 +85,7 @@ If the app has a `jobs/` handler or caches upstream data, confirm the [data-fres
 6. For UI changes, load `/apps/<slug>` in the dev server and exercise the golden path plus one edge case. Don't claim "done" on a UI change you haven't opened in a browser.
 7. **Smoke-test the routes.** Activate the app in Admin > Apps and grant it to the user you test as in Admin > Users (a `global` app needs no grant). Then run `SMOKE_EMAIL=<email> SMOKE_PASSWORD=<password> npx tsx scripts/smoke-test-app.ts <slug>` against the running server. It sends GET and HEAD to every route that user can reach, with a fake value in each path param, and never sends POST, PUT, PATCH or DELETE. Add `--base-url <url>` for a server that isn't on localhost:3000, or pass an existing session as `SMOKE_COOKIE` instead (see the script header). It must exit 0. Then check two things:
    - **Unconfigured connectors:** a route whose connector isn't configured fails with a 503 that names the connector. Don't edit code: **pause and ask the user to add credentials at `/admin/connectors`**, then re-run.
-   - **Live data path:** for each connector that *is* configured, at least one route returns data of the shape the widget consumes. Read the widget file to confirm the field names match: the script doesn't check shapes. Don't ship an app whose live data path you haven't seen work end-to-end.
+   - **Live data path:** for each connector that *is* configured, at least one route returns data of the shape the widget consumes. Read the widget file to confirm the field names match: the script doesn't check shapes. A route on a user-scoped connector answers `{ connected: false }` until the user you test as connects their own account at `/account/connections`. Don't ship an app whose live data path you haven't seen work end-to-end.
 8. **Connector-call review** (any new/changed connector-backed widget or route). Re-read the route against the [discipline above](#connector-call-discipline-widgets--routes): does it fetch anything the widget doesn't render? Does it enrich before filtering? Does `resolveConfig` hit a lightweight endpoint with a timeout fallback? Trim what isn't needed before claiming done.
 9. **Exercise the MCP tools.** If `app.json` declares `mcp`, run `npx @modelcontextprotocol/inspector` against `http://localhost:3000/api/mcp`, complete the OAuth flow (register → consent → token), then call each tool with real arguments. Two checks, both by reading the output rather than running a script:
    - **Is it answerable?** Read the result as if you were the model. Could you answer the question the tool exists for, without a follow-up call? Is anything in there presentation noise (hex colors, RAG enums, embed URLs) that should be dropped?
@@ -137,7 +137,8 @@ fix.
 - Empty states name their cause. If one generic blank box covers filter-empty *and* no-match, that's a finding.
 - A `no-filter` empty state offers a way out.
 - Error states are calm and human, and never render a raw `error.message`.
-- An unconfigured connector surfaces a calm error state, not a blank panel. Every connector is tenant-scoped, so `configured: false` means an admin has not entered credentials — there is no per-user "connect your account" path.
+- An unconfigured connector surfaces a calm error state, not a blank panel. For a tenant-scoped connector, `configured: false` means an admin has not entered credentials, or has turned the connector off.
+- A **user-scoped** connector (`"userScoped": true` in its `connector.json`) is absent from `context.connectors` until the person connects their own account, and again if the provider stops renewing their grant. That is a state, not an error: the route returns `{ connected: false }` rather than a 503, and the UI offers a Connect prompt linking to `/account/connections`. An app can't use one from `schedules` or `sync` (a job has no user), and the build rejects an app that declares both. See [User-scoped connectors](docs/apps/connectors.md#user-scoped-per-user-connectors).
 
 **Colour & contrast**
 - No raw palette classes, no hex, no opaque `bg-white` / `bg-gray-*`, no `dark:` variants. Run `npx eslint apps/<slug>` — but don't stop there: the rule can't see runtime-assembled class names, so grep for template-literal colour construction too.
@@ -155,6 +156,7 @@ fix.
 - The capability context fails closed (defaults `false` until `/me` answers).
 - Read-only users see controls **omitted**, not disabled.
 - Every mutating route enforces the role server-side regardless of what the UI does — check this even though it's not a design finding; a UI-only gate is a security bug.
+- Anything cached from a user-scoped connector has the user in its cache key. A shared key serves one person's data to another ([credentials.md](docs/connectors/credentials.md#caching-a-user-scoped-response)).
 
 **Accessibility floor**
 - Keyboard reachable, focus visible, focus rings not styled away.

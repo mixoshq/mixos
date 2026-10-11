@@ -27,9 +27,9 @@
 //   our containers (app-dev / app / cron)                    -> host.docker.internal
 //
 // Both are derived from one `supabase status -o json` read rather than written
-// down twice, because a hand-copied pair drifts and the failure mode (a 401
-// from PostgREST, or a connection refused from inside a container only) reads
-// like a permissions bug rather than an address bug.
+// down twice, because a hand-copied pair drifts and the failure mode (a
+// connection refused from inside a container only) reads like a permissions
+// bug rather than an address bug.
 //
 // ATTACHED VS DETACHED. By default this ends in an *attached* `docker compose
 // up` and never returns: the terminal becomes the container log stream, and
@@ -432,9 +432,9 @@ function toContainerAddress(url: string): string {
   ) {
     parsed.hostname = "host.docker.internal";
   }
-  // The WHATWG parser normalises "http://h:54321" to a trailing slash. Harmless
-  // for postgres URLs (they carry a database path) but supabase-js concatenates
-  // "/rest/v1" onto whatever it is given, so keep the origin bare.
+  // The WHATWG parser normalises a bare origin ("http://h:54321") to a trailing
+  // slash, so keep one bare. A postgres URL carries a database path and passes
+  // through unchanged.
   const out = parsed.toString();
   return parsed.pathname === "/" && !parsed.search && !parsed.hash
     ? out.replace(/\/$/, "")

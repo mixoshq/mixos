@@ -26,7 +26,7 @@ consecutive builds is how an author gives up.
 | `icon` | Otherwise the grid is a wall of identical plug glyphs |
 | `setup.title` | Names the provider-side step: "Create a Google Cloud OAuth app" |
 | `setup.steps[]` | What the admin does in someone else's console |
-| `auth.scopesUrl` | The page the Access list is read from — see [Scopes](scopes.md). Not needed by a connector that authenticates with nothing (`auth.strategy` `none`): a public API has no permissions to list |
+| `auth.scopesUrl` | The page the Scopes tab's permission list is read from — see [Scopes](scopes.md). Not needed by a connector that authenticates with nothing (`auth.strategy` `none`): a public API has no permissions to list |
 
 An `oauth2_authorization_code` connector additionally must set
 `showRedirectUri` on **exactly one** step. It is the only value in the whole
@@ -40,16 +40,17 @@ be guessed and the provider rejects the flow without it.
 
 Read this before anything else, because it is smaller than it looks.
 
-**The dialog is identical for every connector.** Three tabs, in this order,
+**The dialog is identical for every connector.** Four tabs, in this order,
 always. An author does not design them, choose them, reorder them or add to
 them — the platform renders the same shell for Gmail and for a connector written
 next year.
 
 | Tab | Built from | You write |
 | --- | --- | --- |
-| **Details** | icon, `description`, app manifests, the grant, the scraped scope page | *nothing structural* |
+| **Details** | the credential row (configured, last verified), the admin switch, other apps' manifests | *nothing structural* |
 | **Configure** | the platform's save / authorize / verify steps, plus your provider-side steps | **`setup`** |
-| **Usage Logs** | `telemetry_events` — every recorded call | *nothing* |
+| **Scopes** | `auth.scopes`, checked against the grant, citing `auth.scopesUrl` | **`auth.scopesUrl`** |
+| **Usage Logs** | `telemetry_events` — the last 100 recorded calls | *nothing* |
 
 So there are exactly **two authored surfaces**:
 
@@ -59,11 +60,12 @@ So there are exactly **two authored surfaces**:
 
 Plus `icon` and `description`, which are content rather than design.
 
-Everything else on all three tabs is derived from data the platform already
+Everything else on all four tabs is derived from data the platform already
 holds. **Usage Logs takes no authoring at all** — declare your methods in
 `telemetry` (which invariant 16 requires anyway) and the log populates itself.
 **Details takes none either**: dependency counts come from other apps'
-manifests, permissions from the scrape, status from the credential row.
+manifests, status from the credential row. **Scopes** lists `auth.scopes`,
+which `scripts/check-scopes.ts` writes from your `auth.scopesUrl`.
 
 If you find yourself wanting to change the shape of Details or Usage Logs for
 one connector, that is a platform change and a `docs/plans/` plan — not
@@ -76,8 +78,10 @@ connection rather than to any one view of it, so it stays put while the tabs
 change beneath it. The header carries the icon, the display name and the
 `description`; the footer carries provenance — last updated, and the author.
 
-Tabs are **filtered, never disabled**. A tab that leads nowhere poses a question
-("why can't I click that?") the tab bar has no room to answer.
+Tabs are **never filtered or disabled**: all four render for every connector,
+and one with nothing to show says why in words — a public API's Scopes tab, a
+log no app has written to yet. A disabled tab poses a question ("why can't I
+click that?") the tab bar has no room to answer.
 
 ---
 
