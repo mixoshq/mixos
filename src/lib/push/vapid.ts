@@ -6,8 +6,8 @@ import webpush from "web-push";
 
 /**
  * Web Push VAPID configuration, read from the environment. Locally these come
- * from `.env.local`; in production they are Vercel project environment
- * variables.
+ * from `.env.local`; in production they are the host's environment variables
+ * (docs/hosting/).
  *
  * Generate a keypair with: `npx web-push generate-vapid-keys`
  */
@@ -44,7 +44,7 @@ export function getVapidConfig(): VapidConfig {
     throw new Error(
       `Missing required Web Push env vars: ${missing.join(", ")}. ` +
         `Generate a keypair with \`npx web-push generate-vapid-keys\` and set ` +
-        `them in .env.local (locally) or in the Vercel project's environment ` +
+        `them in .env.local (locally) or in your host's environment ` +
         `variables. VAPID_SUBJECT is a mailto: or https: URL.`,
     );
   }
