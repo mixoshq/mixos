@@ -85,6 +85,7 @@ import {
   readInstallRecord,
   type InstallRecord,
 } from "./install-record";
+import type { LeftOut } from "./left-out";
 import {
   bothLocks,
   checkoutRoot,
@@ -254,9 +255,11 @@ export interface RegisterResult {
   installPath: string;
   installedBy: string;
   installedAt: string;
-  /** The package's files and their bytes, as install counted them: the install record left out. */
+  /** The files install wrote and their bytes, as found in the folder, without the install record. */
   fileCount: number;
   byteCount: number;
+  /** What install left out of the package, from its sidecar: `{ ".gitignore": 1 }`, or `{}`. */
+  leftOut: LeftOut;
   /** What install's check left to registration, which this run checked. */
   deferred: string[];
   registry: RegistryOutcome;
@@ -484,6 +487,7 @@ async function runRegister(
     installedAt: sidecar.installedAt,
     fileCount: packaged.length,
     byteCount: packaged.reduce((n, f) => n + f.bytes, 0),
+    leftOut: sidecar.leftOut ?? {},
     deferred: sidecar.check.deferred,
     registry,
     handBack: handBackFor(record, live.rel, files),
