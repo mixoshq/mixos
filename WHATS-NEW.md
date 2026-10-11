@@ -44,6 +44,15 @@ just pulled.
   the dialog says so and offers **Try again**. If an install is paused for more
   than 15 minutes (a laptop asleep mid-download) and another starts meanwhile,
   the paused one stops before its next write and says what it left on disk.
+- **Registry installs are checked before they land.** An install stages the
+  download and checks it with `generate-project-registry.ts --check`, which
+  reads its files, runs none of its code, and writes its verdict to a file the
+  install names. A refused extension never reaches `apps/`, `connectors/` or
+  `themes/`. A generator an install starts gets only `PATH` and `TMPDIR` from
+  the environment. Installs also refuse a package with paths that differ only
+  in case or Unicode form, a control or bidi character in a path, or a
+  `.gitattributes`, `.gitignore` or `.git` at any depth. The generator now
+  skips folders whose names start with a dot.
 - **Every build knows its version.** The admin pages show it with the commit,
   e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
   into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
