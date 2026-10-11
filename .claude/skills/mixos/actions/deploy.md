@@ -195,9 +195,9 @@ Any correction goes in the plan as its own line, and is written only after
 the user confirms.
 
 **A registered extension.** An app or connector the user installed from the
-Registry and registered with `npm run register`, or a theme they installed
-from Browse, is someone else's code, the release that was verified and
-checked. Commit its folder whole, as a commit of its own
+Registry and registered, on its admin page or with `npm run register`, or a
+theme they installed from Browse, is someone else's code, the release that was
+verified and checked. Commit its folder whole, as a commit of its own
 (`feat(<slug>): add <slug> <version> from mixos.org`), and leave it out of the
 manifest review: correcting its manifest or its code would make it differ from
 that release. Nothing under `.mixos/` is ever committed (git ignores it).
