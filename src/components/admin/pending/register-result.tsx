@@ -1,0 +1,195 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+"use client";
+
+import { useState, type ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import { activateInCheckoutAction } from "@/lib/repository/pending-actions";
+import {
+  describeHosts,
+  type ActivateOutcome,
+  type Registered,
+} from "@/lib/repository/pending-outcomes";
+import Notice from "./notice";
+import WithCode from "./with-code";
+
+/**
+ * What Register did, and what comes next: turning the app on, and shipping it.
+ *
+ * Turning it on is per database. "Activate in this checkout" is offered only
+ * when this checkout's database is on this machine and this server runs what
+ * was registered now; on a database other instances may share, activating
+ * here would turn the app on for all of them, so the result says where to do
+ * it instead. The action checks the database again before it acts.
+ *
+ * Shipping is a commit and a deploy, which the server never does: a web
+ * process committing to its own checkout would commit whatever else is in it.
+ */
+export default function RegisterResult({
+  result,
+  name,
+}: {
+  result: Registered;
+  name: string;
+}) {
+  const isApp = result.kind === "app";
+  return (
+    <div className="space-y-5">
+      <Notice tone="success" title={`Registered to ${result.installPath}`}>
+        <p>
+          The registry generator loaded its code and accepted it
+          {result.deferredChecked > 0 ? ", including what install's check left for registration" : ""}
+          .{" "}
+          {result.servesNow ? (
+            "The dev server runs it now."
+          ) : (
+            <>
+              This server runs a production build of this checkout, so it runs
+              the new code after <code className="font-mono text-xs">npm run build</code>{" "}
+              and a restart.
+            </>
+          )}
+        </p>
+      </Notice>
+
+      <dl className="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-2 text-sm">
+        <Row label="Version">
+          {result.version}
+          {result.gitTag && <span className="text-muted-foreground"> ({result.gitTag})</span>}
+        </Row>
+        <Row label="Commit">
+          <code className="break-all font-mono text-xs">{result.commitSha}</code>
+        </Row>
+        <Row label="Contents">
+          {result.fileCount} files · {Math.max(1, Math.round(result.byteCount / 1024))} KB
+        </Row>
+        <Row label="Database">
+          {describeHosts(result.database)}
+          <span className="text-muted-foreground">
+            {result.database.local ? " · on this machine" : " · other instances may use it"}
+          </span>
+        </Row>
+      </dl>
+
+      {isApp ? (
+        <Section title="Turn it on">
+          <Activation result={result} name={name} />
+        </Section>
+      ) : (
+        <Section title="Set it up">
+          <p className="text-sm text-foreground">
+            Configure it in Admin &gt; Connectors
+            {result.servesNow ? "" : ", once this server has been rebuilt and restarted"}.
+          </p>
+        </Section>
+      )}
+
+      {/*
+        Shipping. The prepared commit message and the link to the source at
+        the installed commit belong in this section, beside these steps.
+      */}
+      <Section title="Ship it">
+        <ol className="list-decimal space-y-1 pl-5 text-sm text-foreground">
+          <li>
+            Commit <code className="font-mono text-xs">{result.installPath}</code>{" "}
+            to your repository. Until then it runs only in this checkout.
+          </li>
+          <li>
+            Deploy.
+            {isApp && " It arrives inactive on each instance: activate it there, in Admin > Apps."}
+          </li>
+        </ol>
+      </Section>
+    </div>
+  );
+}
+
+function Activation({ result, name }: { result: Registered; name: string }) {
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<ActivateOutcome | null>(null);
+  const hosts = describeHosts(result.database);
+
+  if (result.activation === "elsewhere") {
+    return (
+      <p className="text-sm text-foreground">
+        This checkout&apos;s database is on {hosts}, which other instances may
+        use too, so {name} isn&apos;t turned on from here: that would turn it on
+        for every instance on that database. Activate it in Admin &gt; Apps on
+        the instance that serves it.
+      </p>
+    );
+  }
+  if (result.activation === "after-rebuild") {
+    return (
+      <p className="text-sm text-foreground">
+        This checkout&apos;s database is on this machine. Once this server has
+        been rebuilt and restarted, activate {name} in Admin &gt; Apps.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-foreground">
+        This checkout&apos;s database is on this machine, so turning {name} on
+        here changes nothing anywhere else.
+        {result.migrations > 0 && (
+          <>
+            {" "}
+            It has {result.migrations} {result.migrations === 1 ? "migration" : "migrations"}: run{" "}
+            <code className="font-mono text-xs">npm run migrate:apps</code> in this checkout
+            first, or it waits until you do.
+          </>
+        )}
+      </p>
+      {outcome?.ok ? (
+        <Notice tone="success" title="Active in this checkout">
+          Grant it to people in Admin &gt; Users.
+        </Notice>
+      ) : (
+        <>
+          {outcome && !outcome.ok && (
+            <Notice tone={outcome.tone}>
+              <WithCode text={outcome.message} />
+            </Notice>
+          )}
+          <Button
+            variant="primary"
+            busy={busy}
+            busyLabel="Activating…"
+            onClick={async () => {
+              setBusy(true);
+              try {
+                setOutcome(await activateInCheckoutAction({ slug: result.slug }));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Activate in this checkout
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section>
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <div className="mt-2">{children}</div>
+    </section>
+  );
+}
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-foreground">{children}</dd>
+    </>
+  );
+}
