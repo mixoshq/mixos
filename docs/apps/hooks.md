@@ -57,13 +57,13 @@ export default function register(hooks: HookRegistrar) {
 ```
 
 The platform imports every app's entrypoint before it dispatches a hook that
-needs one, and calls it with a registrar attributed to your app. Registering in
-a page or route instead only works on requests that happen to import that file.
-On `/login`, for one, nothing imports app code, so a listener registered there
-never runs. In development, saving an existing `hooks.ts` replaces your
-registrations on the next request. Adding `hooks.ts` for the first time, or
-changing `branding` in `app.json`, changes the generated registry, so restart
-`npm run dev`, which regenerates it.
+needs one, and calls it with a registrar attributed to your app. A listener
+registered from a route instead, through `context.hooks`, exists only after that
+route has run in the same server process, and is added again each time it runs.
+In development, saving an existing `hooks.ts` replaces your registrations on the
+next request. Adding `hooks.ts` for the first time, or changing `branding` in
+`app.json`, changes the generated registry, so restart `npm run dev`, which
+regenerates it.
 
 `hooks.ts` runs server-side and imports from the same list as the rest of the
 app (see [What an app can import](./architecture.md#what-an-app-can-import)): no
@@ -92,7 +92,8 @@ methods:
 import type { HookRegistrar } from "@/lib/hooks";
 
 export default function register(hooks: HookRegistrar) {
-  // Modify data flowing through a core filter (no prefix)
+  // A core filter keeps its bare name (no prefix). This one is declared but
+  // not applied yet, so it has no effect: see Available Core Hooks below.
   hooks.addFilter("user-display-name", async (name, user) => {
     return `${name} (VIP)`;
   });
@@ -110,7 +111,7 @@ export default function register(hooks: HookRegistrar) {
 ```
 
 ```ts
-// In an API route, a job or a service handler
+// In an API route or a job
 await context.hooks.doAction("ready"); // fires "my-app:ready"
 ```
 
@@ -127,7 +128,7 @@ have been applied.
 
 | Name | Description | Args |
 | --- | --- | --- |
-| `init` | Fires once when MixOS initializes. | (none) |
+| `init` | Declared, but **nothing currently fires it.** | (none) |
 | `user-login` | Declared, but **nothing currently fires it.** Its trigger was the SSO sign-in callback, which no longer exists. | `{ id, email }` |
 | `user-sync` | Declared, but **nothing currently fires it.** Its trigger was the SSO profile sync, which no longer exists. | `{ id, email, name }` |
 
@@ -135,7 +136,7 @@ have been applied.
 
 | Name | Description | Args |
 | --- | --- | --- |
-| `user-display-name` | Transform how a user's name is displayed across the platform. | `displayName: string, user: { id, email }` |
+| `user-display-name` | Declared, but **nothing currently applies it**, so a filter on it has no effect. | `displayName: string, user: { id, email }` |
 | `brand-name` | The product name in the menu bar, on the sign-in page, in the tab title and as the installed PWA's name. **Bounded**, see [Brand hooks](#brand-hooks). | `name: string` |
 | `menu-bar-logo` | The mark beside the name in the menu bar. **Bounded.** | `logo: { src, width, height } \| null` |
 | `login-logo` | The mark above the name on the sign-in page. **Bounded.** | `logo: { src, width, height } \| null` |
