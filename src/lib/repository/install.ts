@@ -1456,7 +1456,8 @@ async function runInstall(
     which every build stamps into `src/generated/build-info.ts` (see
     `src/lib/platform/version.ts`). Every checkout and every deployment has one,
     so the floor the publisher declared holds wherever this runs. Register checks
-    it again, against the checkout it runs in.
+    it again, against the checkout it runs in, and every build checks it once
+    more, from the install record (scripts/generate-project-registry.ts).
 
     Unlike `yanked`, this has no override. A withdrawn release is a risk an admin
     is in a position to weigh; a release that needs platform features this build

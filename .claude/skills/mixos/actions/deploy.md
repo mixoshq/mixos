@@ -244,6 +244,11 @@ file split across commits (step 5). In the patch, for each of those version
 fields, delete the `+` line and change the `-` line's leading `-` to a space,
 then apply it with `git apply --cached --recount`. If the bump is all there
 is, there is nothing to commit: go on as for a clean tree (step 1).
+An extension the bump let in, one whose `.registry.json` has a
+`requiresMixOS` above the committed version, fails the build without it, in
+CI and on every host. Leave its folder out too, and list it under "Left out"
+with the reason, such as "needs MixOS 0.2.0; the build fails until that
+release is merged".
 
 **What's new.** If the work adds or changes developer-facing behavior — a
 `/mixos` action, a workflow change, a breaking change — draft a short
