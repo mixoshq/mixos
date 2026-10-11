@@ -6,10 +6,12 @@
  * Which paths the proxy runs for, decided by Next's own matcher code from
  * `config.matcher`, the way the server decides it.
  *
- * The app API mounts must stay out: Next keeps only the first 10 MB of the
- * body of any request the proxy runs for, and hands the route the rest cut off
- * with nothing to say so. Everything else must stay in, because the proxy is
- * where every other path gets the maintenance response.
+ * The routes that read their own bodies must stay out: Next keeps only the
+ * first 10 MB of the body of any request the proxy runs for, and hands the
+ * route the rest cut off with nothing to say so. Those are the two app API
+ * mounts and the webhook route, and each gives the maintenance response
+ * itself. Everything else must stay in, because the proxy is where every other
+ * path gets it.
  */
 
 import { test } from "node:test";
@@ -38,7 +40,7 @@ function proxyRuns(pathname: string): boolean {
   return match(pathname, req, {}) || match(decodeURIComponent(pathname), req, {});
 }
 
-test("the two app API mounts are outside the proxy, at every depth", () => {
+test("the app API mounts and the webhook route are outside the proxy, at every depth", () => {
   for (const path of [
     "/api/apps/notes",
     "/api/apps/notes/items",
@@ -46,6 +48,7 @@ test("the two app API mounts are outside the proxy, at every depth", () => {
     "/api/p/notes",
     "/api/p/notes/items",
     "/api/p/notes/items/%34%32",
+    "/api/webhooks/github",
   ]) {
     assert.equal(proxyRuns(path), false, path);
   }

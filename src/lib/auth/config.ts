@@ -6,7 +6,7 @@ import type { NextAuthConfig, Session, User } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
 import { createServiceClient } from "@/lib/db/server";
-import { verifyPassword } from "./password";
+import { DUMMY_PASSWORD_HASH, verifyPassword } from "./password";
 import { chargeSignInAttempt } from "./sign-in-limit";
 
 const ALLOWED_DOMAINS = process.env.ALLOWED_EMAIL_DOMAINS
@@ -55,6 +55,8 @@ const DATABASE_CHECK: CredentialsCheck = {
  * The credentials provider's `authorize()`, the one password check. Every
  * route into it charges the same per-IP sign-in limit, and charges it first:
  * a refused attempt reads no account and runs no hash (./sign-in-limit.ts).
+ * An attempt let through runs exactly one hash, whether or not the email has
+ * an account.
  */
 export function createCredentialsAuthorize(
   check: CredentialsCheck = DATABASE_CHECK,
@@ -72,7 +74,14 @@ export function createCredentialsAuthorize(
     if (!emailAllowed(email)) return null;
 
     const user = await check.findAccount(email);
-    if (!user?.password_hash) return null;
+    if (!user?.password_hash) {
+      // No account, or one without a password. Compare against a hash whose
+      // password nobody has, and refuse whatever it says. This answer then
+      // costs one hash, as a wrong password does, so its timing doesn't say
+      // whether the email has an account.
+      await check.verifyPassword(password, DUMMY_PASSWORD_HASH);
+      return null;
+    }
     const ok = await check.verifyPassword(password, user.password_hash);
     if (!ok) return null;
 

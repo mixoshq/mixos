@@ -5,11 +5,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { appRegistry } from "@/generated/app-registry";
-import { isAppActive } from "@/lib/apps/access";
+import { checkAppGate } from "@/lib/apps/app-gate";
 import { publicPageAccess } from "@/lib/apps/public-page";
 import { loadAppPage } from "@/lib/apps/loader";
 import { isAppUnlocked } from "@/lib/apps/public-access";
 import { hasAppPassword } from "@/lib/apps/app-password-store";
+import AppUpdating from "@/components/apps/app-updating";
 import PasswordGate from "@/components/apps/password-gate";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -29,7 +30,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     appSlug,
     path.join("/"),
     appRegistry,
-    isAppActive,
+    checkAppGate,
   );
   return {
     title: access.kind === "not-served" ? appSlug : access.manifest.name,
@@ -51,9 +52,12 @@ export default async function PublicAppPage({ params }: Props) {
     appSlug,
     pageKey,
     appRegistry,
-    isAppActive,
+    checkAppGate,
   );
   if (access.kind === "not-served") notFound();
+  // The app's own migrations are behind: the app gate holds back its code, so
+  // the page is not loaded. The proxy normally answers this first, with a 503.
+  if (access.kind === "updating") return <AppUpdating fullScreen />;
   const { manifest } = access;
 
   if (access.kind === "password") {

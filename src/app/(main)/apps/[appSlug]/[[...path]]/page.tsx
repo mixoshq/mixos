@@ -7,9 +7,11 @@ import { notFound, redirect } from "next/navigation";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { appRegistry } from "@/generated/app-registry";
 import { getUserById, hasAppGrant, isAppActive } from "@/lib/apps/access";
+import { checkAppGate } from "@/lib/apps/app-gate";
 import { canOpenAppPage } from "@/lib/apps/page-access";
-import { loadAppPage } from "@/lib/apps/loader";
+import { hasAppPage, loadAppPage } from "@/lib/apps/loader";
 import TrackAppOpen from "@/components/analytics/track-app-open";
+import AppUpdating from "@/components/apps/app-updating";
 
 interface Props {
   params: Promise<{ appSlug: string; path?: string[] }>;
@@ -43,6 +45,19 @@ export default async function AppPage({ params }: Props) {
     isAppActive,
   });
   if (!allowed) redirect("/");
+
+  // The app gate, before the page's module is imported, because importing runs
+  // its top-level code. The app is active, or the check above would have
+  // refused it, so what is left to hold it back is its own migrations being
+  // behind; the proxy normally answers that first, with a 503. Switched off
+  // since that check, it is refused as above, and a page the app doesn't have
+  // is still a 404.
+  const gate = await checkAppGate(appSlug);
+  if (!gate.open) {
+    if (gate.reason !== "updating") redirect("/");
+    if (!hasAppPage(appSlug, path)) notFound();
+    return <AppUpdating />;
+  }
 
   const PageComponent = await loadAppPage(appSlug, path);
   if (!PageComponent) notFound();
