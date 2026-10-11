@@ -2,7 +2,9 @@
 
 ## Overview
 
-Telemetry lets you see **how a connector is actually used** — which operations get called, how often, and **which apps** are driving them. It is developer-provided and opt-in: you declare the methods you want counted in `connector.json`, and the platform does the rest. A connector that declares nothing is never instrumented.
+Telemetry lets you see **how a connector is actually used** — which operations get called, how often, and **which apps** are driving them. You list the connector's methods in `connector.json`, and the platform does the rest.
+
+The list is required, not opt-in: **every public method on the class must be in it**, or the build fails. The exceptions are `initialize`, `testConnection` and `handleWebhook`, which only the platform calls. Make a helper `private` if apps should not call it, and mark each method that changes anything upstream `"mutates": true`.
 
 ```json
 // connector.json
@@ -10,7 +12,8 @@ Telemetry lets you see **how a connector is actually used** — which operations
   "name": "my-service",
   "telemetry": [
     { "method": "enrichPerson",  "description": "Enriched a person record" },
-    { "method": "enrichCompany", "description": "Enriched a company record" }
+    { "method": "enrichCompany", "description": "Enriched a company record" },
+    { "method": "updatePerson",  "description": "Updated a person record", "mutates": true }
   ]
 }
 ```
@@ -31,7 +34,7 @@ flowchart TD
     PROXY --> ROW["records one telemetry_events row<br/>source_type: 'connector'"]
 ```
 
-Only the method name and the declared, non-sensitive metadata are recorded — **never** call arguments, response bodies, credentials, or tokens.
+Each row records the connector, the method, the calling app, **the user whose request made the call** (none for a scheduled job or a public route), and whether the call succeeded, with its error category if it did not. **Never** call arguments, response bodies, credentials, or tokens.
 
 ## Caller-app attribution
 
@@ -45,21 +48,24 @@ Events are visible to admins under **Administration → Analytics**. Selecting y
 - a trend over a selectable time range,
 - a breakdown **by calling app** (`caller_app_slug`).
 
+The connector's **Usage Logs** tab, under **Administration → Connectors**, lists its last 100 calls: when, which app, which user by name, which method, and the result.
+
 ## Why the manifest, not the class
 
 The **manifest is the visible spec** and the **platform is the operative
-behavior**. Declaring `telemetry` opts specific methods into instrumentation
-without the connector class changing — no tracker import, no call site, nothing
-for a connector author to forget. The registry generator validates that each
-declared `method` actually exists on the class at build time.
+behavior**. Declaring `telemetry` instruments the methods without the
+connector class changing — no tracker import, no call site, nothing for a
+connector author to forget. The registry generator checks the list against the
+class at build time, both ways: every public method must be declared, and every
+declared `method` must be a public method on the class.
 
 ## Limits
 
-- **Declared methods only.** A method not listed in `telemetry` is never counted. Method names must match the public methods on your class.
+- **Every public method, and nothing else.** The build fails on a public method missing from `telemetry`, and on a listed method the class doesn't have as a public method.
 - **The list also decides what an MCP tool can call.** A tool reaches a connector only through the methods listed here, and one marked `"mutates": true` throws when a tool calls it — so mark every method that changes anything upstream. See [MCP tools](../apps/mcp.md#read-only-is-enforced-not-requested).
 - **No custom/domain events.** Connector telemetry counts method *calls* — it is auto-instrumented, not a general `track(event, props)` API. If you need arbitrary custom events, emit them from the **app** that calls the connector, using [app telemetry](../apps/telemetry.md).
 - **Best-effort.** Recording never blocks or fails a connector call.
-- **Never sensitive.** Arguments, results, and credentials are never recorded — only the method name and declared metadata.
+- **No payloads.** Arguments, results, and credentials are never recorded. The calling user is: admins see their name beside each call on the Usage Logs tab.
 
 ## How it's wired (platform internals)
 

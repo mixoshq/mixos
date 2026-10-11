@@ -4,7 +4,7 @@
 
 Connector credentials are managed entirely through the admin UI and are never stored in code or environment variables.
 
-1. An admin navigates to **Administration → Connector Registry** and enters the required credentials for each connector.
+1. An admin navigates to **Administration → Connectors** and enters the required credentials for each connector.
 2. Credentials are encrypted using AES-256-GCM and stored in the `connector_configs` database table. The encryption key is the `CONNECTOR_ENCRYPTION_KEY` environment variable.
 3. When an app context is built, credentials are decrypted server-side and passed to the connector's `initialize()` method. They never leave the server.
 
@@ -13,19 +13,21 @@ Connector credentials are managed entirely through the admin UI and are never st
 A connector may be registered but not yet configured by an admin. Always check `configured` before making API calls to avoid cryptic errors.
 
 ```ts
-const myService = context.connectors["my-service"];
+// inside a defineRoute handler
+const myService = context.connectors["my-service"] as MyServiceConnector | undefined;
 
 if (!myService?.configured) {
-  // Connector exists but admin hasn't entered credentials yet
-  return NextResponse.json(
-    { error: "Connector not configured. Ask an admin to set it up." },
-    { status: 503 }
-  );
+  // Connector exists but admin hasn't entered credentials yet: answers 503
+  throw AppError.unavailable("My Service is not configured. Ask an admin to set it up.");
 }
 
 // Safe to call methods
-const data = await myService.getItems();
+const items = await myService.listItems();
 ```
+
+`AppError` comes from `@/lib/apps/route`, and `MyServiceConnector` is a type
+import from `@connectors/my-service`. See [Usage in Apps](usage-in-apps.md) for
+the whole route.
 
 ## Updating Credentials
 
@@ -69,8 +71,8 @@ them in `credentialFields`, and never read them from a connector method.
 
 ## Proving credentials work
 
-`configured` only checks that the required fields are non-empty. **Test
-Connection** in the Registry runs the connector's `testConnection()` against the
+`configured` only checks that the required fields are non-empty. **Verify
+connection** in the Registry runs the connector's `testConnection()` against the
 real API, which is how an admin finds out a key was pasted with a trailing space
 now rather than through a broken widget next week.
 
@@ -91,7 +93,7 @@ While a connector is disabled:
 - Its webhooks get the 401 a connector with no signing secret gets, and nothing
   is recorded, so a delivery the provider retries after it is enabled is
   processed.
-- Connect, the OAuth callback and Test Connection are refused.
+- Connect, the OAuth callback and Verify connection are refused.
 - Activating an app doesn't check it. An app activated while a connector it
   requires is disabled runs, and its calls to that connector fail as above.
 
@@ -109,8 +111,10 @@ naming the app and the query is enough. A **user-scoped** connector does not,
 and the same key then serves one person's data to another.
 
 The platform cannot enforce this, and it is worth being precise about why: an
-app chooses its own cache keys when it calls `context.cache`, so the connector
-layer never sees them. The rule is therefore yours to keep:
+app chooses its own cache keys for whatever it caches or stores, so the
+connector layer never sees them. (`createSwrCache` makes you choose: set
+`userScoped: true` and every call must pass the user's id, which goes into the
+key.) The rule is therefore yours to keep:
 
 ```ts
 // WRONG for a user-scoped connector — one key, many people
