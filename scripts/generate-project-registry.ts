@@ -90,6 +90,14 @@ import {
   buildCheckVerdict,
   serializeCheckVerdict,
 } from "../src/lib/repository/check-verdict";
+import {
+  CheckoutLockHeldError,
+  CheckoutLockLostError,
+  acquireCheckoutLock,
+  adoptCheckoutLock,
+  describeCheckoutLockHolder,
+  type CheckoutLock,
+} from "../src/lib/platform/checkout-lock";
 import * as ts from "typescript";
 import { z } from "zod";
 
@@ -183,10 +191,10 @@ const PUBLIC_BRANDING_DIR = path.resolve(__dirname, "../public/branding");
  *
  * Not `_template` and its kin, which are scaffolds. And not a folder whose name
  * starts with a dot, which is something kept beside the extensions rather than
- * one of them: an install's staging copy (`.installing-<slug>/`, see
- * src/lib/repository/install.ts) left by a crash, a backup, an editor's
- * metadata. Scanned, a staging copy of an app would be imported and registered
- * as an app of its own.
+ * one of them: a copy set aside, a backup, an editor's metadata. Scanned, a
+ * copy of an app would be imported and registered as an app of its own.
+ * Installs stage and wait in `.mixos/` (src/lib/repository/pending.ts), which
+ * no scan reads.
  */
 function isExtensionFolder(entry: fs.Dirent): boolean {
   return entry.isDirectory() && !entry.name.startsWith("_") && !entry.name.startsWith(".");
@@ -2684,38 +2692,146 @@ async function runCheck(args: readonly string[]): Promise<number> {
   return 0;
 }
 
+/* -------------------------------------------------------------------------- */
+/*  The full run, under the checkout lock                                     */
+/* -------------------------------------------------------------------------- */
+
 /*
-  Run as a script: the full generator with no arguments, or an install's check
-  with `--check`. Imported, as the tests import it, nothing runs.
+  generate-project-registry.ts [--lock-token <token>]
+
+  A full run rewrites src/generated/ and public/ from apps/, connectors/ and
+  themes/, which an install, a registration or a discard in this checkout also
+  changes. So it holds the checkout lock, `.mixos/lock`
+  (src/lib/platform/checkout-lock.ts), for as long as it runs. While another
+  process holds it, a run waits, saying who for, and gives up after
+  LOCK_WAIT_MS. A lock whose holder has stopped on this machine is taken over;
+  one from another machine, such as a dev container, never is.
+
+  An install or a registration runs the generator while it holds the lock
+  itself, and passes its token: `--lock-token <token>`. The run then works under
+  its parent's lock, which it checks the file holds, and leaves it for the
+  parent to release. A token the lock doesn't hold stops the run before it
+  changes anything.
+
+  `--check` (above) writes nothing but its verdict, so it takes no lock: the
+  install that runs it holds one.
+*/
+
+const ROOT = path.resolve(__dirname, "..");
+
+/** How long a full run waits for another process's checkout lock. */
+const LOCK_WAIT_MS = 5 * 60_000;
+
+const FULL_USAGE = "Usage: generate-project-registry.ts [--lock-token <token>]";
+
+const SIGNAL_EXIT: Partial<Record<NodeJS.Signals, number>> = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
+
+/**
+ * The full run, from its arguments to its exit code, under the checkout lock.
+ * `options` are for tests: another checkout, another run in main()'s place, a
+ * shorter wait.
+ */
+async function runFullGenerator(
+  args: readonly string[],
+  {
+    root = ROOT,
+    run = main,
+    waitMs = LOCK_WAIT_MS,
+    pollMs = 250,
+  }: { root?: string; run?: () => Promise<void>; waitMs?: number; pollMs?: number } = {},
+): Promise<number> {
+  let token: string | null = null;
+  if (args.length === 2 && args[0] === "--lock-token" && args[1]) {
+    token = args[1];
+  } else if (args.length !== 0) {
+    // Never a full run on arguments it does not know: a caller that meant
+    // `--check` and lost the flag would otherwise rewrite src/generated/.
+    console.error(`Unknown arguments: ${args.join(" ")}\n${FULL_USAGE}\n${CHECK_USAGE}`);
+    return 2;
+  }
+
+  let lock: CheckoutLock;
+  try {
+    if (token) {
+      lock = adoptCheckoutLock(root, token);
+    } else {
+      lock = await acquireCheckoutLock(root, "the registry generator", {
+        waitMs,
+        pollMs,
+        onWait: (holder) =>
+          console.log(
+            holder
+              ? `Waiting for the checkout lock (.mixos/lock), held by ${describeCheckoutLockHolder(holder)}...`
+              : "Waiting for the checkout lock (.mixos/lock), whose file can't be read...",
+          ),
+      });
+      if (lock.tookOver) {
+        console.log(
+          `Took over the checkout lock from ${describeCheckoutLockHolder(lock.tookOver)}, which had stopped.`,
+        );
+      }
+    }
+  } catch (err) {
+    if (err instanceof CheckoutLockHeldError) {
+      console.error(`${err.message}\nThe registry was not generated.`);
+      return 1;
+    }
+    if (err instanceof CheckoutLockLostError) {
+      console.error(
+        "--lock-token names a checkout lock this checkout doesn't hold, so the registry was " +
+          "not generated. The process that holds the lock passes it; nothing else should.",
+      );
+      return 1;
+    }
+    throw err;
+  }
+
+  // A run that took the lock itself releases it however it ends, Ctrl-C
+  // included. One under its parent's lock leaves it to the parent.
+  const signals = token ? [] : (Object.keys(SIGNAL_EXIT) as NodeJS.Signals[]);
+  const onSignal = (signal: NodeJS.Signals) => {
+    lock.release();
+    process.exit(SIGNAL_EXIT[signal] ?? 1);
+  };
+  for (const signal of signals) process.once(signal, onSignal);
+  try {
+    await run();
+    return 0;
+  } catch (err) {
+    console.error(err);
+    return 1;
+  } finally {
+    for (const signal of signals) process.removeListener(signal, onSignal);
+    lock.release();
+  }
+}
+
+/*
+  Run as a script: the full generator, or an install's check with `--check`.
+  Imported, as the tests import it, nothing runs.
 */
 if (require.main === module) {
   const args = process.argv.slice(2);
-  if (args.length === 0) {
-    main().catch((err) => {
-      console.error(err);
-      process.exit(1);
+  const exit = (code: number) => {
+    process.exitCode = code;
+  };
+  if (args[0] === "--check") {
+    runCheck(args).then(exit, (err) => {
+      console.error(err instanceof Error ? err.message : err);
+      exit(1);
     });
-  } else if (args[0] === "--check") {
-    runCheck(args).then(
-      (code) => {
-        process.exitCode = code;
-      },
-      (err) => {
-        console.error(err instanceof Error ? err.message : err);
-        process.exitCode = 1;
-      },
-    );
   } else {
-    // Never a full run on arguments it does not know: a caller that meant
-    // `--check` and lost the flag would otherwise rewrite src/generated/.
-    console.error(`Unknown arguments: ${args.join(" ")}\n${CHECK_USAGE}`);
-    process.exitCode = 2;
+    runFullGenerator(args).then(exit, (err) => {
+      console.error(err);
+      exit(1);
+    });
   }
 }
 
 export {
   checkStaged,
   readRegistered,
+  runFullGenerator,
   scanApps,
   scanConnectors,
   scanThemes,
