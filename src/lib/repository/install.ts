@@ -21,7 +21,8 @@
  * 3.  Download from GitHub, pinned to the commit, through the host allowlist.
  * 4.  Read the archive IN MEMORY. Reject symlinks, traversal, oversize trees.
  * 5.  **Verify the content hash.** Mismatch ends it here, with nothing written.
- * 6.  Pre-flight the manifest — it exists, it parses, it is for this slug.
+ * 6.  Pre-flight: the manifest exists, parses and is for this slug, and no
+ *     path would land on disk as something other than what it names.
  * 7.  Write to a staging directory beside the target, never to the target.
  * 8.  Rename staging into place. This is the first moment the tree is live.
  * 9.  Run the project registry generator — the authoritative validation.
@@ -368,15 +369,125 @@ function resolveInstallDir(kind: ExtensionKind, slug: string): { dir: string; re
 /* -------------------------------------------------------------------------- */
 
 /**
+ * Characters no path in a package may hold: the control characters (C0, DEL
+ * and C1) and Unicode's bidi controls, which can rewrite how a path prints in a
+ * terminal or in the dialogs, so that a reviewer reads one name while the disk
+ * holds another. The line and paragraph separators are refused with them, for
+ * starting a line where the name shows none.
+ */
+const UNPRINTABLE_IN_PATH = /[\p{Cc}\p{Bidi_Control}\p{Zl}\p{Zp}]/u;
+
+/**
+ * Files git reads from the tree it is adding, at any depth.
+ *
+ * A package that ships one changes what the operator's repository records when
+ * the extension is committed, or how a review shows it: `.gitattributes` can
+ * hide a diff (`-diff`) or fold files away as generated, `.gitignore` can keep a
+ * file the extension runs out of the commit, and a `.git` makes git treat the
+ * folder as a repository of its own, which `git add` does not descend into.
+ */
+const GIT_CONTROL_FILES = new Set([".gitattributes", ".gitignore", ".git"]);
+
+/** A path with each character from UNPRINTABLE_IN_PATH, or any non-ASCII one if asked, spelled `\u{…}`. */
+function printablePath(p: string, { ascii = false }: { ascii?: boolean } = {}): string {
+  const pattern = ascii ? /[^\x20-\x7e]/gu : new RegExp(UNPRINTABLE_IN_PATH.source, "gu");
+  return p.replace(pattern, (c) => `\\u{${c.codePointAt(0)!.toString(16).toUpperCase()}}`);
+}
+
+/**
+ * The spelling two paths share when a default macOS or Windows disk would
+ * store them as one: case and Unicode normalisation ignored. Upper-casing
+ * first folds the few letters lower-casing alone leaves apart (`ſ` and `s`).
+ */
+function foldPath(p: string): string {
+  return p.normalize("NFC").toUpperCase().toLowerCase().normalize("NFC");
+}
+
+/**
+ * Every way a package's paths would put something on disk other than what they
+ * name, one line each. Empty for a package whose paths are what they say.
+ *
+ * - Two paths, or two folders, the same but for case or Unicode normalisation.
+ *   A case-insensitive checkout, the default on macOS and Windows, would store
+ *   them as one: two files become whichever was written last, and that is the
+ *   one that runs.
+ * - A control, bidi or line-separator character anywhere in a path.
+ * - A git control file at any depth (GIT_CONTROL_FILES).
+ *
+ * Exported for its tests.
+ */
+export function pathProblems(paths: readonly string[]): string[] {
+  const problems = new Set<string>();
+  const spellings = new Map<string, string>();
+
+  for (const p of paths) {
+    if (UNPRINTABLE_IN_PATH.test(p)) {
+      problems.add(
+        `"${printablePath(p)}" has a control or bidi character in its name, which can change how the name prints.`,
+      );
+      continue;
+    }
+
+    const segments = p.split("/");
+    const git = segments.find((s) => GIT_CONTROL_FILES.has(foldPath(s)));
+    if (git) {
+      problems.add(
+        `"${p}" is a git control file (${git}), which would change what your repository records for the extension, or how a review shows it.`,
+      );
+    }
+
+    // Each folder on the way down, and then the file itself.
+    for (let i = 1; i <= segments.length; i++) {
+      const spelled = segments.slice(0, i).join("/");
+      const folded = foldPath(spelled);
+      const other = spellings.get(folded);
+      if (other === undefined) {
+        spellings.set(folded, spelled);
+      } else if (other !== spelled) {
+        const byForm = other.normalize("NFC") === spelled.normalize("NFC");
+        const [a, b] = byForm
+          ? [printablePath(other, { ascii: true }), printablePath(spelled, { ascii: true })]
+          : [other, spelled];
+        problems.add(
+          `"${a}" and "${b}" differ only in ${byForm ? "Unicode normalisation" : "case"}, so a case-insensitive ` +
+            `disk, the default on macOS and Windows, would store them as one, and what landed there would not be ` +
+            `what the source shows.`,
+        );
+        break;
+      }
+    }
+  }
+  return [...problems];
+}
+
+/**
  * The cheap checks, run on the in-memory tree before anything is written.
  *
- * These do NOT replace the generator. They exist so the common failures — an
- * archive that is not an extension at all, a manifest for a different slug —
+ * These do NOT replace the registry check. They exist so the common failures —
+ * an archive that is not an extension at all, a manifest for a different slug —
  * are reported without the instance's source tree being touched, and so the
  * message names the actual problem rather than being whatever the generator
  * says when it meets a directory it cannot read.
+ *
+ * And so that what is reviewed is what runs. A reviewer reads the source on
+ * GitHub; what runs is what lands on this disk. A path that a case-insensitive
+ * disk would merge with another, or that prints as something it is not, or a
+ * git control file that changes what the operator's commit records, would make
+ * the two differ: `pathProblems` above.
+ *
+ * Exported for its tests.
  */
-function preflight(kind: ExtensionKind, slug: string, entries: TarEntry[]): void {
+export function preflight(kind: ExtensionKind, slug: string, entries: TarEntry[]): void {
+  const problems = pathProblems(entries.map((e) => e.path));
+  if (problems.length > 0) {
+    throw new InstallError(
+      `The package has ${problems.length === 1 ? "a path" : "paths"} this instance will not write, ` +
+        `because what would land on disk would not be what the source shows.`,
+      "invalid-package",
+      problems.join("\n"),
+    );
+  }
+
   const byPath = new Map(entries.map((e) => [e.path, e]));
 
   const manifestName = MANIFEST_FILE[kind];
