@@ -69,6 +69,10 @@ window does that work and records are swept after a day.
 Every verification failure returns the same bare `401`, so the endpoint cannot
 be used to probe which secret or scheme is in use.
 
+Before any of this, a body over 5 MiB gets `413`, and a sender over its per-IP
+limit gets `429` with `Retry-After`. Nothing is recorded for either, so a
+provider's retry is processed.
+
 ## Why the route lives outside `/api/connectors`
 
 Webhooks are unauthenticated by nature — the caller is a third-party server with

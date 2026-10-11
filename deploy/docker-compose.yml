@@ -104,6 +104,9 @@ services:
   migrate:
     <<: *image
     command: ["node", "ops/release.cjs"]
+    # Read-only, like the app below. The release step writes nothing to disk,
+    # not even to /tmp.
+    read_only: true
     environment:
       <<: *app-env
       INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
@@ -125,6 +128,24 @@ services:
     <<: *image
     restart: unless-stopped
     environment: *app-env
+    # A read-only root filesystem, so nothing in this container can change the
+    # app's code, root included. The image's files are root's already (see the
+    # Dockerfile). What Next writes while serving goes to tmpfs mounts, which
+    # live in memory and empty on restart. Anything added that writes at
+    # runtime needs a mount of its own: docs/hosting/docker-compose.md.
+    read_only: true
+    # uid and gid 1000 are `node`, the user the server runs as. Without them
+    # Docker mounts a tmpfs as root's, and the server cannot write to it.
+    tmpfs:
+      # Optimized images from /_next/image. Next keeps this cache to half the
+      # mount's size.
+      - /app/.next/cache:size=256m,uid=1000,gid=1000
+      # Next's copy of a pre-rendered page (the 404 page) once it has served
+      # or regenerated it.
+      - /app/.next/server/route-cache:size=16m,uid=1000,gid=1000
+      # Scratch space for libraries. Nothing in MixOS writes here today. The
+      # image's /tmp is open to everyone, and so is this mount.
+      - /tmp:size=64m
     depends_on:
       migrate:
         condition: service_completed_successfully
