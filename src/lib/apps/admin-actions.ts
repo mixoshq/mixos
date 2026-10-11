@@ -119,6 +119,8 @@ export interface AppSchemaTable {
 export async function setAppActiveAction(
   slug: string,
   isActive: boolean,
+  /** The slug as the admin typed it: an app that replaces a different extension needs it (setAppActive()). */
+  typedSlug?: string,
 ): Promise<void> {
   const session = await requireReadOnlySession();
   const admin = await requireAdmin(session);
@@ -142,7 +144,7 @@ export async function setAppActiveAction(
     }
   }
 
-  await setAppActive(slug, isActive);
+  const confirmed = await setAppActive(slug, isActive, typedSlug);
 
   await recordAdminAction(
     { id: admin.id, email: admin.email },
@@ -150,6 +152,7 @@ export async function setAppActiveAction(
       action: isActive ? "app.activate" : "app.deactivate",
       targetType: "app",
       targetId: slug,
+      ...(confirmed ? { details: confirmed } : {}),
     },
   );
 

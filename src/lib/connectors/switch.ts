@@ -3,8 +3,17 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { createServiceClient } from "@/lib/db/server";
+import { identitySettingKey } from "@/lib/repository/identity";
 import { ConnectorError } from "./errors";
+import {
+  REPLACED_KEY_PREFIX,
+  SWITCH_KEY_PREFIX,
+  connectorReplacedKey,
+  connectorSwitchKey,
+} from "./switch-keys";
 import type { BaseConnector } from "./types";
+
+export { connectorSwitchKey };
 
 /**
  * The admin switch that turns a connector off.
@@ -29,14 +38,12 @@ import type { BaseConnector } from "./types";
  * The credentials are not touched. Turning a connector back on needs nothing
  * re-entered, and turning it off is not how to get rid of a leaked secret:
  * revoke it at the provider and save a new one.
+ *
+ * The release step turns a connector off too, when a different connector has
+ * taken its name (scripts/sync-identities.ts), and marks it replaced
+ * (`connector.replaced.<name>`, ./switch-keys.ts). Its credentials were saved
+ * for the connector before it, so enabling it then needs its name typed.
  */
-
-const KEY_PREFIX = "connector.disabled.";
-
-/** The `platform_settings` key that holds one connector's switch. */
-export function connectorSwitchKey(connectorName: string): string {
-  return `${KEY_PREFIX}${connectorName}`;
-}
 
 /**
  * Which of `names` are turned off, each with when it was.
@@ -55,7 +62,7 @@ export async function getDisabledConnectors(
   if (error) throw error;
   return new Map(
     (data as { key: string; value: string }[]).map((row) => [
-      row.key.slice(KEY_PREFIX.length),
+      row.key.slice(SWITCH_KEY_PREFIX.length),
       row.value,
     ]),
   );
@@ -65,13 +72,57 @@ export async function isConnectorDisabled(connectorName: string): Promise<boolea
   return (await getDisabledConnectors([connectorName])).has(connectorName);
 }
 
+/** A connector the release step found under a name a different one had. */
+export interface ConnectorReplacement {
+  /** When the release step marked it (ISO 8601). */
+  at: string;
+  /** The identity it replaced, and the one it has (src/lib/repository/identity.ts). */
+  previous: string;
+  identity: string | null;
+}
+
+/**
+ * Which of `names` the release step marked as replacing a different connector.
+ * Enabling one needs its name typed (setConnectorEnabled() in ./switch-admin.ts).
+ *
+ * Throws when the marks cannot be read, as getDisabledConnectors() does.
+ */
+export async function getReplacedConnectors(
+  names: readonly string[],
+): Promise<Map<string, ConnectorReplacement>> {
+  if (names.length === 0) return new Map();
+  const { data, error } = await createServiceClient()
+    .from("platform_settings")
+    .select("key, value, updated_at")
+    .in("key", [
+      ...names.map(connectorReplacedKey),
+      ...names.map((name) => identitySettingKey("connector", name)),
+    ]);
+  if (error) throw error;
+  const rows = data as { key: string; value: string; updated_at: string }[];
+  const identities = new Map(rows.map((row) => [row.key, row.value]));
+  const replaced = new Map<string, ConnectorReplacement>();
+  for (const row of rows) {
+    if (!row.key.startsWith(REPLACED_KEY_PREFIX)) continue;
+    const name = row.key.slice(REPLACED_KEY_PREFIX.length);
+    replaced.set(name, {
+      at: new Date(row.updated_at).toISOString(),
+      previous: row.value,
+      identity: identities.get(identitySettingKey("connector", name)) ?? null,
+    });
+  }
+  return replaced;
+}
+
 /**
  * Turn a connector off or back on. The caller is responsible for
- * `requireAdmin()` and for the audit row; `setConnectorEnabled()` in
- * ./switch-admin.ts does both.
+ * `requireAdmin()`, for the audit row, and for a typed name when the connector
+ * is marked replaced; `setConnectorEnabled()` in ./switch-admin.ts does all
+ * three.
  *
  * Turning off keeps the first timestamp when the connector is already off, so
- * the row always says when it went off. Turning on deletes the row.
+ * the row always says when it went off. Turning on deletes the row, and the
+ * mark that a different connector took the name.
  */
 export async function setConnectorDisabled(
   connectorName: string,
@@ -84,7 +135,9 @@ export async function setConnectorDisabled(
         { key: connectorSwitchKey(connectorName), value: now, updated_at: now },
         { onConflict: "key", ignoreDuplicates: true },
       )
-    : await settings.delete().eq("key", connectorSwitchKey(connectorName));
+    : await settings
+        .delete()
+        .in("key", [connectorSwitchKey(connectorName), connectorReplacedKey(connectorName)]);
   if (error) throw error;
 }
 

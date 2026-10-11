@@ -6,11 +6,12 @@
 // it). The work itself is src/lib/repository/register.ts: this reads the
 // arguments, asks before anything a person should agree to, and prints.
 //
-// After a registration it prints the hand-back (src/lib/repository/hand-back.ts):
-// what to commit and how. It also asks git, read-only, whether the checkout's
-// ignore rules would leave any of the new files out of the commit
-// (ignoredByGit()), which the admin pages can't, because the server never runs
-// git.
+// After a registration it says what install left out of the package, if
+// anything (src/lib/repository/left-out.ts), then prints the hand-back
+// (src/lib/repository/hand-back.ts): what to commit and how. It also asks git,
+// read-only, whether the checkout's ignore rules would leave any of the new
+// files out of the commit (ignoredByGit()), which the admin pages can't,
+// because the server never runs git.
 //
 // Library only. Exported for its tests, which give it a checkout, a stand-in
 // generator and their own input and output.
@@ -27,6 +28,7 @@ import {
 } from "../src/lib/platform/checkout-lock";
 import { handBackLines, type IgnoredPath } from "../src/lib/repository/hand-back";
 import { folderFiles } from "../src/lib/repository/install-record";
+import { leftOutLine } from "../src/lib/repository/left-out";
 import {
   MIXOS_DIR,
   liveLocation,
@@ -244,6 +246,8 @@ export async function runCli(args: readonly string[], options: CliOptions): Prom
             ` from commit ${result.commitSha.slice(0, 12)}.`,
         );
         say(result.nextStep);
+        const leftOut = leftOutLine(result.leftOut);
+        if (leftOut) say(leftOut);
         const live = liveLocation(options.root, result.kind, result.slug);
         const ignored = ignoredByGit(
           options.root,

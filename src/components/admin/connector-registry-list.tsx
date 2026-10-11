@@ -16,9 +16,12 @@ import {
   type ConnectorDependents,
 } from "@/lib/connectors/dependents";
 import type { ConnectorConfigState } from "@/lib/connectors/status";
+import type { ConnectorReplacement } from "@/lib/connectors/switch";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
+import { describeIdentity } from "@/lib/repository/identity";
 import ConnectorTile from "./connector-tile";
 import ConnectorConfigureDialog from "./connector-configure-dialog";
+import TypedConfirmDialog from "./typed-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { CARD_SHELL } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
@@ -69,6 +72,11 @@ export type ConnectorWithStatus = ConnectorManifest & {
    * disabled connector keeps its credentials and its `state`; nothing calls it.
    */
   disabledAt: string | null;
+  /**
+   * Set when the release step found it under a name a different connector had,
+   * and turned it off. Enabling it needs its name typed, and clears this.
+   */
+  replacement: ConnectorReplacement | null;
   oauth: ConnectorOAuthStatus | null;
 };
 
@@ -79,8 +87,15 @@ interface Props {
   /** Returns whether the connector now holds a usable credential set. */
   configureAction: (formData: FormData) => Promise<boolean>;
   testAction: (connectorName: string) => Promise<ConnectorTestOutcome>;
-  /** Disable (`enabled: false`) or Enable a connector. */
-  switchAction: (connectorName: string, enabled: boolean) => Promise<void>;
+  /**
+   * Disable (`enabled: false`) or Enable a connector. Enabling one that
+   * replaces a different connector passes its name as typed.
+   */
+  switchAction: (
+    connectorName: string,
+    enabled: boolean,
+    typedName?: string,
+  ) => Promise<void>;
 }
 
 type StatusFilter = "all" | "configured" | "unconfigured";
@@ -119,10 +134,32 @@ export default function ConnectorRegistryList({
   /** The connector awaiting Disable's confirmation, or null. */
   const [confirmingDisable, setConfirmingDisable] =
     useState<ConnectorWithStatus | null>(null);
+  /** A replacing connector awaiting Enable's typed confirmation, or null. */
+  const [confirmingEnable, setConfirmingEnable] =
+    useState<ConnectorWithStatus | null>(null);
+  const [enableError, setEnableError] = useState<string | null>(null);
 
-  function enable(name: string) {
+  function enable(connector: ConnectorWithStatus) {
+    if (connector.replacement) {
+      setEnableError(null);
+      setConfirmingEnable(connector);
+      return;
+    }
     startSwitch(async () => {
-      await switchAction(name, true);
+      await switchAction(connector.name, true);
+    });
+  }
+
+  function confirmEnable(typed: string) {
+    if (!confirmingEnable) return;
+    const name = confirmingEnable.name;
+    startSwitch(async () => {
+      try {
+        await switchAction(name, true, typed);
+        setConfirmingEnable(null);
+      } catch {
+        setEnableError("It couldn't be enabled. Reload the page and try again.");
+      }
     });
   }
 
@@ -249,7 +286,7 @@ export default function ConnectorRegistryList({
               connector={connector}
               onConfigure={() => openTile(connector.name)}
               onDisable={() => setConfirmingDisable(connector)}
-              onEnable={() => enable(connector.name)}
+              onEnable={() => enable(connector)}
               switching={switching}
             />
           ))}
@@ -348,6 +385,51 @@ export default function ConnectorRegistryList({
           </div>
         )}
       </Dialog>
+
+      {/*
+        Enabling a connector the release step found under a name a different
+        connector had asks for the name: the credentials it would be handed
+        were saved for the one before it.
+      */}
+      {confirmingEnable?.replacement && (
+        <TypedConfirmDialog
+          onClose={() => setConfirmingEnable(null)}
+          title={`Enable ${confirmingEnable.displayName}?`}
+          word={confirmingEnable.name}
+          confirmLabel="Enable"
+          busyLabel="Enabling…"
+          busy={switching}
+          error={enableError}
+          onConfirm={confirmEnable}
+        >
+          <p className="text-muted-foreground">
+            A different connector had the name{" "}
+            <code className="font-mono text-foreground">
+              {confirmingEnable.name}
+            </code>{" "}
+            before this one, so it was disabled.
+          </p>
+          <dl className="space-y-1">
+            <div className="flex flex-wrap gap-x-2">
+              <dt className="text-muted-foreground">Before</dt>
+              <dd className="text-foreground">
+                {describeIdentity(confirmingEnable.replacement.previous)}
+              </dd>
+            </div>
+            <div className="flex flex-wrap gap-x-2">
+              <dt className="text-muted-foreground">Now</dt>
+              <dd className="text-foreground">
+                {describeIdentity(confirmingEnable.replacement.identity)}
+              </dd>
+            </div>
+          </dl>
+          <p className="text-muted-foreground">
+            Enabling it hands it the credentials saved under this name, and
+            every user&apos;s connection to it.{" "}
+            {describeDependents(confirmingEnable.dependents)}
+          </p>
+        </TypedConfirmDialog>
+      )}
     </>
   );
 }

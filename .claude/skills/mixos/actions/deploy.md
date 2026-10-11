@@ -231,6 +231,20 @@ Nothing under `.mixos/` is ever committed (git ignores it). Something still
 waiting there hasn't been registered and isn't in the build: ask whether to run
 `npm run register -- <kind>/<slug>` first, or leave it.
 
+**A version bump.** Only a release PR changes `package.json`'s version
+(**Release**, at the end of this file). A developer may bump it locally to
+try an extension whose `requiresMixOS` is newer than this checkout.
+Committed, that bump makes `scripts/release-prep.ts` refuse the next release:
+between releases, `package.json` holds the last release's version. So leave
+out any change to `"version"` in `package.json`, or to the top-level
+`"version"` or `packages[""].version` in `package-lock.json`, and list it
+under "Left out" with a one-line reason, such as "a local version bump; only
+a release PR changes it". If either file has other changes, commit those as a
+file split across commits (step 5). In the patch, for each of those version
+fields, delete the `+` line and change the `-` line's leading `-` to a space,
+then apply it with `git apply --cached --recount`. If the bump is all there
+is, there is nothing to commit: go on as for a clean tree (step 1).
+
 **What's new.** If the work adds or changes developer-facing behavior — a
 `/mixos` action, a workflow change, a breaking change — draft a short
 `## <today's date>` entry for the top of `WHATS-NEW.md` (newest first) and
@@ -265,7 +279,7 @@ Commits:
 
 Manifest: <path> — <field>: "<old>" → "<new>"     (omit if none)
 What's new: <one-line summary of the entry>        (omit if none)
-Left out: <untracked file> — <one-line reason>     (omit if none)
+Left out: <path> — <one-line reason>               (omit if none)
 
 Then: push to origin and open a PR against main.
    — or, B-open —   Then: push to origin; PR #<n> is open, so its title and body get rewritten to cover every commit.
