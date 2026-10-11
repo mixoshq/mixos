@@ -38,7 +38,7 @@ export default async function ThemesAdminPage() {
     // that re-centres itself inside it sits narrower than its siblings for no
     // reason a reader can see. It was the only admin page doing this.
     <div>
-      <div className="mb-6 flex items-start justify-between">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-0">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Themes</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -58,7 +58,7 @@ export default async function ThemesAdminPage() {
           Browse is absent when installing this kind is turned off
           (lib/repository/policy.ts); the page it leads to is a 404 then anyway.
         */}
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           {installEnabled("theme") && (
             <Link
               href="/admin/themes/browse"

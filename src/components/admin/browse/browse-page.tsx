@@ -76,7 +76,7 @@ export default async function BrowsePage({
 
   return (
     <div>
-      <div className="mb-6 flex items-start justify-between gap-4">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">
             Browse {label.many}
@@ -115,7 +115,7 @@ export default async function BrowsePage({
         </div>
         <Link
           href={backHref}
-          className="shrink-0 inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted"
+          className="shrink-0 self-start inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden />
           Installed {label.many}
