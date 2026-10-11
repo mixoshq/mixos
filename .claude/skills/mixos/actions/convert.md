@@ -9,7 +9,7 @@ This is a two-phase command with a **hard stop between them**:
 
 **If the first argument is a path to an existing conversion plan — `apps/<slug>/plans/*.md`, or a legacy `docs/plans/*.md` — skip Phase 1 and resume at [Phase 2](#phase-2--build-the-first-slice).** Re-read the plan in full first; it is the contract you agreed to. If the plan is still at the legacy `docs/plans/` path, move it to `apps/<slug>/plans/` as your first action so it sits beside the app you are about to build.
 
-A conversion is a **re-architecture, not a port.** The original code is a *specification* of behaviour — what the app does, what data it holds, what rules it enforces. It is not source material to paste. Everything the platform already owns (auth, routing, HTTP, styling, state, secrets, tenancy) gets discarded and re-expressed in MixOS terms. See [What does not come over](#15-what-does-not-come-over-say-this-out-loud).
+A conversion is a **re-architecture, not a port.** The original code is a *specification* of behaviour — what the app does, what data it holds, what rules it enforces. It is not source material to paste. Everything the platform already owns (auth, routing, HTTP, styling, state, secrets, tenancy) gets discarded and re-expressed in MixOS terms. See [What does not come over](#18-what-does-not-come-over--say-this-out-loud).
 
 ---
 
@@ -91,7 +91,7 @@ Universal translation table. Apply it row by row against the inventory:
 | Server code calling into the platform: look up users, change roles, send notifications, read settings, call another service | `context.user`, `context.notifications`, `context.env`, `context.services`, each behind its manifest declaration | Never a platform module: those are off the import list because each would be a capability without its declaration. User and role administration has no app equivalent; it is the platform's. |
 | Email / SMS / Slack notification | `"notifications": true` + `context.notifications.send({ userIds, ... })` (Web Push) | **Not a like-for-like swap.** If the original emails external recipients, that is a *gap* — record it and ask the user, don't silently downgrade it to a push to platform users. |
 | Analytics / event tracking calls | `telemetry: [{ name, description }]` + `context.telemetry?.track(...)` | Undeclared names are dropped. Keep properties free of PII. |
-| `org_id` / `tenant_id` / workspace column threaded through every query | **Delete the column.** | The platform deployment *is* the tenant, and connectors are tenant-scoped. Porting a tenancy column duplicates a boundary the platform already draws and quietly breaks every scoped query. Exception: the original really did model multiple *customer* records as data — then it stays as an ordinary domain column, not as a security boundary. |
+| `org_id` / `tenant_id` / workspace column threaded through every query | **Delete the column.** | The platform deployment *is* the tenant, and a connector's credentials are the deployment's (or, for a user-scoped one, each person's). Porting a tenancy column duplicates a boundary the platform already draws and quietly breaks every scoped query. Exception: the original really did model multiple *customer* records as data — then it stays as an ordinary domain column, not as a security boundary. |
 | Feature flags / kill switches | `env[]` entries, or plain code | Do not build a flag system. |
 | File uploads / blob storage | **Gap.** Flag it. | Confirm what the platform supports before promising it in the plan. Do not invent a storage path. |
 | Server-rendered HTML fragments, `dangerouslySetInnerHTML` | Rebuild as components; formatted text from elsewhere (a CMS, a README, notes) through `Markdown` from `@/components/ui/markdown` | There is no escape: the HTML sinks fail the build. If the source only offers HTML, that is a *gap* — record it and ask the user. |
@@ -102,8 +102,8 @@ Universal translation table. Apply it row by row against the inventory:
 
 For each outbound integration in the inventory:
 
-1. **Look for an existing connector first.** `ls connectors/` and read the manifest of anything close. Reuse beats building.
-2. **If none exists**, record it in the plan as a **blocking dependency**, naming the service, the operations the app needs, and the credentials involved. **Do not build the connector inside `/mixos convert`** — tell the user to run `/mixos connector create <name>`. A connector is a shared, tenant-scoped, security-sensitive artifact; it deserves its own plan and its own review, not a side effect of an app conversion.
+1. **Look for an existing connector first.** `ls connectors/` and read the manifest of anything close. Then search the Registry (`curl -sG https://mixos.org/api/v1/search -d kind=connector --data-urlencode 'q=<service>'`): a connector published there with a `latestVersion` is installed by an admin from **Admin > Connectors > Browse Connectors** on a local checkout. Reuse beats building.
+2. **If none exists**, record it in the plan as a **blocking dependency**, naming the service, the operations the app needs, and the credentials involved. **Do not build the connector inside `/mixos convert`** — tell the user to run `/mixos connector create <name>`. A connector is a shared, security-sensitive artifact; it deserves its own plan and its own review, not a side effect of an app conversion.
 3. **If there is no credential involved**, it is not a connector — it is `context.http` plus an `egress` entry. Say which you chose and why.
 
 An integration in the "no connector yet" list means the conversion phase that depends on it **cannot be built**. Sequence the slice so phase 1 does not depend on a connector that does not exist.
