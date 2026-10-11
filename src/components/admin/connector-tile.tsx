@@ -135,10 +135,16 @@ export default function ConnectorTile({
       </div>
 
       {/* The app tile's Inactive pill, for the same kind of fact: an admin
-          switched this off, and the corner pill still says how it is set up. */}
-      {disabled && (
-        <div className="mt-3">
-          <StatusPill tone="warning">Disabled</StatusPill>
+          switched this off, and the corner pill still says how it is set up.
+          The release step switches it off too when a different connector has
+          taken the name, and the second pill says so: Enable then asks for
+          the name. */}
+      {(disabled || connector.replacement) && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          {disabled && <StatusPill tone="warning">Disabled</StatusPill>}
+          {connector.replacement && (
+            <StatusPill tone="warning">Replaces a different extension</StatusPill>
+          )}
         </div>
       )}
 

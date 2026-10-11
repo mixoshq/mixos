@@ -29,8 +29,9 @@ export default async function AppsAdminPage() {
   // getAppTableCounts.
   const tableCountsBySlug = await getAppTableCounts();
   const activeBySlug = await getAppActiveMap();
-  // Apps the release step kept after they left the build, and apps it brought
-  // back with different code. See getAppBuildStatus.
+  // Apps the release step kept after they left the build, apps it brought back
+  // with different code, and apps that replace a different extension under
+  // their slug. See getAppBuildStatus.
   const buildStatus = await getAppBuildStatus();
   const { theme } = await getActiveTheme();
 
@@ -107,6 +108,7 @@ export default async function AppsAdminPage() {
         tableCountsBySlug={tableCountsBySlug}
         activeBySlug={activeBySlug}
         returnedChangedBySlug={buildStatus.returnedChanged}
+        replacedBySlug={buildStatus.replaced}
       />
       <AppsNotInBuild
         apps={buildStatus.notInBuild}
