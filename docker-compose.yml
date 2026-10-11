@@ -10,8 +10,9 @@
 #
 # The consequence is that the app reaches the database the same way anything
 # outside that network would — over the host, at host.docker.internal, on the
-# ports the CLI publishes (54321 api / 54322 postgres). Every service therefore
-# carries an extra_hosts entry; see the comment on the first one.
+# Postgres port the CLI publishes (54322 for the default instance). The app uses
+# nothing else the CLI runs. Every service therefore carries an extra_hosts
+# entry; see the comment on the first one.
 # The project name, and with it every container, volume and network this file
 # creates. `mixos` unless the checkout sets MIXOS_INSTANCE in .env.instance —
 # which is what lets a second checkout be a second INSTANCE rather than a
@@ -29,9 +30,9 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     # Order matters: .env.docker holds the committed dev-only secrets,
-    # .env.docker.local holds the Supabase URL/key/DSN that scripts/docker-up.ts
-    # writes from `supabase status -o json` after the stack is up. Later files
-    # win, which is the direction we want — generated values override defaults.
+    # .env.docker.local holds the DATABASE_URL that scripts/docker-up.ts writes
+    # from `supabase status -o json` after the stack is up. Later files win,
+    # which is the direction we want — generated values override defaults.
     #
     # Both are required on purpose. If .env.docker.local is missing, compose
     # fails here naming the file, which is a far better failure than a container

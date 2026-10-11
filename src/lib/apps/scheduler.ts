@@ -4,9 +4,10 @@
 
 // Universal per-app cron scheduler.
 //
-// A 5-minute master tick calls runDueJobs(). The tick is external — Vercel Cron
-// hits /api/cron (see vercel.json) — because a serverless instance is frozen
-// between requests and cannot hold a timer. Each app declares jobs in its
+// A 5-minute master tick calls runDueJobs(). The tick is external — the host's
+// scheduler hits /api/cron (Vercel Cron from vercel.json, or a cron service;
+// see docs/hosting/) — because a serverless instance is frozen between
+// requests and cannot hold a timer. Each app declares jobs in its
 // manifest `schedules`; the handler lives at apps/<slug>/jobs/<name>.ts. Jobs
 // run with a user-less system context.
 //

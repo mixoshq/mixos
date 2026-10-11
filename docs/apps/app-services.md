@@ -99,8 +99,11 @@ does, and call that route with `createAppClient()` (the same rule as connectors)
 A service handler may return a `Response` (e.g. a file/blob stream) instead of a
 plain object; the broker passes it through untouched (no JSON serialization or
 payload cap). A consumer's route can `return context.services.request<Response>(…)`
-directly. Handy for a public download/preview proxy that streams a provider's
-bytes to an unauthenticated viewer the consumer has already authorized.
+directly if it is a `raw: true` route, which `app.json` declares with the
+`raw-response` escape (see [API Routes](api-routes.md#raw-true)); any other route
+that returns a Response fails. Handy for a public download/preview proxy that
+streams a provider's bytes to an unauthenticated viewer the consumer has already
+authorized.
 
 ## Security guarantees (enforced by the broker)
 

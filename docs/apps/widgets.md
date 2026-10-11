@@ -40,7 +40,7 @@ Add a `widgets` array to your `app.json`. The widget `id` is automatically deriv
 | Field | Required | Description | Example |
 | --- | --- | --- | --- |
 | `name` | ✅ | Display name shown in the widget catalog and widget header during edit mode. | `"name": "Sales Chart"` |
-| `description` |  | Brief description shown in the widget catalog when users browse available widgets. | `"description": "Shows monthly sales trends"` |
+| `description` | ✅ | Brief description shown in the widget catalog when users browse available widgets. | `"description": "Shows monthly sales trends"` |
 | `component` | ✅ | Relative path to the widget's React component file from the app directory. Must be a `"use client"` component that exports a default function. | `"component": "widgets/sales-chart.tsx"` |
 | `defaultSize` |  | Default grid size when the widget is added to the dashboard. `w` is width in columns (1–12), `h` is height in rows. Defaults to `4x3` if omitted. | `"defaultSize": { "w": 6, "h": 4 }` |
 | `minSize` |  | Minimum size the widget can be resized to. Prevents users from making it too small. Uses the same `w`/`h` format. | `"minSize": { "w": 3, "h": 2 }` |
@@ -50,7 +50,7 @@ Add a `widgets` array to your `app.json`. The widget `id` is automatically deriv
 | `config[].type` | ✅ | One of `text`, `number`, `boolean`, `select`, or `multiselect`. | `"type": "select"` |
 | `config[].required` |  | If `true`, the field must be filled before saving. | `"required": true` |
 | `config[].default` |  | Default value used when the widget is first added. | `"default": "month"` |
-| `config[].options` |  | For `select` type only. Array of `{ label: string, value: string }` objects. | `"options": [{ "label": "Weekly", "value": "week" }]` |
+| `config[].options` |  | For `select` and `multiselect`. Array of `{ label: string, value: string }` objects. `resolveConfig` can replace them when the modal opens. | `"options": [{ "label": "Weekly", "value": "week" }]` |
 | `config[].ordered` |  | For `multiselect` only. When `true`, the config modal renders a drag-to-reorder list; the array order of the stored value is the display order. Leave off (default `false`) when order is meaningless — you'll get the classic checkbox UI. | `"ordered": true` |
 
 ## Writing a Widget Component
@@ -215,7 +215,7 @@ The widget's `config` prop becomes typed — no `as string` casts, and the destr
 ```tsx
 // apps/my-app/widgets/favorite-links.tsx
 import type { WidgetProps } from "@/lib/hooks/types";
-import type { FavoriteLinksWidgetConfig } from "../app";
+import type { FavoriteLinksWidgetConfig } from "../widgets";
 
 export default function FavoriteLinksWidget({
   config,
@@ -226,7 +226,7 @@ export default function FavoriteLinksWidget({
 }
 ```
 
-`WidgetProps` is generic; the default is `Record<string, unknown>`, so widgets that don't declare a config type (including any still using JSON manifests) keep working unchanged.
+`WidgetProps` is generic; the default is `Record<string, unknown>`, so widgets that don't declare a config type, including any whose config is inline in `app.json`, keep working unchanged.
 
 ### Preset reference
 
