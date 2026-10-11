@@ -346,8 +346,23 @@ npm run register -- --recover           # after one that stopped midway
 
 Registering checks the folder is still what was verified, moves it into `apps/`
 or `connectors/` and runs the registry generator, which is the first time its
-code runs. A theme has no code, so installing it registers it. To ship either,
-commit the new folder and deploy. See
+code runs. A theme has no code, so installing it registers it.
+
+Every install writes a record into the extension's folder, `.registry.json`:
+where it came from, the release, and the hashes that were verified. To ship an
+extension, commit its folder, record included, and deploy. Register hands back
+what that takes: the files it added, a prepared commit message and the
+commands. `/mixos deploy` does the same and opens the pull request. Check that
+`git status` lists every file: a rule in your `.gitignore` can leave one out,
+and `npm run register` warns when one does.
+
+Don't edit an installed folder. The registry generator compares it with its
+record, and Browse then says "modified locally". On Windows,
+work in WSL, or set `git config core.autocrlf false` in the repository:
+converting line endings changes the files, so every installed folder would
+count as modified. Extensions added before installs kept a record count as
+local. To give one a record, remove its folder and install it again from the
+Registry. See
 [docs/security-architecture.md §31](docs/security-architecture.md#31-installing-from-the-repository).
 
 Each guide below is the authoritative spec — file layout, manifest fields, APIs,
@@ -499,7 +514,9 @@ on every app, connector, or theme with a file in the commit and re-stages the
 manifest — so the date shown in the App Manager and Connector Registry always
 matches the last commit that changed it. A merge doesn't re-stamp what it only
 brings in from the other branch, so merging `main` into a pull request adds no
-date changes. Preview what would be stamped with
+date changes. An extension installed from the Registry is never stamped: its
+`.registry.json` records the files that were verified, and its date is its
+publisher's. Preview what would be stamped with
 `npx tsx scripts/stamp-updated.ts --dry-run`.
 
 Recent, developer-facing changes are summarized in [WHATS-NEW.md](WHATS-NEW.md);

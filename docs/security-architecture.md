@@ -2195,15 +2195,18 @@ taken (below), nothing of that slug may be in place or waiting in pending, and:
 4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
 5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
 6. Pre-flight: the manifest exists, parses and is for this slug, and every
-   path lands on disk as what it names (below). Then the files hash
+   path lands on disk as what it names (below). Then the files hash, and the
+   install record, `.registry.json`, added to the tree (see
+   **The install record**)
 7. Check the locks, then write to `.mixos/staging/<kind dir>/<slug>/`,
    never to the target
 8. CHECK IT WITHOUT RUNNING IT: generate-project-registry.ts --check reads
    the staged copy and imports none of it (below). Rejected, or no verdict:
    check the locks, delete the staged copy, stop
-9. An app or a connector: check the locks, write its sidecar, and rename it
-   to `.mixos/pending/<kind dir>/<slug>/`, where it waits for Register
-   (below). None of its code has run.
+9. An app or a connector: check the locks, write its sidecar (who installed
+   it, when, and the check's verdict), and rename it to
+   `.mixos/pending/<kind dir>/<slug>/`, where it waits for Register (below).
+   None of its code has run.
    A theme: check the locks, rename it into `themes/<slug>/`, and run
    scripts/generate-project-registry.ts. If that leaves it out or stops,
    check the locks, then remove it and regenerate, so a failed install
@@ -2232,7 +2235,10 @@ would make the two differ (`pathProblems()`, `src/lib/repository/install.ts`):
   operator's repository records when the extension is committed, or how a
   review shows it: an attribute can hide a diff or mark files as generated, an
   ignore rule can keep a file the extension runs out of the commit, and a `.git`
-  makes git treat the folder as a repository of its own.
+  makes git treat the folder as a repository of its own;
+- a file or folder named `.registry.json`, in any case, at any depth. That is
+  the install record's name, and only an install writes one, from what it
+  verified.
 
 ### What runs, and when
 
@@ -2290,11 +2296,11 @@ slug, or `npm run register -- --recover`, clears it.
 ### Pending, and Register
 
 An app or a connector from the Registry is not part of the build until someone
-registers it. Install leaves it in `.mixos/pending/<kind dir>/<slug>/`, with a
-sidecar beside it, `<slug>.json`, recording what was verified: the release, its
-commit, its content hash and its files hash, the floor it declares, the check's
-verdict and what it deferred, and who installed it and when. The sidecar is
-about this checkout's install and is never committed.
+registers it. Install leaves it in `.mixos/pending/<kind dir>/<slug>/`, with its
+install record inside it (see **The install record**), and a sidecar beside it,
+`<slug>.json`, holding what is about this checkout's install only: who
+installed it and when, whether they accepted a withdrawn release, and the
+check's verdict and what it deferred. The sidecar is never committed.
 
 Register has two entry points, which do the same thing under both locks (below):
 the **Register** button on Admin > Apps and Admin > Connectors, which comes after
@@ -2302,22 +2308,26 @@ a review of what will run (see **The review before Register**), and
 `npm run register -- <kind>/<slug>`, or the slug alone when only one kind has it
 pending. Either way, in the checkout:
 
-1. The pending folder and its sidecar exist, and nothing is where it would go.
-   The **files hash**, recomputed from the folder, matches the sidecar's. It is
-   the content hash's serialisation over the same files with every mode read as
-   644: install writes every file 0644, so the content hash, which records the
-   execute bit, can't be recomputed from disk. A folder with a file changed,
-   added or removed since install, or a link in it, is refused, so what runs is
-   what was verified and checked.
-2. The release's `requiresMixOS` holds for the version this checkout builds.
+1. The pending folder, its install record and its sidecar exist, and nothing
+   is where it would go. The **files hash**, recomputed from the folder with
+   the record left out, matches the record's. It is the content hash's
+   serialisation over the same files with every mode read as 644: install
+   writes every file 0644, so the content hash, which records the execute bit,
+   can't be recomputed from disk. A folder with a file changed, added or
+   removed since install, or a link in it, is refused, so what runs is what was
+   verified and checked. A pending install from before installs kept a record
+   has none, and is refused: discard it and install it again.
+2. The release's `requiresMixOS`, from the record, holds for the version this
+   checkout builds.
 3. The sidecar records the registration (the checkout lock's token, the pid and
    the host), and the folder is renamed into `apps/` or `connectors/`.
 4. The registry generator runs. This is the first time any of the extension's
    code runs, as the checkout's OS user.
 5. If the generator leaves it out, stops or runs out of time, the folder is
-   renamed back to pending, its record cleared, and the generator run again so
-   `src/generated/` matches the disk. If the generator registers it, the sidecar
-   is deleted.
+   renamed back to pending, the sidecar's registration cleared, and the
+   generator run again so `src/generated/` matches the disk. If the generator
+   registers it, the sidecar is deleted. The install record moves with the
+   folder.
 6. It is audited as `<kind>.register`, or `<kind>.register.rejected` with the
    reason (§28), with `via: "button"` and the admin, or `via: "cli"`.
 
@@ -2340,7 +2350,7 @@ it acts on is audited as `<kind>.register.recover`.
 
 The files hash guards against a change after install by an editor, a tool or
 another process in the checkout. It is no defence against someone who can write
-to the checkout: they can write the sidecar too, or `apps/` itself.
+to the checkout: they can write the record too, or `apps/` itself.
 
 ### The review before Register
 
@@ -2368,16 +2378,18 @@ package's code:
   this instance enforces; the claims are labelled as the publisher's words.
 - **The release's `requiresMixOS`** against this checkout's version.
 - **A link to the source on GitHub at the commit install verified,** which a
-  moved tag or a later push can't change. The claims and the link come from the
-  catalogue the install came from, and only that one; when it can't be asked,
-  the review says so and points to the pending folder instead.
+  moved tag or a later push can't change. It is built from the install record,
+  so it names the repository and commit install downloaded, whatever the
+  listing says now. The claims come from the catalogue the install came from,
+  and only that one; when it can't be asked, the review says so and points to
+  the pending folder instead.
 - **What stands in the way:** files changed since install, a floor this
   checkout doesn't meet, or a registration that stopped midway. Register would
   refuse each, so the review offers no confirmation for them.
 
 The Register button stays off until the admin confirms they have read it. The
 action is sent the files hash the review showed, and Register refuses, under its
-locks, a pending install whose sidecar records a different one, as
+locks, a pending install whose record holds a different one, as
 `changed-meanwhile`: what registers is what was reviewed, even if the slug was
 discarded and installed again in between.
 
@@ -2390,6 +2402,63 @@ what was registered without a rebuild (`next dev`). On any other database the
 result points to Admin > Apps on the instance that serves the app. The action
 checks the database again before it acts, and then applies Activate's own checks
 and audit row (`app.activate`).
+
+### The install record
+
+Every install writes `.registry.json` at the root of the extension's folder
+(`src/lib/repository/install-record.ts`): the catalogue it came from
+(`repositoryBaseUrl()`), the kind, slug, version and tag, the commit, the
+content hash as verified, the files hash, the GitHub repository and folder the
+verified download URL names, and the floor the release declares. It is written
+into the tree after pre-flight, so it waits in pending with the extension, moves
+into place at Register, and is committed with the folder. A theme gets it in
+`themes/<slug>/` as it installs. It holds no date and no admin: the commit and
+the audit row say when and who. Every value is validated when it is written and
+when it is read: the version is dotted or a commit's hex, the source an origin,
+the repository and folder names GitHub and mixos.org accept.
+
+**A publisher can't forge one.** Pre-flight refuses a package that holds a file
+of that name. A record edited in the checkout changes what the admin pages show
+about the extension. Like the files hash it carries, it guards against change
+by accident, not against someone who can write the checkout.
+
+**What a build reads.** The registry generator reads the record of every
+extension it accepts and writes `src/generated/registry-installs.ts`, the only
+copy a deployment reads. An extension whose folder has no record is local, and
+isn't listed. A record that can't be read, or names another kind or slug, is a
+warning, and the extension builds as a local one. The generator hashes each
+listed folder again, the record left out, and marks it `modified` when the
+files no longer match: an edit after install, or a file dropped into the
+folder, such as the `.DS_Store` macOS Finder writes, which the warning names.
+It also warns about a record from a catalogue other than mixos.org, which is
+for development. Browse shows each installed extension as "Installed from
+mixos.org · 1.2.0" (with "modified locally" when it is), "A local extension
+uses this name", or "Installed from <host>; not checked here" for one from
+another catalogue.
+
+**The pre-commit stamp leaves it alone.** `scripts/stamp-updated.ts` never
+stamps `lastUpdated` in a folder that holds its own record, so committing an
+install doesn't change the files it verified.
+
+**Handing it back.** The server never runs git: a web process committing to its
+own checkout would commit whatever else is in it. Register (and a theme's
+install) hands back what to commit instead (`src/lib/repository/hand-back.ts`):
+the files it added, with sizes; a commit message; the commands, which commit
+that folder alone on a branch of its own; a link to the source at the verified
+commit; and what shipping means on each host. The message is built only from
+the record's validated values: the subject
+`feat(<slug>): add <kind> <slug> <version> from <host>`, and the trailers
+`Registry-Source`, `Registry-Version`, `Registry-Commit`,
+`Registry-Content-Hash`, `Registry-Files-Hash` and `Registry-Listing`. The
+manifest's `name`, which can be any text, is never used, so the message can't
+carry `[skip ci]` or its siblings, or a `skip-checks:` trailer, which would turn
+off the repository's workflows for that commit. `npm run register` also asks
+git, read-only (`git check-ignore`), whether the checkout's ignore rules would
+leave a file out of the commit, and names the ones that would; the admin pages
+say to check `git status`.
+
+Extensions installed before installs kept a record are local. Reinstalling one
+from the Registry gives it a record.
 
 ### Two locks: the register lease and the checkout lock
 
