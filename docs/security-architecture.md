@@ -1939,15 +1939,28 @@ Two client-submitted ingestion routes, both session-gated:
 
 - `POST /api/analytics/track` and `POST /api/analytics/app-open`. Both pin
   `user_id` **server-side from the session**, so a client cannot forge another
-  user's event. `appSlug` is validated against the compile-time registry, and an
-  event name the app did not declare in its manifest is rejected.
+  user's event. An event is recorded only for an app the user holds
+  (`hasAppGrant`, §3.1) and whose code may run now (the app gate: not switched
+  off, not being updated), and an event name the app did not declare in its
+  manifest is rejected. The checks are in
+  [`src/lib/analytics/ingest.ts`](../src/lib/analytics/ingest.ts).
 - Server-side, a `telemetry_events` row is written for app route calls and for
   every MCP tool call (§17). MCP calls are recorded whether or not the app
   declares telemetry: the app did not choose to be called, and an operator needs
   to see what a model has been reading.
 
-The forgeable field is **which** declared event fired, not who fired it or for
-which app.
+**A refused event gets the gateway's 404, and records nothing.** An app that
+doesn't exist, one the user doesn't hold, one switched off and one being updated
+all get the same answer, `404 {"error":"Not found","code":"NOT_FOUND"}`: what
+the gateway answers for an app that isn't there (§1). So neither route can be
+used to find out which apps an instance has, or which of them a user holds. The
+app is checked before the event name, so the 400 for an undeclared event is only
+ever about an app the user holds. A page that `pageVisibility` opens to any
+signed-in user is served without the grant, but its opens and events are
+recorded only for users who hold the app.
+
+What a client can still choose is **which** declared event fired, and for which
+of the apps the user holds: not who fired it.
 
 ---
 
@@ -2012,14 +2025,29 @@ log matters. Its prune is also scoped to `source_type = 'route'`, so audit rows
 would in fact survive, but retention that depends on a `WHERE` clause in another
 module is not a retention policy.
 
-Currently recorded: `connector.configure`, `connector.test`,
-`connector.disable`, `connector.enable`, `app.password.set`,
-`app.password.clear`, `app.activate`, `app.deactivate`, `app.missing`,
-`app.returned`, `app.job.run`, `app.job.enable`, `app.job.disable`,
-`scheduler.start`, `scheduler.stop`, `theme.apply`, `user.grant.add`,
-`user.grant.revoke`, `user.role.set`. `connector.disable` and
-`connector.enable` name the apps that declare the connector, in `details` as
-`requiredBy` and `optionalFor`.
+Currently recorded: `connector.configure`, `connector.connect`,
+`connector.test`, `connector.disable`, `connector.enable`, `app.password.set`,
+`app.password.clear`, `app.setting.set`, `app.setting.clear`, `app.activate`,
+`app.deactivate`, `app.missing`, `app.returned`, `app.job.run`,
+`app.job.enable`, `app.job.disable`, `scheduler.start`, `scheduler.stop`,
+`theme.apply`, `user.create`, `user.profile.update`, `user.password.set`,
+`user.admin.grant`, `user.admin.revoke`, `user.grant.add`,
+`user.grant.revoke`, `user.role.set`, `user.sessions.revoke`, and a Registry
+install as `app.register`, `connector.register` or `theme.register`, or, when
+the install is refused, `app.register.rejected`, `connector.register.rejected`
+or `theme.register.rejected`. `connector.disable` and `connector.enable` name
+the apps that declare the connector, in `details` as `requiredBy` and
+`optionalFor`.
+
+**Connecting a connector.** An admin finishing the OAuth round trip for a
+tenant connector (§27), with Connect or Reconnect, is `connector.connect`
+against the connector, with the scopes the provider granted in `details` as
+`scopes`, and never a token. It is written once the grant is stored, so a
+declined, expired or failed round trip leaves none. A tenant connector has no
+Disconnect: its credentials are only replaced, by `connector.configure` or
+`connector.connect`, or switched off, by `connector.disable`. A person
+connecting or disconnecting their own account on a user-scoped connector
+(§3.4) is acting for themselves, not as an admin, and isn't recorded.
 
 **The Scheduled Jobs page's actions.** Run now, Enable and Disable are
 `app.job.*` rows against the app, with the job in `details`. Start and Stop
