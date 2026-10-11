@@ -27,7 +27,7 @@
 
 import { sql } from "@/lib/db/client";
 import { appRegistry } from "@/generated/app-registry";
-import { checkAppGate } from "@/lib/apps/app-gate";
+import { checkAppGate, type AppGate } from "@/lib/apps/app-gate";
 import { isDefinedSync, runSync } from "@/lib/apps/sync";
 
 /**
@@ -257,10 +257,13 @@ export async function setSchedulerEnabled(on: boolean): Promise<void> {
 /**
  * Run a job this pod has claimed, record the run and release the claim.
  *
- * Returns false, having run and recorded nothing, when the app gate refuses.
- * The claim already required the app to be active, so that means it was
- * switched off since. `next_run_at` stays as it was, so the job is due again
- * once the app is back, as it would be had the tick never claimed it.
+ * Returns the app gate's answer: open once the job has run and been recorded,
+ * closed, having run and recorded nothing, when the gate refuses. The claim
+ * already required the app to be active, so a refusal means it was switched
+ * off since, or that its own migrations are behind this build, which the
+ * claim doesn't ask. Either way `next_run_at` stays as it was, so the job is
+ * due again once the app is back, as it would be had the tick never claimed
+ * it.
  *
  * `onStart` runs once the gate has passed, before the handler: Run now records
  * who started the run there, because a run can take minutes and a request cut
@@ -272,7 +275,7 @@ async function runClaimed(
   cadence: Cadence,
   trigger: "scheduled" | "manual",
   onStart?: () => Promise<void>,
-): Promise<boolean> {
+): Promise<AppGate> {
   // The app gate, before the job's or sync's module is imported, because
   // importing runs its top-level code.
   const gate = await checkAppGate(slug);
@@ -282,8 +285,14 @@ async function runClaimed(
       set running_since = null, updated_at = now()
       where app_slug = ${slug} and job_name = ${job}
     `;
-    console.warn(`[scheduler] ${slug}/${job} not run: the app is ${gate.reason}`);
-    return false;
+    console.warn(
+      `[scheduler] ${slug}/${job} not run: ${
+        gate.reason === "updating"
+          ? "the app's migrations are behind this build"
+          : "the app is inactive"
+      }`,
+    );
+    return gate;
   }
 
   const startedAt = new Date();
@@ -362,7 +371,7 @@ async function runClaimed(
     values (${slug}, ${job}, ${startedAt}, now(), ${status}, ${error}, ${durationMs},
             ${trigger})
   `;
-  return true;
+  return gate;
 }
 
 /**
@@ -400,7 +409,9 @@ async function forceClaim(slug: string, job: string): Promise<boolean> {
  *
  * Refused for an app that is not active: an admin's Run now is explicit about
  * the job, not about the app, and deactivating is how an admin stops
- * everything an app runs. `onStart` runs when the run starts; see `runClaimed`.
+ * everything an app runs. Refused too while the app's own migrations are
+ * behind this build, which the app gate decides. `onStart` runs when the run
+ * starts; see `runClaimed`.
  */
 export async function runJobNow(
   slug: string,
@@ -428,11 +439,10 @@ export async function runJobNow(
   // refused, the app gate says whether that was why.
   if (!(await forceClaim(slug, job))) {
     const gate = await checkAppGate(slug);
-    return { ran: false, reason: gate.open ? "already running" : "app inactive" };
+    return { ran: false, reason: gate.open ? "already running" : `app ${gate.reason}` };
   }
-  if (!(await runClaimed(slug, job, cad, "manual", onStart))) {
-    return { ran: false, reason: "app inactive" };
-  }
+  const gate = await runClaimed(slug, job, cad, "manual", onStart);
+  if (!gate.open) return { ran: false, reason: `app ${gate.reason}` };
   return { ran: true };
 }
 
@@ -463,6 +473,10 @@ export async function runDueJobs(): Promise<void> {
     // advance `next_run_at`, so reactivating would silently lose a window. The
     // same goes for an app this build doesn't carry: its row and jobs are kept,
     // active or not, until it comes back, and this build has no handler to run.
+    // An app whose own migrations are behind is claimed here and refused by
+    // the app gate in `runClaimed`, which releases the claim and leaves
+    // `next_run_at` alone, so its jobs stay due for the first tick after the
+    // release step.
     const jobs = (await sql`
       select j.app_slug, j.job_name, j.interval_minutes, j.cron, j.timezone
       from public.app_scheduled_jobs j

@@ -53,6 +53,7 @@ import {
   type RouteDefinition,
 } from "@/lib/apps/route";
 import { getAppOrigin } from "@/lib/env/origin";
+import { APP_UPDATING_MESSAGE } from "@/lib/platform/maintenance-gate";
 
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 
@@ -102,10 +103,15 @@ export async function callAppRoute<TOut = unknown>(
   }
 
   // The app gate, before the import, as on the wire: importing runs the
-  // module's top-level code, and an app an admin switched off must not get
-  // that far. `resolveAuthTier` below checks activation again.
-  if (!(await checkAppGate(appSlug)).open) {
-    throw new AppError("NOT_FOUND", `"${appSlug}" is not active.`);
+  // module's top-level code, and an app an admin switched off, or one whose
+  // own migrations are behind this build, must not get that far. The wire
+  // answers the second with a 503, and `UNAVAILABLE` is the code that becomes
+  // one. `resolveAuthTier` below checks activation again.
+  const gate = await checkAppGate(appSlug);
+  if (!gate.open) {
+    throw gate.reason === "updating"
+      ? AppError.unavailable(APP_UPDATING_MESSAGE)
+      : new AppError("NOT_FOUND", `"${appSlug}" is not active.`);
   }
 
   const modulePath = pattern === "" ? "index" : pattern;

@@ -119,6 +119,8 @@ npm run migrate:apps
 
 The script takes every app in the registry with `"database": true`, creates its role and schema if they do not exist, checks every file it has not applied yet, and then runs them in order, each in its own transaction, as the app's role. Applied migrations are tracked in the `_migrations` table so they never run twice. A folder the registry did not accept never has its SQL run.
 
+**Until they run, your app waits.** While the build carries a migration of yours that the database hasn't applied, none of your app's code runs, because it would meet tables that aren't there yet. Its pages show "This app is being updated. Try again shortly.", and its API routes answer 503 with that message and `Retry-After: 30`. Its jobs wait and stay due, a consumer of its services gets `PROVIDER_UPDATING`, its hook listeners don't run, and its MCP tools refuse. Every other app serves as usual. Your app runs again within 30 seconds of the migrations being applied, by `npm run migrate:apps` locally or the release step in a deployment, with no restart.
+
 This runner handles **app** migrations only. The platform's own schema lives in
 `supabase/migrations/`, and what applies it depends on which database you are
 pointed at:

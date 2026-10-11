@@ -392,6 +392,12 @@ non-2xx. The body carries `{ error, code }`, so a client can branch on the code
 rather than string-matching the message. After a connector failure `error` is the
 connector's envelope rather than a string, and `connectorErrorOf(err)` returns it.
 
+While your app's own migrations are behind this build, every route answers 503
+with `Retry-After: 30` and
+`{ "error": "This app is being updated. Try again shortly.", "code": "UNAVAILABLE" }`,
+without loading your route's module. Show the message and offer to retry; see
+[database.md](./database.md#running-migrations).
+
 Requests always go to `/api/apps/<your-slug>/…`; you cannot call another app's
 routes. For that, use [App Services](./app-services.md).
 

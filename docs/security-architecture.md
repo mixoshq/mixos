@@ -103,7 +103,7 @@ up checking the wrong table.
 | 3    | Rate limit (IP), pre-auth      | 429     | Dispatcher (`src/lib/rate-limit.ts`) |
 | 4    | URL resolves to a route pattern| 404     | Dispatcher (`resolveRoutePath`)      |
 | 5    | This mount serves the route    | 404     | Dispatcher, from the **hoisted contract** — so no app module is imported for a caller the route would refuse |
-| 6    | App is active, then the route module loads; method exported | 404 / 405 / 500 | Dispatcher. The app gate (`src/lib/apps/app-gate.ts`) runs before the import, so a deactivated app's module-scope code never runs. Import and dispatch are separated, so a module that throws is not reported as missing |
+| 6    | App is active and not being updated, then the route module loads; method exported | 404 / 503 / 405 / 500 | Dispatcher. The app gate (`src/lib/apps/app-gate.ts`) runs before the import, so neither a deactivated app's module-scope code (404) nor that of an app whose own migrations are behind this build (503, §3.1) runs. Import and dispatch are separated, so a module that throws is not reported as missing |
 | 7    | Live declaration matches the registry | 404 | Dispatcher — a gate decided from one source and enforced from another is not a gate |
 | 8    | Auth tier the caller earned    | 401 / 403 / 404 | `src/lib/apps/auth-tier.ts` |
 | 9    | CSRF token, cookie-authenticated mutations only | 403 | `src/lib/apps/csrf.ts` — authenticated mount, identity tiers, mutating methods |
@@ -300,6 +300,20 @@ under the same slug, so the release step records a hash of each app's files.
 An app that returns with different files comes back inactive and flagged on
 Admin > Apps until an admin activates it; one that returns with the same files
 comes back as it left. Both are audited (§28).
+
+**The app's own migrations have to be applied, too.** The app gate's second
+reason, asked only of an active app: when the build carries a migration of the
+app's that the ledger (`public._migrations`) lacks, as readiness reports
+(§18), its code was written for tables the database doesn't have yet, so none
+of it runs, and the rest of the instance serves as usual. Its API routes and
+pages answer 503 with `Retry-After: 30` and "This app is being updated. Try
+again shortly.", `callAppRoute()` throws `UNAVAILABLE` (§25), its jobs stay
+due (§20), a consumer gets `PROVIDER_UPDATING` (§23), its hook listeners don't
+run, and its MCP tools refuse (§17). The answer comes from the same check as
+the maintenance response (§18), kept for 15 seconds, so the app serves again
+within 30 seconds of the release step, with no restart. A check that can't
+tell counts as not behind. An app that is also switched off answers as a
+switched-off app does, so the 503 never gives a switched-off app away.
 
 **Do not confuse this with `user_apps`.** That table records which apps a user has
 *installed* on their dashboard — a layout preference, not a permission. The
@@ -1293,6 +1307,11 @@ Consent is a **ceiling**, the live grant is a **floor**. A refresh copies
 (not `hasAppAccess`) is used deliberately — it is the authorization fact, and it
 matches what the App Services broker already enforces for the same question.
 
+The app gate (§3.1) is asked last, before a tool's module is imported. While
+the app's own migrations are behind this build, `tools/list` leaves its tools
+out, because describing one imports it, and `tools/call` refuses with
+`[APP_UPDATING] This app is being updated. Try again shortly.`
+
 The tool runs with the app's own `AppContext`, narrowed: same connectors, same
 resolved app roles, same scoped data the user's own API-route requests get. There
 is no second, subtly-different authorization surface to keep in step, and no
@@ -1431,7 +1450,7 @@ one of these.
 | `/login`, `/api/auth` | the sign-in flow itself, with one per-IP limit on password attempts (§6) |
 | `/api/health` | none — see below |
 | `/manifest.webmanifest` | none; static |
-| `/p` | the public page route (`src/lib/apps/public-page.ts`): the page's own `pageVisibility`, the app being active, and the unlock cookie for a `password` page |
+| `/p` | the public page route (`src/lib/apps/public-page.ts`): the page's own `pageVisibility`, the app gate (§3.1), and the unlock cookie for a `password` page |
 | `/api/p` | the dispatcher's `password` / `key` / `public` tiers (§1) |
 | `/api/mcp` | OAuth 2.1 bearer token (§17), with a per-IP limit on failed checks |
 | `/api/oauth`, `/.well-known`, `/api/well-known` | the OAuth endpoints' own validation (§17) |
@@ -1460,7 +1479,25 @@ the same gate, first, since the proxy leaves it out. The page comes from the
 proxy with no app code and no query, under its own CSP, which allows no script.
 Neither body names a version or says what to run; the server log does both. A
 check that fails, or doesn't answer within 2 seconds, counts as not behind, as
-it does in readiness. App migrations behind don't trigger it.
+it does in readiness.
+
+**One app being updated.** App migrations behind don't close the instance. The
+same answer lists the apps with a migration this build carries that the
+database hasn't applied, and the app gate (§3.1) holds back each one's code
+while everything else serves. Their pages get a 503 from the proxy, because a
+page can't set its own status: a static "Being updated" page with
+`Retry-After: 30`, the same headers and CSP as the maintenance page, and no app
+code. The proxy asks the gate only for an app on that list. A `/p` page gets it
+only where the route would serve it, so a switched-off app's page and a page
+`pageVisibility` doesn't open are still a 404. An `/apps` page gets it once the
+cookie check has passed, before the session is read, so anyone signed in sees
+that the app is being updated. Its API routes get
+`{ "error": "This app is being updated. Try again shortly.", "code": "UNAVAILABLE" }`
+from the dispatcher (§1, step 6), before authentication, because
+authenticating needs the route's declaration and loading it would run the
+app's code. No body names a file or a number. The server log names the app and
+its pending files, once each time the answer is refreshed, in a line starting
+`Serving "being updated" for`.
 
 **Why removing an entry does not harden it.** For `/api/cron`, and for
 `/api/webhooks` were the matcher to stop leaving it out, the proxy would answer
@@ -1587,6 +1624,11 @@ sidecar locally.
   module is imported, so an app switched off after the claim runs nothing
   either, and its job stays due. Run now, a job's Enable and Disable, and Start
   and Stop tick are audited (§28).
+- **An app being updated runs no jobs either** (§3.1). The tick still claims
+  its due jobs, since the claim asks only for activation; the app gate then
+  refuses them, and the claim is released with `next_run_at` unchanged, so they
+  run on the first tick after the release step. Run now is refused, and
+  Scheduled Jobs shows the jobs as **App updating**.
 - **Apps not in the build** keep their job rows, with each job's enabled switch,
   for when they come back (§3.1). A tick runs only jobs of active apps the
   running build carries.
@@ -1683,13 +1725,17 @@ default-deny:
 | Consumer declared this dependency in `consumes` | `NOT_DECLARED` |
 | Provider's `consumers` allowlist admits the caller | `FORBIDDEN` |
 | Provider app is active, whatever the audience | `PROVIDER_INACTIVE` |
+| Provider app's own migrations are applied, whatever the audience | `PROVIDER_UPDATING` |
 | For `audience: "user"`, an acting user exists | `NO_USER` |
 | That user holds a grant for the **provider** app | `FORBIDDEN_USER` |
 
 The activation check is the app gate (§3.1), asked before the provider's
 context is built or its handler imported. An `audience: "app"` service consults
 no grant, so this is what refuses an inactive provider's service to a job or a
-public route.
+public route. The same gate refuses a provider whose own migrations are behind
+this build, with a code of its own because the consumer's remedy differs: a
+provider switched off stays off until an admin acts, while an update is over
+once the release step has run. Both are a 503 if the consumer lets them escape.
 
 The provider's handler runs with the **provider's own scoped context**, and the
 user is re-authorized in the provider's terms rather than inheriting the
@@ -1838,9 +1884,11 @@ server-side and platform-owned.
 
 It is **not** an authorization bypass: it re-runs `resolveAuthTier` against the
 page's own session, the role gate, and input/output validation, and it records
-the same telemetry row. Like the gateway, it checks that the app is active
-before it imports the route (the app gate, §3.1), so a deactivated app's
-module-scope code does not run; `resolveAuthTier` checks activation again.
+the same telemetry row. Like the gateway, it asks the app gate before it
+imports the route (§3.1), so a deactivated app's module-scope code does not
+run, and nor does that of an app whose own migrations are behind, for which it
+throws `UNAVAILABLE` (a 503) with "This app is being updated. Try again
+shortly."; `resolveAuthTier` checks activation again.
 
 It is **bound to the calling app at build time.** Run with another app's slug
 it would execute that app's routes, mutations included, as the current user,
