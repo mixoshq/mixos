@@ -5,13 +5,19 @@
 /**
  * scripts/stamp-updated.ts: which extension directories a commit stamps, from
  * the paths it changes against HEAD and, for a merge or cherry-pick, the paths
- * where it differs from each commit it brings in. Reading those from git is
- * the script's job and isn't exercised here.
+ * where it differs from each commit it brings in, never one installed from a
+ * Registry. Reading those from git is the script's job and isn't exercised
+ * here.
  */
 
-import { describe, test } from "node:test";
+import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { planStamps } from "./stamp-updated";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { filesHash } from "../src/lib/repository/content-hash";
+import { INSTALL_RECORD_FILE, serializeInstallRecord } from "../src/lib/repository/install-record";
+import { hasInstallRecord, planStamps } from "./stamp-updated";
 
 const dirs = (m: Map<string, string[]>) => [...m.keys()].sort();
 
@@ -112,5 +118,64 @@ describe("a cherry-pick", () => {
   test("stamps when the theme ends up in a state the picked commit never had", () => {
     const plan = planStamps(["themes/mixos-dark/theme.css"], [["themes/mixos-dark/fonts.css"]]);
     assert.deepEqual(dirs(plan.own), ["themes/mixos-dark"]);
+  });
+});
+
+describe("an extension installed from a Registry", () => {
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mixos-stamp-")));
+  after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  /** A checkout holding `apps/<slug>`, with an install record naming `kind`/`recorded`, or none. */
+  function checkout(slug: string, record: { kind: "app" | "connector"; slug: string } | "garbled" | null): string {
+    const root = fs.mkdtempSync(path.join(tmp, "checkout-"));
+    const dir = path.join(root, "apps", slug);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "app.json"), '{"name":"Files"}\n');
+    const hash = filesHash([{ path: "app.json", mode: 0o644, data: Buffer.from('{"name":"Files"}\n') }]);
+    if (record === "garbled") fs.writeFileSync(path.join(dir, INSTALL_RECORD_FILE), "{");
+    else if (record) {
+      fs.writeFileSync(
+        path.join(dir, INSTALL_RECORD_FILE),
+        serializeInstallRecord({
+          source: "https://mixos.org",
+          kind: record.kind,
+          slug: record.slug,
+          version: "1.2.0",
+          gitTag: null,
+          commitSha: "c".repeat(40),
+          contentHash: hash,
+          filesHash: hash,
+          repository: { owner: "acme", name: "files", subpath: null },
+          requiresMixOS: null,
+        }),
+      );
+    }
+    return root;
+  }
+
+  test("is never stamped, whoever changed it, and is said apart", () => {
+    const plan = planStamps(
+      ["apps/files/app.json", "apps/files/.registry.json", "apps/wall-e/app.json"],
+      [],
+      (dir) => dir === "apps/files",
+    );
+    assert.deepEqual(dirs(plan.own), ["apps/wall-e"]);
+    assert.deepEqual(dirs(plan.installed), ["apps/files"]);
+    // Nor when a merge brings it in, or changes it on both sides.
+    const merged = planStamps(["apps/files/app.json"], [["apps/files/app.json"]], () => true);
+    assert.deepEqual(dirs(merged.own), []);
+    assert.deepEqual(dirs(merged.broughtIn), []);
+    assert.deepEqual(dirs(merged.installed), ["apps/files"]);
+  });
+
+  test("is one whose folder holds a readable install record naming it", () => {
+    assert.equal(hasInstallRecord("apps/files", checkout("files", { kind: "app", slug: "files" })), true);
+    // No record: a local extension, stamped as always.
+    assert.equal(hasInstallRecord("apps/files", checkout("files", null)), false);
+    // A record that can't be read, or isn't this folder's, makes it local too.
+    assert.equal(hasInstallRecord("apps/files", checkout("files", "garbled")), false);
+    assert.equal(hasInstallRecord("apps/files", checkout("files", { kind: "app", slug: "other" })), false);
+    assert.equal(hasInstallRecord("apps/files", checkout("files", { kind: "connector", slug: "files" })), false);
+    assert.equal(hasInstallRecord("src/lib", checkout("files", { kind: "app", slug: "files" })), false);
   });
 });
