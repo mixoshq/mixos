@@ -15,7 +15,7 @@
  * the date mean "the author ran a command" — accurate, but only when someone
  * remembered to run it, which is the failure mode this removes.
  *
- * Five rules keep the date honest:
+ * Six rules keep the date honest:
  *
  *  - A directory is stamped when ANY file under it changed — source, migrations,
  *    README, assets, and deletions too. "Changed" is the honest claim; "changed
@@ -31,6 +31,11 @@
  *  - The STAGED manifest is what gets stamped, never the working-tree copy —
  *    see stampStaged(). A hook that quietly enlarges a commit with unstaged
  *    edits is worse than a stale date.
+ *  - A folder installed from a Registry is never stamped. Its `.registry.json`
+ *    records the files that were verified (src/lib/repository/install-record.ts),
+ *    and stamping its manifest would change one of them, so the committed
+ *    folder would no longer match. Its `lastUpdated` is its publisher's. See
+ *    planStamps().
  *  - Nothing here ever blocks a commit. A missing date is cosmetic.
  *
  * `--files` exists so the logic is testable outside a git repository, and so
@@ -40,6 +45,7 @@
 import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
+import { readInstallRecord, recordMismatch } from "../src/lib/repository/install-record";
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -217,18 +223,42 @@ function extensionDirs(changed: string[]): Map<string, string[]> {
  * If one side changed `a.css` and the other `b.css`, no file differs from both
  * parents, yet the theme is in a state neither side had. Its `lastUpdated`
  * lines conflict too, and the stamp settles them.
+ *
+ * A directory installed from a Registry, one `vendored` says has an install
+ * record of its own, is never stamped, whoever changed it: it is someone
+ * else's release, and its record says which files were verified. Delete the
+ * record to make it a local extension, and it is stamped like any other.
  */
 export function planStamps(
   changed: string[],
   incoming: string[][] = [],
-): { own: Map<string, string[]>; broughtIn: Map<string, string[]> } {
+  vendored: (dir: string) => boolean = () => false,
+): { own: Map<string, string[]>; broughtIn: Map<string, string[]>; installed: Map<string, string[]> } {
   const differs = incoming.map((paths) => extensionDirs(paths));
   const own = new Map<string, string[]>();
   const broughtIn = new Map<string, string[]>();
+  const installed = new Map<string, string[]>();
   for (const [dir, files] of extensionDirs(changed)) {
-    (differs.every((d) => d.has(dir)) ? own : broughtIn).set(dir, files);
+    if (vendored(dir)) installed.set(dir, files);
+    else (differs.every((d) => d.has(dir)) ? own : broughtIn).set(dir, files);
   }
-  return { own, broughtIn };
+  return { own, broughtIn, installed };
+}
+
+/** The kind each root holds, as an install record names it. */
+const ROOT_KIND = { apps: "app", connectors: "connector", themes: "theme" } as const;
+
+/**
+ * Whether `dir`, `<root>/<slug>`, holds an install record of its own: a
+ * `.registry.json` that reads as one and names this kind and slug. Read from
+ * the working tree, where install put it.
+ */
+export function hasInstallRecord(dir: string, root: string = ROOT): boolean {
+  const [top, slug] = dir.split("/");
+  const kind = ROOT_KIND[top as keyof typeof ROOT_KIND];
+  if (!kind || !slug) return false;
+  const read = readInstallRecord(path.join(root, top, slug));
+  return read.state === "ok" && recordMismatch(read.record, kind, slug) === null;
 }
 
 /** The directories that have a manifest to stamp, in manifest order. */
@@ -407,10 +437,11 @@ function main(): void {
   // A merge or cherry-pick being concluded stamps only what it changes itself;
   // what it brings in was stamped where it was made. See planStamps().
   const from = gitMode ? incoming() : null;
-  const plan = planStamps(changed, from?.changed);
+  const plan = planStamps(changed, from?.changed, (dir) => hasInstallRecord(dir));
   const targets = collectTargets(plan.own);
   const inherited = collectTargets(plan.broughtIn);
-  if (targets.length === 0 && inherited.length === 0) return;
+  const installed = collectTargets(plan.installed);
+  if (targets.length === 0 && inherited.length === 0 && installed.length === 0) return;
 
   // One timestamp for the whole commit: two apps changed by the same commit
   // should carry the same date, not dates milliseconds apart.
@@ -425,6 +456,9 @@ function main(): void {
     for (const target of inherited) {
       skipped.push(`${target.slug} (brought in as is by the ${from.what}, keeps its date)`);
     }
+  }
+  for (const target of installed) {
+    skipped.push(`${target.slug} (installed from a Registry: its .registry.json records the files that were verified)`);
   }
 
   for (const target of targets) {

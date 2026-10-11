@@ -17,7 +17,7 @@ import WithCode from "./with-code";
  * couldn't read as text and left to registration; what the package's manifest
  * declares beside what the publisher claims on the catalogue; whether this
  * checkout's version meets the release's floor; and where to read the source,
- * at the commit that was verified.
+ * at the commit that was verified, from the install record.
  *
  * The manifest's declarations are what this instance enforces. The
  * publisher's claims are their own words on the listing, shown beside them
@@ -30,8 +30,7 @@ export default function ReviewPanel({
   review: PendingReview;
   listing: ListingFacts;
 }) {
-  const { release } = review;
-  const sourceUrl = listing.state === "ok" ? listing.sourceUrl : null;
+  const { release, sourceUrl } = review;
   return (
     <div className="space-y-6">
       <p className="text-sm text-foreground">
@@ -172,8 +171,6 @@ export default function ReviewPanel({
               <p className="mt-2 text-sm text-muted-foreground">
                 <WithCode text={listing.message} />
               </p>
-            ) : listing.claims === null ? (
-              <p className="mt-2 text-sm text-muted-foreground">Not available.</p>
             ) : listing.claims.length === 0 ? (
               <p className="mt-2 text-sm text-muted-foreground">No permissions declared.</p>
             ) : (

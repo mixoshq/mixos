@@ -4,7 +4,7 @@
 
 "use client";
 
-import { ExternalLink, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ExternalLink, PencilLine, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CARD_SHELL } from "@/components/ui/card";
@@ -14,6 +14,11 @@ import {
   truncateWords,
   TILE_DESCRIPTION_WORDS,
 } from "@/lib/apps/display";
+import {
+  provenanceDetail,
+  provenanceLine,
+  type Provenance,
+} from "@/lib/repository/provenance";
 import { KIND_SEGMENT, type ExtensionSummary } from "@/lib/repository/types";
 
 /**
@@ -40,11 +45,19 @@ import { KIND_SEGMENT, type ExtensionSummary } from "@/lib/repository/types";
  * current release has been yanked. None of that is worth a second request per
  * tile — those facts are stated in the register dialog, which fetches the full
  * record precisely because that is the screen where they matter.
+ *
+ * ── AN INSTALLED ONE SAYS WHERE IT CAME FROM ────────────────────────────────
+ *
+ * A name already in this build gets a line instead of a button, from its
+ * install record (src/lib/repository/provenance.ts): installed from this
+ * catalogue at a version, perhaps modified locally since; installed from
+ * another catalogue; or a local extension that only shares the name. Matching
+ * the name alone, as this did, called all three "Installed".
  */
 export default function ExtensionCard({
   extension,
   repositoryOrigin,
-  installedSlugs,
+  installed,
   pendingSlugs,
   onInstall,
   onReview,
@@ -52,15 +65,14 @@ export default function ExtensionCard({
   extension: ExtensionSummary;
   /** Origin of the repository being browsed, for the listing link. */
   repositoryOrigin: string;
-  /** Identifiers already present on this instance, for the "Installed" state. */
-  installedSlugs: ReadonlySet<string>;
+  /** Where the extension of this name in this build came from, or null when there is none. */
+  installed: Provenance | null;
   /** Identifiers waiting in `.mixos/pending/` to be registered. */
   pendingSlugs: ReadonlySet<string>;
   onInstall: (extension: ExtensionSummary) => void;
   /** Open the review of a pending install, which leads to Register. */
   onReview: (extension: ExtensionSummary) => void;
 }) {
-  const installed = installedSlugs.has(extension.slug);
   const pending = !installed && pendingSlugs.has(extension.slug);
   // No version means no published release: nothing to fetch and no hash to
   // verify against. Browsable, not installable, and the button says which.
@@ -109,7 +121,7 @@ export default function ExtensionCard({
 
       {/* Pushed to the floor so tiles in a row align on their action bar even
           when their taglines run to different lengths. */}
-      <div className="mt-auto flex items-center gap-2 pt-4">
+      <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-2 pt-4">
         {/*
           One button. Installing an app or a connector puts it in
           `.mixos/pending/`, where none of its code runs; registering it, after
@@ -117,7 +129,23 @@ export default function ExtensionCard({
           per database, after that. A button that did all three would skip the
           review, so there isn't one.
         */}
-        {pending ? (
+        {installed ? (
+          <p
+            className={cn(
+              "inline-flex min-w-0 items-center gap-1.5 text-xs",
+              installed.from === "catalogue" ? "text-foreground" : "text-muted-foreground",
+            )}
+            title={provenanceDetail(installed)}
+          >
+            {installed.from === "catalogue" &&
+              (installed.modified ? (
+                <PencilLine className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              ) : (
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              ))}
+            {provenanceLine(installed)}
+          </p>
+        ) : pending ? (
           <Button variant="primary" size="sm" onClick={() => onReview(extension)}>
             Review and register
           </Button>
@@ -125,10 +153,10 @@ export default function ExtensionCard({
           <Button
             variant="primary"
             size="sm"
-            disabled={installed || !installable}
+            disabled={!installable}
             onClick={() => onInstall(extension)}
           >
-            {installed ? "Installed" : installable ? "Install" : "No release"}
+            {installable ? "Install" : "No release"}
           </Button>
         )}
         <a

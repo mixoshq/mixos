@@ -120,7 +120,18 @@ your repository, commit, and deploy." To add an extension:
    Admin > Connectors, or `npm run register -- <kind>/<slug>`. A theme is
    registered as it installs.
 3. Commit its folder, `apps/<slug>`, `connectors/<slug>` or `themes/<slug>`,
-   and deploy.
+   with the `.registry.json` install wrote in it, and open a pull request.
+   Register hands back the commands and a commit message that records where
+   the extension came from; `/mixos deploy` does the same.
+4. Merge it into the branch your host deploys. On Coolify, Dokploy, Render,
+   Railway and Vercel, that ships it. With Docker Compose on your own server,
+   pull it there, then build, migrate and start, as in
+   [Upgrading](docker-compose.md#upgrading).
+
+The deployment reads where each extension came from out of its build
+(`src/generated/registry-installs.ts`, from the `.registry.json` files), and
+Browse says so: "Installed from mixos.org · 1.2.0". An installed folder edited
+after install shows "modified locally".
 
 An app arrives **inactive** on each instance. Activate it on that instance's
 Admin > Apps. After Register, the checkout offers **Activate in this checkout**
