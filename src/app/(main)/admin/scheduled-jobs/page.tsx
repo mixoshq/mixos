@@ -103,16 +103,18 @@ export default async function ScheduledJobsAdminPage() {
   for (const app of appRegistry) {
     const schedules = app.schedules ?? [];
     if (schedules.length === 0) continue;
-    // The gate Run now asks, so the page shows what the server will decide: an
-    // inactive app's jobs don't run, on the tick or by hand.
-    const appActive = (await checkAppGate(app.slug)).open;
+    // The gate Run now asks, so the page shows what the server will decide: the
+    // jobs of an app that is inactive, or being updated, don't run, on the
+    // tick or by hand.
+    const gate = await checkAppGate(app.slug);
+    const appState = gate.open ? "active" : gate.reason;
     for (const s of schedules) {
       const key = `${app.slug} ${s.name}`;
       const r = state.get(key);
       jobs.push({
         appSlug: app.slug,
         appName: app.name,
-        appActive,
+        appState,
         jobName: s.name,
         intervalMinutes: s.everyMinutes ?? null,
         cron: s.cron ?? null,

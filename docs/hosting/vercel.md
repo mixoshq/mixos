@@ -21,8 +21,8 @@ own server with TLS.
 2. **Import your fork into Vercel.** The framework preset is detected, and
    [`vercel.json`](../../vercel.json) sets the build command,
    `npm run vercel-build`.
-3. **Set the environment variables** from the table in
-   [README.md](README.md#environment): `DATABASE_URL`, `AUTH_SECRET`,
+3. **Set the environment variables** from the
+   [environment table](README.md#environment): `DATABASE_URL`, `AUTH_SECRET`,
    `CRON_SECRET`, the six platform keys (fresh, from
    `npm run keys:generate`), and `INITIAL_ADMIN_EMAIL` and
    `INITIAL_ADMIN_PASSWORD` for your admin account. `NEXTAUTH_URL` is optional
@@ -55,10 +55,11 @@ own server with TLS.
    change which database it migrates or how it connects.
 
 [`vercel.json`](../../vercel.json) registers the scheduler tick, `/api/cron`
-every five minutes. Vercel's Hobby plan only allows daily cron schedules, so the
-5-minute tick needs Pro. Hobby also caps function duration at 60 seconds, which
-cuts a long tick short. That's harmless, because each job is claimed atomically
-and the next tick picks up where the last one stopped.
+every five minutes. Vercel's Hobby plan allows only daily cron jobs and fails a
+deployment whose cron runs more often, so deploying with this file needs Pro. The
+tick may run for 300 seconds, which every plan allows with Fluid compute,
+Vercel's default. A tick that's cut short anyway is harmless, because each job
+is claimed atomically and the next tick picks up where the last one stopped.
 
 ## Upgrades
 

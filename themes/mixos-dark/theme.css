@@ -15,10 +15,10 @@
  * with it: the two are independent themes that may diverge in type, radius and
  * ramp over time.
  *
- * The brand is materially stronger here than on white. Every accent clears AA
- * at its published value, so nothing has to be substituted the way cyan does in
- * `mixos` — which is why `--primary` can be brand cyan-400 rather than the
- * cyan-700 the light theme steps down to.
+ * Published cyan (4.36:1) and violet (3.13:1) fall short of AA on this slate
+ * too, so this theme substitutes as `mixos` does, from the light end of the
+ * ramp instead of the dark: `--primary` is brand cyan-400 (8.33:1) rather than
+ * the cyan-700 the light theme steps down to, and `--cat-2` is #a78bfa.
  *
  * Ratios are computed by the build, not by hand — scripts/theme-css.ts fails
  * the build if any regress. Run the generator to see the table.

@@ -119,6 +119,8 @@ npm run migrate:apps
 
 The script takes every app in the registry with `"database": true`, creates its role and schema if they do not exist, checks every file it has not applied yet, and then runs them in order, each in its own transaction, as the app's role. Applied migrations are tracked in the `_migrations` table so they never run twice. A folder the registry did not accept never has its SQL run.
 
+**Until they run, your app waits.** While the build carries a migration of yours that the database hasn't applied, none of your app's code runs, because it would meet tables that aren't there yet. Its pages show "This app is being updated. Try again shortly.", and its API routes answer 503 with that message and `Retry-After: 30`. Its jobs wait and stay due, a consumer of its services gets `PROVIDER_UPDATING`, its hook listeners don't run, and its MCP tools refuse. Every other app serves as usual. Your app runs again within 30 seconds of the migrations being applied, by `npm run migrate:apps` locally or the release step in a deployment, with no restart.
+
 This runner handles **app** migrations only. The platform's own schema lives in
 `supabase/migrations/`, and what applies it depends on which database you are
 pointed at:
@@ -146,11 +148,13 @@ runner records itself in. Apply it before running this one.
 Use `context.db` to query your app's tables. It is pinned to your app's schema, so you always use the bare table name.
 
 ```ts
-// In a page or server-side code
+// In an API route handler, or other server code handed `context`.
+// Pages and widgets get no `context`; they call the app's own routes.
 const db = context.db;
+if (!db) throw AppError.unavailable("This app has no database.");
 
 // Insert a row into your schema's orders table
-const { data, error } = await db.table("orders").insert({
+const { error } = await db.table("orders").insert({
   user_id: context.user.id,
   total: 99.99,
   status: "pending",
@@ -301,7 +305,7 @@ await db.table("sync_state").upsert(
 
 Apps that read from a slow upstream keep a local copy in their own scoped tables. Two shapes cover almost every case.
 
-**A single-row JSONB snapshot**, when the upstream set is small and every read wants either one entity or all of them. The scoped client has no joins, so a row-per-entity table read alongside related rows means a query per entity on a path that is already fanning out to a connector:
+**A single-row JSONB snapshot**, when the upstream set is small and every read wants either one entity or all of them. The scoped client has no joins, so a row-per-entity table read alongside related rows takes a query per table and a join in code, on a path that is already fanning out to a connector:
 
 ```sql
 create table if not exists customer_health_snapshot (

@@ -4,7 +4,7 @@
 
 Apps can include CSS, images, fonts, and other static assets. There are two approaches depending on how the asset is used: co-located imports (bundled by the build) and CSS modules or Tailwind for styling. All assets must live inside your app folder.
 
-> **There is no opt-out from the design system.** Every app page renders with the platform's Tailwind layer and design tokens. An app supplies its own CSS *on top of* that baseline — it cannot replace it. The `disableOsStyles` manifest flag that used to grant a blank slate has been removed: it was an escape from the contrast, spacing, and state guarantees every other rule depends on. If your app genuinely needs to break one of those, declare a scoped escape in `app.json` rather than discarding the whole system.
+> **There is no opt-out from the design system.** Every app page renders with the platform's Tailwind layer and design tokens. An app supplies its own CSS *on top of* that baseline — it cannot replace it. The `disableOsStyles` manifest flag that used to grant a blank slate has been removed: it was an escape from the contrast, spacing, and state guarantees every other rule depends on. Those guarantees have no escape either: the only rule an app can escape in `app.json` is `raw-response`, for a route that returns its own Response.
 
 ## Co-located Imports (Recommended)
 
@@ -24,7 +24,7 @@ apps/my-app/
 // apps/my-app/pages/Main.tsx
 import logo from "../assets/logo.png";
 import heroImg from "../assets/hero-banner.jpg";
-import Icon from "../assets/icon.svg";
+import icon from "../assets/icon.svg";
 
 export default function MyAppPage() {
   return (
@@ -33,8 +33,8 @@ export default function MyAppPage() {
       <img src={logo.src} alt="Logo" width={120} height={40} />
       <img src={heroImg.src} alt="Hero" />
 
-      {/* SVGs can be imported as React components */}
-      <Icon className="h-6 w-6" />
+      {/* So is an SVG: it is an image, not a React component */}
+      <img src={icon.src} alt="" className="h-6 w-6" />
     </div>
   );
 }
@@ -103,7 +103,7 @@ You can import a plain `.css` file (not `.module.css`) from a client component. 
 
 ```css
 /* apps/my-app/styles/global.css */
-[data-app="my-app"] .custom-table th {
+[data-app="my-app"] .section-label {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -117,7 +117,7 @@ import "../styles/global.css";
 export default function MyAppPage() {
   return (
     <div data-app="my-app">
-      <table className="custom-table">...</table>
+      <h2 className="section-label">...</h2>
     </div>
   );
 }

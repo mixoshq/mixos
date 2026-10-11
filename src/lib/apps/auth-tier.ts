@@ -46,10 +46,9 @@ type DbUser = NonNullable<Awaited<ReturnType<typeof getUserById>>>;
  * public route to a signed-in user gives away nothing that wasn't already given
  * away.
  *
- * `key` is served on the PUBLIC mount only. Not a policy choice: `/api/apps` sits
- * behind the proxy's cookie-presence check, so a machine-to-machine caller with
- * no cookie is redirected to /login before any of this runs. `/api/p` is the
- * non-cookie surface, which is exactly what an integration needs.
+ * `key` is served on the PUBLIC mount only. `/api/p` is the non-cookie surface,
+ * which is exactly what an integration needs; `/api/apps` is the one the browser
+ * SDK calls with its session cookie, and a key presented there is not read.
  */
 const ELIGIBLE_BY_MOUNT: Record<AppMount, readonly RouteAuth[]> = {
   authenticated: ["session", "signed-in", "public"],

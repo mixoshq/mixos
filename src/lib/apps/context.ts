@@ -124,16 +124,14 @@ export async function buildAppContext(
 }
 
 /**
- * Build the runtime context for an app API route served on the public
- * surface (`/api/p/<slug>/...`) — i.e. routes declared with
- * `visibility: "public"` or `"password"` in the manifest. There is no
- * logged-in user, so:
+ * Build the runtime context for an app API route that resolved to a tier with
+ * no user: `password`, `key` or `public`. There is no logged-in user, so:
  *
  *   - `context.user` is `null` (routes must not read it).
  *
- * Connectors load normally — every connector is tenant-scoped, so its
- * credentials are global to the deployment and don't depend on a visitor
- * identity.
+ * Tenant connectors load normally: their credentials are global to the
+ * deployment and don't depend on a visitor identity. A user-scoped connector
+ * has no grant to resolve without a user, so it is left out.
  */
 export async function buildPublicAppContext(
   appSlug: string,

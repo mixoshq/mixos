@@ -11,7 +11,7 @@ interface LucideIconProps extends LucideProps {
 }
 
 /**
- * Render a Lucide icon by its kebab-case name (e.g., "bar-chart", "box").
+ * Render a Lucide icon by its kebab-case name (e.g., "chart-bar", "box").
  * Falls back to the Box icon if the name isn't found.
  */
 export default function LucideIcon({ name, ...props }: LucideIconProps) {

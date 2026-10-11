@@ -2,7 +2,7 @@
 
 App grants are **binary** at the platform level — a user either has the app or they don't. For finer-grained, in-app permissions (e.g. "admin" vs "read-only", "editor" vs "approver"), an app declares its own **roles**.
 
-Roles are **isolated to your app**: the role keys mean nothing outside it, and the platform provides only the membership check. *Your app* decides what each role is allowed to do — MixOS never enforces a policy on your behalf.
+Roles are **isolated to your app**: the role keys mean nothing outside it. *Your app* decides what each role is allowed to do: a route names the roles it needs and MixOS enforces that before the handler runs (see [Declaring roles on a route](#declaring-roles-on-a-route)), and a handler can branch further with `hasRole`.
 
 ## Declaring roles
 
@@ -79,7 +79,7 @@ const rows = base.map((r) =>
 
 ```ts
 if (!(context.user.isAdmin || context.user.hasRole(["admin"]))) {
-  return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  throw AppError.forbidden();
 }
 ```
 
@@ -87,8 +87,8 @@ if (!(context.user.isAdmin || context.user.hasRole(["admin"]))) {
 
 - An app that declares no `roles` → `hasRole([...])` always returns `false`. Gate optional features behind it safely; existing apps are unaffected.
 - `hasRole([])` (empty array) → `false`.
-- **Public / password routes** run with `context.user === null` and therefore have no roles. Never read roles from a public handler — type the handler against `PublicAppContext` so the compiler enforces it.
+- **Routes accepting `password`, `key` or `public`** run with `context.user === null` when one of those wins, so there are no roles to read. Declaring any of them types `context.user` as nullable, so the compiler makes you handle that. A `signed-in` caller carries no app roles either, which is why the build rejects `roles` on a route whose `auth` is anything but `["session"]`.
 
 ## Where enforcement belongs
 
-Always enforce on the **server** (API routes). Hiding a button in a widget is a UX nicety, not a security boundary — a widget can't import `context` and must not be trusted to gate access. Put every real check in the route handler that returns the data or performs the action.
+Always enforce on the **server** (API routes). Hiding a button in a widget is a UX nicety, not a security boundary — a widget can't import `context` and must not be trusted to gate access. Put every real check on the route that returns the data or performs the action: in its `roles`, or in its handler.

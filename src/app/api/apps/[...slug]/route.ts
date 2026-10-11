@@ -16,7 +16,7 @@
  * `password` is not served here: the unlock cookies are path-scoped to `/p/` and
  * `/api/p/`, so a browser would never send one to this path.
  */
-import { dispatchAppRoute, type HttpMethod } from "@/lib/apps/dispatch";
+import { appRouteOptions, dispatchAppRoute, type HttpMethod } from "@/lib/apps/dispatch";
 
 interface RouteContext {
   params: Promise<{ slug: string[] }>;
@@ -42,3 +42,4 @@ export const POST = (req: Request, ctx: RouteContext) => handle(req, ctx, "POST"
 export const PUT = (req: Request, ctx: RouteContext) => handle(req, ctx, "PUT");
 export const PATCH = (req: Request, ctx: RouteContext) => handle(req, ctx, "PATCH");
 export const DELETE = (req: Request, ctx: RouteContext) => handle(req, ctx, "DELETE");
+export const OPTIONS = (req: Request) => appRouteOptions(req);

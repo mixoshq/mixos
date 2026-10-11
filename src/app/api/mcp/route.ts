@@ -4,9 +4,10 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { checkBearer } from "@/lib/mcp/bearer-limit";
 import { McpToolError, callTool } from "@/lib/mcp/broker";
 import { wwwAuthenticateHeader } from "@/lib/mcp/oauth";
-import { resolveAccessToken, type TokenPrincipal } from "@/lib/mcp/store";
+import type { TokenPrincipal } from "@/lib/mcp/store";
 import { describeTool, reachableApps } from "@/lib/mcp/tools";
 import {
   RPC_INTERNAL_ERROR,
@@ -55,7 +56,8 @@ const MAX_BODY_BYTES = 1024 * 1024;
 /**
  * Per-TOKEN, not per-IP: claude.ai calls arrive from shared egress addresses, so
  * an IP bucket would let one tenant's traffic starve another's. Generous burst
- * because a model happily fires several tools/call in parallel.
+ * because a model happily fires several tools/call in parallel. A token that
+ * fails the check is limited per IP instead (src/lib/mcp/bearer-limit.ts).
  */
 const mcpLimiter = createRateLimiter({
   scope: "api_key",
@@ -63,6 +65,16 @@ const mcpLimiter = createRateLimiter({
   maxTokens: 120,
   refillRatePerSecond: 2,
 });
+
+function rateLimited(retryAfterMs: number) {
+  return NextResponse.json(
+    { error: "rate_limited" },
+    {
+      status: 429,
+      headers: { "Retry-After": String(Math.ceil(retryAfterMs / 1000)) },
+    },
+  );
+}
 
 function unauthorized(message: string) {
   return NextResponse.json(
@@ -90,25 +102,21 @@ export async function POST(request: NextRequest) {
     return unauthorized("A bearer access token is required.");
   }
 
-  const principal = await resolveAccessToken(token);
-  if (!principal) {
+  // An address that has spent its budget of failed checks is refused before
+  // the token is looked up, and a failed check is charged to it.
+  const bearer = await checkBearer(token, request);
+  if (bearer.status === "limited") return rateLimited(bearer.retryAfterMs);
+  if (bearer.status === "invalid") {
     // Same response for unknown, expired, and revoked — a caller must not be
     // able to tell those apart.
     return unauthorized("The access token is invalid, expired, or revoked.");
   }
+  const { principal } = bearer;
 
   const limit = await mcpLimiter.consume(
     principal.clientId + "::" + principal.userId,
   );
-  if (!limit.allowed) {
-    return NextResponse.json(
-      { error: "rate_limited" },
-      {
-        status: 429,
-        headers: { "Retry-After": String(Math.ceil(limit.retryAfterMs / 1000)) },
-      },
-    );
-  }
+  if (!limit.allowed) return rateLimited(limit.retryAfterMs);
 
   const raw = await request.text();
   if (raw.length > MAX_BODY_BYTES) {
