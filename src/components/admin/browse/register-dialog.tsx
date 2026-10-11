@@ -16,6 +16,7 @@ import {
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/input";
+import type { FloorVerdict } from "@/lib/platform/version-floor";
 import Notice from "@/components/ui/notice";
 import {
   installExtensionAction,
@@ -31,6 +32,7 @@ import { KIND_LABEL } from "@/lib/repository/types";
 import { leftOutLine } from "@/lib/repository/left-out";
 import HandBackPanel from "../pending/hand-back";
 import type { PendingTarget } from "../pending/review-dialog";
+import FloorNotice from "./floor-notice";
 
 /**
  * The confirmation step for an install from the catalogue.
@@ -82,6 +84,7 @@ export default function RegisterDialog({
   onReview: (target: PendingTarget) => void;
 }) {
   const [manifest, setManifest] = useState<InstallManifest | null>(null);
+  const [floor, setFloor] = useState<FloorVerdict | null>(null);
   const [listing, setListing] = useState<Extension | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -109,8 +112,10 @@ export default function RegisterDialog({
       // The listing arrives either way — see the action's note on why a failed
       // manifest must not take the context down with it.
       setListing(res.listing);
-      if (res.ok) setManifest(res.manifest);
-      else setResolveError(res.message);
+      if (res.ok) {
+        setManifest(res.manifest);
+        setFloor(res.floor);
+      } else setResolveError(res.message);
     });
     return () => {
       live = false;
@@ -137,7 +142,8 @@ export default function RegisterDialog({
   if (!extension || !kind) return null;
 
   const yanked = manifest?.yanked === true;
-  const blocked = yanked && !acceptYanked;
+  // Install refuses a withdrawn release not accepted, and one needing a newer MixOS.
+  const blocked = (yanked && !acceptYanked) || floor?.met === false;
   // Another registration held the lock, so nothing happened yet. The dialog
   // stays on the same release, with the same answers, and offers it again.
   const locked = outcome?.ok === false && outcome.code === "locked";
@@ -354,11 +360,7 @@ export default function RegisterDialog({
             )}
           </section>
 
-          {manifest.requiresMixOS && (
-            <p className="text-sm text-muted-foreground">
-              Requires MixOS {manifest.requiresMixOS} or newer.
-            </p>
-          )}
+          {floor && <FloorNotice floor={floor} installable={!notInstallable} />}
         </div>
       )}
     </Dialog>

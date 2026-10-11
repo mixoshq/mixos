@@ -194,7 +194,7 @@ test("the review prompt repeats what will run, what was deferred, the claims bes
   assert.match(seen, /Its publisher Their words on mixos\.org, not a guarantee\./);
   assert.match(seen, /network:api\.acme\.example Reads your boards\./);
   // The floor.
-  assert.match(seen, /It requires MixOS 0\.0\.1 or newer\. This checkout is .+, which meets it\./);
+  assert.match(seen, /MixOS version Requires MixOS 0\.0\.1 or newer\. This checkout runs \d+\.\d+\.\d+\S*, which meets it\./);
   // The source, at the installed commit.
   assert.ok(html.includes(`href="${sourceUrl}"`));
   assert.match(seen, /Read it on GitHub at the commit that was verified/);
@@ -219,6 +219,26 @@ test("the prompt asks the admin to confirm they read it, unless Register would r
   );
   assert.doesNotMatch(refused, /type="checkbox"/);
   assert.match(text(refused), /It can't be registered as it is Its files have changed since it was installed/);
+});
+
+test("a floor this checkout doesn't meet is said beside the version, and stands in the way", () => {
+  const review = pendingReview();
+  const html = render(
+    createElement(ReviewPrompt, {
+      review: {
+        ...review,
+        requiresMixOS: { ...review.requiresMixOS, declared: "999.0.0", met: false, reason: "This instance is running MixOS 0.1.0, and this release requires 999.0.0 or newer." },
+        problem: "This instance is running MixOS 0.1.0, and this release requires 999.0.0 or newer.",
+      },
+      listing: { state: "unavailable", origin: "https://mixos.org", message: "Not asked." },
+      read: false,
+      onRead: () => {},
+    }),
+  );
+  const seen = text(html);
+  assert.match(seen, /It can't be registered as it is This instance is running MixOS 0\.1\.0, and this release requires 999\.0\.0 or newer\./);
+  assert.match(seen, /MixOS version Requires MixOS 999\.0\.0 or newer\. This checkout runs \S+, which doesn't meet it\./);
+  assert.doesNotMatch(html, /type="checkbox"/);
 });
 
 test("without the catalogue, the review still stands, with the source from the install record", () => {
