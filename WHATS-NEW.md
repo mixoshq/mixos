@@ -200,6 +200,9 @@ just pulled.
   commits and is listed under "Left out". Only a release PR changes the
   version: a committed local bump makes `scripts/release-prep.ts` refuse the
   next release.
+- **Fix:** the headers of Admin > Apps, Connectors, Themes, Analytics and the
+  Browse pages no longer run off a phone or tablet screen. Below 1024px wide,
+  the buttons sit under the title and wrap.
 
 ## 2026-10-07
 
