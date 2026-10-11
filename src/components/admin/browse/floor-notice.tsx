@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { describeFloor, type FloorVerdict } from "@/lib/platform/version-floor";
-import Notice from "../pending/notice";
+import Notice from "@/components/ui/notice";
 
 /**
  * A release's `requiresMixOS` against this build, in the install dialog: a

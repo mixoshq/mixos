@@ -28,6 +28,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Client SDK           | `src/lib/apps/sdk.ts`                         |
 | Credential config    | `src/lib/connectors/config.ts`                |
 | Connector switch     | `src/lib/connectors/switch.ts`                |
+| Registry update check | `src/lib/repository/update-check.ts`, `src/lib/repository/updates.ts` |
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
 | Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
@@ -2539,6 +2540,77 @@ Extensions installed before installs kept a record are local. Reinstalling one
 from the Registry gives it a record, and the next release step on each
 instance treats it as a different extension, once.
 
+### The update check
+
+Once a day, the scheduler tick asks the catalogue about the extensions this
+build installed from it (`src/lib/repository/update-check.ts`). It is how a
+release its publisher withdrew, for a security problem say, reaches the admins
+of every instance that runs it.
+
+**What is sent.** One request, from the server, never from a browser:
+
+```
+POST https://mixos.org/api/v1/updates
+{ "instanceId": "<random UUID>",
+  "items": [{ "kind": "app", "slug": "files", "version": "1.2.0" }] }
+```
+
+`items` lists the kind, slug and version of each extension whose install
+record names the catalogue this instance browses, from
+`src/generated/registry-installs.ts`. The instance ID is a random UUID, made
+the first time there is something to check and kept in this database as
+`platform_settings.registry_instance_id`. It is derived from nothing: not the
+host name, the URL, a key or a user. One database is one instance, so a checkout
+and production are two.
+
+**What is not sent:** local extensions, extensions installed from another
+catalogue, users, data, settings, the instance's URL, and the MixOS version.
+
+**What mixos.org keeps:** for each instance and extension, the version it last
+listed, a two-letter country, and when it was first and last seen, deleted 30
+days after the last check that listed it; and for each release an instance
+lists for the first time, a row that counts the install, kept for 30 days and
+then only as daily totals. The IP address isn't stored in the Registry's
+database. mixos.org's
+[API docs](https://mixos.org/docs/api#what-we-record-and-what-we-do-not) say the
+same from its side.
+
+**When.** The tick runs every five minutes on most hosts, and a check is due 21
+hours after the last success, plus up to an hour at random, so that Vercel
+Hobby's daily tick, which can come 23 hours after the last, still checks every
+day. A change to the installed set is checked at the next tick. The check runs
+under the `repository.update-check` lock, a two-minute lease, so instances that
+share a database make one request between them. A failure keeps the last answer
+and tries again in an hour, or after the catalogue's `Retry-After`, but never
+more than a day later. The state is one JSON value,
+`platform_settings.registry_update_check`. Nothing the check does fails the
+tick.
+
+**What the answer can do: show notices.** It goes through the client's rules
+(see **The transport carrying the checksum**): https, an 8-second timeout and a
+4 MB cap. It is a POST, so it follows no redirect, and an answer that is one
+is a failure: following it would send the ID and the list again, to wherever
+the redirect pointed. An answer is kept only for an
+item that was sent, at the version sent. The publisher's reason is plain text,
+trimmed, with control and bidi characters removed, at most 500 characters. A
+latest version must be one install could record, and download URLs and hashes
+are ignored. Nothing is updated, switched off or downloaded because of an
+answer.
+
+Under the header of Admin > Apps, Connectors and Themes, admins see a withdrawn
+release, on all three pages, with **Deactivate** for an app, which is the
+admin's act and audited as `app.deactivate`; a different current release on its
+kind's page, called newer only when both versions are dotted, with the MixOS
+version it needs when this instance is older; a listing that is no longer
+published; a folder modified locally; one installed from another catalogue,
+which is never checked; and one line saying when the catalogue last answered.
+
+**Turning it off.** `MIXOS_UPDATE_CHECK=false` sends nothing and creates no ID.
+Unset, empty and `true` are on. A value that isn't true or false is off, and
+the release step reports it. Deleting an extension's `.registry.json` stops
+checking that extension, and deleting the `registry_instance_id` row gives the
+instance a new ID at the next check.
+
 ### Two locks: the register lease and the checkout lock
 
 Two installs or registrations at once would run two generators over the same
@@ -2841,12 +2913,14 @@ that follows a download's redirects (`src/lib/repository/redirects.ts`). Any
 other redirect, such as one to another host or from https to http, is refused
 before anything is sent to it, with an error that names the catalogue and not
 where the redirect pointed. The reason is the one above: whoever answers a
-followed redirect chooses the hash.
+followed redirect chooses the hash. The update check's POST follows no
+redirect at all (see **The update check**).
 
 ### State of the upstream
 
-The endpoints are live: `/api/v1/search`, `/api/v1/<kind>/<slug>` and
-`/api/v1/<kind>/<slug>/install`. Two things about them shape the client.
+The endpoints are live: `/api/v1/search`, `/api/v1/<kind>/<slug>`,
+`/api/v1/<kind>/<slug>/install` and the update check's `/api/v1/updates`. Two
+things about them shape the client.
 
 **Search returns summaries, not listings.** `/search` answers with
 `ExtensionSummary` — no `sourceRepo`, no `releases`, no `description` — which is

@@ -7,7 +7,7 @@ import { ExternalLink } from "lucide-react";
 import { describeFloor } from "@/lib/platform/version-floor";
 import type { ListingFacts } from "@/lib/repository/pending-outcomes";
 import type { PendingReview } from "@/lib/repository/review";
-import Notice from "./notice";
+import Notice from "@/components/ui/notice";
 import WithCode from "./with-code";
 
 /**
