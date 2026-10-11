@@ -125,6 +125,10 @@ just pulled.
   name, and the release step and the app no longer print it, password included.
 - **Fix:** sign-in attempts are limited on every route that checks a password,
   including Auth.js's own callback, and those routes share one budget per IP.
+- **Fix:** the password re-checks, webhooks and MCP bearer checks are limited,
+  and a wrong password takes as long for an email with no account as for one
+  with. "Change my password" and setting a user's password share one budget
+  per person, and a webhook body over 5 MiB is refused.
 
 ## 2026-10-07
 
