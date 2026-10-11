@@ -184,6 +184,17 @@ describe("the sidecar", () => {
     assert.deepEqual(fs.readdirSync(path.dirname(file)).filter((f) => f.endsWith(".tmp")), []);
   });
 
+  test("keeps what install left out, by name, and reads a count it couldn't have written as unreadable", () => {
+    const file = path.join(tmp, `sidecar-${n++}.json`);
+    const value = sidecar({ leftOut: { ".gitignore": 2, ".gitattributes": 1 } });
+    writeSidecar(file, value);
+    assert.deepEqual(readSidecar(file), { state: "ok", sidecar: value });
+    for (const leftOut of [{ ".git": 1 }, { ".gitignore": 0 }, { ".gitignore": "2" }, [".gitignore"]]) {
+      fs.writeFileSync(file, JSON.stringify({ ...sidecar(), leftOut }));
+      assert.equal(readSidecar(file).state, "unreadable", JSON.stringify(leftOut));
+    }
+  });
+
   test("a registration under way is recorded in it", () => {
     const file = path.join(tmp, `sidecar-${n++}.json`);
     const register = { token: "0123456789abcdef-token", pid: 123, hostname: "host", startedAt: new Date().toISOString() };
