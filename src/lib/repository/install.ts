@@ -25,10 +25,12 @@
  * 5.  **Verify the content hash.** Mismatch ends it here, with nothing written.
  * 6.  Pre-flight: the manifest exists, parses and is for this slug, no path
  *     would land on disk as something other than what it names, and the
- *     package holds no install record of its own. Then the files hash, which
- *     Register and the generator can recompute from the folder (filesHash()),
- *     and the install record, `.registry.json`, added to the tree: where it
- *     came from and what was verified (./install-record.ts).
+ *     package holds no install record of its own. Then any `.gitignore` or
+ *     `.gitattributes` is left out (leaveOut(), ./left-out.ts), and the files
+ *     hash is computed over what is written, which Register and the generator
+ *     can recompute from the folder (filesHash()). Then the install record,
+ *     `.registry.json`, is added to the tree: where it came from and what was
+ *     verified (./install-record.ts).
  * 7.  Write to `.mixos/staging/<kind dir>/<slug>/`, never to the target.
  * 8.  **Check the staged copy without running it**: the generator's `--check`,
  *     which reads the extension's text, imports none of its code, and writes
@@ -92,6 +94,7 @@ import {
   repositoryFromTarballUrl,
   type InstallRecord,
 } from "./install-record";
+import { LEFT_OUT_NAMES, type LeftOut } from "./left-out";
 import { BUILT_DEPLOYMENT_NOTICE, isBuiltDeployment } from "../platform/build";
 import {
   CheckoutLockLostError,
@@ -302,9 +305,9 @@ export interface InstallResult {
   /** Null for a release published without a tag. */
   gitTag: string | null;
   commitSha: string;
-  /** The hash that was verified. Recorded in the audit row. */
+  /** The hash that was verified, over the package as published. Recorded in the audit row. */
   contentHash: string;
-  /** The same tree with file modes ignored, which Register recomputes from the folder. */
+  /** The files written, with file modes ignored, which Register recomputes from the folder. */
   filesHash: string;
   /**
    * Repo-relative: `.mixos/pending/apps/postgres` for an app or connector
@@ -313,8 +316,15 @@ export interface InstallResult {
   installPath: string;
   /** True for an app or connector, which waits in `.mixos/pending/` for Register. */
   pending: boolean;
+  /** The files written and their bytes, the install record not counted. */
   fileCount: number;
   byteCount: number;
+  /**
+   * What install left out of the package, by name: `{ ".gitignore": 2 }`, or
+   * `{}` (./left-out.ts). The content hash covers these files; the files hash
+   * and the counts above don't.
+   */
+  leftOut: LeftOut;
   /** What the check left to registration, which loads the extension's code. */
   deferred: string[];
   /** The generator's run, for a theme. Null for a pending install, which runs nothing. */
@@ -483,15 +493,10 @@ function resolveInstallDir(kind: ExtensionKind, slug: string): { dir: string; re
 const UNPRINTABLE_IN_PATH = /[\p{Cc}\p{Bidi_Control}\p{Zl}\p{Zp}]/u;
 
 /**
- * Files git reads from the tree it is adding, at any depth.
- *
- * A package that ships one changes what the operator's repository records when
- * the extension is committed, or how a review shows it: `.gitattributes` can
- * hide a diff (`-diff`) or fold files away as generated, `.gitignore` can keep a
- * file the extension runs out of the commit, and a `.git` makes git treat the
- * folder as a repository of its own, which `git add` does not descend into.
+ * Files install leaves out of what it writes, at any depth. Compared folded.
+ * ./left-out.ts says why; pathProblems() skips them and leaveOut() drops them.
  */
-const GIT_CONTROL_FILES = new Set([".gitattributes", ".gitignore", ".git"]);
+const LEFT_OUT: ReadonlySet<string> = new Set(LEFT_OUT_NAMES);
 
 /** A path with each character from UNPRINTABLE_IN_PATH, or any non-ASCII one if asked, spelled `\u{…}`. */
 function printablePath(p: string, { ascii = false }: { ascii?: boolean } = {}): string {
@@ -508,19 +513,32 @@ function foldPath(p: string): string {
   return p.normalize("NFC").toUpperCase().toLowerCase().normalize("NFC");
 }
 
+/** The path down to, and including, segment `i`. */
+const through = (segments: string[], i: number): string => segments.slice(0, i + 1).join("/");
+
 /**
  * Every way a package's paths would put something on disk other than what they
  * name, one line each. Empty for a package whose paths are what they say.
  *
+ * A file install leaves out (LEFT_OUT) is skipped before anything else is
+ * checked: it is never written, so nothing about its path reaches the disk.
+ *
+ * - A control, bidi or line-separator character in a name. The file or folder
+ *   holding it is named once, with the character spelled `\u{…}`.
+ * - A `.git` file or folder at any depth, named once. Git treats the folder
+ *   holding it as a repository of its own, so that folder would not be
+ *   committed with the extension.
+ * - A file or folder named like the install record, `.registry.json`, at any
+ *   depth and in any case, named once. Install writes the record, from what it
+ *   verified; a package that shipped one could claim another origin or
+ *   release.
  * - Two paths, or two folders, the same but for case or Unicode normalisation.
  *   A case-insensitive checkout, the default on macOS and Windows, would store
  *   them as one: two files become whichever was written last, and that is the
- *   one that runs.
- * - A control, bidi or line-separator character anywhere in a path.
- * - A git control file at any depth (GIT_CONTROL_FILES).
- * - A file or folder named like the install record, `.registry.json`, at any
- *   depth. Install writes the record, from what it verified; a package that
- *   shipped one could claim another origin or release.
+ *   one that runs. Each pair is named once.
+ *
+ * mixos.org's publish check follows this loop, so that it refuses what install
+ * would refuse and nothing else: a change here is one to make there too.
  *
  * Exported for its tests.
  */
@@ -529,23 +547,30 @@ export function pathProblems(paths: readonly string[]): string[] {
   const spellings = new Map<string, string>();
 
   for (const p of paths) {
-    if (UNPRINTABLE_IN_PATH.test(p)) {
+    const segments = p.split("/");
+    if (LEFT_OUT.has(foldPath(segments[segments.length - 1]))) continue;
+
+    const unprintable = segments.findIndex((s) => UNPRINTABLE_IN_PATH.test(s));
+    if (unprintable >= 0) {
       problems.add(
-        `"${printablePath(p)}" has a control or bidi character in its name, which can change how the name prints.`,
+        `"${printablePath(through(segments, unprintable))}" has a control or bidi character in its name, ` +
+          `which can change how the name prints.`,
       );
       continue;
     }
 
-    const segments = p.split("/");
-    const git = segments.find((s) => GIT_CONTROL_FILES.has(foldPath(s)));
-    if (git) {
+    const git = segments.findIndex((s) => foldPath(s) === ".git");
+    if (git >= 0) {
       problems.add(
-        `"${p}" is a git control file (${git}), which would change what your repository records for the extension, or how a review shows it.`,
+        `"${through(segments, git)}" makes git treat the folder it is in as a repository of its own, ` +
+          `so that folder would not be committed with the extension.`,
       );
     }
-    if (segments.some((s) => foldPath(s) === INSTALL_RECORD_FILE)) {
+    const record = segments.findIndex((s) => foldPath(s) === INSTALL_RECORD_FILE);
+    if (record >= 0) {
       problems.add(
-        `"${p}" is named like the install record (${INSTALL_RECORD_FILE}), which only an install writes, from what it verified.`,
+        `"${through(segments, record)}" is named like the install record (${INSTALL_RECORD_FILE}), ` +
+          `which only an install writes, from what it verified.`,
       );
     }
 
@@ -585,8 +610,9 @@ export function pathProblems(paths: readonly string[]): string[] {
  * And so that what is reviewed is what runs. A reviewer reads the source on
  * GitHub; what runs is what lands on this disk. A path that a case-insensitive
  * disk would merge with another, or that prints as something it is not, or a
- * git control file that changes what the operator's commit records, would make
- * the two differ: `pathProblems` above.
+ * `.git` that changes what the operator's commit records, would make the two
+ * differ: `pathProblems` above. A `.gitignore` or `.gitattributes` would too,
+ * and is left out instead (leaveOut() below).
  *
  * Exported for its tests.
  */
@@ -652,6 +678,34 @@ export function preflight(kind: ExtensionKind, slug: string, entries: TarEntry[]
       "invalid-package",
     );
   }
+}
+
+/**
+ * What install writes of a verified package, and what it leaves out: every
+ * file whose name, folded, is in LEFT_OUT, at any depth, counted by name.
+ *
+ * It runs after the content hash is checked, which covers the package as
+ * published, these files included, and before the files hash is computed,
+ * which covers only what is written, so that Register and the generator can
+ * recompute it from the folder.
+ *
+ * Exported for its tests.
+ */
+export function leaveOut(entries: readonly TarEntry[]): { written: TarEntry[]; leftOut: LeftOut } {
+  const written: TarEntry[] = [];
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    const segments = entry.path.split("/");
+    const name = foldPath(segments[segments.length - 1]);
+    if (LEFT_OUT.has(name)) counts.set(name, (counts.get(name) ?? 0) + 1);
+    else written.push(entry);
+  }
+  const leftOut: LeftOut = {};
+  for (const name of LEFT_OUT_NAMES) {
+    const files = counts.get(name);
+    if (files) leftOut[name] = files;
+  }
+  return { written, leftOut };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1438,12 +1492,15 @@ async function runInstall(
   });
   const contentHash = verifyContentHash(entries, manifest.contentHash);
 
-  // Step 6, and the install record: what was verified, including the hash
-  // Register and the generator check the folder against. It goes into the
-  // tree, so it waits in pending with the extension and is committed with it.
+  // Step 6: pre-flight, then what install leaves out, then the install record:
+  // what was verified, including the files hash Register and the generator
+  // check the folder against, which is over what is written. The record goes
+  // into the tree, so it waits in pending with the extension and is committed
+  // with it.
   preflight(kind, slug, entries);
-  const record: InstallRecord = { ...origin, contentHash, filesHash: filesHash(entries) };
-  const tree = [...entries, installRecordEntry(record)];
+  const { written, leftOut } = leaveOut(entries);
+  const record: InstallRecord = { ...origin, contentHash, filesHash: filesHash(written) };
+  const tree = [...written, installRecordEntry(record)];
 
   // Step 7, fenced by the locks (see stageTree).
   const staged = await stageTree(stagingLocation(PROJECT_ROOT, kind, slug).dir, tree, lease);
@@ -1462,9 +1519,10 @@ async function runInstall(
     commitSha: record.commitSha,
     contentHash: record.contentHash,
     filesHash: record.filesHash,
-    // The package's files, without the record install added.
-    fileCount: entries.length,
-    byteCount: entries.reduce((n, e) => n + e.data.length, 0),
+    // The files written, without the record install added.
+    fileCount: written.length,
+    byteCount: written.reduce((n, e) => n + e.data.length, 0),
+    leftOut,
     deferred: check.deferred,
   };
 
@@ -1481,6 +1539,8 @@ async function runInstall(
         installedAt: new Date().toISOString(),
         installedBy: options.installedBy ?? "an administrator",
         check: { verdict: "accepted", deferred: check.deferred },
+        // For Register to say again. Left off when nothing was left out.
+        ...(Object.keys(leftOut).length > 0 ? { leftOut } : {}),
       },
       lease,
     );
