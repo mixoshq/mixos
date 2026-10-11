@@ -14,7 +14,7 @@
  *     "gitTag": "v1.2.0",                   null for a release with no tag
  *     "commitSha": "<40 hex>",
  *     "contentHash": "sha256-…",            as published, and verified
- *     "filesHash": "sha256-…",              the same files, modes ignored
+ *     "filesHash": "sha256-…",              the files written, modes ignored
  *     "repository": { "owner": "acme", "name": "mixos-files", "subpath": null },
  *     "requiresMixOS": "0.4.0"
  *   }
@@ -37,13 +37,15 @@
  *
  * ── filesHash ───────────────────────────────────────────────────────────────
  *
- * The content hash records each file's execute bit, as a git tree does, but
- * install writes every file 0644, so a folder on disk can't reproduce it. The
- * files hash is the content hash's serialisation over the same files with
- * every mode read as 644 (filesHash() in ./content-hash.ts), and it can be
- * recomputed from the folder: folderFilesHash() below, which counts every file
- * but the record itself. Register refuses a pending folder that no longer
- * matches, and the generator marks a registered one `modified`.
+ * The content hash records each file's execute bit, as a git tree does, and
+ * covers the package as published. Install writes every file 0644 and leaves
+ * out any `.gitignore` or `.gitattributes` (./left-out.ts), so a folder on disk
+ * can't reproduce it. The files hash is the content hash's serialisation over
+ * the files install wrote, with every mode read as 644 (filesHash() in
+ * ./content-hash.ts), and it can be recomputed from the folder:
+ * folderFilesHash() below, which counts every file but the record itself.
+ * Register refuses a pending folder that no longer matches, and the generator
+ * marks a registered one `modified`.
  *
  * It checks for change after install, by an editor, a tool or another process
  * in the checkout. It is not a signature: anyone who can write the folder can

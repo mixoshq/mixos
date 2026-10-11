@@ -18,7 +18,7 @@ import path from "node:path";
 import { checkoutLockFile, readCheckoutLock, tryAcquireCheckoutLock } from "../src/lib/platform/checkout-lock";
 import { filesHash, hashFileTree } from "../src/lib/repository/content-hash";
 import { INSTALL_RECORD_FILE, serializeInstallRecord } from "../src/lib/repository/install-record";
-import { pendingLocation, writeSidecar, type PendingKind } from "../src/lib/repository/pending";
+import { pendingLocation, writeSidecar, type PendingKind, type PendingSidecar } from "../src/lib/repository/pending";
 import type { TarEntry } from "../src/lib/repository/tar";
 import { cliActor, parseArgs, printable, resolveTarget, runCli } from "./register-cli";
 
@@ -64,7 +64,7 @@ beforeEach(() => {
 
 const TREE: TarEntry[] = [{ path: "app.json", mode: 0o644, data: Buffer.from('{"name":"Acme"}\n') }];
 
-function pend(kind: PendingKind, slug: string, tree: TarEntry[] = TREE) {
+function pend(kind: PendingKind, slug: string, tree: TarEntry[] = TREE, sidecar: Pick<PendingSidecar, "leftOut"> = {}) {
   const where = pendingLocation(root, kind, slug);
   fs.mkdirSync(where.folder, { recursive: true });
   for (const e of tree) fs.writeFileSync(path.join(where.folder, e.path), e.data);
@@ -90,6 +90,7 @@ function pend(kind: PendingKind, slug: string, tree: TarEntry[] = TREE) {
     installedAt: "2026-10-11T09:00:00.000Z",
     installedBy: "admin@example.com",
     check: { verdict: "accepted", deferred: [] },
+    ...sidecar,
   });
   return where;
 }
@@ -185,9 +186,22 @@ describe("running it", () => {
     assert.match(out, /https:\/\/github\.com\/acme\/mixos-acme\/tree\/d{40}/);
     assert.match(out, /It arrives inactive on each instance/);
     assert.doesNotMatch(out, /\.gitignore leaves/);
+    assert.doesNotMatch(out, /Left out/);
     assert.ok(fs.existsSync(path.join(root, "apps", "acme", "app.json")));
     assert.ok(fs.existsSync(path.join(root, "apps", "acme", INSTALL_RECORD_FILE)));
     assert.deepEqual(audit, [{ actor_id: null, actor_email: "cli:tester@test-host", action: "app.register" }]);
+  });
+
+  test("says in one line what install left out of the package, after what it registered", async () => {
+    pend("app", "acme", TREE, { leftOut: { ".gitignore": 1, ".gitattributes": 2 } });
+    const t = terminal();
+    assert.equal(await cli(["app/acme"], t), 0, t.err.join("\n"));
+    const out = t.out.join("\n");
+    assert.match(
+      out,
+      /\nRegistered to apps\/acme: [^\n]+\nLeft out \.gitignore \(1 file\) and \.gitattributes \(2 files\): MixOS doesn't install git control files\.\n/,
+    );
+    assert.equal(out.match(/Left out/g)?.length, 1);
   });
 
   test("warns, and adds by name, a file the checkout's .gitignore would leave out of the commit", async (t) => {
