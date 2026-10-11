@@ -22,7 +22,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { mixosVersion, satisfiesMinimum } from "../platform/version";
+import { floorVerdict } from "../platform/version";
+import type { FloorVerdict } from "../platform/version-floor";
 import { contentHashesMatch } from "./content-hash";
 import {
   FolderReadError,
@@ -88,16 +89,8 @@ export interface PendingReview {
   deferred: string[];
   /** What the package's manifest declares. Null when it can't be read. */
   declared: Declaration[] | null;
-  /** The release's floor against this checkout's version. */
-  requiresMixOS: {
-    declared: string | null;
-    current: string;
-    /** False when Register would refuse it. */
-    met: boolean;
-    /** Whether a comparison happened: false for no floor, or one that isn't a version. */
-    checked: boolean;
-    reason: string | null;
-  };
+  /** The release's floor against this checkout's version. `met` is false when Register would refuse it. */
+  requiresMixOS: FloorVerdict;
   /**
    * What stands in the way of registering it now, or null. Register checks all
    * of it again under its locks; this says so before anyone asks.
@@ -375,8 +368,8 @@ export function reviewPendingInstall(root: string, kind: PendingKind, slug: stri
     }
   }
 
-  const floor = satisfiesMinimum(record.requiresMixOS);
-  if (!problem && !floor.allowed) problem = floor.reason ?? "This checkout's MixOS is older than the release requires.";
+  const floor = floorVerdict(record.requiresMixOS);
+  if (!problem && !floor.met) problem = floor.reason ?? "This checkout's MixOS is older than the release requires.";
 
   const name = manifest?.[kind === "app" ? "name" : "displayName"];
   return {
@@ -402,13 +395,7 @@ export function reviewPendingInstall(root: string, kind: PendingKind, slug: stri
     runs: runGroups(kind, files),
     deferred: sidecar.check.deferred.map((d) => shownText(d, MAX_LINE_CHARS)),
     declared: manifest ? declaredBy(kind, manifest) : null,
-    requiresMixOS: {
-      declared: record.requiresMixOS,
-      current: mixosVersion(),
-      met: floor.allowed,
-      checked: floor.checked,
-      reason: floor.reason ?? null,
-    },
+    requiresMixOS: floor,
     problem,
   };
 }
