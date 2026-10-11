@@ -27,7 +27,7 @@
  *   4. Resolve the URL to an on-disk route pattern.   → 404
  *   5. Pre-import eligibility, from the REGISTRY.     → 404
  *   6. The app gate, then import the module and find
- *      the declaration.                               → 404 / 405 / 500
+ *      the declaration.                               → 404 / 503 / 405 / 500
  *   7. Live declaration must agree with the registry. → 404
  *   8. Resolve the auth tier the caller presents.     → 401 / 403 / 404
  *   9. Per-user and per-route rate limits, now that we know who is calling.
@@ -36,15 +36,20 @@
  *
  * Step 5 exists so a route that does not serve this mount never gets the chance
  * to run its module-scope code for a caller it would have refused. The app gate
- * that opens step 6 does the same for a whole app: one an admin switched off
- * never runs its module-scope code, for anyone. Step 8 checks activation again,
- * as a second line. Step 7 exists because step 5 trusted the generated
- * registry, and a gate decided from one source and enforced from another is
- * not a gate.
+ * that opens step 6 does the same for a whole app: one an admin switched off,
+ * or one whose own migrations are behind this build, never runs its
+ * module-scope code, for anyone. Step 8 checks activation again, as a second
+ * line. Step 7 exists because step 5 trusted the generated registry, and a
+ * gate decided from one source and enforced from another is not a gate.
  */
 
 import { NextResponse } from "next/server";
 import { appRegistry } from "@/generated/app-registry";
+import {
+  APP_UPDATING_MESSAGE,
+  MAINTENANCE_HEADERS,
+  maintenanceGate,
+} from "@/lib/platform/maintenance-gate";
 import { resolveRoutePath } from "@/lib/apps/api-router";
 import { checkAppGate } from "@/lib/apps/app-gate";
 import { buildAppContext, buildPublicAppContext } from "@/lib/apps/context";
@@ -61,7 +66,6 @@ import { capRequestBody } from "@/lib/apps/request-body";
 import type { RouteAuth } from "@/lib/apps/types";
 import { buildCsp, cspNonce } from "@/lib/csp";
 import { maintenanceState } from "@/lib/platform/maintenance";
-import { maintenanceGate } from "@/lib/platform/maintenance-gate";
 
 /**
  * Cap request bodies at 27 MB. Routes still validate their own payloads; this is
@@ -136,6 +140,20 @@ function notFound() {
   return NextResponse.json(
     { error: "Not found", code: "NOT_FOUND" },
     { status: 404 },
+  );
+}
+
+/**
+ * The app's own migrations are behind this build. Not a 404, which is a
+ * switched-off app's answer and tells a client the route is gone: this one is
+ * back once the release step has run, which is what 503 and `Retry-After` say
+ * to every HTTP client. `UNAVAILABLE` is the code `callAppRoute()` throws for
+ * it too.
+ */
+function appUpdating() {
+  return NextResponse.json(
+    { error: APP_UPDATING_MESSAGE, code: "UNAVAILABLE" },
+    { status: 503, headers: MAINTENANCE_HEADERS },
   );
 }
 
@@ -241,8 +259,13 @@ async function dispatch({
 
   // 6 — the app gate, before the import, because importing runs the module's
   // top-level code. An app that is off is a 404, like a route that was never
-  // here, which is also what step 8 answers for it.
-  if (!(await checkAppGate(appSlug)).open) return notFound();
+  // here, which is also what step 8 answers for it. One whose own migrations
+  // are behind is a 503 until the release step has run. That answer comes
+  // before authentication, because authenticating needs the declaration this
+  // import would load, so it reaches anyone step 5 lets through: it says only
+  // that the app is being updated.
+  const gate = await checkAppGate(appSlug);
+  if (!gate.open) return gate.reason === "updating" ? appUpdating() : notFound();
 
   // Import and dispatch are separated so a route that throws at module scope is
   // not reported as missing. That distinction cost real debugging time.

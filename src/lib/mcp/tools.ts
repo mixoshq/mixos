@@ -9,6 +9,7 @@ import type { AppManifest, McpToolDefinition } from "@/lib/apps/types";
 import { MOS_SOURCE } from "@/lib/apps/types";
 import type { McpToolContext } from "@/lib/hooks/types";
 import { hasAppGrant } from "@/lib/apps/access";
+import { checkAppGate } from "@/lib/apps/app-gate";
 
 /**
  * Tool discovery and naming for the MixOS MCP server.
@@ -22,6 +23,10 @@ import { hasAppGrant } from "@/lib/apps/access";
  * (2) is a ceiling and (3) is a floor: an admin revoking a grant removes the
  * tools immediately, without the user having to re-consent, and re-granting
  * does not silently re-expand a consent the user never gave.
+ *
+ * And then the app gate (src/lib/apps/app-gate.ts), before a tool's module is
+ * imported: while the app's own migrations are behind this build its tools
+ * are not listed, and a call to one refuses until the release step has run.
  *
  * `hasAppGrant` — not `hasAppAccess` — is deliberate. "Installed" is a
  * dashboard-layout preference; "granted" is the authorization fact, and it is
@@ -71,8 +76,14 @@ export async function consentableApps(userId: string): Promise<AppManifest[]> {
 }
 
 /**
- * Apps reachable right now for a given token: consented AND still granted.
- * `grantedApps` comes from the token, `hasAppGrant` from the database.
+ * Apps reachable right now for a given token: consented AND still granted AND
+ * let through by the app gate (src/lib/apps/app-gate.ts). `grantedApps` comes
+ * from the token, `hasAppGrant` and the gate from the database.
+ *
+ * The gate is asked because listing a tool imports its module, for its input
+ * schema. An app whose own migrations are behind this build runs no code, so
+ * its tools are left out of the list until the release step has run, and a
+ * call to one refuses with "This app is being updated" (`./broker.ts`).
  */
 export async function reachableApps(
   userId: string,
@@ -80,10 +91,13 @@ export async function reachableApps(
 ): Promise<AppManifest[]> {
   const consented = new Set(consentedSlugs);
   const candidates = appsWithMcpTools().filter((a) => consented.has(a.slug));
-  const granted = await Promise.all(
-    candidates.map((a) => hasAppGrant(userId, a.slug)),
+  const reachable = await Promise.all(
+    candidates.map(
+      async (a) =>
+        (await hasAppGrant(userId, a.slug)) && (await checkAppGate(a.slug)).open,
+    ),
   );
-  return candidates.filter((_, i) => granted[i]);
+  return candidates.filter((_, i) => reachable[i]);
 }
 
 export type McpToolHandler = (

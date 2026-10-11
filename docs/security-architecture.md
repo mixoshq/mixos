@@ -31,6 +31,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
 | Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
+| Password re-check limit | `src/lib/auth/recheck-limit.ts`            |
 | Safe error helper    | `src/lib/safe-error.ts`                       |
 | Security headers     | `next.config.ts`                              |
 | Content-Security-Policy | `src/lib/csp.ts`                           |
@@ -38,6 +39,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | App containment scan | `scripts/app-containment.ts`                  |
 | ESLint restrictions  | `eslint.config.mjs`                           |
 | MCP endpoint         | `src/app/api/mcp/route.ts`                    |
+| MCP bearer-check limit | `src/lib/mcp/bearer-limit.ts`               |
 | MCP tool broker      | `src/lib/mcp/broker.ts`                       |
 | MCP tool discovery   | `src/lib/mcp/tools.ts`                        |
 | OAuth AS crypto      | `src/lib/mcp/oauth.ts`                        |
@@ -99,7 +101,7 @@ up checking the wrong table.
 | 3    | Rate limit (IP), pre-auth      | 429     | Dispatcher (`src/lib/rate-limit.ts`) |
 | 4    | URL resolves to a route pattern| 404     | Dispatcher (`resolveRoutePath`)      |
 | 5    | This mount serves the route    | 404     | Dispatcher, from the **hoisted contract** — so no app module is imported for a caller the route would refuse |
-| 6    | App is active, then the route module loads; method exported | 404 / 405 / 500 | Dispatcher. The app gate (`src/lib/apps/app-gate.ts`) runs before the import, so a deactivated app's module-scope code never runs. Import and dispatch are separated, so a module that throws is not reported as missing |
+| 6    | App is active and not being updated, then the route module loads; method exported | 404 / 503 / 405 / 500 | Dispatcher. The app gate (`src/lib/apps/app-gate.ts`) runs before the import, so neither a deactivated app's module-scope code (404) nor that of an app whose own migrations are behind this build (503, §3.1) runs. Import and dispatch are separated, so a module that throws is not reported as missing |
 | 7    | Live declaration matches the registry | 404 | Dispatcher — a gate decided from one source and enforced from another is not a gate |
 | 8    | Auth tier the caller earned    | 401 / 403 / 404 | `src/lib/apps/auth-tier.ts` |
 | 9    | CSRF token, cookie-authenticated mutations only | 403 | `src/lib/apps/csrf.ts` — authenticated mount, identity tiers, mutating methods |
@@ -296,6 +298,20 @@ under the same slug, so the release step records a hash of each app's files.
 An app that returns with different files comes back inactive and flagged on
 Admin > Apps until an admin activates it; one that returns with the same files
 comes back as it left. Both are audited (§28).
+
+**The app's own migrations have to be applied, too.** The app gate's second
+reason, asked only of an active app: when the build carries a migration of the
+app's that the ledger (`public._migrations`) lacks, as readiness reports
+(§18), its code was written for tables the database doesn't have yet, so none
+of it runs, and the rest of the instance serves as usual. Its API routes and
+pages answer 503 with `Retry-After: 30` and "This app is being updated. Try
+again shortly.", `callAppRoute()` throws `UNAVAILABLE` (§25), its jobs stay
+due (§20), a consumer gets `PROVIDER_UPDATING` (§23), its hook listeners don't
+run, and its MCP tools refuse (§17). The answer comes from the same check as
+the maintenance response (§18), kept for 15 seconds, so the app serves again
+within 30 seconds of the release step, with no restart. A check that can't
+tell counts as not behind. An app that is also switched off answers as a
+switched-off app does, so the 503 never gives a switched-off app away.
 
 **Do not confuse this with `user_apps`.** That table records which apps a user has
 *installed* on their dashboard — a layout preference, not a permission. The
@@ -575,7 +591,7 @@ What the platform does between those two boxes, in order:
 | CSRF protection      | Cross-site request forgery    | `SameSite=Lax` cookie, plus double-submit token on cookie-authenticated mutations | `csrf.ts`, Auth.js, Next.js (see §7) |
 | Admin authorization  | Admin-only pages and actions  | `requireAdmin()` re-reads `is_admin` per call | `access.ts` (see §9)         |
 | Server-side admin    | Admin action bypass           | `requireAdmin()` in pages + server actions   | `access.ts`, admin pages     |
-| Rate limiting        | Abuse / DoS, password guessing | Postgres token-bucket, memory pre-filter    | `rate-limit.ts`, gateway, sign-in (§6) |
+| Rate limiting        | Abuse / DoS, password guessing | Postgres token-bucket, memory pre-filter    | `rate-limit.ts`, gateway, sign-in and password re-checks (§6), MCP (§17), webhooks (§19) |
 | Tier resolution      | Per-request auth decision     | `resolveAuthTier()`, strongest-first, fails closed | `auth-tier.ts`          |
 | App access control   | Unauthorized app access       | `hasAppGrant()` checks `user_app_grants`     | `auth-tier.ts` via `access.ts` |
 | Email domain gate    | Unauthorized user provisioning| `ALLOWED_EMAIL_DOMAINS` env var check        | `access.ts` (`ensureUser`)   |
@@ -588,10 +604,11 @@ What the platform does between those two boxes, in order:
 | App containment scan | Secrets, egress, injection    | Syntax-tree scan; a finding skips the app    | `app-containment.ts` (see §24) |
 | SDK routing          | Direct DB/connector access    | All client calls go through `/api/apps/...`  | `sdk.ts`                     |
 | Safe error responses | Internal detail leakage       | `safeErrorMessage()` strips details in prod  | `safe-error.ts`, all routes  |
-| Request body limit   | Memory-exhaustion DoS         | 27 MB cap, `content-length` checked first    | `dispatch.ts` (`MAX_BODY_BYTES`) |
+| Request body limit   | Memory-exhaustion DoS         | 27 MB cap, `content-length` checked first; 5 MiB on webhooks, read no further than the cap | `dispatch.ts` (`MAX_BODY_BYTES`), `webhook.ts` (`MAX_WEBHOOK_BODY_BYTES`) |
 | Timing-safe queries  | User/app enumeration          | `.maybeSingle()` on all access checks        | `access.ts`                  |
 | Security headers     | Clickjacking, MIME sniffing   | CSP `frame-ancestors 'self'`, `nosniff`, etc | `next.config.ts`             |
 | Session cookies      | Session hijacking / forgery   | Auth.js JWT, httpOnly, secure, sameSite=lax  | `next-auth` (Auth.js v5)     |
+| Read-only image      | The server changing its own code | Image files owned by root; a read-only root filesystem under Compose (see §31) | `Dockerfile`, `deploy/docker-compose.yml` |
 
 ---
 
@@ -706,9 +723,10 @@ exposure, not a new one.
 
 The cron tick deletes buckets untouched for an hour. The invariant: that TTL must
 exceed `maxTokens / refillRatePerSecond` for **every** configured limiter, or GC
-forgives an abuser mid-penalty. The slowest limiter today is OAuth dynamic
-registration at 10 tokens / 0.05 per second = 200 seconds, leaving ~18x headroom.
-A slower limiter than that needs a longer TTL or per-row budget columns.
+forgives an abuser mid-penalty. The slowest limiter today is the password
+re-check at 5 tokens / one every 300 seconds = 1,500 seconds, leaving ~2.4x
+headroom. A slower limiter than that needs a longer TTL or per-row budget
+columns.
 
 ### IP extraction hardening
 
@@ -721,6 +739,10 @@ an attacker prepends fake IPs to bypass rate limiting.
 x-forwarded-for: <attacker-spoofed>, <real-client-ip>
                                       ^^^^^^^^^^^^^^^^ used
 ```
+
+Every per-IP limit keys on this rule (`getClientIp`,
+`src/lib/apps/public-access.ts`), which is why MixOS is served behind a proxy
+or platform that sets these headers ([hosting](hosting/README.md)).
 
 The pre-filter's in-memory store (`src/lib/rate-limit.ts`) evicts stale entries
 automatically; the Postgres authority is pruned from the cron tick.
@@ -745,6 +767,32 @@ it is cheap and answers the same for a known and an unknown email. The login
 page shows "Too many sign-in attempts. Please try again shortly." Auth.js's
 route answers in its usual error form: a redirect to
 `/login?error=CredentialsSignin&code=rate_limited`.
+
+An attempt that is let through runs exactly one bcrypt hash, whether or not the
+email has an account. With no account, or an account with no password, the
+password is compared against `DUMMY_PASSWORD_HASH` (`src/lib/auth/password.ts`),
+a hash of the same cost and format whose password nobody has, and the attempt
+is refused whatever the comparison says. So the time a wrong password takes
+doesn't say which emails have accounts.
+
+### Password re-checks
+
+Two server actions ask a signed-in person for their own password:
+
+- "Change my password" (`updatePassword`, `src/lib/account/actions.ts`) checks
+  the current password.
+- Setting another user's password (`adminSetPassword`,
+  `src/lib/admin/user-actions.ts`) checks the acting admin's, which is what
+  keeps someone at an admin's unlocked laptop from taking over another account.
+
+Both draw on one bucket per user, `password-recheck`
+(`src/lib/auth/recheck-limit.ts`): 5 attempts in a burst, then one more every 5
+minutes, right or wrong. One bucket, because both re-check the same password.
+
+The key is the user id from the session, not the IP: the session says whose
+password is being checked, wherever it is used from. The charge comes before
+the hash, so a refused attempt runs none, and both actions answer "Too many
+attempts. Please try again shortly." whatever the password was.
 
 ---
 
@@ -1210,6 +1258,10 @@ The rate limiter runs before body parsing (in the App Router, the request
 body is not read until the handler calls `request.json()`), so rate limiting
 applies even to oversized requests.
 
+Inbound webhooks have a cap of their own, 5 MiB (`MAX_WEBHOOK_BODY_BYTES`,
+`src/lib/connectors/webhook.ts`), which holds without `content-length` too: the
+route reads the body a chunk at a time and stops at the cap (§19).
+
 ---
 
 ## 16. Connector Initialization Safety
@@ -1262,6 +1314,11 @@ Consent is a **ceiling**, the live grant is a **floor**. A refresh copies
 `granted_apps` forward verbatim, so consent can never silently widen. `hasAppGrant`
 (not `hasAppAccess`) is used deliberately — it is the authorization fact, and it
 matches what the App Services broker already enforces for the same question.
+
+The app gate (§3.1) is asked last, before a tool's module is imported. While
+the app's own migrations are behind this build, `tools/list` leaves its tools
+out, because describing one imports it, and `tools/call` refuses with
+`[APP_UPDATING] This app is being updated. Try again shortly.`
 
 The tool runs with the app's own `AppContext`, narrowed: same connectors, same
 resolved app roles, same scoped data the user's own API-route requests get. There
@@ -1362,6 +1419,11 @@ or a native custom scheme, and only public clients are accepted.
   the hardest to debug from the client side.
 - Rate limiting is **per token**, not per IP: claude.ai egresses from shared
   addresses, so an IP bucket would let one caller starve another.
+- A token that **fails** the check is limited per IP instead
+  (`src/lib/mcp/bearer-limit.ts`): 30 failures in a burst, then one every 2
+  seconds. The bucket is read before the token is looked up and charged only
+  on a failure, so a valid token never spends it. Past the budget, a request
+  from that address is answered 429 with `Retry-After`, without a lookup.
 - `Access-Control-Allow-Origin: *` is set on the two `.well-known` discovery
   documents **only**. They are public endpoint metadata with no user data. The
   token, authorize, and MCP endpoints get no CORS relaxation.
@@ -1385,7 +1447,7 @@ operator needs to be able to see what a model has been reading.
 ## 18. The Unauthenticated Surface
 
 `src/proxy.ts` redirects to `/login` when no session cookie is present, except on
-`PUBLIC_ROUTE_PREFIXES`. That list is **eleven entries**, and each one is a
+`PUBLIC_ROUTE_PREFIXES`. That list is **twelve entries**, and each one is a
 place where "no cookie" is the expected state and the route's own gate is the
 real control. Listing them here because the proxy is the wrong place to look for
 that control, and a reader who assumes a cookie check happened will misread every
@@ -1396,10 +1458,11 @@ one of these.
 | `/login`, `/api/auth` | the sign-in flow itself, with one per-IP limit on password attempts (§6) |
 | `/api/health` | none — see below |
 | `/manifest.webmanifest` | none; static |
-| `/p` | the public page route (`src/lib/apps/public-page.ts`): the page's own `pageVisibility`, the app being active, and the unlock cookie for a `password` page |
-| `/api/mcp` | OAuth 2.1 bearer token (§17) |
+| `/p` | the public page route (`src/lib/apps/public-page.ts`): the page's own `pageVisibility`, the app gate (§3.1), and the unlock cookie for a `password` page |
+| `/api/p` | the dispatcher's `password` / `key` / `public` tiers (§1) |
+| `/api/mcp` | OAuth 2.1 bearer token (§17), with a per-IP limit on failed checks |
 | `/api/oauth`, `/.well-known`, `/api/well-known` | the OAuth endpoints' own validation (§17) |
-| `/api/webhooks` | HMAC signature over the raw body (§19) |
+| `/api/webhooks` | HMAC signature over the raw body (§19), behind a per-IP limit and a body cap |
 | `/api/cron` | timing-safe `CRON_SECRET` bearer compare (§20) |
 
 The matcher additionally exempts `_next/static`, `_next/image`,
@@ -1408,38 +1471,65 @@ The matcher additionally exempts `_next/static`, `_next/image`,
 proxy entirely, so neither the cookie check nor the maintenance response below
 applies to them.
 
-It also exempts the two app API mounts, `/api/apps/<slug>/…` and
-`/api/p/<slug>/…`, because on a request the proxy runs for, Next keeps only the
-first 10 MB of the body (§15). No cookie check applies to either. The real gate
-on both is the dispatcher's auth tiers (§1): `session`, `signed-in` and `public`
-on `/api/apps`, and `password`, `key` and `public` on `/api/p`. A caller with no
-cookie on `/api/apps` gets the dispatcher's answer, 401 for a route that needs a
-session and 404 for no such route, rather than a redirect to `/login`. The
-proxy's check was presence-only, so any made-up cookie got past it anyway. The
-dispatcher gives the maintenance response below itself, first, and sets the CSP
-(§14).
+It also exempts three API mounts whose routes read their own bodies. Each runs
+the maintenance gate itself, before anything else, so the maintenance response
+below still applies to all three:
+
+- `api/webhooks/`, so that a delivery's body is read only by the webhook route,
+  which stops at its cap (§19).
+- `api/apps/` and `api/p/`, the two app API mounts, because on a request the
+  proxy runs for, Next keeps only the first 10 MB of the body (§15). No cookie
+  check applies to either. The real gate on both is the dispatcher's auth tiers
+  (§1): `session`, `signed-in` and `public` on `/api/apps`, and `password`,
+  `key` and `public` on `/api/p`. A caller with no cookie on `/api/apps` gets
+  the dispatcher's answer, 401 for a route that needs a session and 404 for no
+  such route, rather than a redirect to `/login`. The proxy's check was
+  presence-only, so any made-up cookie got past it anyway. The dispatcher also
+  sets the CSP (§14).
+
+`/api/p` and `/api/webhooks` stay on the list above anyway, so that if the
+matcher stopped leaving them out, their callers would still not be sent to
+`/login`.
 
 **Maintenance response.** Before the public list or the cookie check, the proxy
 asks whether the platform schema is behind this build
 (`src/lib/platform/maintenance.ts`, answer kept for 15 seconds). It can,
-because in Next 16 the proxy always runs on the Node.js runtime. The two app
-API mounts, which the proxy doesn't run on, get the same answer from the
-dispatcher, which asks first as well. While the schema is behind, every path
-except `/api/health/live` and `/api/health/ready` gets a 503 with
-`Retry-After: 30`: a static page for a page, and
+because in Next 16 the proxy always runs on the Node.js runtime. While the
+schema is behind, every path except `/api/health/live` and `/api/health/ready`
+gets a 503 with `Retry-After: 30`: a static page for a page, and
 `{ "error": "This instance is being updated. Try again shortly." }` for
-`/api/*` and `/.well-known/*`. That includes `/api/cron` (the tick waits),
-`/api/webhooks` (senders retry) and `/api/mcp`. The page comes from the proxy
-with no app code and no query, under its own CSP, which allows no script.
+`/api/*` and `/.well-known/*`. That includes `/api/cron` (the tick waits) and
+`/api/mcp`. `/api/webhooks` (senders retry) and both app API mounts get it
+too, from their own routes, which run the same gate first, since the proxy
+leaves them out. The page comes from the proxy with no app code and no query,
+under its own CSP, which allows no script.
 Neither body names a version or says what to run; the server log does both. A
 check that fails, or doesn't answer within 2 seconds, counts as not behind, as
-it does in readiness. App migrations behind don't trigger it.
+it does in readiness.
 
-**Why removing an entry does not harden it.** For `/api/cron` and `/api/webhooks`
-the proxy would answer `307 → /login`, which is a perfectly successful HTTP
-exchange. The cron sidecar's `curl` has no `-L`, so it records the status and
-keeps ticking; a webhook provider records the delivery as accepted and drops the
-event. Nothing throws, nothing retries, and the scheduler simply stops. The
+**One app being updated.** App migrations behind don't close the instance. The
+same answer lists the apps with a migration this build carries that the
+database hasn't applied, and the app gate (§3.1) holds back each one's code
+while everything else serves. Their pages get a 503 from the proxy, because a
+page can't set its own status: a static "Being updated" page with
+`Retry-After: 30`, the same headers and CSP as the maintenance page, and no app
+code. The proxy asks the gate only for an app on that list. A `/p` page gets it
+only where the route would serve it, so a switched-off app's page and a page
+`pageVisibility` doesn't open are still a 404. An `/apps` page gets it once the
+cookie check has passed, before the session is read, so anyone signed in sees
+that the app is being updated. Its API routes get
+`{ "error": "This app is being updated. Try again shortly.", "code": "UNAVAILABLE" }`
+from the dispatcher (§1, step 6), before authentication, because
+authenticating needs the route's declaration and loading it would run the
+app's code. No body names a file or a number. The server log names the app and
+its pending files, once each time the answer is refreshed, in a line starting
+`Serving "being updated" for`.
+
+**Why removing an entry does not harden it.** For `/api/cron`, and for
+`/api/webhooks` were the matcher to stop leaving it out, the proxy would answer
+`307 → /login`, which is a perfectly successful HTTP exchange. The cron
+sidecar's `curl` has no `-L`, so it records the status and keeps ticking; a
+webhook provider records the delivery as accepted and drops the event. Nothing throws, nothing retries, and the scheduler simply stops. The
 route's own 401 is what an operator needs to see.
 
 **Health endpoints.** `/api/health/live` returns a static `{ status: "ok" }` with
@@ -1491,6 +1581,17 @@ Declaring the provider's timestamp header, where it signs one, removes that.
 
 **Do not swallow errors in `handleWebhook()`.** Throw. A swallowed error loses the
 delivery for good; a thrown one makes the provider retry.
+
+### Limits before the signature
+
+The proxy leaves `/api/webhooks/` out, so a delivery's body is read only by the
+route, which runs the maintenance gate itself, first (§18). Then a per-IP limit
+with the app gateway's budget, 60 deliveries in a burst and then 10 a second,
+answers 429 with `Retry-After`. A body cap of 5 MiB answers 413: the route
+refuses a declared length over it without reading the body, and reads a body
+without one no further than the cap. Both come before the connector switch
+below is read, the credentials are decrypted or anything is recorded, so a
+provider's retry is processed as a first delivery.
 
 ### Turning a connector off
 
@@ -1549,6 +1650,11 @@ sidecar locally.
   module is imported, so an app switched off after the claim runs nothing
   either, and its job stays due. Run now, a job's Enable and Disable, and Start
   and Stop tick are audited (§28).
+- **An app being updated runs no jobs either** (§3.1). The tick still claims
+  its due jobs, since the claim asks only for activation; the app gate then
+  refuses them, and the claim is released with `next_run_at` unchanged, so they
+  run on the first tick after the release step. Run now is refused, and
+  Scheduled Jobs shows the jobs as **App updating**.
 - **Apps not in the build** keep their job rows, with each job's enabled switch,
   for when they come back (§3.1). A tick runs only jobs of active apps the
   running build carries.
@@ -1645,13 +1751,17 @@ default-deny:
 | Consumer declared this dependency in `consumes` | `NOT_DECLARED` |
 | Provider's `consumers` allowlist admits the caller | `FORBIDDEN` |
 | Provider app is active, whatever the audience | `PROVIDER_INACTIVE` |
+| Provider app's own migrations are applied, whatever the audience | `PROVIDER_UPDATING` |
 | For `audience: "user"`, an acting user exists | `NO_USER` |
 | That user holds a grant for the **provider** app | `FORBIDDEN_USER` |
 
 The activation check is the app gate (§3.1), asked before the provider's
 context is built or its handler imported. An `audience: "app"` service consults
 no grant, so this is what refuses an inactive provider's service to a job or a
-public route.
+public route. The same gate refuses a provider whose own migrations are behind
+this build, with a code of its own because the consumer's remedy differs: a
+provider switched off stays off until an admin acts, while an update is over
+once the release step has run. Both are a 503 if the consumer lets them escape.
 
 The provider's handler runs with the **provider's own scoped context**, and the
 user is re-authorized in the provider's terms rather than inheriting the
@@ -1800,9 +1910,11 @@ server-side and platform-owned.
 
 It is **not** an authorization bypass: it re-runs `resolveAuthTier` against the
 page's own session, the role gate, and input/output validation, and it records
-the same telemetry row. Like the gateway, it checks that the app is active
-before it imports the route (the app gate, §3.1), so a deactivated app's
-module-scope code does not run; `resolveAuthTier` checks activation again.
+the same telemetry row. Like the gateway, it asks the app gate before it
+imports the route (§3.1), so a deactivated app's module-scope code does not
+run, and nor does that of an app whose own migrations are behind, for which it
+throws `UNAVAILABLE` (a 503) with "This app is being updated. Try again
+shortly."; `resolveAuthTier` checks activation again.
 
 It is **bound to the calling app at build time.** Run with another app's slug
 it would execute that app's routes, mutations included, as the current user,
@@ -2168,12 +2280,13 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   (`isBuiltDeployment()`, `src/lib/platform/build.ts`).
 
   This check has to be a marker rather than a capability probe, because the
-  capability probe passes and the capability is absent.
+  capability probe can pass while the capability is absent.
   `outputFileTracingIncludes` copies `apps/` into the standalone build, and the
   tracer follows the literal paths in `install.ts` and pulls `scripts/` and
-  `node_modules/tsx` in with them — so "the directory is writable" and "the
-  generator file exists" are both **true** in a shipped image. What is missing is
-  `esbuild`, `typescript` and `zod`, so the generator is present and cannot run.
+  `node_modules/tsx` in with them — so "the generator file exists" is **true**
+  in a shipped image, and so is "the directory is writable" wherever the server
+  owns its files. What is missing is `esbuild`, `typescript` and `zod`, so the
+  generator is present and cannot run.
 
   The failure that produced was `rejected-by-registry`: verified, written,
   spawned, died, rolled back, and the admin told the extension "did not pass this
@@ -2188,6 +2301,15 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   everywhere. A non-zero exit from the generator is never its verdict on one
   extension — per-item problems are `Skipping <dir>/ — ...` warnings and the run
   still exits 0, because one bad app must not break everyone else's build.
+
+  In the Docker image, everything but Next's two cache directories belongs to
+  root, and the server runs as `node`, so it cannot change its own code on any
+  host. Compose also runs the image on a read-only root filesystem, with those
+  two directories and `/tmp` as `tmpfs` mounts (`Dockerfile`,
+  `deploy/docker-compose.yml`,
+  [docs/hosting/docker-compose.md](hosting/docker-compose.md#whats-read-only)).
+  The marker is checked first, so an admin there is told why a built deployment
+  cannot register, not that a folder is read-only.
 - **Carry the archive's file modes.** Everything is written `0644`. Nothing here
   execs a source file, and an archive that can set the mode of a file it places
   in the checkout can set the setuid bit.
