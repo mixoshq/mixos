@@ -41,7 +41,8 @@
  */
 
 import { z } from "zod";
-import { mixosVersion, parseVersion, satisfiesMinimum } from "@/lib/platform/version";
+import { mixosVersion, satisfiesMinimum } from "@/lib/platform/version";
+import { parseVersion } from "@/lib/platform/version-floor";
 import { isRecordedVersion, type RegistryInstall } from "./install-record";
 import { sourceHost } from "./provenance";
 import { ExtensionKindSchema, type ExtensionKind, type UpdateItem, type UpdateResult } from "./types";
