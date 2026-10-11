@@ -4,7 +4,8 @@ Gets the current work onto GitHub as a PR against `main`. Deployment itself
 is done by whatever hosts the install (docs/hosting/): on Vercel every PR gets
 a Preview deployment, and on any host merging into `main` deploys Production.
 `.github/workflows/ci.yml` gates the PR (lint, audit, repository-URL check,
-typecheck, build). This action stops at the PR — merging is a human decision.
+typecheck, unit tests, build). This action stops at the PR — merging is a human
+decision.
 
 ## Modes
 
@@ -114,11 +115,17 @@ failing them there. Run in this order and read each result:
 
 ```bash
 npx tsx scripts/generate-project-registry.ts   # registry + theme contrast
-npm run typecheck
 npm run lint
+npm audit --omit=dev --audit-level=high        # what ships: high or worse fails
+npm audit --audit-level=critical               # dev tooling too: critical fails
 npm run verify:repository-url
+npm run typecheck
+npm test
 npm run build
 ```
+
+If `.github/workflows/ci.yml` runs something this list doesn't, run that too:
+the workflow is the gate, and this list copies it.
 
 Then, only when the relevant files changed:
 

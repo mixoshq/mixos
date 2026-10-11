@@ -9,8 +9,8 @@ connectors/my-service/
   connector.json    # Metadata, credential fields, setup guide
   README.md         # Optional — long-form description for the catalogue listing
   index.ts          # Implementation class
-  assets/           # Optional. icon.png and anything else the manifest names.
-    icon.png        # Square, >= 512x512. Copied to public/connector-assets/my-service/
+  assets/           # icon.png and anything else the manifest names.
+    icon.png        # Required. Square, >= 512x512. Copied to public/connector-assets/my-service/
 ```
 
 **Templates:** any connector directory whose name starts with an underscore (e.g. `connectors/_template/`) is treated as a template and skipped by the registry. Use this for starter scaffolds you want to keep in the repo without exposing to admins.
@@ -23,14 +23,29 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 {
   "name": "my-service",
   "displayName": "My Service",
+  "icon": "assets/icon.png",
   "description": "Connector for the My Service API",
   "authors": [
     { "name": "Jane Doe", "email": "jane@example.com" }
   ],
+  "setup": {
+    "title": "Create an API key",
+    "steps": [
+      {
+        "text": "Open API keys and create a key.",
+        "link": { "label": "API keys", "url": "https://my-service.example.com/settings/api-keys" }
+      }
+    ]
+  },
   "credentialFields": [
     { "key": "apiKey", "label": "API Key", "type": "password" },
     { "key": "baseUrl", "label": "Base URL", "type": "text" }
-  ]
+  ],
+  "auth": {
+    "strategy": "apiKey",
+    "credentialKeys": ["apiKey"],
+    "scopesUrl": "https://docs.my-service.example.com/api/scopes"
+  }
 }
 ```
 
@@ -40,19 +55,19 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 | --- | --- | --- | --- |
 | `name` | ✅ | Unique identifier for the connector. Used in app.json and internally. Should be lowercase with hyphens. | `"name": "my-service"` |
 | `displayName` | ✅ | Human-readable name shown in the Connector Registry admin page. | `"displayName": "My Service"` |
-| `icon` |  | Path inside the connector's own `assets/` directory, **written out in full including the `assets/` prefix**, shown on its Connector Registry tile. **Square, at least 512x512**, `.png` / `.webp` / `.svg`; the generator measures it and aborts the build otherwise. Omit it and the tile renders a generic plug glyph. | `"icon": "assets/icon.png"` |
+| `icon` | ✅ | Path inside the connector's own `assets/` directory, **written out in full including the `assets/` prefix**, shown on its Connector Registry tile. A `.png` or `.webp` must be **square, at least 512x512**; an `.svg` must have a `viewBox`. The generator checks the file and aborts the build otherwise. | `"icon": "assets/icon.png"` |
 | `description` |  | What the **service** is, in a sentence or two. Not what the connector does with it, and not how to set it up. **Capped at 140 characters.** The tile shows its first 15 words; the configure dialog shows all of it. | `"description": "Highly popular email service by Google. Gmail tracks all of your email conversations."` |
 | `tagline` |  | One line for a listing card on mixos.org — the version that fits beside the icon in a grid. Max 100 characters, single line. Where it is absent, `description` is used instead; setting only one of the two is the normal case. | `"tagline": "Read Gmail messages, threads and labels"` |
 | `keywords` |  | Search and browse terms for the catalogue. Lowercase words, separated by single spaces or hyphens; max 10, no duplicates. Lowercase is enforced because a facet list dedupes on the exact string — `Gmail` next to `gmail` renders as two filters for one idea and splits the results between them. | `"keywords": ["email", "crm"]` |
 | `license` |  | SPDX identifier or expression for the connector's own licence, or `UNLICENSED` for something not redistributable. Validated as a shape, not against the full SPDX list — which still rejects the mistake worth rejecting: prose. `"MIT License"` fails the build; `"MIT"` passes. | `"license": "MPL-2.0"` |
 | `connectorUrl` |  | Where the connector lives for someone who wants to read about it — a homepage, a docs site, a repository directory. Absolute `https://` only: these render as links on pages served over https, and an author never sees the downgrade because their own dev server is http. | `"connectorUrl": "https://example.com/x"` |
 | `connectorSupportUrl` |  | Where a user takes a problem with the connector — an issue tracker, a support page. Same `https://` rule. Kept separate from `connectorUrl` because "read about it" and "something is broken" are different destinations, and collapsing them sends bug reports to a marketing page. | `"connectorSupportUrl": "https://example.com/x/issues"` |
-| `setup` |  | Provisioning instructions, structured so the registry renders them as a numbered list with working links. See below. | |
-| `setup.steps` | ✅ (if `setup`) | Array of `{ text, why?, link? }`. The provider-side work only — the registry renders saving, authorizing and verifying as its own steps. One imperative sentence each; the UI numbers them, so don't number them yourself. | `{ "text": "Create an API key.", "link": { "label": "API keys", "url": "https://example.com/keys" } }` |
+| `setup` | ✅ | Provisioning instructions, structured so the registry renders them as a numbered list with working links. See below. | |
+| `setup.steps` | ✅ | Array of `{ text, why?, link? }`, at least one. The provider-side work only — the registry renders saving, authorizing and verifying as its own steps. One imperative sentence each; the UI numbers them, so don't number them yourself. | `{ "text": "Create an API key.", "link": { "label": "API keys", "url": "https://example.com/keys" } }` |
 | `setup.steps[].why` |  | Rationale, shown behind a **"?"** the reader opens on hover or focus. Max 300 chars. Rationale *only* — a tooltip is not somewhere an instruction can live. | `"why": "Internal avoids Google's annual CASA assessment."` |
 | `setup.steps[].link` |  | Where the step is carried out. If `label` appears in `text` as a standalone phrase, **that phrase becomes the link**; otherwise it trails the sentence. | `"link": { "label": "OAuth consent screen", "url": "https://…" }` |
 | `setup.steps[].showRedirectUri` |  | Renders this deployment's redirect URI with a copy button beneath the step. Required on **exactly one** step of a three-legged connector, and rejected on any other strategy — both build-enforced. | `"showRedirectUri": true` |
-| `setup.title` |  | Label for the provider-side step. Defaults to "Get your credentials". | `"title": "Create a Google Cloud OAuth app"` |
+| `setup.title` | ✅ | Label for the provider-side step. Max 60 characters. | `"title": "Create a Google Cloud OAuth app"` |
 | `setup.notes` |  | `{ credentials?, authorize?, verify? }` — a provider-specific warning attached to the registry's own step, so it appears at the control it concerns. | `"notes": { "authorize": "Sign in as the shared mailbox, not as yourself." }` |
 | `setup.docs` |  | Array of `{ label, url, why }` reference links — scope tables, API docs. Shown below the checklist, not as a step. **`why` is required**: it answers "when would I open this?" behind a "?", which a bare link cannot. | `{ "label": "Gmail API scopes", "url": "https://…", "why": "Open it to confirm gmail.readonly cannot send or delete." }` |
 | `authors` |  | Array of `{ name, email }` objects identifying the connector's authors. Shown in the Connector Registry admin page. Optional but recommended so others know who to contact. | `"authors": [{ "name": "Jane Doe", "email": "jane@example.com" }]` |
@@ -61,9 +76,10 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 | `credentialFields[].label` | ✅ | Label shown in the admin configuration form. | `"label": "API Key"` |
 | `credentialFields[].type` | ✅ | Either `text` for visible input or `password` for masked input. Use `password` for API keys, tokens, and secrets. | `"type": "password"` |
 | `auth` |  | How the platform authenticates. See below. Absent means `{ "strategy": "none" }`. | |
+| `auth.scopesUrl` | ✅ (unless `strategy` is `none`) | The provider's scope reference page, which the registry's permission list is read from. See [Scopes](scopes.md). | `"scopesUrl": "https://docs.example.com/api/scopes"` |
 | `http` |  | Transport policy: base URL, timeouts, retry budget, pagination. Every value has a working default. | |
 | `webhook` |  | Inbound webhook verification. See [Webhooks](webhooks.md). | |
-| `telemetry` |  | Methods to auto-instrument. See [Telemetry](telemetry.md). | |
+| `telemetry` |  | Every public method apps can call, as `{ method, description?, mutates? }`; the build fails on one that is missing. Each is auto-instrumented. See [Telemetry](telemetry.md). | |
 
 ### Setup guidance and the icon
 
@@ -135,8 +151,9 @@ consent screen is the account the whole deployment acts as. It also renders the
 redirect URI with a copy button, and lists `auth.scopes` so the ask is not a
 surprise. `setup` covers what is specific to *this* provider.
 
-An `icon` is a filename inside the connector's own `assets/` directory. The
-generator proves it exists, proves it is square and at least 512x512, then
+An `icon` is a path inside the connector's own `assets/` directory, and every
+connector must have one. The generator proves it exists and that a `.png` or
+`.webp` is square and at least 512x512 (an `.svg` needs a `viewBox`), then
 copies the whole directory to `public/connector-assets/<name>/` and rewrites the
 manifest value to the URL the browser requests. `public/connector-assets/` is
 generated and gitignored, exactly like `public/themes/` — the committed source
@@ -156,7 +173,8 @@ time rather than degrading silently in production.
   "in": "header",              // apiKey: header | query | bearer (default bearer)
   "name": "X-Api-Key",         // required when in is header or query
   "prefix": "Token ",          // optional value prefix
-  "credentialKeys": ["apiKey"] // must exist in credentialFields; also derives `configured`
+  "credentialKeys": ["apiKey"], // must exist in credentialFields; also derives `configured`
+  "scopesUrl": "https://docs.example.com/api/scopes" // required unless strategy is none
 },
 "http": {
   "baseUrl": "https://api.example.com",  // a `baseUrl` credential overrides this at runtime
@@ -198,7 +216,7 @@ Connectors follow a simple lifecycle:
 1. The connector is **registered** automatically when the platform scans the `/connectors` directory and finds a valid `connector.json`.
 2. An admin **configures credentials** in the Connector Registry admin page. Credentials are encrypted at rest using AES-256-GCM.
 3. When an app declares a connector dependency in its `app.json`, the platform **initializes** the connector with decrypted credentials and injects it into the app context.
-4. App API routes access the connector via `context.connectors.myService` and call its methods.
+4. App API routes access the connector by its manifest name, `context.connectors["my-service"]`, and call its methods.
 
 ## Security Model
 
@@ -250,6 +268,6 @@ The rules:
 
 People manage their own grants at `/account/connections`. In the Connector
 Registry, an admin saves the client id and secret, which is the deployment's
-whole part, and then connects their own account, which is what Test Connection
+whole part, and then connects their own account, which is what Verify connection
 runs with.
 
