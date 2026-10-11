@@ -615,6 +615,12 @@ catalogue's Browse pages and its install actions go away for that kind, and
 Register, from the page or `npm run register`, won't register it
 ([details](docs/hosting/README.md#fixing-what-an-instance-runs)).
 
+Once a day, each instance asks mixos.org about the extensions it installed from
+there, so admins see a release its publisher withdrew. It sends a random
+instance ID and each of those extensions' kind, slug and version, and nothing
+else. `MIXOS_UPDATE_CHECK=false` turns it off
+([what is sent and kept](docs/hosting/README.md#what-mixos-sends-to-mixosorg)).
+
 Before exposing a deployment publicly, read
 [docs/security-architecture.md](docs/security-architecture.md) — the trust
 boundaries, the key inventory and what rotating each key costs, and the

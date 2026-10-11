@@ -17,6 +17,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/input";
 import type { FloorVerdict } from "@/lib/platform/version-floor";
+import Notice from "@/components/ui/notice";
 import {
   installExtensionAction,
   resolveInstallAction,
@@ -30,7 +31,6 @@ import type {
 import { KIND_LABEL } from "@/lib/repository/types";
 import { leftOutLine } from "@/lib/repository/left-out";
 import HandBackPanel from "../pending/hand-back";
-import StatusNotice from "../pending/notice";
 import type { PendingTarget } from "../pending/review-dialog";
 import FloorNotice from "./floor-notice";
 
@@ -208,7 +208,7 @@ export default function RegisterDialog({
     >
       {notInstallable && !outcome && (
         <div className="mb-5">
-          <StatusNotice tone={notInstallable.tone}>{notInstallable.message}</StatusNotice>
+          <Notice tone={notInstallable.tone}>{notInstallable.message}</Notice>
         </div>
       )}
       {outcome ? (
@@ -379,33 +379,6 @@ function Row({
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0 text-foreground">{children}</dd>
     </>
-  );
-}
-
-function Notice({
-  tone,
-  icon,
-  children,
-}: {
-  tone: "warning" | "danger" | "success" | "neutral";
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  const TONES = {
-    warning: "border-warning/40 bg-warning/10",
-    danger: "border-destructive/40 bg-destructive/10",
-    success: "border-success/40 bg-success/10",
-    neutral: "border-border bg-muted",
-  } as const;
-  return (
-    <div
-      className={`rounded-lg border px-4 py-3 text-sm text-foreground ${TONES[tone]}`}
-    >
-      <div className="flex gap-2">
-        <span className="mt-0.5 shrink-0">{icon}</span>
-        <div className="min-w-0">{children}</div>
-      </div>
-    </div>
   );
 }
 
