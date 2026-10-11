@@ -3,18 +3,20 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Registering an extension from mixos.org onto this instance.
+ * Installing an extension from mixos.org into this checkout.
  *
- * "Register" here means what the admin sees it mean: the extension's source
- * lands in `apps/`, `connectors/` or `themes/` and becomes part of what this
- * instance offers everyone on it. It is a privileged, instance-wide act, which
- * is why every entry point into this module is admin-gated and audited.
+ * An app or a connector is installed into `.mixos/pending/`, where nothing reads
+ * it, and waits there until someone registers it (./register.ts), which is when
+ * its code first runs. A theme has no code, so it is registered as it is
+ * installed: it lands in `themes/`. Either is a privileged act, which is why
+ * every entry point into this module is admin-gated and audited.
  *
  * ── THE ORDER OF OPERATIONS IS THE SECURITY MODEL ───────────────────────────
  *
- * Before the lock: the kind's install flag, then `assertInstallable` (not a
+ * Before the locks: the kind's install flag, then `assertInstallable` (not a
  * built deployment, a writable folder, a generator to run). Then, under the
- * `repository.register` lock, with the target directory confirmed absent:
+ * `repository.register` row lock and the checkout lock (`.mixos/lock`), with no
+ * extension of that slug in place or pending:
  *
  * 1.  Ask mixos.org how to install → commit, download URL, content hash.
  * 2.  Refuse a yanked release unless the admin has been shown why and insisted.
@@ -22,34 +24,34 @@
  * 4.  Read the archive IN MEMORY. Reject symlinks, traversal, oversize trees.
  * 5.  **Verify the content hash.** Mismatch ends it here, with nothing written.
  * 6.  Pre-flight: the manifest exists, parses and is for this slug, and no
- *     path would land on disk as something other than what it names.
- * 7.  Write to a staging directory beside the target, never to the target.
+ *     path would land on disk as something other than what it names. Then the
+ *     files hash, which Register can recompute from the folder (filesHash()).
+ * 7.  Write to `.mixos/staging/<kind dir>/<slug>/`, never to the target.
  * 8.  **Check the staged copy without running it**: the generator's `--check`,
  *     which reads the extension's text, imports none of its code, and writes
  *     its verdict to a file this process names. Rejected, or no verdict at
  *     all: delete the staged copy and stop.
- * 9.  Rename staging into place. This is the first moment the tree is live.
- * 10. Run the project registry generator, which loads the extension's code for
- *     the first time to read what only its code can say.
- * 11. If that run left the extension out or stopped, remove the directory and
- *     regenerate again, so a failed registration leaves the instance exactly
- *     as it was.
+ * 9.  An app or a connector: write its sidecar, then rename the staged copy to
+ *     `.mixos/pending/<kind dir>/<slug>/`. It waits there for Register, and
+ *     none of its code has run.
+ *     A theme: rename it into `themes/<slug>/`, run the project registry
+ *     generator, and if that run leaves the theme out or stops, remove it and
+ *     regenerate, so a failed install leaves the checkout as it was.
  *
- * Steps 7, 9 and 11 each begin by confirming the lock is still this
- * registration's (`lease.assertHeld()`, see `installExtension`), and stop
- * without touching the disk when it is not. So does deleting a staged copy the
- * check refused.
+ * Steps 7 and 9, and deleting a staged copy the check refused, each begin by
+ * confirming both locks are still this install's (`lease.assertHeld()`, see
+ * `installExtension`), and stop without touching the disk when either is not.
  *
  * Steps 3–5 are ordered that way deliberately: nothing untrusted touches the
  * filesystem before the hash has been checked. An extract-then-verify pipeline
  * has a window where a tampered tree is on disk, and then depends on its
  * cleanup path being correct for that not to matter.
  *
- * Steps 8–10 are ordered the same way for the code: nothing the package ships
- * runs before the text of all of it has been checked, and the check's answer
- * comes from a file, never from what the check prints, which repeats what the
- * package says about itself. Both generator runs get `PATH` and `TMPDIR` as
- * their whole environment (`generatorEnv`).
+ * Steps 8 and 9 are ordered the same way for the code: nothing the package
+ * ships runs before the text of all of it has been checked, and the check's
+ * answer comes from a file, never from what the check prints, which repeats
+ * what the package says about itself. Every generator run gets `PATH` and
+ * `TMPDIR` as its whole environment (`generatorEnv`).
  *
  * ── WHAT THIS CANNOT DO, AND SAYS SO ────────────────────────────────────────
  *
@@ -75,14 +77,34 @@ import {
   parseCheckVerdict,
   type CheckVerdict,
 } from "./check-verdict";
-import { fetchInstallManifest } from "./client";
+import { fetchInstallManifest, repositoryBaseUrl } from "./client";
 import { fetchExtensionTree } from "./fetch-source";
-import { verifyContentHash } from "./content-hash";
+import { filesHash, verifyContentHash } from "./content-hash";
 import { isBuiltDeployment } from "../platform/build";
+import {
+  CheckoutLockLostError,
+  describeCheckoutLockHolder,
+  withCheckoutLock,
+  type CheckoutLock,
+} from "../platform/checkout-lock";
 import { LockLostError, withPlatformLock, type PlatformLease } from "../platform/lock";
 import { satisfiesMinimum } from "../platform/version";
+import {
+  pathExists,
+  pendingLocation,
+  readSidecar,
+  stagingLocation,
+  writeSidecar,
+  type PendingLocation,
+  type PendingSidecar,
+} from "./pending";
 import type { TarEntry } from "./tar";
-import { isVerifiableHash, type ExtensionKind, type InstallManifest } from "./types";
+import {
+  SlugSchema,
+  isVerifiableHash,
+  type ExtensionKind,
+  type InstallManifest,
+} from "./types";
 import { installDisabledMessage, installEnabled } from "./policy";
 import {
   RawAppManifestSchema,
@@ -125,8 +147,18 @@ const PROJECT_ROOT = process.cwd();
 const APPS_DIR = path.join(PROJECT_ROOT, "apps");
 const CONNECTORS_DIR = path.join(PROJECT_ROOT, "connectors");
 const THEMES_DIR = path.join(PROJECT_ROOT, "themes");
+/**
+ * Where pending installs, staged copies and the checkout lock live (./pending.ts).
+ * next.config.ts keeps it out of every build's file trace as well.
+ */
+const MIXOS_DIR = path.join(PROJECT_ROOT, ".mixos");
 const GENERATOR = path.join(PROJECT_ROOT, "scripts/generate-project-registry.ts");
 const TSX_CLI = path.join(PROJECT_ROOT, "node_modules/tsx/dist/cli.mjs");
+
+/** This checkout, for the modules that take it as an argument (./register.ts). */
+export function checkoutRoot(): string {
+  return PROJECT_ROOT;
+}
 
 /**
  * A switch rather than a `Record<ExtensionKind, string>` lookup, and the two
@@ -258,11 +290,21 @@ export interface InstallResult {
   commitSha: string;
   /** The hash that was verified. Recorded in the audit row. */
   contentHash: string;
-  /** Repo-relative, e.g. `apps/postgres`. */
+  /** The same tree with file modes ignored, which Register recomputes from the folder. */
+  filesHash: string;
+  /**
+   * Repo-relative: `.mixos/pending/apps/postgres` for an app or connector
+   * waiting for Register, `themes/aurora` for a theme.
+   */
   installPath: string;
+  /** True for an app or connector, which waits in `.mixos/pending/` for Register. */
+  pending: boolean;
   fileCount: number;
   byteCount: number;
-  registry: RegistryOutcome;
+  /** What the check left to registration, which loads the extension's code. */
+  deferred: string[];
+  /** The generator's run, for a theme. Null for a pending install, which runs nothing. */
+  registry: RegistryOutcome | null;
   /** What the admin has to do before this is actually live. */
   nextStep: string;
 }
@@ -326,16 +368,18 @@ export async function checkInstallable(kind: ExtensionKind): Promise<Installabil
     };
   }
 
-  try {
-    await fs.access(installDir(kind), fs.constants.W_OK);
-  } catch {
+  // Where this install writes: `.mixos/` for an app or a connector, which
+  // waits there for Register; `themes/` for a theme. Register checks `apps/`
+  // or `connectors/` when it runs.
+  if (!(await canWrite(kind === "theme" ? THEMES_DIR : MIXOS_DIR))) {
+    const folder = kind === "theme" ? "themes/" : ".mixos/";
     return {
       ok: false,
       reason:
-        `This deployment cannot register extensions: ${INSTALL_SEGMENT[kind]}/ is not writable. ` +
-        `Registering copies source into the checkout and re-runs the build-time ` +
+        `This deployment cannot install extensions: ${folder} is not writable. ` +
+        `Installing copies source into the checkout and runs the build-time ` +
         `registry generator, which a read-only or serverless filesystem cannot do. ` +
-        `Register on a machine with a writable checkout and deploy the result.`,
+        `Install on a machine with a writable checkout and deploy the result.`,
     };
   }
   try {
@@ -350,6 +394,27 @@ export async function checkInstallable(kind: ExtensionKind): Promise<Installabil
     };
   }
   return { ok: true };
+}
+
+/**
+ * Whether this process can write in `dir`, or, when it doesn't exist yet, make
+ * it in its parent. `.mixos/` is made by the first install.
+ */
+async function canWrite(dir: string): Promise<boolean> {
+  try {
+    await fs.access(dir, fs.constants.W_OK);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") return false;
+  }
+  try {
+    // The checkout itself. Named for the tracer as a path it leaves alone: as
+    // a folder to read, it would be the whole project (see PROJECT_ROOT).
+    await fs.access(path.join(/* turbopackIgnore: true */ dir, ".."), fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function assertInstallable(kind: ExtensionKind): Promise<void> {
@@ -567,51 +632,44 @@ export function preflight(kind: ExtensionKind, slug: string, entries: TarEntry[]
 /* -------------------------------------------------------------------------- */
 
 /**
- * Where an extension waits while it is checked: `<kind dir>/.installing-<slug>/`,
- * holding the staged copy in a folder named for the slug.
+ * Write the verified tree to its staging folder, `staged`, for the check to
+ * read: `.mixos/staging/<kind dir>/<slug>/` (stagingLocation() in ./pending.ts).
+ * Returns `staged`. placeTree() or placePending() then moves it on.
  *
- * Dot-prefixed, because the generator never scans a dot-prefixed folder, so a
- * crash at any point here leaves nothing a later build will read. And the copy
- * sits one level down, in `<slug>/`, so that the check can treat it as the
- * extension's own folder: the folder's name is the slug the import rules and
- * every message use.
- */
-function stagingHolder(dir: string): string {
-  return path.join(path.dirname(dir), `.installing-${path.basename(dir)}`);
-}
-
-/**
- * Write the verified tree to a staging directory, for the check to read.
- * Returns the staged copy's folder. placeTree() then moves it into place.
+ * Named for the slug, so the check can treat it as the extension's own folder:
+ * the folder's name is the slug the import rules and every message use. And
+ * under `.mixos/`, which nothing that builds or runs the checkout reads, so a
+ * crash at any point here leaves nothing a later build will load.
  *
  * Staging-then-rename rather than writing straight to the target: a partial
  * write into `apps/<slug>` is a half-extension that the generator will meet on
- * its next run — including the run that `next dev` triggers on its own — and a
- * tree the check refuses must never be in place at all. The rename is the only
- * step that makes the tree visible, and it is atomic on every filesystem this
- * runs on.
+ * its next run, and a tree the check refuses must never be in place at all.
+ * The rename is the only step that moves the tree on, and it is atomic on every
+ * filesystem this runs on.
  *
- * Starts by confirming the lease, then clears what an earlier run left in the
- * staging directory. A write that fails is cleaned up straight away. A
- * registration that has lost the lock may share that staging directory with
- * the one that holds it now, so it leaves it as a crash would, for the next
- * registration of the slug to clear.
+ * Starts by confirming the locks, then clears what an earlier run left in the
+ * staging folder. A write that fails is cleaned up straight away. An install
+ * that has lost a lock may share that staging folder with the one that holds it
+ * now, so it leaves it as a crash would, for the next install of the slug to
+ * clear.
  *
  * Exported for its tests; `runInstall` is the only caller.
  */
 export async function stageTree(
-  dir: string,
+  staged: string,
   entries: TarEntry[],
   lease: PlatformLease,
 ): Promise<string> {
-  const holder = stagingHolder(dir);
-  const staged = path.join(holder, path.basename(dir));
-
   await fence(lease, "Nothing was written.");
-  await fs.rm(holder, { recursive: true, force: true });
+  await fs.rm(staged, { recursive: true, force: true });
   try {
+    await fs.mkdir(staged, { recursive: true });
     for (const entry of entries) {
-      const target = path.resolve(staged, entry.path);
+      // `staged` is an argument, which Turbopack's tracer resolves from this
+      // module's own folder, pulling all of src/lib/repository/ into the
+      // build of every page that imports this module. It is a runtime path
+      // under `.mixos/staging/`, so the tracer is told to leave it alone.
+      const target = path.resolve(/* turbopackIgnore: true */ staged, entry.path);
       // Third and last containment check, this one on the fully-joined path.
       if (!target.startsWith(staged + path.sep)) {
         throw new InstallError(
@@ -626,16 +684,16 @@ export async function stageTree(
       await fs.writeFile(target, entry.data, { mode: 0o644 });
     }
   } catch (err) {
-    await fs.rm(holder, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(staged, { recursive: true, force: true }).catch(() => {});
     throw asWriteFailure(err);
   }
   return staged;
 }
 
 /**
- * Move a staged copy the check accepted into place, at `dir`: the first moment
- * the tree is live. Confirms the lease first, and puts nothing in place without
- * it.
+ * Move a staged theme the check accepted into place, at `dir`: the first moment
+ * the tree is live. Confirms the locks first, and puts nothing in place without
+ * them.
  *
  * Exported for its tests; `runInstall` is the only caller.
  */
@@ -644,17 +702,38 @@ export async function placeTree(
   dir: string,
   lease: PlatformLease,
 ): Promise<void> {
-  const holder = path.dirname(staged);
-
   await fence(lease, "Nothing was moved into place.");
   try {
     await fs.rename(staged, dir);
   } catch (err) {
-    await fs.rm(holder, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(staged, { recursive: true, force: true }).catch(() => {});
     throw asWriteFailure(err);
   }
-  // Empty now. `rmdir` removes nothing else, if anything else is there.
-  await fs.rmdir(holder).catch(() => {});
+}
+
+/**
+ * Move a staged app or connector the check accepted into pending, where it
+ * waits for Register, with its sidecar: the sidecar first, so a pending folder
+ * always has the record Register checks it against. Confirms the locks first.
+ *
+ * Exported for its tests; `runInstall` is the only caller.
+ */
+export async function placePending(
+  staged: string,
+  where: PendingLocation,
+  sidecar: PendingSidecar,
+  lease: PlatformLease,
+): Promise<void> {
+  await fence(lease, "Nothing was moved into .mixos/pending/.");
+  try {
+    await fs.mkdir(path.dirname(where.folder), { recursive: true });
+    writeSidecar(where.sidecar, sidecar);
+    await fs.rename(staged, where.folder);
+  } catch (err) {
+    await fs.rm(where.sidecar, { force: true }).catch(() => {});
+    await fs.rm(staged, { recursive: true, force: true }).catch(() => {});
+    throw asWriteFailure(err);
+  }
 }
 
 /**
@@ -662,33 +741,31 @@ export async function placeTree(
  * Returns the accepted outcome; throws an InstallError otherwise, once the
  * staged copy is deleted.
  *
- * Deleting it waits on the lease, as every change to the disk here does. A
- * registration that has lost the lock leaves the copy where it is: it is
- * dot-prefixed, so nothing scans it, and the next registration of the slug
- * clears it.
+ * Deleting it waits on the locks, as every change to the disk here does. An
+ * install that has lost a lock leaves the copy where it is: nothing reads
+ * `.mixos/staging/`, and the next install of the slug clears it.
  *
  * `options` are checkExtension()'s, for tests. Exported for its tests;
  * `runInstall` is the only caller.
  */
 export async function checkStagedTree(
   kind: ExtensionKind,
-  dir: string,
+  slug: string,
   staged: string,
   lease: PlatformLease,
   options?: Parameters<typeof checkExtension>[2],
 ): Promise<CheckOutcome> {
-  const slug = path.basename(dir);
   const check = await checkExtension(kind, staged, options);
   if (check.ran && check.accepted) return check;
 
   const detail = check.ran ? check.problems.join("\n") : check.output;
   await fence(
     lease,
-    `The staged copy in ${INSTALL_SEGMENT[kind]}/.installing-${slug}/ is still on disk; ` +
+    `The staged copy in .mixos/staging/${INSTALL_SEGMENT[kind]}/${slug}/ is still on disk; ` +
       `nothing reads it, and installing ${slug} again clears it.`,
     detail,
   );
-  await fs.rm(stagingHolder(dir), { recursive: true, force: true }).catch(() => {});
+  await fs.rm(staged, { recursive: true, force: true }).catch(() => {});
 
   // Two different failures, and saying the wrong one sends the admin to argue
   // with a publisher about their own machine.
@@ -716,36 +793,69 @@ function asWriteFailure(err: unknown): InstallError {
 }
 
 /**
+ * The row lock and the checkout lock as one lease: `assertHeld()` confirms
+ * both, the row first. What install and Register fence every disk change with.
+ */
+export function bothLocks(lease: PlatformLease, lock: CheckoutLock): PlatformLease {
+  return {
+    async assertHeld() {
+      await lease.assertHeld();
+      lock.assertHeld();
+    },
+  };
+}
+
+/**
+ * What a failed `assertHeld()` means, for the admin: which lock went, and that
+ * the operation, `what` ("This install"), stopped before changing anything
+ * more. Three failures, said apart. `lock-lost` is a row lock that has passed
+ * to someone else, or a checkout lock that was broken or replaced.
+ * `lock-unconfirmed` is a check that could not reach the database, which stops
+ * the operation at the same point, because an unconfirmed lease is not one to
+ * change the disk under.
+ */
+export function describeLockFailure(
+  err: unknown,
+  what: string,
+): { code: "lock-lost" | "lock-unconfirmed"; message: string } {
+  if (err instanceof LockLostError) {
+    return {
+      code: "lock-lost",
+      message:
+        `${what} was paused for longer than its lock lasts (a laptop going to sleep can ` +
+        `do that), so another may hold the lock now. It stopped here rather than change ` +
+        `files the other one may be using.`,
+    };
+  }
+  if (err instanceof CheckoutLockLostError) {
+    return {
+      code: "lock-lost",
+      message:
+        `${what} no longer holds this checkout's lock (.mixos/lock): it was broken or ` +
+        `replaced while ${what.replace(/^This /, "the ")} ran, so another operation may be changing ` +
+        `the checkout. It stopped here rather than change files the other one may be using.`,
+    };
+  }
+  // The database's own words stay in the log: they can name hosts and roles.
+  console.error("[repository] could not confirm the register lock:", err);
+  return {
+    code: "lock-unconfirmed",
+    message:
+      `${what} could not confirm with the database that it still holds its lock, so it ` +
+      `stopped here rather than risk changing files another operation may be using.`,
+  };
+}
+
+/**
  * `lease.assertHeld()`, with a failure turned into what the admin is told: why
- * this stopped, and `left`, what is on disk at the point it did.
- *
- * Two failures, said apart. `lock-lost` is a lease that has passed to someone
- * else. `lock-unconfirmed` is a check that could not reach the database, which
- * stops the registration at the same point, because an unconfirmed lease is
- * not one to change the disk under.
+ * the install stopped, and `left`, what is on disk at the point it did.
  */
 async function fence(lease: PlatformLease, left: string, detail?: string): Promise<void> {
   try {
     await lease.assertHeld();
   } catch (err) {
-    if (err instanceof LockLostError) {
-      throw new InstallError(
-        `This registration was paused for longer than its lock lasts (a laptop going ` +
-          `to sleep can do that), so another registration may hold the lock now. It ` +
-          `stopped here rather than change files the other one may be using. ${left}`,
-        "lock-lost",
-        detail,
-      );
-    }
-    // The database's own words stay in the log: they can name hosts and roles.
-    console.error("[repository] could not confirm the register lock:", err);
-    throw new InstallError(
-      `This registration could not confirm with the database that it still holds ` +
-        `its lock, so it stopped here rather than risk changing files another ` +
-        `registration may be using. ${left}`,
-      "lock-unconfirmed",
-      detail,
-    );
+    const { code, message } = describeLockFailure(err, "This install");
+    throw new InstallError(`${message} ${left}`, code, detail);
   }
 }
 
@@ -797,7 +907,7 @@ const VERDICT_FILE = "verdict.json";
 /**
  * Run the generator's `--check` on a staged extension, and read its verdict.
  *
- * `dir` is the staged copy, in a folder named for the slug (stagingHolder()).
+ * `dir` is the staged copy, in a folder named for the slug (stagingLocation()).
  * The check reads the extension's text and runs none of its code: what it does,
  * and what it leaves to registration, is described where it lives, at the end
  * of scripts/generate-project-registry.ts.
@@ -888,9 +998,27 @@ async function readVerdict(dir: string): Promise<CheckVerdict | null> {
   }
 }
 
+/** What regenerateRegistry() runs under, and for tests, where. */
+export interface RegenerateOptions {
+  /**
+   * The checkout lock's token. The run works under its caller's lock, and is
+   * told the token in its arguments, `--lock-token`, since its environment is
+   * only `PATH` and `TMPDIR` (adoptCheckoutLock() in
+   * src/lib/platform/checkout-lock.ts). Without it the run would wait for the
+   * lock its own caller holds.
+   */
+  lockToken: string;
+  /** Tests: the checkout to run in. Its `src/generated/` is the one read. */
+  root?: string;
+  /** Tests: a script in the generator's place. */
+  generator?: string;
+  /** Ends the run early, as its time limit does. */
+  signal?: AbortSignal;
+}
+
 /**
- * Run `scripts/generate-project-registry.ts` once the check has accepted the
- * extension and it is in place, and say whether it is now registered.
+ * Run `scripts/generate-project-registry.ts` once an extension is in place, and
+ * say whether it is now registered.
  *
  * This is the run that loads the extension's code: `widgets.ts` and every
  * `route.ts`, which the check never loads. It can refuse the extension for what
@@ -899,20 +1027,17 @@ async function readVerdict(dir: string): Promise<CheckVerdict | null> {
  * everyone else's build. So the extension is registered when the run exits 0
  * AND its identifier is in the generated module, a file this process reads.
  * Nothing in the run's output decides it.
+ *
+ * Install runs it for a theme, and Register (./register.ts) for an app or a
+ * connector.
  */
-async function regenerateRegistry(
+export async function regenerateRegistry(
   kind: ExtensionKind,
   slug: string,
+  options: RegenerateOptions,
 ): Promise<RegistryOutcome> {
-  const run = await spawnCapture(
-    process.execPath,
-    // tsx's CLI entry, resolved from node_modules rather than via `npx`, which
-    // would be free to go to the network for a package that is missing.
-    [TSX_CLI, GENERATOR],
-    PROJECT_ROOT,
-    GENERATOR_TIMEOUT_MS,
-    generatorEnv(),
-  );
+  const run = await runRegistryGenerator(options);
+  const { root } = options;
 
   if (run.code === null) {
     return { ran: false, ok: false, stopped: true, output: run.output };
@@ -922,7 +1047,7 @@ async function regenerateRegistry(
     return { ran: true, ok: false, stopped: true, output: run.output };
   }
 
-  const generated = await fs.readFile(registryFile(kind), "utf8").catch(() => "");
+  const generated = await readRegistryModule(kind, root);
   const present = generated.includes(`"${REGISTRY_KEY[kind]}": ${JSON.stringify(slug)}`);
   return {
     ran: true,
@@ -932,6 +1057,44 @@ async function regenerateRegistry(
       ? run.output
       : `${run.output}\n\nThe generator ran without error but ${slug} is not in ${REGISTRY_FILE_LABEL[kind]}.`,
   };
+}
+
+/**
+ * The text of the generated module that lists `kind`: this checkout's, or the
+ * one under `root`. A `root` is given by tests and by `npm run register`, never
+ * by the server, which reads the constants above.
+ *
+ * Joined from an argument and a kind looked up at runtime, the second path is
+ * the dynamic filesystem access that makes Turbopack trace the whole project
+ * into every build (see PROJECT_ROOT), so the tracer is told to leave it alone.
+ */
+async function readRegistryModule(kind: ExtensionKind, root?: string): Promise<string> {
+  if (!root) return fs.readFile(registryFile(kind), "utf8").catch(() => "");
+  return fs
+    .readFile(path.join(/* turbopackIgnore: true */ root, REGISTRY_FILE_LABEL[kind]), "utf8")
+    .catch(() => "");
+}
+
+/**
+ * One full run of the registry generator under its caller's checkout lock, with
+ * `PATH` and `TMPDIR` as its environment: exit code null when it didn't finish.
+ */
+export function runRegistryGenerator({
+  lockToken,
+  root,
+  generator,
+  signal,
+}: RegenerateOptions): Promise<{ code: number | null; output: string }> {
+  return spawnCapture(
+    process.execPath,
+    // tsx's CLI entry, resolved from node_modules rather than via `npx`, which
+    // would be free to go to the network for a package that is missing.
+    [TSX_CLI, generator ?? GENERATOR, "--lock-token", lockToken],
+    root ?? PROJECT_ROOT,
+    GENERATOR_TIMEOUT_MS,
+    generatorEnv(),
+    signal,
+  );
 }
 
 /** Generator runs are seconds; a minute is a hang, not a slow machine. */
@@ -956,7 +1119,9 @@ const OWN_PROCESS_GROUP = process.platform !== "win32";
 /**
  * Run a generator to the end or to its time limit, and collect what it printed,
  * stdout and stderr together, for display. `env` is the child's whole
- * environment, `generatorEnv()` unless a caller says otherwise.
+ * environment, `generatorEnv()` unless a caller says otherwise. `signal` ends
+ * the run early, as the time limit does: `npm run register` aborts it on
+ * Ctrl-C, which a run in its own process group would not otherwise see.
  *
  * Exported for its tests; `timeoutMs` is theirs to shorten.
  */
@@ -966,8 +1131,13 @@ export function spawnCapture(
   cwd: string,
   timeoutMs: number = GENERATOR_TIMEOUT_MS,
   env: Record<string, string> = generatorEnv(),
+  signal?: AbortSignal,
 ): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve({ code: null, output: "Stopped before the registry generator started." });
+      return;
+    }
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(command, args, {
@@ -995,14 +1165,24 @@ export function spawnCapture(
       killRun(child);
       output += `\nThe registry generator did not finish within ${timeoutMs / 1000}s.`;
     }, timeoutMs);
+    const stop = () => {
+      killRun(child);
+      output += "\nThe registry generator was stopped.";
+    };
+    signal?.addEventListener("abort", stop, { once: true });
+    const settle = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
+    };
 
     child.on("error", (err) => {
-      clearTimeout(timer);
+      settle();
       resolve({ code: null, output: `${output}\n${err.message}` });
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, output: output.trim() });
+      settle();
+      // A run ended by `signal` is one that did not finish, as at the time limit.
+      resolve({ code: signal?.aborted ? null : code, output: output.trim() });
     });
   });
 }
@@ -1037,6 +1217,8 @@ export interface InstallOptions {
    * act by the admin after being shown `yankedReason`.
    */
   allowYanked?: boolean;
+  /** Who the install is for, as the audit row names them, for a pending install's sidecar. */
+  installedBy?: string;
 }
 
 /**
@@ -1083,56 +1265,73 @@ export async function resolveInstall(
 }
 
 /**
- * Register an extension onto this instance.
+ * Install an extension into this checkout: an app or a connector into
+ * `.mixos/pending/`, to wait for Register; a theme into `themes/`.
  *
  * Callers must have already established that the actor is an admin — this
  * module does not authenticate. See `actions.ts`, which is the only entry
  * point the UI has, and which gates and audits every call.
  *
- * ── WHY THE WHOLE THING IS UNDER A LOCK ─────────────────────────────────────
+ * ── WHY THE WHOLE THING IS UNDER TWO LOCKS ──────────────────────────────────
  *
- * `regenerateRegistry` rewrites the shared `src/generated/*.ts` modules, and the
- * rollback path rewrites them again. Two admins registering at once run two
- * generator processes over the same three files, and the second one's rollback
- * can land on top of the first one's success. The exists-check is inside the
- * lock too, so two concurrent registrations of the SAME slug cannot both find
- * the directory absent and both proceed to write it.
+ * The row lock, `repository.register`, is the one every instance on this
+ * database shares. The checkout lock, `.mixos/lock`, is the one every process
+ * changing this checkout shares, the registry generator that `npm run dev` and
+ * `npm run registry` start included, which uses no database
+ * (src/lib/platform/checkout-lock.ts says why both). Held together, they keep a
+ * second install, a registration or a generator run from changing the same
+ * folders, or rewriting the shared `src/generated/*.ts` modules, while this one
+ * does. The exists-checks are inside the locks too, so two installs of the SAME
+ * slug cannot both find it absent and both proceed to write it.
  *
- * The lock is instance-wide rather than per-slug because the contended resource
- * is the generated registry, which every kind and every slug shares.
+ * The row lock is instance-wide rather than per-slug because the contended
+ * resource is the generated registry, which every kind and every slug shares.
  *
- * ── AND WHY EVERY DISK CHANGE CHECKS IT FIRST ───────────────────────────────
+ * ── AND WHY EVERY DISK CHANGE CHECKS THEM FIRST ─────────────────────────────
  *
- * The lock is a lease (src/lib/platform/lock.ts) that anyone may take once it
- * has gone 15 minutes without renewal, and a registration can be paused for
+ * The row lock is a lease (src/lib/platform/lock.ts) that anyone may take once
+ * it has gone 15 minutes without renewal, and an install can be paused for
  * longer than that: a laptop running `next dev` goes to sleep mid-download,
- * wakes up and carries on. So the lease renews itself every minute while this
- * runs, and `lease.assertHeld()` comes before writing the staging tree, before
- * deleting a staged copy the check refused, before the rename and before the
- * rollback. A registration that finds the lock gone stops there with
- * `lock-lost`, says what it left on disk, and cleans nothing up: what it would
- * remove may be the new holder's.
+ * wakes up and carries on. The checkout lock can be broken by hand while it is.
+ * So the lease renews itself every minute while this runs, and both locks are
+ * confirmed (bothLocks()) before writing the staging tree, before deleting a
+ * staged copy the check refused, before moving the tree on and before a theme's
+ * rollback. An install that finds a lock gone stops there with `lock-lost`, says
+ * what it left on disk, and cleans nothing up: what it would remove may be the
+ * new holder's.
  *
  * Renewal holds the lock for as long as this runs, so everything here has a
- * time limit: the repository and GitHub requests, and both generator runs, the
- * check and the registration, whose whole process group `spawnCapture` ends at
- * the limit.
+ * time limit: the repository and GitHub requests, and every generator run,
+ * whose whole process group `spawnCapture` ends at the limit.
  */
 export async function installExtension(
   kind: ExtensionKind,
   slug: string,
   options: InstallOptions = {},
 ): Promise<InstallResult> {
-  // Before the lock: a kind this instance does not install, or a deployment
-  // that cannot register anything, should not hold up anyone else's
-  // registration while it is refused.
+  // Before the locks: a kind this instance does not install, or a deployment
+  // that cannot install anything, should not hold up anyone else's install
+  // while it is refused.
   if (!installEnabled(kind)) {
     throw new InstallError(installDisabledMessage(kind), "disabled");
   }
   await assertInstallable(kind);
+  // Every path below is built from the slug, which the Registry validates and
+  // this checks again before it names anything on disk.
+  if (!SlugSchema.safeParse(slug).success) {
+    throw new InstallError(`"${slug}" is not an extension slug.`, "invalid-package");
+  }
 
   return withPlatformLock("repository.register", (lease) =>
-    runInstall(kind, slug, options, lease),
+    withCheckoutLock(PROJECT_ROOT, `an install of ${kind}/${slug} from the Registry`, (lock) => {
+      if (lock.tookOver) {
+        console.warn(
+          `[repository] took over the checkout lock from ` +
+            `${describeCheckoutLockHolder(lock.tookOver)}, which had stopped.`,
+        );
+      }
+      return runInstall(kind, slug, options, bothLocks(lease, lock), lock.token);
+    }),
   );
 }
 
@@ -1141,6 +1340,7 @@ async function runInstall(
   slug: string,
   options: InstallOptions,
   lease: PlatformLease,
+  lockToken: string,
 ): Promise<InstallResult> {
   const { dir, rel } = resolveInstallDir(kind, slug);
 
@@ -1148,16 +1348,16 @@ async function runInstall(
   // different question attached — what happens to the data and grants the
   // existing one already has — and quietly replacing a directory on an admin
   // who meant to install something new is the worst possible answer to it.
-  try {
-    await fs.access(dir);
+  if (pathExists(dir)) {
     throw new InstallError(
-      `${rel} already exists on this instance. Remove it first, or update it in its own source repo.`,
+      `${rel} already exists in this checkout. Remove it first, or update it in its own source repo.`,
       "already-installed",
     );
-  } catch (err) {
-    if (err instanceof InstallError) throw err;
-    // ENOENT is the good case.
   }
+  // Nor one already waiting for Register: discarding it is a choice, and
+  // installing again over it would make it for the admin.
+  const where = kind === "theme" ? null : pendingLocation(PROJECT_ROOT, kind, slug);
+  if (where) assertNotPending(kind, slug, where);
 
   const manifest = await resolveInstall(kind, slug, options.version);
 
@@ -1174,7 +1374,8 @@ async function runInstall(
     The publisher's floor, compared with this build's version: `package.json`'s,
     which every build stamps into `src/generated/build-info.ts` (see
     `src/lib/platform/version.ts`). Every checkout and every deployment has one,
-    so the floor the publisher declared holds wherever this runs.
+    so the floor the publisher declared holds wherever this runs. Register checks
+    it again, against the checkout it runs in.
 
     Unlike `yanked`, this has no override. A withdrawn release is a risk an admin
     is in a position to weigh; a release that needs platform features this build
@@ -1205,27 +1406,79 @@ async function runInstall(
   });
   const contentHash = verifyContentHash(entries, manifest.contentHash);
 
+  // Step 6, and the hash Register checks the folder against.
   preflight(kind, slug, entries);
+  const files = filesHash(entries);
 
-  // Step 7, fenced by the lease (see stageTree).
-  const staged = await stageTree(dir, entries, lease);
+  // Step 7, fenced by the locks (see stageTree).
+  const staged = await stageTree(stagingLocation(PROJECT_ROOT, kind, slug).dir, entries, lease);
 
   // Step 8. The staged copy is judged before it is anywhere a build or the dev
   // server would look, and before any of its code has run.
-  await checkStagedTree(kind, dir, staged, lease);
+  const check = await checkStagedTree(kind, slug, staged, lease);
 
-  // Step 9, fenced by the lease (see placeTree).
+  const verified = {
+    kind,
+    slug,
+    name: manifest.name,
+    version: manifest.version,
+    gitTag: manifest.gitTag ?? null,
+    commitSha: manifest.commitSha,
+    contentHash,
+    filesHash: files,
+    fileCount: entries.length,
+    byteCount: entries.reduce((n, e) => n + e.data.length, 0),
+    deferred: check.deferred,
+  };
+
+  // Step 9, for an app or a connector: into pending, with its sidecar. None of
+  // its code has run, and none will until Register.
+  if (where) {
+    await placePending(
+      staged,
+      where,
+      {
+        kind: kind as PendingSidecar["kind"],
+        slug,
+        source: repositoryBaseUrl(),
+        version: manifest.version,
+        gitTag: manifest.gitTag ?? null,
+        commitSha: manifest.commitSha,
+        contentHash,
+        filesHash: files,
+        requiresMixOS: manifest.requiresMixOS ?? null,
+        yankedAccepted: manifest.yanked === true,
+        installedAt: new Date().toISOString(),
+        installedBy: options.installedBy ?? "an administrator",
+        fileCount: verified.fileCount,
+        byteCount: verified.byteCount,
+        check: { verdict: "accepted", deferred: check.deferred },
+      },
+      lease,
+    );
+    return {
+      ...verified,
+      installPath: where.rel,
+      pending: true,
+      registry: null,
+      nextStep:
+        `Installed to ${where.rel}/, where nothing runs it yet. Read its code there, then ` +
+        `register it in this checkout with \`npm run register -- ${kind}/${slug}\`, which runs ` +
+        `its code for the first time. Then commit ${INSTALL_SEGMENT[kind]}/${slug} and deploy it.`,
+    };
+  }
+
+  // Step 9, for a theme, fenced by the locks (see placeTree), then the
+  // registry generator.
   await placeTree(staged, dir, lease);
-
-  // Step 10: registration, the first time any of the extension's code runs.
-  const registry = await regenerateRegistry(kind, slug);
+  const registry = await regenerateRegistry(kind, slug, { lockToken });
   if (registry.ran && !registry.ok) {
     // Undo. Removing the directory is not enough on its own: the failed run may
     // already have rewritten src/generated, so the generator is run once more
     // to restore a registry that matches what is actually on disk.
     //
-    // Only while the lock is still this registration's. Without it, another
-    // registration may be running the generator over these same files, so the
+    // Only while the locks are still this install's. Without them, another
+    // operation may be running the generator over these same files, so the
     // admin is told what to clean up instead.
     await fence(
       lease,
@@ -1234,38 +1487,31 @@ async function runInstall(
       registry.output,
     );
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-    await regenerateRegistry(kind, slug).catch(() => {});
+    await regenerateRegistry(kind, slug, { lockToken }).catch(() => {});
 
-    // The check passed, so what refused it here is what the check leaves to
-    // registration: the extension's code, loaded for the first time. A run
-    // that stopped could also be this checkout, and install cannot tell which.
+    // The check passed and a theme runs no code, so a run that left it out
+    // found what the check doesn't read, and one that stopped could also be
+    // this checkout. Install cannot tell which.
     throw registry.stopped
       ? new InstallError(
           `The registry generator stopped while registering ${slug}, after its check had ` +
-            `passed, so it was not installed. Registering loads the extension's code for the ` +
-            `first time, so the output below may be about that code or about this checkout.`,
+            `passed, so it was not installed. The output below may be about the theme or ` +
+            `about this checkout.`,
           "generator-failed",
           registry.output,
         )
       : new InstallError(
           `${slug} passed this instance's registry check, but the registry generator left it ` +
-            `out once it loaded the extension's code, so it was not installed.`,
+            `out, so it was not installed.`,
           "rejected-by-registry",
           registry.output,
         );
   }
 
   return {
-    kind,
-    slug,
-    name: manifest.name,
-    version: manifest.version,
-    gitTag: manifest.gitTag ?? null,
-    commitSha: manifest.commitSha,
-    contentHash,
+    ...verified,
     installPath: rel,
-    fileCount: entries.length,
-    byteCount: entries.reduce((n, e) => n + e.data.length, 0),
+    pending: false,
     registry,
     nextStep: registry.ran
       ? process.env.NODE_ENV === "development"
@@ -1274,4 +1520,27 @@ async function runInstall(
       : `Written to ${rel}, but the registry generator could not be run here. ` +
         `Run \`npm run registry\` in the checkout and restart the server before it is usable.`,
   };
+}
+
+/**
+ * Refuse an install of a slug already waiting in pending, or left there by a
+ * registration that stopped midway, naming what to run instead.
+ */
+function assertNotPending(kind: ExtensionKind, slug: string, where: PendingLocation): void {
+  const read = readSidecar(where.sidecar);
+  if (read.state === "ok" && read.sidecar.register) {
+    throw new InstallError(
+      `A registration of ${slug} stopped before it finished. Run \`npm run register -- --recover\` ` +
+        `in this checkout, then try again.`,
+      "already-installed",
+    );
+  }
+  if (pathExists(where.folder) || read.state !== "missing") {
+    throw new InstallError(
+      `${slug} is already installed and waiting in ${where.rel}/. Register it with ` +
+        `\`npm run register -- ${kind}/${slug}\`, or discard it with ` +
+        `\`npm run register -- ${kind}/${slug} --discard\`.`,
+      "already-installed",
+    );
+  }
 }
