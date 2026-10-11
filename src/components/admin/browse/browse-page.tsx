@@ -5,6 +5,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { registryInstalls } from "@/generated/registry-installs";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
 import { isBuiltDeployment } from "@/lib/platform/build";
@@ -12,12 +13,14 @@ import { repositoryBaseUrl } from "@/lib/repository/client";
 import { checkInstallable, checkoutRoot } from "@/lib/repository/install";
 import { listPendingInstalls } from "@/lib/repository/pending";
 import { installEnabled } from "@/lib/repository/policy";
+import { provenanceOf, type Provenance } from "@/lib/repository/provenance";
 import { KIND_LABEL, type ExtensionKind } from "@/lib/repository/types";
 import ExtensionBrowser from "./extension-browser";
 
 /**
- * The shell all three browse routes share: the gate, the header, and the two
- * server-side facts the client browser needs.
+ * The shell all three browse routes share: the gate, the header, and the
+ * server-side facts the client browser needs: what is installed already and
+ * where each came from, and what waits in pending.
  *
  * The three routes differ only in which kind they name and which generated
  * registry they read to answer "is this one already here" — so they are three
@@ -71,6 +74,13 @@ export default async function BrowsePage({
     // with the message the client needs. The header just keeps its label.
   }
   const host = origin.replace(/^https?:\/\//, "");
+
+  // Where each extension of this kind in the build came from, from the install
+  // records the registry generator read, for the line its listing shows in
+  // place of an install button.
+  const installed: Record<string, Provenance> = Object.fromEntries(
+    installedSlugs.map((slug) => [slug, provenanceOf(kind, slug, registryInstalls, origin)]),
+  );
 
   const label = KIND_LABEL[kind];
 
@@ -126,7 +136,7 @@ export default async function BrowsePage({
         kind={kind}
         repositoryOrigin={origin}
         repositoryOverridable={!isBuiltDeployment()}
-        installedSlugs={installedSlugs}
+        installed={installed}
         pendingSlugs={pendingSlugs}
         installable={ok ? null : (reason ?? null)}
         installableTone={code === "built-deployment" ? "info" : "warning"}

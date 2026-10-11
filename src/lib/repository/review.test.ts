@@ -4,7 +4,7 @@
 
 /**
  * The review an admin reads before Register: built from a pending install's
- * folder and sidecar alone, in a checkout of its own.
+ * folder, its install record and its sidecar alone, in a checkout of its own.
  */
 
 import { after, beforeEach, test } from "node:test";
@@ -14,11 +14,11 @@ import os from "node:os";
 import path from "node:path";
 import { mixosVersion } from "../platform/version";
 import { filesHash, hashFileTree } from "./content-hash";
+import { INSTALL_RECORD_FILE, serializeInstallRecord, type InstallRecord } from "./install-record";
 import { pendingLocation, writeSidecar, type PendingKind, type PendingSidecar } from "./pending";
 import {
   ReviewError,
   declaredBy,
-  githubSourceUrl,
   migrationCount,
   pendingDisplayName,
   reviewPendingInstall,
@@ -71,28 +71,41 @@ const ACME = [
   file("README.md", "# Acme\n"),
 ];
 
-/** A pending install, as install leaves one. */
-function pend(kind: PendingKind, slug: string, entries: TarEntry[] = ACME, fields: Partial<PendingSidecar> = {}) {
+/** A pending install, as install leaves one: the tree with its record, and the sidecar beside it. */
+function pend(
+  kind: PendingKind,
+  slug: string,
+  entries: TarEntry[] = ACME,
+  { record = {}, ...fields }: Partial<PendingSidecar> & { record?: Partial<InstallRecord> } = {},
+) {
   const where = pendingLocation(root, kind, slug);
+  fs.mkdirSync(where.folder, { recursive: true });
   for (const e of entries) {
     fs.mkdirSync(path.dirname(path.join(where.folder, e.path)), { recursive: true });
     fs.writeFileSync(path.join(where.folder, e.path), e.data, { mode: 0o644 });
   }
+  fs.writeFileSync(
+    path.join(where.folder, INSTALL_RECORD_FILE),
+    serializeInstallRecord({
+      source: "https://mixos.org",
+      kind,
+      slug,
+      version: "1.2.0",
+      gitTag: "v1.2.0",
+      commitSha: "c".repeat(40),
+      contentHash: hashFileTree(entries),
+      filesHash: filesHash(entries),
+      repository: { owner: "acme", name: "mixos-apps", subpath: `apps/${slug}` },
+      requiresMixOS: null,
+      ...record,
+    }),
+  );
   writeSidecar(where.sidecar, {
     kind,
     slug,
-    source: "https://mixos.org",
-    version: "1.2.0",
-    gitTag: "v1.2.0",
-    commitSha: "c".repeat(40),
-    contentHash: hashFileTree(entries),
-    filesHash: filesHash(entries),
-    requiresMixOS: null,
     yankedAccepted: false,
     installedAt: "2026-10-11T09:00:00.000Z",
     installedBy: "admin@example.com",
-    fileCount: entries.length,
-    byteCount: entries.reduce((s, e) => s + e.data.length, 0),
     check: { verdict: "accepted", deferred: ["apps/acme/widgets.ts: the widget config fields it builds are checked at registration, which loads it."] },
     ...fields,
   });
@@ -116,10 +129,16 @@ test("an app's review lists what will run, by when it runs", () => {
   // The check's verdict, from the sidecar.
   assert.equal(review.deferred.length, 1);
   assert.match(review.deferred[0], /widgets\.ts/);
-  // What install verified.
+  // What install verified, from the record, and who installed it, from the sidecar.
   assert.equal(review.release.version, "1.2.0");
   assert.equal(review.release.commitSha, "c".repeat(40));
+  assert.equal(review.release.filesHash, filesHash(ACME));
   assert.equal(review.release.installedBy, "admin@example.com");
+  // The package's own files, the record install added left out.
+  assert.equal(review.release.fileCount, ACME.length);
+  assert.equal(review.release.byteCount, ACME.reduce((n, e) => n + e.data.length, 0));
+  // The source, at the commit install verified, built from the record.
+  assert.equal(review.sourceUrl, `https://github.com/acme/mixos-apps/tree/${"c".repeat(40)}/apps/acme`);
 });
 
 test("an app's manifest declarations, in the review's terms", () => {
@@ -175,17 +194,17 @@ test("a connector's review: its code, and what its manifest says it reaches", ()
 });
 
 test("the release's floor, met and not", () => {
-  pend("app", "met", ACME, { requiresMixOS: "0.0.1" });
+  pend("app", "met", ACME, { record: { requiresMixOS: "0.0.1" } });
   const met = reviewPendingInstall(root, "app", "met").requiresMixOS;
   assert.deepEqual(met, { declared: "0.0.1", current: mixosVersion(), met: true, checked: true, reason: null });
 
-  pend("app", "unmet", ACME, { requiresMixOS: "999.0.0" });
+  pend("app", "unmet", ACME, { record: { requiresMixOS: "999.0.0" } });
   const unmet = reviewPendingInstall(root, "app", "unmet");
   assert.equal(unmet.requiresMixOS.met, false);
   // Register would refuse it, so the review says so before anyone asks.
   assert.match(unmet.problem ?? "", /requires 999\.0\.0 or newer/);
 
-  pend("app", "odd", ACME, { requiresMixOS: "soon" });
+  pend("app", "odd", ACME, { record: { requiresMixOS: "soon" } });
   const odd = reviewPendingInstall(root, "app", "odd").requiresMixOS;
   assert.equal(odd.met, true);
   assert.equal(odd.checked, false);
@@ -205,11 +224,17 @@ test("a registration that stopped midway is flagged for recovery", () => {
   assert.match(reviewPendingInstall(root, "app", "acme").problem ?? "", /--recover/);
 });
 
-test("nothing pending, or a folder with no record, has no review", () => {
+test("nothing pending, or a folder with no sidecar or no install record, has no review", () => {
   assert.throws(() => reviewPendingInstall(root, "app", "ghost"), (err: unknown) => err instanceof ReviewError && /Nothing named ghost/.test((err as Error).message));
   const where = pend("app", "acme");
   fs.rmSync(where.sidecar);
   assert.throws(() => reviewPendingInstall(root, "app", "acme"), (err: unknown) => err instanceof ReviewError && /Discard it/.test((err as Error).message));
+  const unrecorded = pend("app", "unrecorded");
+  fs.rmSync(path.join(unrecorded.folder, INSTALL_RECORD_FILE));
+  assert.throws(
+    () => reviewPendingInstall(root, "app", "unrecorded"),
+    (err: unknown) => err instanceof ReviewError && /has no install record.*Discard it and install it again/.test((err as Error).message),
+  );
 });
 
 test("an unreadable manifest leaves the declarations out, not the review", () => {
@@ -240,18 +265,4 @@ test("migrations are counted from the registered folder", () => {
   fs.writeFileSync(path.join(dir, "migrations", "notes.md"), "");
   assert.equal(migrationCount(dir), 2);
   assert.equal(migrationCount(path.join(root, "apps", "none")), 0);
-});
-
-test("the source link is GitHub's tree at the installed commit", () => {
-  const sha = "a".repeat(40);
-  assert.equal(
-    githubSourceUrl({ owner: "acme", name: "mixos-apps" }, sha, "apps/acme board"),
-    `https://github.com/acme/mixos-apps/tree/${sha}/apps/acme%20board`,
-  );
-  assert.equal(githubSourceUrl({ owner: "acme", name: "board" }, sha, null), `https://github.com/acme/board/tree/${sha}`);
-  // Nothing GitHub wouldn't serve, and nothing that climbs out of the tree.
-  assert.equal(githubSourceUrl({ owner: "acme/../x", name: "board" }, sha), null);
-  assert.equal(githubSourceUrl({ owner: "acme", name: ".." }, sha), null);
-  assert.equal(githubSourceUrl({ owner: "acme", name: "board" }, sha, "apps/../../etc"), null);
-  assert.equal(githubSourceUrl({ owner: "acme", name: "board" }, "main"), null);
 });

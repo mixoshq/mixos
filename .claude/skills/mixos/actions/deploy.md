@@ -175,7 +175,8 @@ split for the sake of splitting.
 
 **Manifest review.** If a group touches files under an app, connector, or
 theme, the pre-commit hook will stamp that manifest's `lastUpdated`
-(preview with `npx tsx scripts/stamp-updated.ts --dry-run`). The date claims
+(preview with `npx tsx scripts/stamp-updated.ts --dry-run`), unless it was
+installed from the Registry (below). The date claims
 the manifest describes what exists today, and only you can check that.
 Read the code and compare:
 
@@ -197,12 +198,38 @@ the user confirms.
 **A registered extension.** An app or connector the user installed from the
 Registry and registered, on its admin page or with `npm run register`, or a
 theme they installed from Browse, is someone else's code, the release that was
-verified and checked. Commit its folder whole, as a commit of its own
-(`feat(<slug>): add <slug> <version> from mixos.org`), and leave it out of the
-manifest review: correcting its manifest or its code would make it differ from
-that release. Nothing under `.mixos/` is ever committed (git ignores it).
-Something still waiting there hasn't been registered and isn't in the build:
-ask whether to run `npm run register -- <kind>/<slug>` first, or leave it.
+verified and checked. Its folder holds `.registry.json`, the install record.
+Commit the folder whole, record included, as a commit of its own, with the
+message Register printed. To write it yourself, take every value from the
+record, never from the manifest's `name`:
+
+```
+feat(<slug>): add <kind> <slug> <version> from <host>
+
+Installed from <host> and registered in a checkout.
+<folder>/.registry.json records the release and the hashes that
+were verified.
+
+The source at that commit: https://github.com/<owner>/<name>/tree/<commitSha>/<subpath>
+
+Registry-Source: <source>
+Registry-Version: <version>
+Registry-Commit: <commitSha>
+Registry-Content-Hash: <contentHash>
+Registry-Files-Hash: <filesHash>
+Registry-Listing: <source>/extend/<kind>s/<slug>
+```
+
+`<host>` is the host of `source`: `mixos.org` for an install from mixos.org.
+`<owner>`, `<name>` and `<subpath>` are `repository`'s; leave out `/<subpath>`
+when it is null.
+Leave the folder out of the manifest review: correcting its manifest or its
+code would make it differ from that release, and the pre-commit hook doesn't
+stamp it. Check that `git status` shows every file in the folder: a
+`.gitignore` rule can leave one out, which `git add -f <path>` puts back.
+Nothing under `.mixos/` is ever committed (git ignores it). Something still
+waiting there hasn't been registered and isn't in the build: ask whether to run
+`npm run register -- <kind>/<slug>` first, or leave it.
 
 **A version bump.** Only a release PR changes `package.json`'s version
 (**Release**, at the end of this file). A developer may bump it locally to
