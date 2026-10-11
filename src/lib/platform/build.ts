@@ -36,3 +36,12 @@ const STANDALONE_SERVER = existsSync(path.join(process.cwd(), "server.js"));
 export function isBuiltDeployment(): boolean {
   return Boolean(process.env.VERCEL) || STANDALONE_SERVER;
 }
+
+/**
+ * What a built deployment says when it is asked to install or register an
+ * extension. It isn't a fault, so it reads as information, not as a warning: a
+ * deployment runs what its build carries, and an extension reaches it through
+ * a checkout, a commit and a deploy.
+ */
+export const BUILT_DEPLOYMENT_NOTICE =
+  "This deployment runs a build. Install and register in a checkout of your repository, commit, and deploy.";

@@ -9,7 +9,8 @@ import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
 import { isBuiltDeployment } from "@/lib/platform/build";
 import { repositoryBaseUrl } from "@/lib/repository/client";
-import { checkInstallable } from "@/lib/repository/install";
+import { checkInstallable, checkoutRoot } from "@/lib/repository/install";
+import { listPendingInstalls } from "@/lib/repository/pending";
 import { installEnabled } from "@/lib/repository/policy";
 import { KIND_LABEL, type ExtensionKind } from "@/lib/repository/types";
 import ExtensionBrowser from "./extension-browser";
@@ -46,10 +47,19 @@ export default async function BrowsePage({
 
   if (!installEnabled(kind)) notFound();
 
-  // Answered on the server so a deployment that cannot write to its own
-  // checkout says so at the top of the page, rather than after an admin has
-  // chosen something and waited for a download that was never going to land.
-  const { ok, reason } = await checkInstallable(kind);
+  // Answered on the server so a deployment that doesn't install says so at the
+  // top of the page, rather than after an admin has chosen something and
+  // waited for a download that was never going to land.
+  const { ok, reason, code } = await checkInstallable(kind);
+
+  // Installed but not yet registered: their tiles offer the review instead of
+  // an install the server would refuse. A theme registers as it installs.
+  const pendingSlugs =
+    ok && kind !== "theme"
+      ? listPendingInstalls(checkoutRoot())
+          .filter((p) => p.kind === kind)
+          .map((p) => p.slug)
+      : [];
 
   // Two forms of the same fact: the host for the header sentence, the full
   // origin for links out to individual listings.
@@ -79,16 +89,26 @@ export default async function BrowsePage({
           */}
           <p className="mt-1 text-sm text-muted-foreground">
             {ok ? (
-              <>
-                {label.many} published to {host}. Installing one downloads it
-                from GitHub, verifies it against the checksum {host} published,
-                runs it through this instance&rsquo;s registry checks, and
-                copies it into this deployment.
-              </>
+              kind === "theme" ? (
+                <>
+                  {label.many} published to {host}. Installing one downloads it
+                  from GitHub, verifies it against the checksum {host}{" "}
+                  published, runs this instance&rsquo;s registry checks on it,
+                  and adds it to <code className="font-mono text-xs">themes/</code>.
+                </>
+              ) : (
+                <>
+                  {label.many} published to {host}. Installing one downloads it
+                  from GitHub, verifies it against the checksum {host}{" "}
+                  published, and checks it without running it. It then waits
+                  in <code className="font-mono text-xs">.mixos/pending/</code>{" "}
+                  until you review and register it.
+                </>
+              )
             ) : (
               <>
-                {label.many} published to {host}. This instance can browse the
-                catalogue but cannot install from it — see below.
+                {label.many} published to {host}. Browse them here; see below
+                for where to install them.
               </>
             )}
           </p>
@@ -107,7 +127,9 @@ export default async function BrowsePage({
         repositoryOrigin={origin}
         repositoryOverridable={!isBuiltDeployment()}
         installedSlugs={installedSlugs}
+        pendingSlugs={pendingSlugs}
         installable={ok ? null : (reason ?? null)}
+        installableTone={code === "built-deployment" ? "info" : "warning"}
       />
     </div>
   );
