@@ -7,11 +7,14 @@
  * what install's check left to registration, what the package's manifest
  * declares, and whether this checkout's version meets the release's floor.
  *
- * All of it comes from the pending install itself: its sidecar, which records
- * what install verified and the check's verdict, and its folder, read as text.
- * Nothing here imports, evaluates or executes a file the package ships. The
- * publisher's claims and the link to the source come from the catalogue, which
- * the review action asks separately (listingFacts() in ./pending-admin.ts).
+ * All of it comes from the pending install itself: its install record,
+ * `.registry.json`, which says what install verified and where it came from;
+ * its sidecar, which has the check's verdict and who installed it; and its
+ * folder, read as text. The link to the source is built from the record, so it
+ * is the repository and commit install downloaded and verified. Nothing here
+ * imports, evaluates or executes a file the package ships. The publisher's
+ * claims come from the catalogue, which the review action asks separately
+ * (listingFacts() in ./pending-admin.ts).
  *
  * Every path below is a runtime path in a checkout, built from arguments, so
  * each join is marked for Turbopack's tracer to leave alone (see ./pending.ts).
@@ -22,14 +25,22 @@ import path from "node:path";
 import { mixosVersion, satisfiesMinimum } from "../platform/version";
 import { contentHashesMatch } from "./content-hash";
 import {
-  MIXOS_DIR,
-  PendingError,
+  FolderReadError,
+  INSTALL_RECORD_FILE,
+  folderFiles,
   folderFilesHash,
+  readInstallRecord,
+  recordSourceUrl,
+  type InstallRecord,
+} from "./install-record";
+import {
+  MIXOS_DIR,
   isRealDirectory,
   kindDir,
   listPendingInstalls,
   pendingLocation,
   readSidecar,
+  recordProblem,
   type PendingKind,
   type PendingSidecar,
 } from "./pending";
@@ -62,21 +73,15 @@ export interface PendingReview {
   folder: string;
   /** Repo-relative: where Register puts it, `apps/<slug>`. */
   target: string;
-  /** What install verified and recorded. */
-  release: Pick<
-    PendingSidecar,
-    | "source"
-    | "version"
-    | "gitTag"
-    | "commitSha"
-    | "contentHash"
-    | "filesHash"
-    | "installedAt"
-    | "installedBy"
-    | "fileCount"
-    | "byteCount"
-    | "yankedAccepted"
-  >;
+  /** What install verified, from the install record, and who installed it, from the sidecar. */
+  release: Pick<InstallRecord, "source" | "version" | "gitTag" | "commitSha" | "contentHash" | "filesHash"> &
+    Pick<PendingSidecar, "installedAt" | "installedBy" | "yankedAccepted"> & {
+      /** The package's files and their bytes, the install record left out. */
+      fileCount: number;
+      byteCount: number;
+    };
+  /** The source on GitHub at the commit install verified, from the install record. */
+  sourceUrl: string | null;
   /** The files that will run, by group. */
   runs: RunGroup[];
   /** What install's check couldn't read as text and left to registration. */
@@ -110,9 +115,6 @@ export class ReviewError extends Error {
 /** Per group, so a package of thousands of routes still renders as a review. */
 const MAX_LISTED = 40;
 
-/** A walk stops here: install's archive limits keep a real package well inside it. */
-const MAX_WALKED = 20_000;
-
 /** The largest manifest this reads. The schema keeps a real one far smaller. */
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 
@@ -131,32 +133,6 @@ const CODE = /\.(?:[cm]?[jt]sx?)$/;
 /* -------------------------------------------------------------------------- */
 /*  Reading the folder                                                          */
 /* -------------------------------------------------------------------------- */
-
-/**
- * Every regular file under `dir`, as POSIX paths relative to it, sorted. A link
- * or anything else that isn't a file or a folder is left out: install never
- * writes one, and the files hash check reports the folder as changed.
- */
-export function listFolder(dir: string): string[] {
-  const out: string[] = [];
-  const walk = (relative: string) => {
-    if (out.length >= MAX_WALKED) return;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(path.join(/* turbopackIgnore: true */ dir, relative), { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const rel = relative ? `${relative}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) walk(rel);
-      else if (entry.isFile()) out.push(rel);
-      if (out.length >= MAX_WALKED) return;
-    }
-  };
-  walk("");
-  return out.sort();
-}
 
 /** A small file's text, never through a link, or null. */
 function readText(file: string, limit: number): string | null {
@@ -355,23 +331,32 @@ export function declaredBy(kind: PendingKind, manifest: Record<string, unknown>)
  * takes no lock: Register checks everything again under both of its locks.
  *
  * Throws ReviewError when there is nothing to review: no pending install of
- * that name, or one without a readable record of what install verified.
+ * that name, or one without a readable sidecar or install record of its own.
  */
 export function reviewPendingInstall(root: string, kind: PendingKind, slug: string): PendingReview {
   const where = pendingLocation(root, kind, slug);
   const read = readSidecar(where.sidecar);
-  if (read.state !== "ok" || !isRealDirectory(where.folder)) {
+  const recordRead = isRealDirectory(where.folder) ? readInstallRecord(where.folder) : null;
+  if (
+    read.state !== "ok" ||
+    !recordRead ||
+    recordRead.state !== "ok" ||
+    recordProblem(where, kind, slug, recordRead) !== null
+  ) {
     const listed = listPendingInstalls(root).find((p) => p.kind === kind && p.slug === slug);
     throw new ReviewError(
       listed?.problem ?? `Nothing named ${slug} is waiting in ${MIXOS_DIR}/pending/${kindDir(kind)}/.`,
     );
   }
   const sidecar = read.sidecar;
+  const record = recordRead.record;
   if (sidecar.kind !== kind || sidecar.slug !== slug) {
     throw new ReviewError(`${where.rel}.json records ${sidecar.kind}/${sidecar.slug}, not ${kind}/${slug}. Discard it.`);
   }
 
-  const files = listFolder(where.folder);
+  // The package's files: everything in the folder but the record install added.
+  const listed = folderFiles(where.folder).filter((f) => f.path !== INSTALL_RECORD_FILE);
+  const files = listed.map((f) => f.path);
   const manifest = readManifest(where.folder, kind);
 
   // What Register will find: the files as install verified them, or not.
@@ -380,17 +365,17 @@ export function reviewPendingInstall(root: string, kind: PendingKind, slug: stri
     problem = "A registration of it stopped before it finished. Run `npm run register -- --recover` in this checkout.";
   } else {
     try {
-      if (!contentHashesMatch(folderFilesHash(where.folder), sidecar.filesHash)) {
+      if (!contentHashesMatch(folderFilesHash(where.folder), record.filesHash)) {
         problem =
           "Its files have changed since it was installed, so Register would refuse it. Discard it and install it again.";
       }
     } catch (err) {
-      if (!(err instanceof PendingError)) throw err;
+      if (!(err instanceof FolderReadError)) throw err;
       problem = `${err.message} Register would refuse it. Discard it and install it again.`;
     }
   }
 
-  const floor = satisfiesMinimum(sidecar.requiresMixOS);
+  const floor = satisfiesMinimum(record.requiresMixOS);
   if (!problem && !floor.allowed) problem = floor.reason ?? "This checkout's MixOS is older than the release requires.";
 
   const name = manifest?.[kind === "app" ? "name" : "displayName"];
@@ -401,23 +386,24 @@ export function reviewPendingInstall(root: string, kind: PendingKind, slug: stri
     folder: where.rel,
     target: `${kindDir(kind)}/${slug}`,
     release: {
-      source: sidecar.source,
-      version: sidecar.version,
-      gitTag: sidecar.gitTag,
-      commitSha: sidecar.commitSha,
-      contentHash: sidecar.contentHash,
-      filesHash: sidecar.filesHash,
+      source: record.source,
+      version: record.version,
+      gitTag: record.gitTag,
+      commitSha: record.commitSha,
+      contentHash: record.contentHash,
+      filesHash: record.filesHash,
       installedAt: sidecar.installedAt,
       installedBy: sidecar.installedBy,
-      fileCount: sidecar.fileCount,
-      byteCount: sidecar.byteCount,
+      fileCount: listed.length,
+      byteCount: listed.reduce((n, f) => n + f.bytes, 0),
       yankedAccepted: sidecar.yankedAccepted,
     },
+    sourceUrl: recordSourceUrl(record),
     runs: runGroups(kind, files),
     deferred: sidecar.check.deferred.map((d) => shownText(d, MAX_LINE_CHARS)),
     declared: manifest ? declaredBy(kind, manifest) : null,
     requiresMixOS: {
-      declared: sidecar.requiresMixOS,
+      declared: record.requiresMixOS,
       current: mixosVersion(),
       met: floor.allowed,
       checked: floor.checked,
@@ -425,31 +411,4 @@ export function reviewPendingInstall(root: string, kind: PendingKind, slug: stri
     },
     problem,
   };
-}
-
-/* -------------------------------------------------------------------------- */
-/*  The source, at the installed commit                                         */
-/* -------------------------------------------------------------------------- */
-
-/** GitHub's own rules for an owner and a repository name. */
-const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
-const GITHUB_REPO = /^[A-Za-z0-9._-]{1,100}$/;
-
-/**
- * `https://github.com/<owner>/<repo>/tree/<commit>/<subpath>`: the files at the
- * commit install verified, which a moved tag or a new push can't change. Null
- * when the catalogue's answer doesn't make a link that can be trusted to mean
- * that: an owner or a name GitHub wouldn't accept, or a subpath that climbs.
- */
-export function githubSourceUrl(
-  repo: { owner: string; name: string },
-  commitSha: string,
-  subpath?: string | null,
-): string | null {
-  if (!GITHUB_OWNER.test(repo.owner) || !GITHUB_REPO.test(repo.name) || /^\.+$/.test(repo.name)) return null;
-  if (!/^[0-9a-f]{40}$/.test(commitSha)) return null;
-  const segments = (subpath ?? "").split("/").filter(Boolean);
-  if (segments.some((s) => s === "." || s === "..")) return null;
-  const rest = segments.map(encodeURIComponent).join("/");
-  return `https://github.com/${repo.owner}/${repo.name}/tree/${commitSha}${rest ? `/${rest}` : ""}`;
 }

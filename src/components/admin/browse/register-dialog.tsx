@@ -27,6 +27,7 @@ import type {
   InstallManifest,
 } from "@/lib/repository/types";
 import { KIND_LABEL } from "@/lib/repository/types";
+import HandBackPanel from "../pending/hand-back";
 import StatusNotice from "../pending/notice";
 import type { PendingTarget } from "../pending/review-dialog";
 
@@ -71,10 +72,11 @@ export default function RegisterDialog({
   notInstallable?: { message: string; tone: "info" | "warning" } | null;
   onClose: () => void;
   /**
-   * Told once it is installed, and whether it waits in pending, so the grid
-   * can flip the tile: to "Installed" for a theme, to the review otherwise.
+   * Told once it is installed, whether it waits in pending, and its version,
+   * so the grid can flip the tile: to where it came from for a theme, to the
+   * review otherwise.
    */
-  onInstalled: (extension: ExtensionSummary, pending: boolean) => void;
+  onInstalled: (extension: ExtensionSummary, pending: boolean, version: string) => void;
   /** Go on to the review of the pending install, which leads to Register. */
   onReview: (target: PendingTarget) => void;
 }) {
@@ -125,7 +127,7 @@ export default function RegisterDialog({
         allowYanked: acceptYanked,
       });
       setOutcome(res);
-      if (res.ok && extension) onInstalled(extension, res.result.pending);
+      if (res.ok && extension) onInstalled(extension, res.result.pending, res.result.version);
     } finally {
       setBusy(false);
     }
@@ -457,6 +459,15 @@ function OutcomePanel({ outcome }: { outcome: InstallOutcome }) {
             {r.fileCount} files · {Math.round(r.byteCount / 1024)} KB
           </Row>
         </dl>
+        {/* A theme registers as it installs, so it is ready to commit now. */}
+        {r.handBack && (
+          <section>
+            <h3 className="text-sm font-semibold text-foreground">Ship it</h3>
+            <div className="mt-2">
+              <HandBackPanel handBack={r.handBack} isApp={false} />
+            </div>
+          </section>
+        )}
       </div>
     );
   }

@@ -23,15 +23,19 @@
  * 3.  Download from GitHub, pinned to the commit, through the host allowlist.
  * 4.  Read the archive IN MEMORY. Reject symlinks, traversal, oversize trees.
  * 5.  **Verify the content hash.** Mismatch ends it here, with nothing written.
- * 6.  Pre-flight: the manifest exists, parses and is for this slug, and no
- *     path would land on disk as something other than what it names. Then the
- *     files hash, which Register can recompute from the folder (filesHash()).
+ * 6.  Pre-flight: the manifest exists, parses and is for this slug, no path
+ *     would land on disk as something other than what it names, and the
+ *     package holds no install record of its own. Then the files hash, which
+ *     Register and the generator can recompute from the folder (filesHash()),
+ *     and the install record, `.registry.json`, added to the tree: where it
+ *     came from and what was verified (./install-record.ts).
  * 7.  Write to `.mixos/staging/<kind dir>/<slug>/`, never to the target.
  * 8.  **Check the staged copy without running it**: the generator's `--check`,
  *     which reads the extension's text, imports none of its code, and writes
  *     its verdict to a file this process names. Rejected, or no verdict at
  *     all: delete the staged copy and stop.
- * 9.  An app or a connector: write its sidecar, then rename the staged copy to
+ * 9.  An app or a connector: write its sidecar (who installed it, when, and the
+ *     check's verdict), then rename the staged copy to
  *     `.mixos/pending/<kind dir>/<slug>/`. It waits there for Register, and
  *     none of its code has run.
  *     A theme: rename it into `themes/<slug>/`, run the project registry
@@ -80,6 +84,14 @@ import {
 import { fetchInstallManifest, repositoryBaseUrl } from "./client";
 import { fetchExtensionTree } from "./fetch-source";
 import { filesHash, verifyContentHash } from "./content-hash";
+import { handBackFor, type HandBack } from "./hand-back";
+import {
+  INSTALL_RECORD_FILE,
+  InstallRecordSchema,
+  installRecordEntry,
+  repositoryFromTarballUrl,
+  type InstallRecord,
+} from "./install-record";
 import { BUILT_DEPLOYMENT_NOTICE, isBuiltDeployment } from "../platform/build";
 import {
   CheckoutLockLostError,
@@ -284,6 +296,8 @@ export interface InstallResult {
   kind: ExtensionKind;
   slug: string;
   name: string;
+  /** The install record written into the tree: `.registry.json`. */
+  record: InstallRecord;
   version: string;
   /** Null for a release published without a tag. */
   gitTag: string | null;
@@ -305,6 +319,11 @@ export interface InstallResult {
   deferred: string[];
   /** The generator's run, for a theme. Null for a pending install, which runs nothing. */
   registry: RegistryOutcome | null;
+  /**
+   * For a theme, which registers as it installs: what to commit, and how
+   * (./hand-back.ts). Null for a pending install, whose Register hands back.
+   */
+  handBack: HandBack | null;
   /** What the admin has to do before this is actually live. */
   nextStep: string;
 }
@@ -499,6 +518,9 @@ function foldPath(p: string): string {
  *   one that runs.
  * - A control, bidi or line-separator character anywhere in a path.
  * - A git control file at any depth (GIT_CONTROL_FILES).
+ * - A file or folder named like the install record, `.registry.json`, at any
+ *   depth. Install writes the record, from what it verified; a package that
+ *   shipped one could claim another origin or release.
  *
  * Exported for its tests.
  */
@@ -519,6 +541,11 @@ export function pathProblems(paths: readonly string[]): string[] {
     if (git) {
       problems.add(
         `"${p}" is a git control file (${git}), which would change what your repository records for the extension, or how a review shows it.`,
+      );
+    }
+    if (segments.some((s) => foldPath(s) === INSTALL_RECORD_FILE)) {
+      problems.add(
+        `"${p}" is named like the install record (${INSTALL_RECORD_FILE}), which only an install writes, from what it verified.`,
       );
     }
 
@@ -1394,6 +1421,11 @@ async function runInstall(
     console.warn(`[repository] ${kind}/${slug}: ${compat.reason}`);
   }
 
+  // What the install record will say about where this came from, checked
+  // before anything is downloaded: a release whose answer can't be recorded is
+  // refused here rather than after the download.
+  const origin = recordedOrigin(kind, slug, manifest);
+
   // Steps 3–5. Nothing has touched the filesystem yet, and nothing will until
   // verifyContentHash returns.
   const entries = await fetchExtensionTree({
@@ -1406,12 +1438,15 @@ async function runInstall(
   });
   const contentHash = verifyContentHash(entries, manifest.contentHash);
 
-  // Step 6, and the hash Register checks the folder against.
+  // Step 6, and the install record: what was verified, including the hash
+  // Register and the generator check the folder against. It goes into the
+  // tree, so it waits in pending with the extension and is committed with it.
   preflight(kind, slug, entries);
-  const files = filesHash(entries);
+  const record: InstallRecord = { ...origin, contentHash, filesHash: filesHash(entries) };
+  const tree = [...entries, installRecordEntry(record)];
 
   // Step 7, fenced by the locks (see stageTree).
-  const staged = await stageTree(stagingLocation(PROJECT_ROOT, kind, slug).dir, entries, lease);
+  const staged = await stageTree(stagingLocation(PROJECT_ROOT, kind, slug).dir, tree, lease);
 
   // Step 8. The staged copy is judged before it is anywhere a build or the dev
   // server would look, and before any of its code has run.
@@ -1421,11 +1456,13 @@ async function runInstall(
     kind,
     slug,
     name: manifest.name,
-    version: manifest.version,
-    gitTag: manifest.gitTag ?? null,
-    commitSha: manifest.commitSha,
-    contentHash,
-    filesHash: files,
+    record,
+    version: record.version,
+    gitTag: record.gitTag,
+    commitSha: record.commitSha,
+    contentHash: record.contentHash,
+    filesHash: record.filesHash,
+    // The package's files, without the record install added.
     fileCount: entries.length,
     byteCount: entries.reduce((n, e) => n + e.data.length, 0),
     deferred: check.deferred,
@@ -1440,18 +1477,9 @@ async function runInstall(
       {
         kind: kind as PendingSidecar["kind"],
         slug,
-        source: repositoryBaseUrl(),
-        version: manifest.version,
-        gitTag: manifest.gitTag ?? null,
-        commitSha: manifest.commitSha,
-        contentHash,
-        filesHash: files,
-        requiresMixOS: manifest.requiresMixOS ?? null,
         yankedAccepted: manifest.yanked === true,
         installedAt: new Date().toISOString(),
         installedBy: options.installedBy ?? "an administrator",
-        fileCount: verified.fileCount,
-        byteCount: verified.byteCount,
         check: { verdict: "accepted", deferred: check.deferred },
       },
       lease,
@@ -1461,6 +1489,7 @@ async function runInstall(
       installPath: where.rel,
       pending: true,
       registry: null,
+      handBack: null,
       nextStep:
         `Installed to ${where.rel}/, where nothing runs it yet. Read its code there, then ` +
         `register it in this checkout with \`npm run register -- ${kind}/${slug}\`, which runs ` +
@@ -1513,6 +1542,13 @@ async function runInstall(
     installPath: rel,
     pending: false,
     registry,
+    handBack: handBackFor(
+      record,
+      rel,
+      tree
+        .map((e) => ({ path: e.path, bytes: e.data.length }))
+        .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+    ),
     nextStep: registry.ran
       ? process.env.NODE_ENV === "development"
         ? `Registered to ${rel}. The dev server picks it up on its next compile — reload the page it appears on.`
@@ -1520,6 +1556,48 @@ async function runInstall(
       : `Written to ${rel}, but the registry generator could not be run here. ` +
         `Run \`npm run registry\` in the checkout and restart the server before it is usable.`,
   };
+}
+
+/**
+ * What the install record says about where a release came from, from the
+ * catalogue's answer: the catalogue, the release, and the GitHub repository its
+ * download URL names, with the folder in it. Everything but the hashes, which
+ * come from the download. Throws `invalid-package` for an answer with a value
+ * the record can't hold, so nothing is downloaded for it.
+ */
+function recordedOrigin(
+  kind: ExtensionKind,
+  slug: string,
+  manifest: InstallManifest,
+): Omit<InstallRecord, "contentHash" | "filesHash"> {
+  const repository = repositoryFromTarballUrl(manifest.tarballUrl);
+  if (!repository) {
+    throw new InstallError(
+      `The repository's download URL for ${slug} doesn't name a GitHub repository, so where it came from ` +
+        `couldn't be recorded. It was not installed.`,
+      "invalid-package",
+    );
+  }
+  const origin = {
+    source: repositoryBaseUrl(),
+    kind,
+    slug,
+    version: manifest.version,
+    gitTag: manifest.gitTag ?? null,
+    commitSha: manifest.commitSha,
+    repository: { ...repository, subpath: (manifest.subpath ?? "").replace(/^\/+|\/+$/g, "") || null },
+    requiresMixOS: manifest.requiresMixOS ?? null,
+  };
+  const parsed = InstallRecordSchema.omit({ contentHash: true, filesHash: true }).safeParse(origin);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new InstallError(
+      `The repository's answer for ${slug} has a value this instance can't record ` +
+        `(${issue?.path.join(".") || "it"}: ${issue?.message ?? "invalid"}), so it was not installed.`,
+      "invalid-package",
+    );
+  }
+  return parsed.data;
 }
 
 /**

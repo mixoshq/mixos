@@ -5,6 +5,7 @@
 /**
  * Pending installs on disk: the files hash an install records and Register
  * recomputes from the folder, the sidecar, and what is listed as pending.
+ * The install record itself is ./install-record.test.ts's.
  */
 
 import { after, describe, test } from "node:test";
@@ -14,13 +15,20 @@ import os from "node:os";
 import path from "node:path";
 import { filesHash, hashFileTree } from "./content-hash";
 import {
-  PendingError,
+  FolderReadError,
+  INSTALL_RECORD_FILE,
   folderFilesHash,
+  serializeInstallRecord,
+  type InstallRecord,
+} from "./install-record";
+import {
+  PendingError,
   listPendingInstalls,
   pendingLocation,
   readSidecar,
   stagingLocation,
   writeSidecar,
+  type PendingKind,
   type PendingSidecar,
 } from "./pending";
 import type { TarEntry } from "./tar";
@@ -55,6 +63,34 @@ function sidecar(fields: Partial<PendingSidecar> = {}): PendingSidecar {
   return {
     kind: "app",
     slug: "acme",
+    yankedAccepted: false,
+    installedAt: new Date().toISOString(),
+    installedBy: "admin@example.com",
+    check: { verdict: "accepted", deferred: [] },
+    ...fields,
+  };
+}
+
+/** The install record install writes for TREE as `kind`/`slug`. */
+function record(kind: PendingKind, slug: string): InstallRecord {
+  return {
+    source: "https://mixos.org",
+    kind,
+    slug,
+    version: "1.2.0",
+    gitTag: "v1.2.0",
+    commitSha: "a".repeat(40),
+    contentHash: hashFileTree(TREE),
+    filesHash: filesHash(TREE),
+    repository: { owner: "acme", name: "mixos-apps", subpath: null },
+    requiresMixOS: null,
+  };
+}
+
+/** What a sidecar from before the record moved into the folder held. */
+function earlierSidecar() {
+  return {
+    ...sidecar(),
     source: "https://mixos.org",
     version: "1.2.0",
     gitTag: "v1.2.0",
@@ -62,13 +98,8 @@ function sidecar(fields: Partial<PendingSidecar> = {}): PendingSidecar {
     contentHash: hashFileTree(TREE),
     filesHash: filesHash(TREE),
     requiresMixOS: null,
-    yankedAccepted: false,
-    installedAt: new Date().toISOString(),
-    installedBy: "admin@example.com",
     fileCount: TREE.length,
     byteCount: 42,
-    check: { verdict: "accepted", deferred: [] },
-    ...fields,
   };
 }
 
@@ -94,6 +125,15 @@ describe("filesHash", () => {
 });
 
 describe("folderFilesHash", () => {
+  test("leaves out the install record at the folder's root, and only there", () => {
+    const dir = written(TREE);
+    fs.writeFileSync(path.join(dir, INSTALL_RECORD_FILE), serializeInstallRecord(record("app", "acme")));
+    assert.equal(folderFilesHash(dir), filesHash(TREE));
+    // Anywhere else it is a file like any other, which pre-flight refuses to install.
+    fs.writeFileSync(path.join(dir, "lib", INSTALL_RECORD_FILE), "{}\n");
+    assert.notEqual(folderFilesHash(dir), filesHash(TREE));
+  });
+
   test("from the folder install wrote, it is what install recorded", () => {
     const executable = TREE.map((e) => (e.path === "lib/helper.ts" ? { ...e, mode: 0o755 } : e));
     assert.equal(folderFilesHash(written(executable)), filesHash(executable));
@@ -128,7 +168,7 @@ describe("folderFilesHash", () => {
     const outside = path.join(tmp, `outside-${n++}.ts`);
     fs.writeFileSync(outside, "export {};\n");
     fs.symlinkSync(outside, path.join(dir, "lib/linked.ts"));
-    assert.throws(() => folderFilesHash(dir), (err: unknown) => err instanceof PendingError && /lib\/linked\.ts is a symbolic link/.test(err.message));
+    assert.throws(() => folderFilesHash(dir), (err: unknown) => err instanceof FolderReadError && /lib\/linked\.ts is a symbolic link/.test(err.message));
   });
 });
 
@@ -159,9 +199,9 @@ describe("the sidecar", () => {
     assert.deepEqual(readSidecar(path.join(dir, "none.json")), { state: "missing" });
     const cases: Record<string, string> = {
       "text.json": "not json",
-      "short.json": JSON.stringify({ ...sidecar(), filesHash: undefined }),
+      "short.json": JSON.stringify({ ...sidecar(), installedBy: undefined }),
       "extra.json": JSON.stringify({ ...sidecar(), extra: 1 }),
-      "badhash.json": JSON.stringify({ ...sidecar(), filesHash: "sha256-nope" }),
+      "baddate.json": JSON.stringify({ ...sidecar(), installedAt: "yesterday" }),
     };
     for (const [name, text] of Object.entries(cases)) {
       fs.writeFileSync(path.join(dir, name), text);
@@ -170,6 +210,17 @@ describe("the sidecar", () => {
     fs.writeFileSync(path.join(dir, "real.json"), JSON.stringify(sidecar()));
     fs.symlinkSync(path.join(dir, "real.json"), path.join(dir, "link.json"));
     assert.equal(readSidecar(path.join(dir, "link.json")).state, "unreadable");
+  });
+});
+
+describe("a sidecar an earlier version wrote", () => {
+  test("is told apart, since it held what install verified, which is now in the folder's record", () => {
+    const file = path.join(tmp, `sidecar-${n++}.json`);
+    fs.writeFileSync(file, JSON.stringify(earlierSidecar(), null, 2));
+    const read = readSidecar(file);
+    assert.equal(read.state, "unreadable");
+    assert.equal(read.state === "unreadable" && read.earlier, true);
+    assert.match(read.state === "unreadable" ? read.reason : "", /earlier version of MixOS/);
   });
 });
 
@@ -196,31 +247,56 @@ describe("locations", () => {
 describe("listPendingInstalls", () => {
   test("lists each pending install with what stands in its way", () => {
     const root = path.join(tmp, `checkout-${n++}`);
-    const ok = pendingLocation(root, "app", "good");
-    fs.mkdirSync(ok.folder, { recursive: true });
+    /** A pending folder as install leaves one, its record named `kind`/`slug` unless said otherwise. */
+    const pendWith = (kind: PendingKind, slug: string, recordAs: [PendingKind, string] | null = [kind, slug]) => {
+      const where = pendingLocation(root, kind, slug);
+      fs.mkdirSync(where.folder, { recursive: true });
+      if (recordAs) {
+        fs.writeFileSync(path.join(where.folder, INSTALL_RECORD_FILE), serializeInstallRecord(record(...recordAs)));
+      }
+      return where;
+    };
+
+    const ok = pendWith("app", "good");
     writeSidecar(ok.sidecar, sidecar({ slug: "good" }));
 
-    const noRecord = pendingLocation(root, "app", "bare");
-    fs.mkdirSync(noRecord.folder, { recursive: true });
+    pendWith("app", "bare");
 
     const noFolder = pendingLocation(root, "connector", "gone");
     fs.mkdirSync(path.dirname(noFolder.sidecar), { recursive: true });
     writeSidecar(noFolder.sidecar, sidecar({ kind: "connector", slug: "gone" }));
 
-    const stopped = pendingLocation(root, "connector", "midway");
-    fs.mkdirSync(stopped.folder, { recursive: true });
+    const stopped = pendWith("connector", "midway");
     writeSidecar(
       stopped.sidecar,
       sidecar({ kind: "connector", slug: "midway", register: { token: "0123456789abcdef-x", pid: 1, hostname: "h", startedAt: new Date().toISOString() } }),
     );
 
-    const listed = listPendingInstalls(root).map((p) => ({ id: `${p.kind}/${p.slug}`, problem: p.problem && p.problem.split(" ").slice(0, 4).join(" ") }));
+    const unrecorded = pendWith("app", "unrecorded", null);
+    writeSidecar(unrecorded.sidecar, sidecar({ slug: "unrecorded" }));
+
+    const borrowed = pendWith("app", "borrowed", ["app", "other"]);
+    writeSidecar(borrowed.sidecar, sidecar({ slug: "borrowed" }));
+
+    const earlier = pendWith("app", "earlier", null);
+    fs.writeFileSync(earlier.sidecar, JSON.stringify(earlierSidecar()));
+
+    const listing = listPendingInstalls(root);
+    const listed = listing.map((p) => ({ id: `${p.kind}/${p.slug}`, problem: p.problem && p.problem.split(" ").slice(0, 4).join(" ") }));
     assert.deepEqual(listed, [
       { id: "app/bare", problem: "It has no record" },
+      { id: "app/borrowed", problem: "Its install record (.mixos/pending/apps/borrowed/.registry.json)" },
+      { id: "app/earlier", problem: "An earlier version of" },
       { id: "app/good", problem: null },
+      { id: "app/unrecorded", problem: "It has no install" },
       { id: "connector/gone", problem: ".mixos/pending/connectors/gone/ is missing, so" },
       { id: "connector/midway", problem: "A registration of it" },
     ]);
+    const byId = new Map(listing.map((p) => [`${p.kind}/${p.slug}`, p]));
+    assert.equal(byId.get("app/good")?.record?.version, "1.2.0");
+    assert.equal(byId.get("app/borrowed")?.record, null);
+    assert.match(byId.get("app/borrowed")?.problem ?? "", /it records app\/other, not app\/borrowed\. Discard it and install it again\./);
+    assert.match(byId.get("app/earlier")?.problem ?? "", /Discard it and install it again\./);
   });
 
   test("is empty for a checkout with nothing pending", () => {

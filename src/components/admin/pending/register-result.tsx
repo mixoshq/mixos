@@ -12,6 +12,7 @@ import {
   type ActivateOutcome,
   type Registered,
 } from "@/lib/repository/pending-outcomes";
+import HandBackPanel from "./hand-back";
 import Notice from "./notice";
 import WithCode from "./with-code";
 
@@ -26,6 +27,9 @@ import WithCode from "./with-code";
  *
  * Shipping is a commit and a deploy, which the server never does: a web
  * process committing to its own checkout would commit whatever else is in it.
+ * So the result hands back what to commit and how (./hand-back.tsx): the files,
+ * a commit message prepared from the install record, the commands, the source
+ * at the verified commit, and what shipping means on each host.
  */
 export default function RegisterResult({
   result,
@@ -62,9 +66,7 @@ export default function RegisterResult({
         <Row label="Commit">
           <code className="break-all font-mono text-xs">{result.commitSha}</code>
         </Row>
-        <Row label="Contents">
-          {result.fileCount} files · {Math.max(1, Math.round(result.byteCount / 1024))} KB
-        </Row>
+        <Row label="From">{result.handBack.host}</Row>
         <Row label="Database">
           {describeHosts(result.database)}
           <span className="text-muted-foreground">
@@ -86,21 +88,8 @@ export default function RegisterResult({
         </Section>
       )}
 
-      {/*
-        Shipping. The prepared commit message and the link to the source at
-        the installed commit belong in this section, beside these steps.
-      */}
       <Section title="Ship it">
-        <ol className="list-decimal space-y-1 pl-5 text-sm text-foreground">
-          <li>
-            Commit <code className="font-mono text-xs">{result.installPath}</code>{" "}
-            to your repository. Until then it runs only in this checkout.
-          </li>
-          <li>
-            Deploy.
-            {isApp && " It arrives inactive on each instance: activate it there, in Admin > Apps."}
-          </li>
-        </ol>
+        <HandBackPanel handBack={result.handBack} isApp={isApp} />
       </Section>
     </div>
   );
