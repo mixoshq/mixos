@@ -233,66 +233,64 @@ describe("checkStagedTree: a refused copy is gone before the install stops", { c
     },
   });
 
-  /** `<kind dir>/.installing-acme/acme/`, staged as stageTree() stages it. */
-  async function stagedCopy(): Promise<{ dir: string; holder: string; staged: string }> {
-    const kindDir = path.join(tmp, `apps-${n++}`);
-    const holder = path.join(kindDir, ".installing-acme");
-    const staged = path.join(holder, "acme");
+  /** `.mixos/staging/apps/acme/` in a checkout of its own, staged as stageTree() stages it. */
+  async function stagedCopy(): Promise<{ root: string; staged: string }> {
+    const root = path.join(tmp, `checkout-${n++}`);
+    const staged = path.join(root, ".mixos", "staging", "apps", "acme");
     await fs.mkdir(staged, { recursive: true });
     await fs.writeFile(path.join(staged, "app.json"), '{"name":"Acme"}');
-    return { dir: path.join(kindDir, "acme"), holder, staged };
+    return { root, staged };
   }
 
   const exists = (p: string) => fs.access(p).then(() => true, () => false);
 
   test("rejected: deleted, and refused with the problems as the detail", async () => {
-    const { dir, holder, staged } = await stagedCopy();
+    const { root, staged } = await stagedCopy();
     const generator = await standIn(write({ verdict: "rejected", problems: ["apps/acme/a.ts:1 — fetch", "apps/acme/b.ts:2 — eval"], deferred: [] }));
     await assert.rejects(
-      checkStagedTree("app", dir, staged, lease(), { generator }),
+      checkStagedTree("app", "acme", staged, lease(), { generator }),
       (err: unknown) =>
         err instanceof InstallError &&
         err.code === "rejected-by-registry" &&
         err.detail === "apps/acme/a.ts:1 — fetch\napps/acme/b.ts:2 — eval",
     );
-    assert.equal(await exists(holder), false);
-    assert.equal(await exists(dir), false);
+    assert.equal(await exists(staged), false);
+    assert.equal(await exists(path.join(root, "apps")), false);
   });
 
   test("no verdict: deleted, and reported as this checkout's failure, not the extension's", async () => {
-    const { dir, holder, staged } = await stagedCopy();
+    const { staged } = await stagedCopy();
     const generator = await standIn(`console.error("tsx could not start"); process.exit(1);`);
     await assert.rejects(
-      checkStagedTree("app", dir, staged, lease(), { generator }),
+      checkStagedTree("app", "acme", staged, lease(), { generator }),
       (err: unknown) =>
         err instanceof InstallError &&
         err.code === "generator-failed" &&
         /could not complete its registry check/.test(err.message) &&
         /tsx could not start/.test(err.detail ?? ""),
     );
-    assert.equal(await exists(holder), false);
+    assert.equal(await exists(staged), false);
   });
 
-  test("accepted: left where it is, for placeTree() to move", async () => {
-    const { dir, holder, staged } = await stagedCopy();
+  test("accepted: left where it is, for the install to move on", async () => {
+    const { root, staged } = await stagedCopy();
     const generator = await standIn(write({ verdict: "accepted", problems: [], deferred: ["later"] }));
-    const outcome = await checkStagedTree("app", dir, staged, lease(), { generator });
+    const outcome = await checkStagedTree("app", "acme", staged, lease(), { generator });
     assert.equal(outcome.accepted, true);
     assert.deepEqual(outcome.deferred, ["later"]);
     assert.equal(await exists(path.join(staged, "app.json")), true);
-    assert.equal(await exists(dir), false);
-    assert.ok(await exists(holder));
+    assert.equal(await exists(path.join(root, ".mixos", "pending")), false);
   });
 
   test("rejected after the lock was lost: left for the next install of the slug to clear", async () => {
-    const { dir, staged } = await stagedCopy();
+    const { staged } = await stagedCopy();
     const generator = await standIn(write({ verdict: "rejected", problems: ["apps/acme/a.ts:1 — fetch"], deferred: [] }));
     await assert.rejects(
-      checkStagedTree("app", dir, staged, lease(true), { generator }),
+      checkStagedTree("app", "acme", staged, lease(true), { generator }),
       (err: unknown) =>
         err instanceof InstallError &&
         err.code === "lock-lost" &&
-        /\.installing-acme\/ is still on disk/.test(err.message),
+        /\.mixos\/staging\/apps\/acme\/ is still on disk/.test(err.message),
     );
     assert.equal(await exists(path.join(staged, "app.json")), true);
   });
