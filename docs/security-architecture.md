@@ -2190,7 +2190,8 @@ taken (below), nothing of that slug may be in place or waiting in pending, and:
 
 ```
 1. GET /api/v1/<kind>/<slug>/install     the commit, the URL, the hash
-2. Refuse a yanked release unless the admin was shown why and insisted
+2. Refuse a yanked release unless the admin was shown why and insisted,
+   and refuse one whose requiresMixOS is above this checkout's version
 3. Download from GitHub, PINNED TO THE COMMIT, through the host allowlist
 4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
 5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
@@ -2435,6 +2436,20 @@ for development. Browse shows each installed extension as "Installed from
 mixos.org · 1.2.0" (with "modified locally" when it is), "A local extension
 uses this name", or "Installed from <host>; not checked here" for one from
 another catalogue.
+
+**The floor, at install, Register and build.** A release may declare
+`requiresMixOS`, the oldest MixOS it runs on, and the record keeps it. Install
+(step 2) and Register (step 2) refuse a release whose floor is above this
+checkout's version, `package.json`'s, with no override. Every build checks each
+record's floor against the version it stamps, and fails, naming the extension,
+its floor and the version, when one is above it: leaving the extension out
+instead would drop it from that deploy without a word. All three compare
+`X.Y.Z` numerically (`X` and `X.Y` count as `X.0.0` and `X.Y.0`, a leading `v`,
+`>=`, `~` or `^` is ignored, and a `-` or `+` suffix is dropped), and none
+enforces a floor that doesn't read as a version; each says so instead. A local
+extension has no record, so the build doesn't check it. The install dialog and
+the review say whether this checkout meets the floor, from a verdict the server
+works out, so this build's version stays out of every page bundle (§18).
 
 **The pre-commit stamp leaves it alone.** `scripts/stamp-updated.ts` never
 stamps `lastUpdated` in a folder that holds its own record, so committing an
