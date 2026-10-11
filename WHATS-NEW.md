@@ -143,6 +143,21 @@ just pulled.
   without its escape, in the build's own words. Options it can't read as
   written, such as ones built from a variable, a spread or another file, are
   listed as checked at registration, which loads the route.
+- **Registry installs wait for you to register them.** Installing an app or a
+  connector from Browse puts it in `.mixos/pending/`, where nothing runs it,
+  instead of in `apps/` or `connectors/`. Register it in your checkout with
+  `npm run register -- app/<slug>`, or the slug alone: it checks the folder
+  still matches what was verified, moves it into place and runs the registry
+  generator, which is when its code first runs, and puts it back in pending if
+  the generator refuses it. Then commit the folder and deploy. On its own,
+  `npm run register` lists what is waiting; `--discard` drops one, `--recover`
+  tidies up after one that stopped midway, and `--break-lock` asks before
+  clearing a stuck lock. A theme still registers when it is installed.
+  Installs, registrations and the registry generator take turns through
+  `.mixos/lock`, so `npm run dev` or `npm run registry` waits while one runs.
+  **Breaking:** in the audit log an install is `<kind>.install`, and
+  `<kind>.register` means registering a pending one; `npm run register`'s
+  rows name `cli:<user>@<host>`, with no user id, and show as unverified.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's

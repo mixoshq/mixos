@@ -86,6 +86,10 @@ const eslintConfig = defineConfig([
     // The bundled release step (`npm run build:ops`): generated, gitignored,
     // and linted at its source in scripts/.
     "ops/**",
+    // Installs from the Registry waiting to be registered: someone else's
+    // code, checked by the install's own check and by the build once it is
+    // registered, and never part of this project until then.
+    ".mixos/**",
   ]),
   // ── Security: what app code may import ──
   //

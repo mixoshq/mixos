@@ -2013,7 +2013,7 @@ no trace at all.
 
 | Column | Notes |
 |---|---|
-| `actor_id` | FK to `users`, `on delete set null` |
+| `actor_id` | FK to `users`, `on delete set null`. Null on a row no signed-in admin wrote: the release step's and `npm run register`'s |
 | `actor_email` | **Denormalised text.** Survives the actor's deletion |
 | `action` | Dotted verb — `connector.configure`, `user.grant.add`, `app.password.set` |
 | `target_type` / `target_id` | Plain text: targets span connectors, apps, users and themes |
@@ -2044,11 +2044,16 @@ Currently recorded: `connector.configure`, `connector.connect`,
 `app.job.enable`, `app.job.disable`, `scheduler.start`, `scheduler.stop`,
 `theme.apply`, `user.create`, `user.profile.update`, `user.password.set`,
 `user.admin.grant`, `user.admin.revoke`, `user.grant.add`,
-`user.grant.revoke`, `user.role.set`, `user.sessions.revoke`, and a Registry
-install as `app.register`, `connector.register` or `theme.register`, or, when
-the install is refused, `app.register.rejected`, `connector.register.rejected`
-or `theme.register.rejected`. `connector.disable` and `connector.enable` name
-the apps that declare the connector, in `details` as `requiredBy` and
+`user.grant.revoke`, `user.role.set`, `user.sessions.revoke`; a Registry
+install as `app.install`, `connector.install` or `theme.install`, or, when the
+install is refused, `app.install.rejected`, `connector.install.rejected` or
+`theme.install.rejected`; registering a pending app or connector as
+`app.register` or `connector.register`, or `app.register.rejected` and
+`connector.register.rejected` when it is refused; discarding one as
+`app.discard` or `connector.discard`; and recovery putting back or clearing
+what a stopped one left as `app.register.recover` or
+`connector.register.recover` (§31). `connector.disable` and `connector.enable`
+name the apps that declare the connector, in `details` as `requiredBy` and
 `optionalFor`.
 
 **Connecting a connector.** An admin finishing the OAuth round trip for a
@@ -2074,6 +2079,18 @@ null and `actor_email` is `release-step`, which can't be an address. They are
 written in the sync's own transaction, so the change and its record commit
 together: rule 2 is about not failing an admin's action, and here a failed write
 fails the step before anything it would have recorded is committed.
+
+**Rows `npm run register` writes.** Registering, discarding and recovering run
+in a shell in the checkout, where nobody has signed in, so their rows have a
+null `actor_id`, `actor_email` `cli:<os user>@<hostname>`, and `via: "cli"` in
+`details`. The colon keeps the name from reading as an address. Nothing vouches
+for it: the user and the hostname come from the machine, and anyone with a shell
+there can set both. So these rows, and the release step's, are **unverified**:
+`readAdminAuditLog()` returns them with `actorVerified: false`, and the user
+dialog's History marks them "(unverified)". A row whose `actor_id` became null
+because its admin was deleted still names their address and stays verified, so
+the label keys on the name, not on the null. They follow rule 2, as an admin's
+rows do: the registration has already happened when its row is written.
 
 **The review checklist item for any new admin action**: call `recordAdminAction`
 alongside `requireAdmin`. Nothing upstream does either for you.
@@ -2142,9 +2159,12 @@ block a release.
 ## 31. Installing From the Repository
 
 `/admin/{apps,connectors,themes}/browse` lets an admin search mixos.org and copy
-an extension into this instance's own source tree. It is the only path by which
-code an admin did not write reaches `apps/`, `connectors/` or `themes/`, so the
-whole of it is worth stating in one place.
+an extension into this instance's own source tree. An app or a connector waits
+in `.mixos/pending/` until someone registers it with `npm run register`, which
+is when its code first runs; a theme, which has no code, is registered as it is
+installed. This is the only path by which code an admin did not write reaches
+`apps/`, `connectors/` or `themes/`, so the whole of it is worth stating in one
+place.
 
 **The trust model is that mixos.org is an index, not a package host.** It stores
 metadata and identity; GitHub stores code. This instance asks mixos.org *what* to
@@ -2158,9 +2178,9 @@ them.
 Two refusals come first and need no lock: the kind's install flag (see
 **Turning it off**), then `checkInstallable()`, which refuses a built deployment
 (see **What it deliberately will not do**), a folder that is not writable and a
-missing generator. A registration refused there neither waits behind another
-admin's nor holds one up. Then the register lock is taken (below), the target
-directory must not exist, and:
+missing generator. An install refused there neither waits behind another
+admin's nor holds one up. Then the register lock and the checkout lock are
+taken (below), nothing of that slug may be in place or waiting in pending, and:
 
 ```
 1. GET /api/v1/<kind>/<slug>/install     the commit, the URL, the hash
@@ -2169,18 +2189,19 @@ directory must not exist, and:
 4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
 5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
 6. Pre-flight: the manifest exists, parses and is for this slug, and every
-   path lands on disk as what it names (below)
-7. Check the lock, then write to `.installing-<slug>/<slug>/` beside the
-   target, never to the target
+   path lands on disk as what it names (below). Then the files hash
+7. Check the locks, then write to `.mixos/staging/<kind dir>/<slug>/`,
+   never to the target
 8. CHECK IT WITHOUT RUNNING IT: generate-project-registry.ts --check reads
    the staged copy and imports none of it (below). Rejected, or no verdict:
-   check the lock, delete the staged copy, stop
-9. Check the lock, then rename into place — the first moment the tree is live
-10. Run scripts/generate-project-registry.ts, which loads the extension's
-    code for the first time
-11. If it left the extension out or stopped, check the lock, then remove the
-    directory and regenerate, so a failed registration leaves the instance
-    exactly as it was
+   check the locks, delete the staged copy, stop
+9. An app or a connector: check the locks, write its sidecar, and rename it
+   to `.mixos/pending/<kind dir>/<slug>/`, where it waits for Register
+   (below). None of its code has run.
+   A theme: check the locks, rename it into `themes/<slug>/`, and run
+   scripts/generate-project-registry.ts. If that leaves it out or stops,
+   check the locks, then remove it and regenerate, so a failed install
+   leaves the checkout exactly as it was
 ```
 
 **Nothing untrusted touches the filesystem before step 5.** That is why the tar
@@ -2209,7 +2230,7 @@ would make the two differ (`pathProblems()`, `src/lib/repository/install.ts`):
 
 ### What runs, and when
 
-**Nothing the package ships runs before step 10.** Step 8 is the registry
+**Nothing the package ships runs before Register.** Step 8 is the registry
 generator in check mode, `generate-project-registry.ts --check <kind> <dir>
 --verdict-file <path>`, on the staged copy. It treats that copy as the
 extension's own folder, the folder's name as its slug, and runs every check that
@@ -2243,53 +2264,137 @@ when the check exited 0 and that directory holds exactly one well-formed verdict
 to the admin and never parsed: it repeats file names and manifest strings, which
 the package chooses, so a line of it could be made to read as a verdict.
 
-**A generator an install starts gets `PATH` and `TMPDIR`, and nothing else**
-(`generatorEnv()`), for the check and for step 10 alike. The server's own
-environment, `DATABASE_URL`, `AUTH_SECRET` and `CONNECTOR_ENCRYPTION_KEY` among
-it, never reaches either run.
+**A generator an install or a registration starts gets `PATH` and `TMPDIR`,
+and nothing else** (`generatorEnv()`), for the check, a theme's registration and
+Register's run alike. The server's own environment, `DATABASE_URL`,
+`AUTH_SECRET` and `CONNECTOR_ENCRYPTION_KEY` among it, never reaches any of them,
+and `npm run register` passes the generator none of what it loaded to reach the
+database. Once registered, an app runs in the dev server with the server's
+environment, as every app does.
 
-**Staged copies are never scanned.** The staging folder is dot-prefixed, and the
-generator skips every dot-prefixed folder in `apps/`, `connectors/` and
-`themes/`, as it skips `_template`. A staged copy, or one a crash left behind,
-is never imported or registered, and the next install of the same slug clears
-it.
+**Staged and pending copies are never scanned.** Both are under `.mixos/`,
+outside every folder the generator reads, and the generator also skips every
+dot-prefixed folder in `apps/`, `connectors/` and `themes/`, as it skips
+`_template`. `.mixos/` is git-ignored, Docker-ignored and ESLint-ignored, `tsc`'s
+globs skip it, and `next.config.ts` leaves it out of every build's file trace, so
+no build, image or commit carries a pending extension. A staged copy a crash
+left behind is never imported or registered, and the next install of the same
+slug, or `npm run register -- --recover`, clears it.
 
-### The register lock is a lease, renewed and fenced
+### Pending, and Register
 
-Two registrations at once would run two generators over the same
+An app or a connector from the Registry is not part of the build until someone
+registers it. Install leaves it in `.mixos/pending/<kind dir>/<slug>/`, with a
+sidecar beside it, `<slug>.json`, recording what was verified: the release, its
+commit, its content hash and its files hash, the floor it declares, the check's
+verdict and what it deferred, and who installed it and when. The sidecar is
+about this checkout's install and is never committed.
+
+`npm run register -- <kind>/<slug>`, or the slug alone when only one kind has it
+pending, registers it in the checkout, under both locks (below):
+
+1. The pending folder and its sidecar exist, and nothing is where it would go.
+   The **files hash**, recomputed from the folder, matches the sidecar's. It is
+   the content hash's serialisation over the same files with every mode read as
+   644: install writes every file 0644, so the content hash, which records the
+   execute bit, can't be recomputed from disk. A folder with a file changed,
+   added or removed since install, or a link in it, is refused, so what runs is
+   what was verified and checked.
+2. The release's `requiresMixOS` holds for the version this checkout builds.
+3. The sidecar records the registration (the checkout lock's token, the pid and
+   the host), and the folder is renamed into `apps/` or `connectors/`.
+4. The registry generator runs. This is the first time any of the extension's
+   code runs, as the checkout's OS user.
+5. If the generator leaves it out, stops or runs out of time, the folder is
+   renamed back to pending, its record cleared, and the generator run again so
+   `src/generated/` matches the disk. If the generator registers it, the sidecar
+   is deleted.
+6. It is audited as `<kind>.register`, or `<kind>.register.rejected` with the
+   reason (§28).
+
+`npm run register -- <kind>/<slug> --discard` deletes a pending install, folder
+and sidecar, under both locks, audited as `<kind>.discard`. The kind's install
+flag turns Register off with installing (see **Turning it off**); Discard still
+works.
+
+**A registration that stops midway** (a crash, a Ctrl-C, a lock lost) leaves its
+record in the sidecar, and Register, Discard and install refuse that slug until
+`npm run register -- --recover` has dealt with it. Recovery shows what it found
+and what it would do, and asks; then it takes both locks, checks the checkout is
+still as it showed, and acts. It acts on a record only once its holder is gone:
+it leaves alone one whose process is still running on this machine, and warns
+about one from another machine, which it can't check. An extension that a
+registration moved into place is put back into pending and the registry
+regenerated, so it can be registered again; a record with no folder, a folder
+with no record, and copies an install staged are deleted. Each pending install
+it acts on is audited as `<kind>.register.recover`.
+
+The files hash guards against a change after install by an editor, a tool or
+another process in the checkout. It is no defence against someone who can write
+to the checkout: they can write the sidecar too, or `apps/` itself.
+
+### Two locks: the register lease and the checkout lock
+
+Two installs or registrations at once would run two generators over the same
 `src/generated/*.ts` files, and one's rollback could land on top of the other's
-success. So steps 1 to 11 run under one instance-wide lock, `repository.register`
-([`src/lib/platform/lock.ts`](../src/lib/platform/lock.ts)): a row in
-`_platform_locks` rather than a Postgres advisory lock, because a session
-advisory lock does not survive a transaction pooler. An admin who registers
-while it is held is told another registration is running and offered **Try
-again**, and the attempt is audited as `<kind>.register.rejected` with
-`reason: "locked"`.
+success. So install, Register, Discard and recovery each run under two locks.
+
+**The register lock**, `repository.register`
+([`src/lib/platform/lock.ts`](../src/lib/platform/lock.ts)), is a row in
+`_platform_locks`, which every instance using the database shares, rather than a
+Postgres advisory lock, because a session advisory lock does not survive a
+transaction pooler. An admin who installs while it is held is told another
+install or registration is running and offered **Try again**, and the attempt
+is audited as `<kind>.install.rejected` with `reason: "locked"`.
+
+**The checkout lock**, `.mixos/lock`
+([`src/lib/platform/checkout-lock.ts`](../src/lib/platform/checkout-lock.ts)),
+is a file in the checkout, created with `O_EXCL` and holding its holder's pid,
+hostname and a random token. The row lock can't serialise a checkout on its own:
+`npm run register` finds its database through the shell, `.env.local` or the
+Docker stack's files, and a dev server in a container through its own
+environment, so the two can each hold "the" row lock in a different database
+while changing one checkout. And the registry generator, which `npm run dev`,
+`npm run build` and `npm run registry` start, uses no database at all. It takes
+the checkout lock for a full run, waiting while another process holds it and
+saying for whom, so none of them rewrites `src/generated/` while an install or a
+registration is changing the checkout. A holder that runs the generator passes
+its token in the generator's arguments, `--lock-token`, since the generator's
+environment is only `PATH` and `TMPDIR`; the run checks the file holds that token
+and works under its parent's lock. A checkout lock is stale only when its
+hostname is this machine's and its pid isn't running, and then the next process
+that needs it takes it over. One from another hostname, such as a dev container,
+or one whose file can't be read, is never taken over:
+`npm run register -- --break-lock` shows its holder and asks before removing it.
 
 The row is a lease. Anyone may take it once it has gone 15 minutes without
-renewal, so a crashed registration cannot wedge the feature. But a registration
-can also be paused for longer than that, by a laptop going to sleep
-mid-download, and carry on when it wakes, by which time another may hold the
-lock. Three rules cover that:
+renewal, so a crashed install cannot wedge the feature. But an install can also
+be paused for longer than that, by a laptop going to sleep mid-download, and
+carry on when it wakes, by which time another may hold the lock. And a checkout
+lock can be broken by hand while its holder is suspended. Three rules cover
+that:
 
 - **The holder renews the lease every minute** while it works, so a slow but
-  live registration never loses it, the generator runs in steps 8 and 10
-  included. That makes its own time limits the lock's: the repository and
-  GitHub requests time out, and a generator run is ended after 120 seconds, the
-  processes it started included.
-- **The lock is checked before the disk changes.** Steps 7, 9 and 11, and
-  deleting a staged copy the check refused, begin with `assertHeld()`,
-  `update _platform_locks set acquired_at = now() where name = $1 and holder =
-  $2 returning 1`, which renews the lease only while the row still holds this
-  acquisition's random token. Step 10 runs straight after step 9's check.
-- **A holder that has lost the lock stops without touching the disk**, cleanup
-  included: by then the staging directory, or the registry it would regenerate,
-  may be the new holder's. The admin is told what was left on disk, and the
-  audit row records `reason: "lock-lost"`. A check that cannot reach the
-  database stops it the same way, as `"lock-unconfirmed"`.
+  live install or registration never loses it, its generator runs included.
+  That makes its own time limits the lock's: the repository and GitHub requests
+  time out, and a generator run is ended after 120 seconds, the processes it
+  started included.
+- **Both locks are checked before the disk changes.** Every change (staging,
+  deleting a staged copy the check refused, moving into pending or into place,
+  a rollback, deleting a pending install, each step of a recovery) begins with
+  `assertHeld()`, `update _platform_locks set acquired_at = now() where name =
+  $1 and holder = $2 returning 1`, which renews the lease only while the row
+  still holds this acquisition's random token, and then reads the lock file back
+  for its token.
+- **A holder that has lost either lock stops without touching the disk**,
+  cleanup included: by then the staging directory, the pending folder or the
+  registry it would regenerate may be the new holder's. The admin is told what
+  was left on disk, and the audit row records `reason: "lock-lost"`. A check
+  that cannot reach the database stops it the same way, as
+  `"lock-unconfirmed"`.
 
-The release is scoped to the same token, so a holder that lost the lock cannot
-delete the new holder's row on its way out.
+Each release is scoped to its own token, so a holder that lost a lock cannot
+remove the new holder's on its way out.
 
 ### Why a host allowlist and not resolve-and-recheck
 
@@ -2335,13 +2440,18 @@ one; adding a second should be a deliberate code change with a floor.
 
 ### Authorization and audit
 
-Every entry point is a server action that calls `requireAdmin()` itself (§9) —
-the browse page's own gate guards the render only, and the actions are reachable
-without ever loading it. Both outcomes are audited (§28): `app.register` records
-the version, commit, verified hash and file count; `app.register.rejected`
-records the reason. A rejection is the more interesting row —
-`reason: "checksum"` says someone was served bytes that did not match what the
-catalogue published.
+Every entry point in the admin pages is a server action that calls
+`requireAdmin()` itself (§9) — the browse page's own gate guards the render only,
+and the actions are reachable without ever loading it. Both outcomes are audited
+(§28): `app.install` records the version, commit, verified hash, files hash,
+where it went and the check's verdict; `app.install.rejected` records the
+reason. A rejection is the more interesting row — `reason: "checksum"` says
+someone was served bytes that did not match what the catalogue published.
+
+`npm run register` is a shell in the checkout, not a signed-in admin: anyone who
+can run it can already change the checkout's code. Its rows record no user id,
+and name the machine's OS user and hostname as `cli:<user>@<host>`, which
+readers label unverified (§28).
 
 ### Turning it off
 
@@ -2355,7 +2465,8 @@ merely hidden:
 | The admin page | No Browse button |
 | `/admin/<kind>/browse` | A 404, after the admin gate |
 | `searchRepositoryAction`, `resolveInstallAction` | Refused, before the repository is contacted |
-| `registerExtensionAction` → `installExtension()` | Refused before the platform lock is taken, and audited as `<kind>.register.rejected` with `reason: "disabled"` — a row no page can produce |
+| `installExtensionAction` → `installExtension()` | Refused before the platform lock is taken, and audited as `<kind>.install.rejected` with `reason: "disabled"` — a row no page can produce |
+| `npm run register` | Registering a pending install of that kind is refused before the locks are taken, and audited as `<kind>.register.rejected`; `--discard` and `--recover` still work |
 | `checkInstallable()` | Reports the kind as not installable |
 
 Every layer checks for itself, for the reason the admin gate does (§9): the
@@ -2381,13 +2492,15 @@ below), so on those the flags decide only whether the catalogue can be browsed.
 
 ### What it deliberately will not do
 
-- **Overwrite.** An existing directory is refused rather than replaced. Upgrading
-  in place is a different operation with a different question attached — what
-  happens to the data and grants the installed one already has.
+- **Overwrite.** An existing directory, or an install of the same slug already
+  waiting in pending, is refused rather than replaced. Upgrading in place is a
+  different operation with a different question attached — what happens to the
+  data and grants the installed one already has.
 - **Run from a built artifact.** `checkInstallable()` refuses up front when
   `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
   `output: "standalone"` tree, which its server `chdir`s to before listening
-  (`isBuiltDeployment()`, `src/lib/platform/build.ts`).
+  (`isBuiltDeployment()`, `src/lib/platform/build.ts`). Register refuses on the
+  same marker.
 
   This check has to be a marker rather than a capability probe, because the
   capability probe can pass while the capability is absent.
@@ -2412,10 +2525,10 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   non-zero, runs out of time or leaves no well-formed verdict has judged
   nothing, and the admin is told this checkout could not complete it, as
   `generator-failed`. A rejection is a verdict that lists its problems, as
-  `rejected-by-registry`. After a passing check, step 10 can still leave the
-  extension out, for what only its code shows, which is a rejection; or stop
-  with a non-zero exit, which could be the extension's code or the checkout, and
-  is reported as either.
+  `rejected-by-registry`. After a passing check, Register's generator run (for
+  a theme, install's) can still leave the extension out, for what only its code
+  shows, which is a rejection; or stop with a non-zero exit, which could be the
+  extension's code or the checkout, and is reported as either.
 
   In the Docker image, everything but Next's two cache directories belongs to
   root, and the server runs as `node`, so it cannot change its own code on any

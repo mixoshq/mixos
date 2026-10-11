@@ -140,3 +140,18 @@ export function verifyContentHash(entries: TarEntry[], expected: string): string
   }
   return actual;
 }
+
+/**
+ * The files hash: the same serialisation over the same entries, with every
+ * file's mode read as 644.
+ *
+ * Install writes every file 0644, so the content hash, which records the
+ * execute bit, can't be recomputed from a folder on disk. This one can. Install
+ * records it for a tree it has verified, and Register recomputes it from the
+ * folder waiting in `.mixos/pending/` and refuses one that no longer matches
+ * (./pending.ts). For a tree with no executable file it equals the content
+ * hash.
+ */
+export function filesHash(entries: readonly TarEntry[]): string {
+  return hashFileTree(entries.map((entry) => ({ ...entry, mode: 0o644 })));
+}

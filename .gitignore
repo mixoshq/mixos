@@ -76,3 +76,9 @@ supabase/.branches/
 
 # The bundled release step (`npm run build:ops`), built into the Docker image.
 /ops/
+
+# This checkout's installs from the Registry: extensions waiting to be
+# registered, the copies installs check, and the checkout lock
+# (src/lib/repository/pending.ts). What a registration produces is in apps/ or
+# connectors/, and that is what gets committed.
+/.mixos/

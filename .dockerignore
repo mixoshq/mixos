@@ -59,5 +59,9 @@ docker-compose.yml
 # A host-side `npm run build:ops` output. The image builds its own.
 ops
 
+# This checkout's pending installs and its lock. A pending extension has not been
+# registered, so it is not part of any build, and no image ever carries it.
+.mixos
+
 # Self-hosting secrets live beside deploy/docker-compose.yml, never in an image.
 deploy/.env
