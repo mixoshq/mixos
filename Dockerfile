@@ -57,10 +57,9 @@ COPY . .
 # src/generated/ (the app and connector registries) from apps/ and connectors/,
 # and that directory is gitignored, so it does not exist in the build context.
 #
-# No secrets are needed or accepted here. Everything except NEXT_PUBLIC_* is
-# read at request time from the compose env_file; the one NEXT_PUBLIC_ reference
-# in the codebase (src/lib/db/supabase.ts) is a fallback behind SUPABASE_URL and
-# inlines as undefined, which is correct — the runtime value wins.
+# No secrets are needed or accepted here. Configuration is read at request time
+# from the environment the container runs with, and nothing in the codebase
+# reads a NEXT_PUBLIC_ variable, so the build inlines no value from this stage.
 RUN npm run build
 
 # Fail the build loudly if the runtime file trees did not make it into the
