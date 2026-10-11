@@ -893,7 +893,7 @@ async function readVerdict(dir: string): Promise<CheckVerdict | null> {
  * extension and it is in place, and say whether it is now registered.
  *
  * This is the run that loads the extension's code: `widgets.ts` and every
- * `route.ts`, which the check left to it. It can refuse the extension for what
+ * `route.ts`, which the check never loads. It can refuse the extension for what
  * only that code shows, and a refusal there is not an abort: the generator
  * leaves one bad app out and still exits 0, because one bad app must not break
  * everyone else's build. So the extension is registered when the run exits 0
