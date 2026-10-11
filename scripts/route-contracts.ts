@@ -6,7 +6,7 @@
  * Reading a route's contract off the `defineRoute()` results its module exports.
  *
  * The registry generator walks `apps/<slug>/api/`, imports each `route.ts` and
- * hands the module to `routeContract` (scanApiRoutes in
+ * hands the module to `routeContract` (importRouteContracts in
  * scripts/generate-project-registry.ts). It lives in a module of its own so a
  * test can run a `defineRoute` fixture through the same code the build uses:
  * scripts/app-smoke.test.ts does, so the smoke test cannot again miss routes
