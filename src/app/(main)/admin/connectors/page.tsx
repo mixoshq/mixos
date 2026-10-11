@@ -21,7 +21,7 @@ import { getUserTokens } from "@/lib/connectors/user-config";
 import { getConnectorLog, grantedScopes } from "@/lib/connectors/access";
 import { getScopeStatus } from "@/lib/connectors/scope-status";
 import { getConnectorDependents } from "@/lib/connectors/dependents";
-import { getDisabledConnectors } from "@/lib/connectors/switch";
+import { getDisabledConnectors, getReplacedConnectors } from "@/lib/connectors/switch";
 import { setConnectorEnabled } from "@/lib/connectors/switch-admin";
 import { TOKEN_KEYS, redirectUriFor } from "@/lib/connectors/oauth";
 import { runConnectorTest } from "@/lib/connectors/test-connection";
@@ -100,6 +100,11 @@ export default async function ConnectorsAdminPage({
   const disabled = await getDisabledConnectors(
     connectorRegistry.map((c) => c.name),
   );
+  // Which of them the release step turned off because a different connector
+  // took the name. Enabling one needs its name typed.
+  const replaced = await getReplacedConnectors(
+    connectorRegistry.map((c) => c.name),
+  );
 
   const statuses = await Promise.all(
     connectorRegistry.map(async (c) => {
@@ -137,6 +142,7 @@ export default async function ConnectorsAdminPage({
       // shipped rather than only those an admin has switched on.
       const dependents = getConnectorDependents(c.name);
       const disabledAt = disabled.get(c.name) ?? null;
+      const replacement = replaced.get(c.name) ?? null;
 
       if (c.auth?.strategy !== "oauth2_authorization_code") {
         return {
@@ -147,6 +153,7 @@ export default async function ConnectorsAdminPage({
           scopeStatus,
           dependents,
           disabledAt,
+          replacement,
           oauth: null,
         };
       }
@@ -171,6 +178,7 @@ export default async function ConnectorsAdminPage({
         scopeStatus,
         dependents,
         disabledAt,
+        replacement,
         oauth: {
           connected: Boolean(
             grant?.[TOKEN_KEYS.refresh] || grant?.[TOKEN_KEYS.access],
@@ -261,19 +269,23 @@ export default async function ConnectorsAdminPage({
   /**
    * Disable or Enable. Takes effect on the next request everywhere: the app
    * context, webhooks, OAuth and Test Connection read the switch per request.
-   * Credentials are not touched either way.
+   * Credentials are not touched either way. Enabling a connector that replaces
+   * a different one needs its name typed, `typedName`.
    */
   async function switchConnector(
     connectorName: string,
     enabled: boolean,
+    typedName?: string,
   ): Promise<void> {
     "use server";
     const session = await requireReadOnlySession();
     const admin = await requireAdmin(session);
-    await setConnectorEnabled(connectorName, enabled, {
-      id: admin.id,
-      email: admin.email,
-    });
+    await setConnectorEnabled(
+      connectorName,
+      enabled,
+      { id: admin.id, email: admin.email },
+      typedName,
+    );
     // My Connections lists user-scoped connectors and says when one is off.
     revalidatePath("/admin/connectors");
     revalidatePath("/account/connections");
