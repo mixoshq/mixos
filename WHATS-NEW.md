@@ -220,6 +220,17 @@ just pulled.
 - **Fix:** the headers of Admin > Apps, Connectors, Themes, Analytics and the
   Browse pages no longer run off a phone or tablet screen. Below 1024px wide,
   the buttons sit under the title and wrap.
+- **The build checks each installed extension's MixOS floor.** When an
+  extension's `.registry.json` says it needs a newer MixOS than the version
+  being built, `package.json`'s, the registry generator stops the build, naming
+  the extension, its floor and the version: upgrade MixOS, or install an older
+  release of the extension. A local extension isn't checked, and a floor that
+  isn't a version is a warning, as at install. The install dialog and the
+  review before Register now say whether this checkout meets a release's floor:
+  "Requires MixOS 0.2.0 or newer. This checkout runs 0.1.0, which doesn't meet
+  it." **Breaking:** a checkout or a deploy that carries such an extension no
+  longer builds. To try one before its MixOS is released, bump `package.json`
+  locally, and don't ship the extension until that release is merged.
 
 ## 2026-10-07
 
