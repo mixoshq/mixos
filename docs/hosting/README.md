@@ -145,6 +145,33 @@ only when its own database is on the same machine: loopback, a Unix socket or
 database other instances share doesn't offer it, because activating there would
 turn the app on for every instance on that database.
 
+### When an extension needs a newer MixOS
+
+A release of an extension can name the oldest MixOS it runs on, and its
+`.registry.json` keeps it. Install and Register refuse a release that needs a
+newer MixOS than the checkout's, the version in `package.json`, and the build
+checks again. When an extension in the build needs a newer MixOS than the one
+being built, the build stops:
+
+```
+This build is MixOS 0.1.0, and an extension installed from a Registry needs a newer one:
+  apps/acme-board/.registry.json: release 1.2.0 requires MixOS 0.2.0 or newer.
+Upgrade MixOS, or install an older release of it that runs on 0.1.0. The build stops rather than leave it out of this deploy.
+```
+
+It stops because skipping the extension would drop it from the deploy without
+a word. Nothing is deployed, so what was serving keeps serving, and a pull
+request that carries the extension fails CI the same way. It happens when the
+extension was installed on a newer MixOS than the one being built: in a
+checkout with `package.json` bumped locally, say, or on a branch with an
+upgrade yours doesn't have.
+
+To fix it, [upgrade MixOS](#upgrading) to a release that meets the floor, or go
+back to a release of the extension that runs on your version. Browse installs
+only an extension's current release, so going back means reverting the commit
+that brought the newer one in. A local extension, with no `.registry.json`, is
+never checked, and a floor that isn't a version is a warning, not a stop.
+
 ### What MixOS sends to mixos.org
 
 Once a day, each instance asks mixos.org about the extensions it installed from
@@ -402,6 +429,13 @@ Skipping releases is fine. Merge the newest tag, and the release step applies
 every migration in between; read the notes of each release you skipped.
 Prereleases, tags with a suffix such as `v0.3.0-rc.1`, are for trying a
 version before it's final, and `--exclude '*-*'` leaves them out.
+
+Extensions installed from the Registry move with your copy. A release of one
+can name the oldest MixOS it runs on: install and Register refuse it on an
+older version, and a build that carries it stops (see
+[When an extension needs a newer MixOS](#when-an-extension-needs-a-newer-mixos)).
+Upgrading never trips that check, since every floor an older MixOS meets, a
+newer one meets too.
 
 ## Before going public
 

@@ -4,6 +4,7 @@
 
 import type { ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
+import { describeFloor } from "@/lib/platform/version-floor";
 import type { ListingFacts } from "@/lib/repository/pending-outcomes";
 import type { PendingReview } from "@/lib/repository/review";
 import Notice from "@/components/ui/notice";
@@ -219,14 +220,6 @@ export default function ReviewPanel({
       </Section>
     </div>
   );
-}
-
-/** The release's floor, against this checkout's version. */
-export function describeFloor(floor: PendingReview["requiresMixOS"]): string {
-  if (!floor.declared) return `It declares no minimum MixOS version. This checkout is ${floor.current}.`;
-  if (!floor.met) return floor.reason ?? `It requires MixOS ${floor.declared}, and this checkout is ${floor.current}.`;
-  if (!floor.checked) return floor.reason ?? `It declares "${floor.declared}", which isn't a version, so it isn't enforced.`;
-  return `It requires MixOS ${floor.declared} or newer. This checkout is ${floor.current}, which meets it.`;
 }
 
 /** An ISO instant, as a reader in any time zone can place it. */
