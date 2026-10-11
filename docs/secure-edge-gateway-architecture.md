@@ -346,8 +346,8 @@ The boundary holds in five places:
    ([`scripts/app-containment.ts`](../scripts/app-containment.ts)): a reference
    to `process`, a network constructor or module, an HTML sink, `eval` or
    `Function`, an import off the list, or any other way of loading code skips
-   the app, and on the install path a skip is a rejection,
-   rolled back. It reads syntax, so it is not a sandbox — it makes accidental
+   the app, and an install's check rejects it before it reaches `apps/`. It
+   reads syntax, so it is not a sandbox — it makes accidental
    and naive use impossible to ship, and evasion conspicuous in review. See
    [`security-architecture.md` §24](security-architecture.md#24-environment-containment).
 5. **Manifest `escapes`.** `app.json` may name rules from a closed set with one
