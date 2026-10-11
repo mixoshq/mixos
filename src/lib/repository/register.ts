@@ -30,19 +30,24 @@
  *
  * ── REGISTER ────────────────────────────────────────────────────────────────
  *
- * 1. The pending folder exists, with its sidecar, and nothing is where it
- *    would go. `filesHash` recomputed from the folder matches the sidecar's:
- *    what runs has to be what install verified and checked.
- * 2. `requiresMixOS` holds for this checkout's version.
+ * 1. The pending folder exists, with its sidecar and its install record
+ *    (`.registry.json`, ./install-record.ts), and nothing is where it would
+ *    go. `filesHash` recomputed from the folder, the record left out, matches
+ *    the record's: what runs has to be what install verified and checked.
+ * 2. `requiresMixOS`, from the record, holds for this checkout's version.
  * 3. The sidecar records this registration (the checkout lock's token, the pid
  *    and the host), then the folder is renamed into place.
  * 4. The full generator, with `PATH` and `TMPDIR` as its environment. This is
  *    the first time any of the extension's code runs, as this checkout's OS
  *    user.
- * 5. Refused, stopped or out of time: renamed back to pending, the record
- *    cleared, and the generator run again so `src/generated/` matches the
- *    disk. Accepted: the sidecar is deleted.
+ * 5. Refused, stopped or out of time: renamed back to pending, the sidecar's
+ *    registration cleared, and the generator run again so `src/generated/`
+ *    matches the disk. Accepted: the sidecar is deleted. The install record
+ *    stays in the folder, to be committed with it.
  * 6. Audited: `<kind>.register`, or `<kind>.register.rejected` with the reason.
+ *
+ * The result hands back what to commit and how (./hand-back.ts): the folder's
+ * files, a commit message built from the record, and the commands.
  *
  * ── A REGISTRATION THAT DIED MIDWAY ─────────────────────────────────────────
  *
@@ -71,6 +76,15 @@ import {
 import { LockUnavailableError, withPlatformLock, type PlatformLease } from "../platform/lock";
 import { satisfiesMinimum } from "../platform/version";
 import { contentHashesMatch } from "./content-hash";
+import { handBackFor, type HandBack } from "./hand-back";
+import {
+  FolderReadError,
+  INSTALL_RECORD_FILE,
+  folderFiles,
+  folderFilesHash,
+  readInstallRecord,
+  type InstallRecord,
+} from "./install-record";
 import {
   bothLocks,
   checkoutRoot,
@@ -82,7 +96,6 @@ import {
 import {
   MIXOS_DIR,
   PendingError,
-  folderFilesHash,
   isPendingKind,
   isRealDirectory,
   kindDir,
@@ -90,6 +103,7 @@ import {
   pathExists,
   pendingLocation,
   readSidecar,
+  recordProblem,
   writeSidecar,
   type PendingKind,
   type PendingSidecar,
@@ -115,8 +129,8 @@ export interface PendingActionOptions {
   /**
    * Register only: the files hash of the pending install the person reviewed
    * (the admin pages' review prompt). Checked under the locks against the
-   * pending install's record, so what registers is what they read, even if it
-   * was discarded and installed again in between.
+   * pending install's record, `.registry.json`, so what registers is what they
+   * read, even if it was discarded and installed again in between.
    */
   reviewedFilesHash?: string;
 }
@@ -228,6 +242,8 @@ function interruptedEarlier(slug: string, r: Registering): RegisterError {
 export interface RegisterResult {
   kind: PendingKind;
   slug: string;
+  /** Its install record, now in its folder, to be committed with it. */
+  record: InstallRecord;
   source: string;
   version: string;
   gitTag: string | null;
@@ -238,12 +254,15 @@ export interface RegisterResult {
   installPath: string;
   installedBy: string;
   installedAt: string;
+  /** The package's files and their bytes, as install counted them: the install record left out. */
   fileCount: number;
   byteCount: number;
   /** What install's check left to registration, which this run checked. */
   deferred: string[];
   registry: RegistryOutcome;
-  /** What to do next: it runs in this checkout now, and ships when it is committed. */
+  /** What to commit, and how: it runs in this checkout now, and ships when it is committed. */
+  handBack: HandBack;
+  /** What to do next, in a paragraph. */
   nextStep: string;
 }
 
@@ -365,9 +384,9 @@ async function runRegister(
   const fence = fencer(lease, "This registration", options.signal);
   const generator = { lockToken, root: options.root, generator: options.generator, signal: options.signal };
 
-  // 1. What is pending, its record, and nothing where it would go.
-  const sidecar = pendingSidecarFor(kind, slug, where);
-  if (options.reviewedFilesHash !== undefined && !contentHashesMatch(options.reviewedFilesHash, sidecar.filesHash)) {
+  // 1. What is pending, its records, and nothing where it would go.
+  const { sidecar, record } = pendingInstallFor(kind, slug, where);
+  if (options.reviewedFilesHash !== undefined && !contentHashesMatch(options.reviewedFilesHash, record.filesHash)) {
     throw new RegisterError(
       `What is waiting in ${where.rel}/ isn't what you reviewed: it was discarded and installed ` +
         "again, or replaced, since. Nothing was moved. Review it again before registering it.",
@@ -383,20 +402,21 @@ async function runRegister(
     );
   }
 
-  // What runs has to be what install verified and checked.
+  // What runs has to be what install verified and checked: every file but the
+  // record, against the record's files hash.
   let found: string;
   try {
     found = folderFilesHash(where.folder);
   } catch (err) {
-    if (err instanceof PendingError) throw changedSinceInstall(slug, kind, err.message);
+    if (err instanceof FolderReadError) throw changedSinceInstall(slug, kind, err.message);
     throw err;
   }
-  if (!contentHashesMatch(found, sidecar.filesHash)) {
-    throw changedSinceInstall(slug, kind, `expected ${sidecar.filesHash}\nfound    ${found}`);
+  if (!contentHashesMatch(found, record.filesHash)) {
+    throw changedSinceInstall(slug, kind, `expected ${record.filesHash}\nfound    ${found}`);
   }
 
   // 2. The release's floor, against the version this checkout builds.
-  const compat = satisfiesMinimum(sidecar.requiresMixOS);
+  const compat = satisfiesMinimum(record.requiresMixOS);
   if (!compat.allowed) throw new RegisterError(compat.reason!, "incompatible");
   if (compat.reason) console.warn(`[register] ${kind}/${slug}: ${compat.reason}`);
 
@@ -447,40 +467,45 @@ async function runRegister(
   );
   fs.rmSync(where.sidecar, { force: true });
 
+  const files = folderFiles(live.dir);
+  const packaged = files.filter((f) => f.path !== INSTALL_RECORD_FILE);
   return {
     kind,
     slug,
-    source: sidecar.source,
-    version: sidecar.version,
-    gitTag: sidecar.gitTag,
-    commitSha: sidecar.commitSha,
-    contentHash: sidecar.contentHash,
-    filesHash: sidecar.filesHash,
+    record,
+    source: record.source,
+    version: record.version,
+    gitTag: record.gitTag,
+    commitSha: record.commitSha,
+    contentHash: record.contentHash,
+    filesHash: record.filesHash,
     installPath: live.rel,
     installedBy: sidecar.installedBy,
     installedAt: sidecar.installedAt,
-    fileCount: sidecar.fileCount,
-    byteCount: sidecar.byteCount,
+    fileCount: packaged.length,
+    byteCount: packaged.reduce((n, f) => n + f.bytes, 0),
     deferred: sidecar.check.deferred,
     registry,
+    handBack: handBackFor(record, live.rel, files),
+    // The hand-back says how to ship it; this says what it is now.
     nextStep:
-      `Registered to ${live.rel}: the registry generator loaded its code and accepted it, and ` +
-      `it runs in this checkout now. ` +
+      `Registered to ${live.rel}: the registry generator loaded its code and accepted it. ` +
       (kind === "app"
         ? "It is off until an admin activates it in Admin > Apps (run `npm run migrate:apps` " +
-          "first if it has migrations). "
-        : "Configure it in Admin > Connectors. ") +
-      `To ship it, commit ${live.rel} and deploy` +
-      (kind === "app" ? ": it arrives inactive on each instance, to activate there." : "."),
+          "first if it has migrations)."
+        : "Configure it in Admin > Connectors."),
   };
 }
 
-/** The sidecar of a pending install that Register can act on, or why not. */
-function pendingSidecarFor(
+/**
+ * The sidecar and the install record of a pending install that Register can
+ * act on, or why not.
+ */
+function pendingInstallFor(
   kind: PendingKind,
   slug: string,
   where: ReturnType<typeof pendingLocation>,
-): PendingSidecar {
+): { sidecar: PendingSidecar; record: InstallRecord } {
   const read = readSidecar(where.sidecar);
   const hasFolder = isRealDirectory(where.folder);
   if (read.state === "ok" && read.sidecar.register) throw interruptedEarlier(slug, read.sidecar.register);
@@ -498,12 +523,21 @@ function pendingSidecarFor(
       "unregistrable",
     );
   }
+  const discard = `Discard it with \`npm run register -- ${kind}/${slug} --discard\` and install it again.`;
+  if (read.state === "unreadable" && read.earlier) {
+    // Pending installs from before the record moved into the folder have no
+    // record there, so there is nothing to check them against.
+    throw new RegisterError(
+      `${where.rel}/ was installed by an earlier version of MixOS, before installs kept their record ` +
+        `in the extension's folder, so it can't be checked and won't be registered. ${discard}`,
+      "unregistrable",
+    );
+  }
   if (read.state !== "ok") {
     throw new RegisterError(
-      `${where.rel}/ has no readable record of what install verified (${where.rel}.json` +
+      `${where.rel}/ has no readable record of its install (${where.rel}.json` +
         (read.state === "unreadable" ? `: ${read.reason}` : ", which is missing") +
-        `), so it can't be checked and won't be registered. Discard it with ` +
-        `\`npm run register -- ${kind}/${slug} --discard\` and install it again.`,
+        `), so it won't be registered. ${discard}`,
       "unregistrable",
     );
   }
@@ -514,7 +548,12 @@ function pendingSidecarFor(
       "unregistrable",
     );
   }
-  return read.sidecar;
+  const record = readInstallRecord(where.folder);
+  const problem = recordProblem(where, kind, slug, record);
+  if (problem || record.state !== "ok") {
+    throw new RegisterError(`${where.rel}/ can't be registered. ${problem} ${discard}`, "unregistrable");
+  }
+  return { sidecar: read.sidecar, record: record.record };
 }
 
 function changedSinceInstall(slug: string, kind: PendingKind, detail: string): RegisterError {
@@ -567,8 +606,10 @@ export interface DiscardResult {
   slug: string;
   /** Repo-relative path of what was deleted. */
   pendingPath: string;
-  /** Its record, when it could be read. */
+  /** Its sidecar, when it could be read. */
   sidecar: PendingSidecar | null;
+  /** Its install record, when it could be read. */
+  record: InstallRecord | null;
 }
 
 /** Delete a pending install, folder and sidecar, under both locks. Audited. */
@@ -579,7 +620,7 @@ export async function discardPending(
 ): Promise<DiscardResult> {
   const root = options.root ?? checkoutRoot();
   const result = await discardUnderLocks(kind, slug, root, options);
-  const s = result.sidecar;
+  const { sidecar: s, record: r } = result;
   await recordAdminAction(options.actor, {
     action: `${kind}.discard`,
     targetType: kind,
@@ -587,17 +628,16 @@ export async function discardPending(
     details: {
       via: options.via,
       pendingPath: result.pendingPath,
-      ...(s
+      ...(r
         ? {
-            source: s.source,
-            version: s.version,
-            commitSha: s.commitSha,
-            contentHash: s.contentHash,
-            filesHash: s.filesHash,
-            installedBy: s.installedBy,
-            installedAt: s.installedAt,
+            source: r.source,
+            version: r.version,
+            commitSha: r.commitSha,
+            contentHash: r.contentHash,
+            filesHash: r.filesHash,
           }
-        : { record: "missing or unreadable" }),
+        : { installRecord: "missing or unreadable" }),
+      ...(s ? { installedBy: s.installedBy, installedAt: s.installedAt } : { record: "missing or unreadable" }),
     },
   });
   return result;
@@ -625,6 +665,10 @@ async function discardUnderLocks(
         );
       }
 
+      // What it was, for the audit row, before it goes.
+      const record = pathExists(where.folder) ? readInstallRecord(where.folder) : null;
+      const own = record?.state === "ok" && record.record.kind === kind && record.record.slug === slug;
+
       // The folder first: a record without its folder is what recovery
       // clears, and a folder without its record can never be registered.
       await fence("Nothing was deleted.");
@@ -639,6 +683,7 @@ async function discardUnderLocks(
         slug,
         pendingPath: where.rel,
         sidecar: read.state === "ok" ? read.sidecar : null,
+        record: own && record?.state === "ok" ? record.record : null,
       };
     }),
   );

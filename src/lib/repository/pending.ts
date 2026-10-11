@@ -8,9 +8,10 @@
  * registers it.
  *
  *   .mixos/staging/<kind dir>/<slug>/       the tree while install checks it
- *   .mixos/pending/<kind dir>/<slug>/       the tree as installed, waiting
- *   .mixos/pending/<kind dir>/<slug>.json   its sidecar: what install verified,
- *                                           for whom, and when
+ *   .mixos/pending/<kind dir>/<slug>/       the tree as installed, waiting, with
+ *                                           its install record, .registry.json
+ *   .mixos/pending/<kind dir>/<slug>.json   its sidecar: who installed it, when,
+ *                                           and the check's verdict
  *
  * `<kind dir>` is `apps`, `connectors` or, while staging only, `themes`: a theme
  * has no code to run, so it registers when it is installed.
@@ -21,37 +22,33 @@
  * ESLint, Docker and git are told to ignore it. So a pending app's code can't
  * run until Register (./register.ts) moves it into `apps/`.
  *
- * ── THE SIDECAR ─────────────────────────────────────────────────────────────
+ * ── ONE RECORD, AND A SIDECAR ───────────────────────────────────────────────
  *
- * Never committed: it is about this checkout's install. It records what install
- * verified (the release, its commit, its content hash and `filesHash`), the
- * floor the release declared, the check's verdict, who installed it and when.
- * While a registration is under way it also records that registration's holder,
- * so one that died midway can be told from one still running.
+ * What install verified is in the tree itself, in `.registry.json`
+ * (./install-record.ts): the release, its commit, its content hash and its
+ * files hash, where it came from and the floor it declares. It moves with the
+ * folder at Register and is committed with it. Register recomputes the files
+ * hash from the folder and refuses one that no longer matches.
  *
- * ── filesHash ───────────────────────────────────────────────────────────────
- *
- * The content hash records each file's execute bit, as a git tree does, but
- * install writes every file 0644, so a folder on disk can't reproduce it. So the
- * sidecar records `filesHash` as well (filesHash() in ./content-hash.ts), and
- * Register recomputes it from the pending folder and refuses a folder that no
- * longer matches: what runs is what install verified and checked. It is a check
- * against change after install, by an editor, a tool or another process in the
- * checkout. Anyone who can write the folder can write the sidecar too.
+ * The sidecar holds only what is about this checkout's pending install, and is
+ * never committed: who installed it and when, whether they accepted a release
+ * its publisher withdrew, and the check's verdict. While a registration is
+ * under way it also records that registration's holder, so one that died
+ * midway can be told from one still running.
  */
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
-import { filesHash } from "./content-hash";
-import type { TarEntry } from "./tar";
 import {
-  CONTENT_HASH_PATTERN,
-  CommitShaSchema,
-  SlugSchema,
-  type ExtensionKind,
-} from "./types";
+  INSTALL_RECORD_FILE,
+  readInstallRecord,
+  recordMismatch,
+  type InstallRecord,
+  type RecordRead,
+} from "./install-record";
+import { SlugSchema, type ExtensionKind } from "./types";
 
 /** The kinds that wait in pending. A theme registers when it is installed. */
 export type PendingKind = "app" | "connector";
@@ -154,7 +151,6 @@ export function liveLocation(root: string, kind: ExtensionKind, slug: string): {
 /*  The sidecar                                                                */
 /* -------------------------------------------------------------------------- */
 
-const HashSchema = z.string().regex(CONTENT_HASH_PATTERN, "expected a sha256- hash");
 const InstantSchema = z.string().refine((s) => !Number.isNaN(Date.parse(s)), "expected a date and time");
 
 /** The registration under way, recorded before anything moves. */
@@ -170,23 +166,11 @@ export type Registering = z.infer<typeof RegisteringSchema>;
 export const PendingSidecarSchema = z.strictObject({
   kind: z.enum(["app", "connector"]),
   slug: SlugSchema,
-  /** The catalogue it came from: repositoryBaseUrl() at install, an origin. */
-  source: z.string().min(1),
-  version: z.string().min(1),
-  gitTag: z.string().nullable(),
-  commitSha: CommitShaSchema,
-  /** The content hash, as published and verified. */
-  contentHash: HashSchema,
-  /** The same entries with every mode read as 644, which Register recomputes from the folder. */
-  filesHash: HashSchema,
-  /** The release's declared floor, which Register checks again. */
-  requiresMixOS: z.string().nullable(),
+  /** Whether the admin chose to install a release its publisher had withdrawn. */
   yankedAccepted: z.boolean(),
   installedAt: InstantSchema,
   /** Who installed it, as the audit row names them. */
   installedBy: z.string().min(1),
-  fileCount: z.number().int().nonnegative(),
-  byteCount: z.number().int().nonnegative(),
   /** The install check's verdict, and what it left to registration. */
   check: z.strictObject({
     verdict: z.literal("accepted"),
@@ -199,8 +183,18 @@ export type PendingSidecar = z.infer<typeof PendingSidecarSchema>;
 
 export type SidecarRead =
   | { state: "missing" }
-  | { state: "unreadable"; reason: string }
+  /**
+   * `earlier` marks a sidecar an earlier version of MixOS wrote, which held
+   * what install verified before that moved into the tree's own record. Its
+   * folder has no record, so it can't be registered: discard it and install it
+   * again.
+   */
+  | { state: "unreadable"; reason: string; earlier?: true }
   | { state: "ok"; sidecar: PendingSidecar };
+
+/** Why an earlier version's sidecar can't be used, for a person. */
+const EARLIER_SIDECAR =
+  "it was written by an earlier version of MixOS, before installs kept their record in the extension's folder";
 
 /** The largest sidecar this reads. A deferred list at its limit fits well inside it. */
 const MAX_SIDECAR_BYTES = 4 * 1024 * 1024;
@@ -227,6 +221,10 @@ export function readSidecar(file: string): SidecarRead {
     value = JSON.parse(text);
   } catch {
     return { state: "unreadable", reason: "it is not JSON" };
+  }
+  // What an install before .registry.json wrote: the release's facts, here.
+  if (value && typeof value === "object" && "filesHash" in value && "contentHash" in value) {
+    return { state: "unreadable", reason: EARLIER_SIDECAR, earlier: true };
   }
   const parsed = PendingSidecarSchema.safeParse(value);
   if (!parsed.success) {
@@ -256,57 +254,6 @@ export function writeSidecar(file: string, sidecar: PendingSidecar): void {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  filesHash, from a folder                                                   */
-/* -------------------------------------------------------------------------- */
-
-/**
- * The files hash of the tree under `dir`: every file, at any depth, dot files
- * and `node_modules/` included, since install wrote all of them and any of them
- * could run. Empty folders count for nothing, as they do in the content hash.
- *
- * Throws PendingError for a link or anything else that is not a file or a
- * folder: install writes neither, so the folder has changed.
- */
-export function folderFilesHash(dir: string): string {
-  const entries: TarEntry[] = [];
-  collect(dir, "", entries);
-  return filesHash(entries);
-}
-
-function collect(dir: string, relative: string, into: TarEntry[]): void {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    // POSIX separators, as the archive's paths have.
-    const rel = relative ? `${relative}/${entry.name}` : entry.name;
-    const full = path.join(/* turbopackIgnore: true */ dir, entry.name);
-    if (entry.isDirectory()) {
-      collect(full, rel, into);
-    } else if (entry.isFile()) {
-      into.push({ path: rel, mode: 0o644, data: readRegularFile(full, rel) });
-    } else {
-      throw new PendingError(
-        `${rel} is ${entry.isSymbolicLink() ? "a symbolic link" : "not a regular file"}, which install never writes.`,
-      );
-    }
-  }
-}
-
-/** A file's bytes, never through a link put in its place since it was listed. */
-function readRegularFile(full: string, rel: string): Buffer {
-  let fd: number;
-  try {
-    fd = fs.openSync(full, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-  } catch (err) {
-    throw new PendingError(`${rel} could not be read: ${(err as NodeJS.ErrnoException).code ?? err}`);
-  }
-  try {
-    if (!fs.fstatSync(fd).isFile()) throw new PendingError(`${rel} is not a regular file.`);
-    return fs.readFileSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-/* -------------------------------------------------------------------------- */
 /*  What is pending                                                            */
 /* -------------------------------------------------------------------------- */
 
@@ -318,6 +265,8 @@ export interface PendingInstall {
   hasFolder: boolean;
   /** Its sidecar, when there is one that reads as one. */
   sidecar: PendingSidecar | null;
+  /** Its install record, `.registry.json` in its folder, when it is there and is its own. */
+  record: InstallRecord | null;
   /** What stands in the way of registering it as it is, or null for nothing. */
   problem: string | null;
 }
@@ -346,13 +295,16 @@ export function listPendingInstalls(root: string): PendingInstall[] {
       const where = pendingLocation(root, kind, slug);
       const hasFolder = isRealDirectory(where.folder);
       const read = readSidecar(where.sidecar);
+      const record: RecordRead = hasFolder ? readInstallRecord(where.folder) : { state: "missing" };
+      const own = record.state === "ok" && recordMismatch(record.record, kind, slug) === null;
       out.push({
         kind,
         slug,
         path: where.rel,
         hasFolder,
         sidecar: read.state === "ok" ? read.sidecar : null,
-        problem: pendingProblem(where, hasFolder, read),
+        record: own && record.state === "ok" ? record.record : null,
+        problem: pendingProblem(where, hasFolder, read) ?? withRemedy(recordProblem(where, kind, slug, record)),
       });
     }
   }
@@ -367,12 +319,41 @@ function pendingProblem(where: PendingLocation, hasFolder: boolean, read: Sideca
     return `${where.rel}/ is missing, so there is nothing to register. Run \`npm run register -- --recover\`.`;
   }
   if (read.state === "missing") {
-    return `It has no record of what install verified (${where.rel}.json), so it can't be registered. Discard it.`;
+    return `It has no record of its install (${where.rel}.json), so it can't be registered. Discard it.`;
   }
   if (read.state === "unreadable") {
-    return `Its record of what install verified (${where.rel}.json) can't be read: ${read.reason}. Discard it.`;
+    return read.earlier
+      ? "An earlier version of MixOS installed it, before installs kept their record in the extension's " +
+          "folder, so it can't be registered. Discard it and install it again."
+      : `Its record of its install (${where.rel}.json) can't be read: ${read.reason}. Discard it.`;
   }
   return null;
+}
+
+/**
+ * What is wrong with a pending install's own record, `.registry.json` in its
+ * folder, or null. Register refuses each, so the list and the review say so.
+ */
+export function recordProblem(
+  where: PendingLocation,
+  kind: PendingKind,
+  slug: string,
+  read: RecordRead,
+): string | null {
+  const file = `${where.rel}/${INSTALL_RECORD_FILE}`;
+  if (read.state === "missing") {
+    return `It has no install record (${file}), so what install verified can't be checked.`;
+  }
+  if (read.state === "invalid") {
+    return `Its install record (${file}) can't be read: ${read.reason}.`;
+  }
+  const mismatch = recordMismatch(read.record, kind, slug);
+  return mismatch ? `Its install record (${file}) isn't its own: ${mismatch}.` : null;
+}
+
+/** A problem with what to do about it, or null. */
+function withRemedy(problem: string | null): string | null {
+  return problem ? `${problem} Discard it and install it again.` : null;
 }
 
 /** A directory at `p` itself, not a link to one. */
