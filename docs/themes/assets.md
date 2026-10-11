@@ -10,7 +10,7 @@ src: url("/themes/mixos/fonts/inter-variable.woff2") format("woff2-variations");
 
 ## No external hosts
 
-A theme may not `@import` or `url()` another host. `data:` URIs are fine — they are self-contained.
+A theme may not `@import` anything, or `url()` another host. `data:` URIs are fine — they are self-contained.
 
 This is a hard rule with two reasons behind it. A third-party asset is a request on **every page load** for every user, and a webfont fetched at render time is a flash of unstyled text on every cold load. It is also a channel: a theme is CSS, and CSS that can reach the network can report who loaded it and when.
 
@@ -122,7 +122,7 @@ Both survive, because they answer different questions, and the difference is abo
 
 `screenshots` is the **listing gallery**, read by someone who has not installed the theme. None of those swatches exist for them; there is no live anything. A picture is all there is. So this is where a theme shows what its token table cannot: how the menu bar sits on `--brand`, what a table looks like at density, what the sign-in page does.
 
-Worth including — they are the surfaces you are asked to review in both modes before merging anyway: a page with a table, a form, and **the sign-in page signed out**, which is the surface theme authors forget and the first one every user sees.
+Worth including — they are the surfaces you are asked to review before merging anyway: a page with a table, a form, and **the sign-in page signed out**, which is the surface theme authors forget and the first one every user sees.
 
 ### What the build enforces
 

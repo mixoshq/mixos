@@ -35,8 +35,9 @@ import { pruneWebhookEvents } from "@/lib/connectors/webhook";
  */
 export const dynamic = "force-dynamic";
 // Jobs get up to 4 minutes each (JOB_TIMEOUT_MS); give the tick room to finish.
-// Vercel caps this by plan — Hobby allows 60s, so a long tick is cut short
-// there. The Postgres claim means a truncated tick simply resumes next time.
+// Every Vercel plan allows 300s with Fluid compute, its default; with it off,
+// Hobby stops at 60s. Either way the Postgres claim means a truncated tick
+// simply resumes next time.
 export const maxDuration = 300;
 
 function authorized(request: NextRequest): boolean {

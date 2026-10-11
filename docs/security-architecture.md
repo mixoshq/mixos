@@ -100,8 +100,8 @@ up checking the wrong table.
 | 2    | App slug exists                | 404     | Dispatcher (registry lookup)         |
 | 3    | Rate limit (IP), pre-auth      | 429     | Dispatcher (`src/lib/rate-limit.ts`) |
 | 4    | URL resolves to a route pattern| 404     | Dispatcher (`resolveRoutePath`)      |
-| 5    | This mount serves the route    | 404     | Dispatcher, from the **hoisted contract** — so no app module is imported for a caller the route would refuse |
-| 6    | App is active and not being updated, then the route module loads; method exported | 404 / 503 / 405 / 500 | Dispatcher. The app gate (`src/lib/apps/app-gate.ts`) runs before the import, so neither a deactivated app's module-scope code (404) nor that of an app whose own migrations are behind this build (503, §3.1) runs. Import and dispatch are separated, so a module that throws is not reported as missing |
+| 5    | This mount serves the route    | 404     | Dispatcher, from the **hoisted contract** — so no app module is imported for a route this mount doesn't serve. The checks on the caller come after the import, from step 8 |
+| 6    | App is active and not being updated, then the route module loads; method exported | 404 / 503 / 405 / 500 | Dispatcher. The app gate (`src/lib/apps/app-gate.ts`) runs before the import, so neither a deactivated app's module-scope code (404) nor that of an app whose own migrations are behind this build (503, §3.1) runs. Import and dispatch are separated, so a module that throws at load is logged as a load failure rather than as a missing route; the caller gets 404 either way |
 | 7    | Live declaration matches the registry | 404 | Dispatcher — a gate decided from one source and enforced from another is not a gate |
 | 8    | Auth tier the caller earned    | 401 / 403 / 404 | `src/lib/apps/auth-tier.ts` |
 | 9    | CSRF token, cookie-authenticated mutations only | 403 | `src/lib/apps/csrf.ts` — authenticated mount, identity tiers, mutating methods |
@@ -130,17 +130,10 @@ needs; `/api/apps` is the mount the browser SDK calls with its session cookie,
 and does not read a key.
 
 A key is `mixk_` + 32 random bytes, shown once and stored only as an
-HMAC-SHA256 digest (key derived from `CONNECTOR_ENCRYPTION_KEY` under its own
-label). It is bound to one app — presenting app A's key on app B's route resolves
-to nothing — and **scope-checked per method and route pattern**, so a key minted
-for one endpoint does not become a key for the whole app.
-
-This section previously stated the opposite: that the tier "has no
-implementation" and was therefore unreachable. That was true when written and
-false once `api-keys.ts` landed. The same stale claim still appears as a comment
-at `src/lib/apps/dispatch.ts` (`servedHere`) and in the public mount's file
-header — in both cases the *code* is correct and admits `key`; only the prose
-is stale.
+HMAC-SHA256 digest, keyed with `APP_API_KEY_SECRET` (§5). It is bound to one
+app — presenting app A's key on app B's route resolves to nothing — and
+**scope-checked per method and route pattern**, so a key minted for one endpoint
+does not become a key for the whole app.
 
 ---
 
@@ -153,7 +146,7 @@ and only decrypted server-side, per-request. They never reach the browser.
 
 ```
 Algorithm:  AES-256-GCM (authenticated encryption)
-Key:        CONNECTOR_ENCRYPTION_KEY env var (32 bytes, hex-encoded)
+Key:        CONNECTOR_ENCRYPTION_KEY env var (32 bytes, as hex or base64)
 IV:         12 random bytes, generated per encrypt() call
 Output:     base64(IV) : base64(AuthTag) : base64(Ciphertext)
 ```
@@ -164,20 +157,23 @@ Output:     base64(IV) : base64(AuthTag) : base64(Ciphertext)
   Admin UI (browser)
   ==================
   | Submits plaintext credentials for a connector
-  | POST /api/connectors/<name>/config
+  | configureConnector server action (/admin/connectors)
   |
   v
 +--------------------------------------------------+
 | saveConnectorConfig()                            |
 | (src/lib/connectors/config.ts)                   |
 |                                                  |
-|  1. JSON.stringify(credentials)                  |
-|  2. encrypt(plaintext)                           |
+|  1. Take the connector's advisory lock, read and |
+|     decrypt the stored set, and merge the new    |
+|     fields over it (a blank field keeps the      |
+|     stored value)                                |
+|  2. encrypt(JSON.stringify(merged))              |
 |     - Generate random 12-byte IV                 |
 |     - AES-256-GCM encrypt with CONNECTOR_        |
 |       ENCRYPTION_KEY                             |
 |     - Produce: IV:AuthTag:Ciphertext (base64)    |
-|  3. Upsert into connector_configs table          |
+|  3. Write the connector_configs row              |
 |     - PK: connector_name (one row per connector) |
 |     - Stores: encrypted_credentials,             |
 |       configured_by (userId), updated_at         |
@@ -277,8 +273,11 @@ hasAppGrant(userId, appSlug):
 Result: boolean --> 403 if false
 ```
 
-Users can only reach app API routes for apps they hold a grant for. This is
-checked on **every request**, inside `resolveAuthTier`, before any app code runs.
+The `session` tier serves only users who hold a grant for the app. This is
+checked on **every request**, inside `resolveAuthTier`, before the handler runs.
+The other tiers don't read grants: `signed-in` serves any signed-in user,
+without the app's roles, and `password`, `key` and `public` serve callers with
+no account (§1).
 
 **The app has to be active, and in the running build.** `resolveAuthTier` and
 `hasAppGrant` refuse an app an admin has deactivated, or one the running build
@@ -351,7 +350,7 @@ apps whose schema or role names would be the same.
 +-----------------------------------+
 | Postgres (shared database)        |
 |                                   |
-|  public: platform tables (25, all |
+|  public: platform tables (27, all |
 |  RLS enabled, zero policies):     |
 |    users, apps                    |
 |    user_apps, user_app_grants     |
@@ -374,7 +373,8 @@ apps whose schema or role names would be the same.
 |    oauth_authorization_codes      |
 |    oauth_tokens                   |
 |    rate_buckets                   |
-|    _migrations                    |
+|    admin_audit_log                |
+|    _migrations, _platform_locks   |
 |                                   |
 |  app_my_app    (mixos_app_my_app) |
 |    goals                          |
@@ -588,7 +588,7 @@ What the platform does between those two boxes, in order:
 |---------------------|-------------------------------|----------------------------------------------|------------------------------|
 | Proxy (optimistic)   | Unauthenticated browsing      | Cookie-PRESENCE check, redirect to /login    | `src/proxy.ts`               |
 | Authoritative auth   | Forged / stale session        | JWT verified per request in route handlers   | `requireReadOnlySession()`   |
-| CSRF protection      | Cross-site request forgery    | `SameSite=Lax` cookie, plus double-submit token on cookie-authenticated mutations | `csrf.ts`, Auth.js, Next.js (see §7) |
+| CSRF protection      | Cross-site request forgery    | `SameSite=Lax` cookie, plus double-submit token on cookie-authenticated app-API mutations | `csrf.ts`, Auth.js, Next.js (see §7) |
 | Admin authorization  | Admin-only pages and actions  | `requireAdmin()` re-reads `is_admin` per call | `access.ts` (see §9)         |
 | Server-side admin    | Admin action bypass           | `requireAdmin()` in pages + server actions   | `access.ts`, admin pages     |
 | Rate limiting        | Abuse / DoS, password guessing | Postgres token-bucket, memory pre-filter    | `rate-limit.ts`, gateway, sign-in and password re-checks (§6), MCP (§17), webhooks (§19) |
@@ -605,8 +605,8 @@ What the platform does between those two boxes, in order:
 | SDK routing          | Direct DB/connector access    | All client calls go through `/api/apps/...`  | `sdk.ts`                     |
 | Safe error responses | Internal detail leakage       | `safeErrorMessage()` strips details in prod  | `safe-error.ts`, all routes  |
 | Request body limit   | Memory-exhaustion DoS         | 27 MB cap, `content-length` checked first; 5 MiB on webhooks, read no further than the cap | `dispatch.ts` (`MAX_BODY_BYTES`), `webhook.ts` (`MAX_WEBHOOK_BODY_BYTES`) |
-| Timing-safe queries  | User/app enumeration          | `.maybeSingle()` on all access checks        | `access.ts`                  |
-| Security headers     | Clickjacking, MIME sniffing   | CSP `frame-ancestors 'self'`, `nosniff`, etc | `next.config.ts`             |
+| Enumeration answers  | User, app and route enumeration | On the public mount, a caller without the sign-in or grant a route needs gets 404, as if there were no route; a sign-in attempt runs one bcrypt hash whether or not the email has an account (§6) | `dispatch.ts`, `password.ts` |
+| Security headers     | Clickjacking, MIME sniffing   | CSP `frame-ancestors 'self'`, `nosniff`, etc | `csp.ts`, set by the proxy or the gateway (§14); `next.config.ts` |
 | Session cookies      | Session hijacking / forgery   | Auth.js JWT, httpOnly, secure, sameSite=lax  | `next-auth` (Auth.js v5)     |
 | Read-only image      | The server changing its own code | Image files owned by root; a read-only root filesystem under Compose (see §31) | `Dockerfile`, `deploy/docker-compose.yml` |
 
@@ -624,7 +624,7 @@ What the platform does between those two boxes, in order:
 | `APP_API_KEY_SECRET`        | HMAC digests for app API keys (the `key` tier) | Lets an attacker mint app API keys |
 | `APP_SETTINGS_ENCRYPTION_KEY` | AES-256-GCM for `password`-typed app settings (`context.env`) | Exposes every app-scoped secret an admin entered |
 | `APP_UNLOCK_SECRET`         | Signs app password-unlock cookies    | Bypass of every app password |
-| `CRON_SECRET`               | Authenticates Vercel Cron -> /api/cron | Attacker can trigger every app background job  |
+| `CRON_SECRET`               | Authenticates the scheduler tick -> /api/cron | Attacker can trigger every app background job  |
 | `VAPID_PRIVATE_KEY`         | Signs Web Push messages              | Attacker could send push to existing subscribers; no data read access |
 | `VAPID_PUBLIC_KEY` / `VAPID_SUBJECT` | Client subscribe key / contact URL | Not secret; public key is handed to the browser to subscribe |
 | `ALLOWED_EMAIL_DOMAINS`     | Restricts user provisioning          | Not secret, but removing it lets any email domain sign in |
@@ -665,7 +665,8 @@ exactly what produced the RLS gap in §8.
 
 **Do not point two keys at the same value, and do not derive one from another.**
 
-In production these are Vercel project environment variables.
+In production these are the host's environment variables
+([hosting](hosting/README.md)).
 
 ---
 
@@ -854,7 +855,7 @@ the one pool configured from `DATABASE_URL`:
 | Client | Module | Used for |
 |--------|--------|----------|
 | The query builder (`createServiceClient()`) | [`src/lib/db/query.ts`](../src/lib/db/query.ts), from [`src/lib/db/server.ts`](../src/lib/db/server.ts) | Essentially everything, including the app-facing `context.db` |
-| Raw `postgres.js` pool (`sql`) | [`src/lib/db/client.ts`](../src/lib/db/client.ts), options in [`src/lib/db/pg-options.ts`](../src/lib/db/pg-options.ts) | The few queries the builder cannot express: analytics aggregates, telemetry rollups, the scheduler's atomic job claim, and the schema's own functions |
+| Raw `postgres.js` pool (`sql`) | [`src/lib/db/client.ts`](../src/lib/db/client.ts), options in [`src/lib/db/pg-options.ts`](../src/lib/db/pg-options.ts) | About twenty platform modules, for what needs a transaction, a lock, an atomic upsert or SQL the builder cannot express: connector credentials and per-user OAuth grants, the MCP token store, rate limits and unlock failures, the admin audit log, analytics and telemetry, the scheduler's job claim, webhook replay markers, and the platform's locks and schema checks. Values are always bind parameters (tagged templates) |
 
 **Both connect as the role that owns every platform table and is a member of
 every app's role, and Row-Level Security does not apply to a table's owner or to
@@ -922,11 +923,13 @@ What it is **not**:
   makes the platform query the wrong row will be served, because the owning role
   is permitted to read every row.
 
-**A table added in a future migration is covered automatically** by the sweep at
-the bottom of `0001_initial.sql` — but only if that migration runs after it. A
-migration that *adds* a table (as `0002` does) should enable RLS on it directly,
-because the earlier sweep has already run. Adding a *policy* is what would open a
-table up; there are none, and there should stay none.
+**A table added in a later migration is not covered by the sweep at the bottom
+of `0001_initial.sql`**, which ran once, when `0001` was applied. A migration
+that *adds* a table enables RLS on it directly, as `0002`, `0003`, `0004` and
+`0007` do. The sweep the release step and `npm run migrate:apps` run over
+`public` afterwards is a backstop, not the rule: `npm run db:migrate` and the
+Supabase CLI apply the platform schema without it. Adding a *policy* is what
+would open a table up; there are none, and there should stay none.
 
 ### Where authorization actually happens
 
@@ -977,7 +980,8 @@ from a `"use client"` component, would be a full database compromise.
 
 ## 9. Admin Authorization
 
-Admin pages and server actions enforce authorization at two layers:
+Admin pages and server actions enforce authorization in one place, each for
+itself:
 
 ```
   THERE IS NO PROXY-LEVEL ADMIN GATE.
@@ -996,7 +1000,7 @@ session JWT could go stale after a demotion, so `requireAdmin()` reads
 `is_admin` from the database on every call rather than trusting the token.
 
 Because server actions are directly invocable POST endpoints, each admin action
-(`configureConnector`, `toggleUserGrant`, `toggleAppRegistration`,
+(`configureConnector`, `toggleUserGrant`, `setAppActiveAction`,
 `getAppSchema`, `revokeUserSessionsAction`, …) calls `requireAdmin()` itself.
 Nothing upstream does it for them, so an action that forgets the call is fully
 exposed to any signed-in user.
@@ -1147,7 +1151,7 @@ not a rule for the app to disclaim.
 **Platform code** fetches URLs it did not author in three places, and none goes
 through `context.http`:
 
-- **The connector OAuth token exchange** (§18). The token endpoint comes from the
+- **The connector OAuth token exchange** (§27). The token endpoint comes from the
   connector manifest — code, not user input — and the admin-supplied half is only
   the authorization code.
 - **The repository install path** (§31). The tarball URL is chosen by
@@ -1254,9 +1258,10 @@ first 10 MB (`proxyClientMaxBodySize`), so the route would get a truncated body
 and no error. As a second line, a body that ends short of its declared
 `content-length` fails the route's read rather than arriving cut.
 
-The rate limiter runs before body parsing (in the App Router, the request
-body is not read until the handler calls `request.json()`), so rate limiting
-applies even to oversized requests.
+The `content-length` check and the rate limiter both run before anything reads
+the body (in the App Router, it is not read until the handler calls
+`request.json()`). The check comes first, so a request it refuses is never
+charged to the rate limiter.
 
 Inbound webhooks have a cap of their own, 5 MiB (`MAX_WEBHOOK_BODY_BYTES`,
 `src/lib/connectors/webhook.ts`), which holds without `content-length` too: the
@@ -1284,7 +1289,7 @@ separately again for the per-user grant lookup on a `userScoped` connector.
 platform never *constructs* a log line containing a credential, but it does not
 scrub the thrown object either — a connector whose `initialize()` throws an error
 carrying the credential it just rejected will put that value in the server log.
-Connector authors own this: invariant 16 in
+Connector authors own this: invariant 18 in
 [`connectors/AGENTS.md`](../connectors/AGENTS.md) is "never log or echo
 credentials", and dropping the upstream error body is the base class's job.
 
@@ -1294,10 +1299,10 @@ credentials", and dropping the upstream error body is the base class's job.
 ## 17. MCP Server and OAuth Authorization Server
 
 MixOS exposes a single MCP server at `POST /api/mcp` so an MCP client (claude.ai,
-Claude Desktop, Claude Code) can read app data on a user's behalf. This is the
-only inbound surface authenticated by a **bearer token** rather than a session
-cookie, and the only place MixOS acts as an OAuth **authorization server** rather
-than an OAuth client.
+Claude Desktop, Claude Code) can read app data on a user's behalf. It is
+authenticated by an OAuth **bearer token** rather than a session cookie, and it
+is the only place MixOS acts as an OAuth **authorization server** rather than an
+OAuth client.
 
 ### Authorization chain
 
@@ -1366,11 +1371,9 @@ tables is the worst outcome this feature could have:
 - Tokens and authorization codes are **opaque** high-entropy random strings,
   never JWTs. Revocation must take effect on the next request, and that is worth
   one indexed lookup per call.
-- Only `HMAC-SHA256(value, key)` digests are stored. The key is derived from
-  `CONNECTOR_ENCRYPTION_KEY` via HMAC with a fixed label — the same PRF-separation
-  pattern as `src/lib/apps/unlock-secret.ts` — so a database leak alone yields
-  nothing replayable, and this key cannot be used to recover the base key or
-  decrypt connector credentials. **No new environment secret.**
+- Only `HMAC-SHA256(value, key)` digests are stored. The key is `MCP_TOKEN_KEY`,
+  a variable of its own (§5), so a database leak alone yields nothing
+  replayable, and rotating it revokes every MCP token and code and nothing else.
 - HMAC rather than bcrypt: these are 256-bit random values with nothing to
   brute-force, and lookup must be by exact digest. (App *passwords* use bcrypt
   because those are low-entropy and human-chosen.)
@@ -1556,8 +1559,9 @@ Both halves are required, and the second is the one that gets skipped:
    `JSON.parse` → `JSON.stringify` does not round-trip key order or whitespace,
    and the signature is over bytes. The algorithm comes from the connector
    manifest (`hmac-sha1` → sha1, otherwise sha256); hex and base64 digests are
-   both accepted, as is a `t=...,v1=...` style header where the value follows an
-   `=`. Compared with `timingSafeEqual`.
+   both accepted, bare or after one `prefix=` such as `sha256=`. A header that
+   carries several fields, such as `t=...,v1=...`, is not parsed, so it never
+   verifies. Compared with `timingSafeEqual`.
 2. **Timestamp** — a signature is valid forever, so without a freshness window an
    attacker who captured one delivery can replay it indefinitely. When the policy
    declares a timestamp header the signed payload is `${timestamp}.${rawBody}`
@@ -1628,8 +1632,10 @@ and Enable are audited (§28).
 
 ## 20. Scheduled Jobs
 
-`GET /api/cron` drives the scheduler — Vercel Cron in production, a compose
-sidecar locally.
+`GET /api/cron` drives the scheduler. In production the host's scheduler calls
+it every 5 minutes: Vercel Cron, a Render cron job, a Railway cron service or
+the Compose `cron` service ([hosting](hosting/README.md)). Locally, a compose
+sidecar does.
 
 - **Auth** is a bearer comparison against `CRON_SECRET`, length-checked first then
   `timingSafeEqual` (the function throws on length mismatch). It **fails closed**
@@ -1672,8 +1678,8 @@ The `password` tier (§1) gates a public app behind a shared password.
   `app_passwords`. Absence of a row is **fail-closed** — no password configured
   means no unlock, not open access.
 - **Cookie**: not a JWT. `b64url(JSON{s,iat,exp}) + "." + b64url(HMAC-SHA256)`,
-  verified with `timingSafeEqual`, signed with a key derived from
-  `APP_UNLOCK_SECRET`. The app slug is bound **inside** the signed payload as well
+  verified with `timingSafeEqual`, signed with `APP_UNLOCK_SECRET`, a key of
+  its own (§5). The app slug is bound **inside** the signed payload as well
   as in the cookie path, so one app's cookie cannot unlock another.
 - **Path scoping**: two cookies, scoped to `/p/<slug>` and `/api/p/<slug>`. This
   is also why the `password` tier is not served on `/api/apps` — a browser would
@@ -1722,16 +1728,16 @@ retention exceeds the penalty with a full lockout of headroom.
 The `key` tier (§1), for machine-to-machine callers. Public mount only.
 
 - Format `mixk_` + 32 random bytes, base64url. Shown **once** at mint time.
-- Stored as `HMAC-SHA256(key, k)` in `app_api_keys`, where `k` derives from
-  `CONNECTOR_ENCRYPTION_KEY` under its own label. HMAC rather than bcrypt because
+- Stored as `HMAC-SHA256(key, k)` in `app_api_keys`, where `k` is
+  `APP_API_KEY_SECRET`, a key of its own (§5). HMAC rather than bcrypt because
   these are high-entropy random values with nothing to brute-force, and lookup
   must be by exact digest.
 - **Bound to one app.** A valid key for app A presented on app B's route resolves
   to nothing.
 - **Scoped per method and route pattern.** A key minted for one endpoint does not
   become a key for the whole app.
-- Deliberately **not** derived from `APP_UNLOCK_SECRET`, so rotating app passwords
-  does not silently invalidate every integration.
+- Deliberately **independent** of `APP_UNLOCK_SECRET`, so rotating the unlock
+  key does not silently invalidate every integration.
 
 ---
 
@@ -1792,10 +1798,11 @@ encrypted at rest and decrypted here and nowhere else.
 Lint flags the environment in the editor, but lint runs on pull requests to this
 repository and nowhere else, so for an extension installed from the Registry it
 would be advice. The rule that holds is in the registry generator, which runs on
-every build and as step 9 of every install (§31). Before it loads any of an
-app's code, it reads the syntax tree of every source file under `apps/<slug>/`
-(`scripts/app-containment.ts`) and skips the app — on the install path, rejects
-it and rolls it back — if the code references:
+every build and in every install's check (§31), on the staged copy, before the
+install puts anything in place. Before it loads any of an app's code, it reads
+the syntax tree of every source file in the app's folder
+(`scripts/app-containment.ts`) and skips the app — on the install path, the
+check rejects it, and it never reaches `apps/` — if the code references:
 
 - `process` in any form: `process.env`, `globalThis.process`, an import of
   `process` or `node:process`;
@@ -1959,8 +1966,8 @@ ever about an app the user holds. A page that `pageVisibility` opens to any
 signed-in user is served without the grant, but its opens and events are
 recorded only for users who hold the app.
 
-What a client can still choose is **which** declared event fired, and for which
-of the apps the user holds: not who fired it.
+A client cannot forge **who** fired an event, or record one for an app the user
+doesn't hold. What it still chooses is which declared event fired.
 
 ---
 
@@ -1969,10 +1976,15 @@ of the apps the user holds: not who fired it.
 Distinct from §17, where MixOS is an authorization *server*. Here it is a client,
 obtaining a grant from a third party.
 
-`/api/connectors/<name>/oauth/start` and `/callback` are **admin-only**
-(`requireReadOnlySession()` + `requireAdmin()`) and are deliberately **not** on
-the proxy's public prefix list — `/api/connectors` stays session-gated, which is
-why the webhook route lives under `/api/webhooks` instead.
+`/api/connectors/<name>/oauth/start` and `/callback` need a session
+(`requireReadOnlySession()`). For a tenant connector they are **admin-only**
+(`requireAdmin()`). For a user-scoped one (§3.4), any signed-in user may connect
+their own account, and the callback refuses unless the signed-in user is the
+one who started the flow, as recorded in its cookie
+(`src/lib/connectors/oauth-flow.ts`).
+Both are deliberately **not** on the proxy's public prefix list —
+`/api/connectors` stays session-gated, which is why the webhook route lives
+under `/api/webhooks` instead.
 
 - The PKCE verifier is carried in an **encrypted, short-lived cookie**, not in a
   server-side table.
@@ -2117,11 +2129,13 @@ Resolved by upgrading `next-auth` beta.31 → beta.32, `next` 16.2.3 → 16.3.3 
 `js-yaml`, `brace-expansion`, `qs`, `postcss`). **11 → 1**, and the remainder is
 `esbuild` under `tsx`: dev tooling, never shipped.
 
-**Make this recurring.** A one-off audit dates immediately; the finding here was
-not that a particular version was vulnerable but that nobody was looking. `npm
-audit` belongs in CI beside the blocking lint and typecheck steps, with a
-severity threshold rather than a clean-slate requirement so a low advisory in a
-dev dependency cannot block a release.
+**It is recurring now.** A one-off audit dates immediately; the finding here was
+not that a particular version was vulnerable but that nobody was looking. CI
+runs `npm audit` as a blocking step beside lint and typecheck
+(`.github/workflows/ci.yml`), with severity thresholds rather than a clean-slate
+requirement: what ships (`--omit=dev`) fails on a high advisory, and dev
+tooling only on a critical one, so a low advisory in a dev dependency cannot
+block a release.
 
 ---
 
@@ -2154,14 +2168,19 @@ directory must not exist, and:
 3. Download from GitHub, PINNED TO THE COMMIT, through the host allowlist
 4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
 5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
-6. Pre-flight the manifest: it exists, it parses, it is for this slug
-7. Check the lock, then write to `.installing-<slug>` beside the target,
-   never to the target
-8. Check the lock, then rename into place — the first moment the tree is live
-9. Run scripts/generate-project-registry.ts — the authoritative validation,
-   containment scan included (§24)
-10. If it was rejected, check the lock, then remove the directory and
-    regenerate, so a failed registration leaves the instance exactly as it was
+6. Pre-flight: the manifest exists, parses and is for this slug, and every
+   path lands on disk as what it names (below)
+7. Check the lock, then write to `.installing-<slug>/<slug>/` beside the
+   target, never to the target
+8. CHECK IT WITHOUT RUNNING IT: generate-project-registry.ts --check reads
+   the staged copy and imports none of it (below). Rejected, or no verdict:
+   check the lock, delete the staged copy, stop
+9. Check the lock, then rename into place — the first moment the tree is live
+10. Run scripts/generate-project-registry.ts, which loads the extension's
+    code for the first time
+11. If it left the extension out or stopped, check the lock, then remove the
+    directory and regenerate, so a failed registration leaves the instance
+    exactly as it was
 ```
 
 **Nothing untrusted touches the filesystem before step 5.** That is why the tar
@@ -2171,11 +2190,66 @@ then depends on its cleanup being correct for that not to matter. It also means
 the path rules are ours rather than differing between GNU tar and bsdtar, which
 is what this project runs on in Docker and in development respectively.
 
+**What is reviewed is what lands.** A reviewer reads the source on GitHub; what
+runs is what lands on this disk. So step 6 also refuses a package whose paths
+would make the two differ (`pathProblems()`, `src/lib/repository/install.ts`):
+
+- two paths, or two folders, that differ only in case or Unicode normalisation,
+  such as `api/report/route.ts` beside `API/report/route.ts`. A case-insensitive
+  disk, the default on macOS and Windows, stores them as one, and of two files
+  the one written last is the one that runs;
+- a path holding a control character (C0, DEL or C1), a Unicode bidi control or
+  a line separator, any of which can change how the path prints in a terminal
+  or in the dialogs. A refusal shows each one escaped, as `\u{202E}`;
+- a `.gitattributes`, `.gitignore` or `.git` at any depth. Each changes what the
+  operator's repository records when the extension is committed, or how a
+  review shows it: an attribute can hide a diff or mark files as generated, an
+  ignore rule can keep a file the extension runs out of the commit, and a `.git`
+  makes git treat the folder as a repository of its own.
+
+### What runs, and when
+
+**Nothing the package ships runs before step 10.** Step 8 is the registry
+generator in check mode, `generate-project-registry.ts --check <kind> <dir>
+--verdict-file <path>`, on the staged copy. It treats that copy as the
+extension's own folder, the folder's name as its slug, and runs every check that
+reads text: the manifest against its schema, the containment scan and the
+import rules (§24), the SQL check on an app's migrations (§3.2), the file and
+text checks, and the checks that span extensions — App Services and hook
+wiring, schema and role clashes, user-scoped connectors in scheduled jobs — over
+the manifests already registered in `src/generated/`, with this one added. It
+reads those registered manifests as text, too.
+
+What it leaves out is the point of it. It imports none of the extension's code,
+so an app's `widgets.ts` and the `defineRoute` contract in each `route.ts` are
+listed in the verdict as deferred, checked at registration, which loads them. A
+connector's and a theme's checks never load code, so the check runs all of them.
+It writes nothing to `src/generated/` or `public/`, and does not stamp the build.
+
+**The verdict is a file.** The check writes one verdict,
+`{"verdict":"accepted"|"rejected","problems":[…],"deferred":[…]}`, to a path in a
+directory the installing process makes for it, and the install accepts it only
+when the check exited 0 and that directory holds exactly one well-formed verdict
+(`checkExtension()`). Each problem names its file. What the check prints is shown
+to the admin and never parsed: it repeats file names and manifest strings, which
+the package chooses, so a line of it could be made to read as a verdict.
+
+**A generator an install starts gets `PATH` and `TMPDIR`, and nothing else**
+(`generatorEnv()`), for the check and for step 10 alike. The server's own
+environment, `DATABASE_URL`, `AUTH_SECRET` and `CONNECTOR_ENCRYPTION_KEY` among
+it, never reaches either run.
+
+**Staged copies are never scanned.** The staging folder is dot-prefixed, and the
+generator skips every dot-prefixed folder in `apps/`, `connectors/` and
+`themes/`, as it skips `_template`. A staged copy, or one a crash left behind,
+is never imported or registered, and the next install of the same slug clears
+it.
+
 ### The register lock is a lease, renewed and fenced
 
 Two registrations at once would run two generators over the same
 `src/generated/*.ts` files, and one's rollback could land on top of the other's
-success. So steps 1 to 10 run under one instance-wide lock, `repository.register`
+success. So steps 1 to 11 run under one instance-wide lock, `repository.register`
 ([`src/lib/platform/lock.ts`](../src/lib/platform/lock.ts)): a row in
 `_platform_locks` rather than a Postgres advisory lock, because a session
 advisory lock does not survive a transaction pooler. An admin who registers
@@ -2190,15 +2264,15 @@ mid-download, and carry on when it wakes, by which time another may hold the
 lock. Three rules cover that:
 
 - **The holder renews the lease every minute** while it works, so a slow but
-  live registration never loses it, the generator run in step 9 included. That
-  makes its own time limits the lock's: the repository and GitHub requests time
-  out, and a generator run is ended after 120 seconds, the processes it started
-  included.
-- **The lock is checked before the disk changes.** Steps 7, 8 and 10 begin with
-  `assertHeld()`, `update _platform_locks set acquired_at = now() where name =
-  $1 and holder = $2 returning 1`, which renews the lease only while the row
-  still holds this acquisition's random token. Step 9 runs straight after step
-  8's check.
+  live registration never loses it, the generator runs in steps 8 and 10
+  included. That makes its own time limits the lock's: the repository and
+  GitHub requests time out, and a generator run is ended after 120 seconds, the
+  processes it started included.
+- **The lock is checked before the disk changes.** Steps 7, 9 and 11, and
+  deleting a staged copy the check refused, begin with `assertHeld()`,
+  `update _platform_locks set acquired_at = now() where name = $1 and holder =
+  $2 returning 1`, which renews the lease only while the row still holds this
+  acquisition's random token. Step 10 runs straight after step 9's check.
 - **A holder that has lost the lock stops without touching the disk**, cleanup
   included: by then the staging directory, or the registry it would regenerate,
   may be the new holder's. The admin is told what was left on disk, and the
@@ -2243,9 +2317,8 @@ the next path is ambiguous and two different trees can be made to collide.
 agree on `sha256-<base64>` and disagree on how a tree becomes bytes produce a
 mismatch on every honest package, which is indistinguishable from an attack and
 is how a check gets disabled. So the serialisation is written down, versioned by
-its domain prefix (`mixos-tree-v1`), and mixos.org's publish path must implement
-the same one. **Until it does, the check has nothing real to compare against —
-see the note on the upstream below.**
+its domain prefix (`mixos-tree-v1`), and mixos.org's publish path computes the
+same one.
 
 The algorithm is pinned to sha256 by the schema's regex rather than parsed out of
 an `<alg>-<digest>` field. A server that can name the algorithm can name a weak
@@ -2325,10 +2398,15 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   build. Registering is an operation on a source checkout; no arrangement of a
   shipped artifact makes it work.
 
-  Relatedly, `RegistryOutcome.brokenToolchain` now separates the two failures
-  everywhere. A non-zero exit from the generator is never its verdict on one
-  extension — per-item problems are `Skipping <dir>/ — ...` warnings and the run
-  still exits 0, because one bad app must not break everyone else's build.
+  Relatedly, a check that could not judge is never reported as a judgement. The
+  check's verdict is a file (see **What runs, and when**): a check that exits
+  non-zero, runs out of time or leaves no well-formed verdict has judged
+  nothing, and the admin is told this checkout could not complete it, as
+  `generator-failed`. A rejection is a verdict that lists its problems, as
+  `rejected-by-registry`. After a passing check, step 10 can still leave the
+  extension out, for what only its code shows, which is a rejection; or stop
+  with a non-zero exit, which could be the extension's code or the checkout, and
+  is reported as either.
 
   In the Docker image, everything but Next's two cache directories belongs to
   root, and the server runs as `node`, so it cannot change its own code on any
@@ -2338,9 +2416,9 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   [docs/hosting/docker-compose.md](hosting/docker-compose.md#whats-read-only)).
   The marker is checked first, so an admin there is told why a built deployment
   cannot register, not that a folder is read-only.
-- **Carry the archive's file modes.** Everything is written `0644`. Nothing here
-  execs a source file, and an archive that can set the mode of a file it places
-  in the checkout can set the setuid bit.
+- **Carry the archive's file modes.** Everything is written `0644`: an archive
+  that can set the mode of a file it places in the checkout can set the setuid
+  bit, and no file an extension ships is a program to execute.
 
 ### A built deployment searches mixos.org
 
@@ -2426,19 +2504,19 @@ admin is actually being asked to weigh. Building the client against the spec's
 full `Extension` instead is a mistake that fails as "every search response is
 malformed", which reads like the repository being broken.
 
-**Nothing on it is installable yet.** Every release in the seeded catalogue
-publishes `sha256-PLACEHOLDER-<slug>` where the checksum goes, so
-`isVerifiableHash` refuses all of them with `unverifiable-checksum`. That is the
-pipeline working, not failing — and it is why the hash format is a *semantic*
-check rather than a parse rule: a placeholder is a well-formed answer whose
-content is "this cannot be verified", and rejecting the whole payload as
-malformed would take browsing down over a fact that only matters at the moment
-of installing.
+**A release without a real hash is not installable.** A release that carries
+`sha256-PLACEHOLDER-<slug>` where the checksum goes, as every release in
+mixos.org's seed data does, is refused by `isVerifiableHash` with
+`unverifiable-checksum`. That is the pipeline working, not failing — and it is
+why the hash format is a *semantic* check rather than a parse rule: a
+placeholder is a well-formed answer whose content is "this cannot be verified",
+and rejecting the whole payload as malformed would take browsing down over a
+fact that only matters at the moment of installing.
 
 There is deliberately **no override** for it. `yanked` has one, because a
 withdrawn release is a risk an admin can read a reason for and knowingly accept;
 an unverifiable download is not something anyone is in a position to weigh.
 
-**What has to land on the mixos.org side** before this is a real control: a
-publish path that computes `contentHash` with the serialisation above and stores
-it in place of the placeholder.
+**The mixos.org side has landed.** Publishing a release reads its tagged
+archive and stores the `contentHash` computed with the serialisation above, so
+a release published that way can be verified and installed.

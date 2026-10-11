@@ -18,10 +18,12 @@ To use a connector, add its name to the `connectors` array in your `app.json`. T
 }
 ```
 
-Access initialized connectors via `context.connectors` in your pages, widgets, or API routes:
+A connector that only part of the app uses goes in `optionalConnectors` instead. It is built into `context.connectors` the same way, but an admin can activate and grant the app before it is configured, so the part that uses it must cope without it.
+
+Access initialized connectors via `context.connectors` in your API routes, and in the jobs, syncs, services and MCP tools that are handed `context`. Pages and widgets get no `context`: they call the app's own routes (see [API Routes](./api-routes.md#calling-from-a-widget-or-client-page)).
 
 ```ts
-// In a page or server-side code
+// In an API route handler
 const monday = context.connectors.monday;
 const contacts = await monday.getContacts({ limit: 10 });
 
@@ -31,74 +33,94 @@ const messages = await slack.getMessages({ channel: "C0123456789" });
 
 ## Creating a Connector
 
-Each connector has a directory under `/connectors` with two files:
+Each connector has a directory under `/connectors` with a manifest, an implementation and an icon:
 
 ```
 connectors/my-service/
-  connector.json    # Metadata and credential fields
+  connector.json    # Metadata, credential fields, setup guide
   index.ts          # Implementation class
+  assets/
+    icon.svg        # Required: an SVG with a viewBox, or a square PNG/WebP of at least 512x512
 ```
 
 See [connectors/architecture.md](../connectors/architecture.md) and [connectors/implementation.md](../connectors/implementation.md) for full details.
 
 ## Connector Manifest (connector.json)
 
-Declares the connector's metadata and what credentials it needs. These fields appear in the Connector Registry admin UI.
+Declares the connector's metadata, what credentials it needs, and how to get them. These fields appear in the Connector Registry admin UI.
 
 ```json
 {
   "name": "my-service",
   "displayName": "My Service",
-  "description": "Connector for the My Service API",
+  "icon": "assets/icon.svg",
+  "description": "Project tracking for small teams.",
+  "setup": {
+    "title": "Create an API key",
+    "steps": [
+      {
+        "text": "Open API keys and create a key with read access.",
+        "link": { "label": "API keys", "url": "https://myservice.example.com/settings/api-keys" }
+      }
+    ]
+  },
   "credentialFields": [
     { "key": "apiKey", "label": "API Key", "type": "password" },
-    { "key": "baseUrl", "label": "Base URL", "type": "text" }
-  ]
+    { "key": "baseUrl", "label": "Base URL (optional)", "type": "text" }
+  ],
+  "auth": {
+    "strategy": "apiKey",
+    "credentialKeys": ["apiKey"],
+    "scopesUrl": "https://docs.myservice.example.com/api/scopes"
+  },
+  "http": { "baseUrl": "https://api.myservice.example.com" },
+  "telemetry": [{ "method": "listItems", "description": "Listed items" }]
 }
 ```
 
 | Field | Required | Description | Example |
 | --- | --- | --- | --- |
-| `name` | ✅ | Unique identifier for the connector. Used in app.json and internally. | `"name": "my-service"` |
+| `name` | ✅ | Unique identifier for the connector, matching its folder name. Used in app.json and internally. | `"name": "my-service"` |
 | `displayName` | ✅ | Human-readable name shown in the Connector Registry. | `"displayName": "My Service"` |
-| `description` |  | Brief description of what this connector integrates with. | `"description": "Connector for the My Service API"` |
+| `icon` | ✅ | The registry tile's icon, a path inside the connector's `assets/` written with that prefix. | `"icon": "assets/icon.svg"` |
+| `description` |  | What the service is, in a sentence or two. Max 140 characters. | `"description": "Project tracking for small teams."` |
+| `setup.title` | ✅ | Label for the provider-side step of the Configure wizard. | `"title": "Create an API key"` |
+| `setup.steps` | ✅ | At least one step: what the admin does in the provider's own console. | `{ "text": "Open API keys and create a key." }` |
 | `credentialFields` |  | Array of credential fields the admin must provide. Omit it only for a connector that needs no credentials (`auth.strategy` `none`), which is ready as soon as it is installed. |  |
 | `credentialFields[].key` | ✅ | Property name used to access this credential in the connector's initialize method. | `"key": "apiKey"` |
 | `credentialFields[].label` | ✅ | Label shown in the admin configuration form. | `"label": "API Key"` |
 | `credentialFields[].type` | ✅ | Either `text` for visible input or `password` for masked input. | `"type": "password"` |
+| `auth` |  | How the platform authenticates. Absent means `{ "strategy": "none" }`, a public API. Any other strategy needs `auth.scopesUrl`, the provider's page listing its scopes. | `"auth": { "strategy": "apiKey", "credentialKeys": ["apiKey"], "scopesUrl": "https://…" }` |
+| `telemetry` | ✅ | One entry per public method of the class, `{ method, description?, mutates? }`. The build fails on a public method that isn't listed. | `"telemetry": [{ "method": "listItems" }]` |
+
+The build fails on a connector missing any required field, and checks the icon's shape. The full reference is [connectors/architecture.md](../connectors/architecture.md#field-reference); what the registry needs, and why, is [the registry contract](../connectors/registry-ux.md#the-registry-contract).
 
 ## Connector Implementation
 
-The `index.ts` file exports a class that implements the `BaseConnector` interface. The platform calls `initialize()` with decrypted credentials before the connector is passed to any app.
+The `index.ts` file default-exports a class that extends `HttpConnector`, which applies the manifest's `auth` and `http` policy: authentication, timeouts, retries and typed errors. You write `testConnection()` and the methods apps call. The platform calls `initialize()` with decrypted credentials before the connector is passed to any app.
 
 ```ts
 // connectors/my-service/index.ts
-import type { BaseConnector } from "@/lib/connectors/types";
+import { HttpConnector } from "@/lib/connectors/http-connector";
+import type { ConnectorTestResult } from "@/lib/connectors/types";
 
-export default class MyServiceConnector implements BaseConnector {
+export default class MyServiceConnector extends HttpConnector {
   readonly name = "my-service";
-  private apiKey = "";
-  private baseUrl = "";
 
-  get configured(): boolean {
-    return !!this.apiKey;
+  async testConnection(): Promise<ConnectorTestResult> {
+    await this.request("/me");
+    return { ok: true };
   }
 
-  initialize(credentials: Record<string, string>): void {
-    this.apiKey = credentials.apiKey ?? "";
-    this.baseUrl = credentials.baseUrl ?? "https://api.myservice.com";
-  }
-
-  async getItems(params?: { limit?: number }) {
-    const res = await fetch(
-      `${this.baseUrl}/items?limit=${params?.limit ?? 20}`,
-      { headers: { Authorization: `Bearer ${this.apiKey}` } }
-    );
-    if (!res.ok) throw new Error(`MyService API error: ${res.status}`);
-    return res.json();
+  async listItems(params?: { limit?: number }) {
+    return this.request<{ id: string; name: string }[]>("/items", undefined, {
+      query: { limit: params?.limit ?? 20 },
+    });
   }
 }
 ```
+
+See [connectors/implementation.md](../connectors/implementation.md) for pagination, errors and writes.
 
 ## What a Connector Owes a Long Pull
 
@@ -148,7 +170,7 @@ Connector credentials are managed entirely through the admin UI:
 
 ## User-Scoped (Per-User) Connectors
 
-Some connectors authenticate each logged-in user against an external IdP (e.g. Slack, Google Calendar) instead of using a single admin-configured credential set. **Apps don't declare scope — the connector itself does**, by virtue of implementing `OAuthCapableConnector` in its `index.ts`. Apps just list connector names:
+Some connectors authenticate each logged-in user against an external IdP (e.g. Slack, Google Calendar) instead of using a single admin-configured credential set. **Apps don't declare scope — the connector itself does.** Apps just list connector names:
 
 ```json
 {
@@ -166,19 +188,23 @@ When a user-scoped connector is absent from `context.connectors`, the user has n
 
 ```ts
 // apps/<slug>/api/<thing>/route.ts
-import type { AppContext } from "@/lib/hooks/types";
+import { z } from "zod";
+import { defineRoute } from "@/lib/apps/route";
 import type SlackConnector from "@connectors/slack";
 
-export async function GET(_req: Request, { context }: { context: AppContext }) {
-  const slack = context.connectors.slack as unknown as
-    | SlackConnector
-    | undefined;
-  if (!slack?.configured) {
-    return NextResponse.json({ connected: false });
-  }
-  const messages = await slack.getMessages({ /* ... */ });
-  return NextResponse.json({ connected: true, messages });
-}
+const Message = z.object({ id: z.string(), text: z.string() });
+
+export const GET = defineRoute({
+  output: z.object({ connected: z.boolean(), messages: z.array(Message).optional() }),
+  handler: async (context) => {
+    const slack = context.connectors.slack as unknown as
+      | SlackConnector
+      | undefined;
+    if (!slack?.configured) return { connected: false };
+    const messages = await slack.getMessages({ /* ... */ });
+    return { connected: true, messages };
+  },
+});
 ```
 
 ```tsx
@@ -207,4 +233,4 @@ if (data.connected === false) {
 
 ### How to make a connector user-scopable
 
-It's a connector-side change, not an app-side one. The connector's `index.ts` implements `OAuthCapableConnector` (exports an `oauth` object); the platform picks that up at registry-generation time and exposes the connector as user-scoped to every app that lists it. See [connectors/implementation.md](../connectors/implementation.md#oauth-capable-connectors-user-scoped) and the OAuth connector template at [connectors/_template-oauth/](../../connectors/_template-oauth/).
+It's a connector-side change, not an app-side one. The connector sets `"userScoped": true` in its `connector.json`, which needs `auth.strategy` `oauth2_authorization_code`, and the platform treats it as user-scoped for every app that lists it. The OAuth connector template at [connectors/_template-oauth/](../../connectors/_template-oauth/) is a three-legged connector without the flag, shared by the whole deployment. See [connectors/architecture.md](../connectors/architecture.md#user-scoped-connectors).

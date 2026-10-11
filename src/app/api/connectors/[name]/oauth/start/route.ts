@@ -12,12 +12,13 @@ import {
 import { startConnectorOAuth } from "@/lib/connectors/oauth-flow";
 
 /**
- * Begin the tenant OAuth consent flow for one connector.
+ * Begin the OAuth consent flow for one connector: an admin's for a tenant
+ * connector, or a signed-in user's own grant for a user-scoped one.
  *
- * Admin-only, and deliberately NOT in the proxy's public prefixes: this is a
- * browser navigation carrying a session cookie, so bouncing an unauthenticated
- * visitor to /login is the correct behaviour. Who may start which flow, and
- * when it is refused, is decided in src/lib/connectors/oauth-flow.ts.
+ * Deliberately NOT in the proxy's public prefixes: this is a browser
+ * navigation carrying a session cookie, so bouncing an unauthenticated visitor
+ * to /login is the correct behaviour. Who may start which flow, and when it is
+ * refused, is decided in src/lib/connectors/oauth-flow.ts.
  *
  * The PKCE verifier goes into an encrypted, HttpOnly cookie rather than into
  * `state` — the provider sees `state`, and handing it the verifier would

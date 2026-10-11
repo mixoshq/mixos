@@ -299,7 +299,7 @@ export function validateRegistryContract(
 
   if (!raw.icon) {
     missing.push(
-      '"icon" — a square PNG/WebP/SVG of at least 512x512 in this connector\'s assets/',
+      '"icon" — a square PNG or WebP of at least 512x512, or an SVG with a viewBox, in this connector\'s assets/',
     );
   }
   if ((raw.auth?.strategy ?? "none") !== "none" && !raw.auth?.scopesUrl) {

@@ -7,14 +7,15 @@
 /**
  * Status indicators that cannot be built colour-only.
  *
- * Both components take a required `label`, which is rendered into `aria-label`
- * and `title`. That's deliberate: "don't communicate state with colour alone"
- * is the kind of rule that gets nodded at in review and then quietly skipped,
- * so here the type signature refuses to compile without the text alternative
- * rather than a reviewer having to catch it.
+ * Each one requires its text: `StatusDot` a `label`, rendered into
+ * `aria-label` and `title`, and `StatusPill` and `StatusSwatch` their visible
+ * text as `children`. That's deliberate: "don't communicate state with colour
+ * alone" is the kind of rule that gets nodded at in review and then quietly
+ * skipped, so here the type signature refuses to compile without the text
+ * alternative rather than a reviewer having to catch it.
  *
- * Colours come from the semantic tokens in globals.css, which are verified to
- * clear WCAG AA in both themes. Never pass a hex.
+ * Colours come from the semantic tokens, whose values each theme sets and the
+ * build verifies against WCAG AA. Never pass a hex.
  */
 
 /** Semantic status. `null` means "not known yet" — a distinct state from every

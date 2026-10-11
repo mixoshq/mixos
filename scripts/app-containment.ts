@@ -10,8 +10,9 @@
  * every app, on every build and every Registry install:
  *
  *  - THE PROCESS ENVIRONMENT. `process.env` holds DATABASE_URL (every table,
- *    as their owner) and CONNECTOR_ENCRYPTION_KEY (every stored credential).
- *    An app reads its configuration as `context.env`.
+ *    as their owner), AUTH_SECRET (every session) and the platform keys in
+ *    src/lib/env/keys.ts, such as CONNECTOR_ENCRYPTION_KEY (every stored
+ *    connector credential). An app reads its configuration as `context.env`.
  *  - THE NETWORK. A raw `fetch` is the SSRF and exfiltration path that
  *    `context.http` exists to close: it checks the manifest's `egress`, resolves
  *    the host and re-checks every address. A fixed upstream is a connector.
