@@ -22,7 +22,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { MaintenanceState } from "@/lib/platform/maintenance-gate";
 
-const state = globalThis as { __maintenanceState?: MaintenanceState };
+const state = globalThis as { __dispatchTestMaintenance?: MaintenanceState };
 const BEHIND: MaintenanceState = { platformBehind: true, appsBehind: new Set() };
 const CURRENT: MaintenanceState = { platformBehind: false, appsBehind: new Set() };
 
@@ -35,7 +35,7 @@ before(async () => {
   const stub = path.join(work, "maintenance.mjs");
   fs.writeFileSync(
     stub,
-    `export function maintenanceState() { return Promise.resolve(globalThis.__maintenanceState); }\n`,
+    `export function maintenanceState() { return Promise.resolve(globalThis.__dispatchTestMaintenance); }\n`,
   );
   resolver = registerHooks({
     resolve(specifier, context, nextResolve) {
@@ -79,7 +79,7 @@ function call(mount: (typeof MOUNTS)[number], method: "GET" | "POST", init: Requ
 }
 
 test("while the platform schema is behind, both mounts give the maintenance response first", async () => {
-  state.__maintenanceState = BEHIND;
+  state.__dispatchTestMaintenance = BEHIND;
   for (const mount of MOUNTS) {
     for (const method of ["GET", "POST"] as const) {
       const res = await call(mount, method, method === "POST" ? { body: "{}" } : {});
@@ -96,7 +96,7 @@ test("while the platform schema is behind, both mounts give the maintenance resp
 });
 
 test("otherwise the request goes through, and the answer carries the CSP", async () => {
-  state.__maintenanceState = CURRENT;
+  state.__dispatchTestMaintenance = CURRENT;
   for (const mount of MOUNTS) {
     for (const method of ["GET", "POST"] as const) {
       // A POST carries a body, so it is past the body cap's copy of the request
@@ -112,7 +112,7 @@ test("otherwise the request goes through, and the answer carries the CSP", async
 });
 
 test("OPTIONS is Next's own answer for the mount files, with the CSP", async () => {
-  state.__maintenanceState = CURRENT;
+  state.__dispatchTestMaintenance = CURRENT;
   for (const mount of MOUNTS) {
     const res = await gateway.appRouteOptions(new Request(mount.url, { method: "OPTIONS" }));
     assert.equal(res.status, 204);
@@ -122,7 +122,7 @@ test("OPTIONS is Next's own answer for the mount files, with the CSP", async () 
 });
 
 test("a declared length over the cap is a 413 before the body is read", async () => {
-  state.__maintenanceState = CURRENT;
+  state.__dispatchTestMaintenance = CURRENT;
   for (const mount of MOUNTS) {
     let read = false;
     const body = new ReadableStream<Uint8Array>(

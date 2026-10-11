@@ -117,7 +117,9 @@ await context.hooks.doAction("ready"); // fires "my-app:ready"
 Your listeners run only while your app is active. That is checked each time a
 hook fires, so deactivating an app stops its listeners from the next request.
 `hooks.ts` itself is loaded only once the app is active, on the first request
-after an admin activates it.
+after an admin activates it. The same goes while your app's own migrations are
+behind this build: its listeners don't run, and `hooks.ts` loads once they
+have been applied.
 
 ## Available Core Hooks
 

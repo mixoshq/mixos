@@ -135,10 +135,13 @@ bytes to an unauthenticated viewer the consumer has already authorized.
 
 `request()` rejects with a `ServiceRequestError` carrying a `code`:
 `NOT_FOUND`, `NOT_EXPOSED`, `NOT_DECLARED`, `FORBIDDEN`, `PROVIDER_INACTIVE`,
-`NO_USER`, `FORBIDDEN_USER`, `NO_HANDLER`, `TIMEOUT`, `PAYLOAD_TOO_LARGE`,
-`PROVIDER_ERROR`. `PROVIDER_INACTIVE` means an admin has switched the provider
-app off, whatever the service's audience.
+`PROVIDER_UPDATING`, `NO_USER`, `FORBIDDEN_USER`, `NO_HANDLER`, `TIMEOUT`,
+`PAYLOAD_TOO_LARGE`, `PROVIDER_ERROR`. `PROVIDER_INACTIVE` means an admin has
+switched the provider app off, whatever the service's audience.
 Handle it in your route and degrade gracefully (e.g. render an empty state).
+`PROVIDER_UPDATING` means the provider's own migrations are behind this build.
+It clears once they are applied, so say the data is coming back rather than
+gone, and try again later.
 
 ## Verify
 
