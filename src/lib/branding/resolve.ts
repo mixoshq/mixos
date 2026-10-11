@@ -7,6 +7,7 @@ import { appRegistry } from "@/generated/app-registry";
 import { createServiceClient } from "@/lib/db/server";
 import { hooks } from "@/lib/hooks";
 import { ensureHooksLoaded } from "@/lib/hooks/loader";
+import { maintenanceState } from "@/lib/platform/maintenance";
 import { getActiveTheme } from "@/lib/themes/active";
 import {
   acceptLogo,
@@ -117,23 +118,27 @@ async function resolveSlot<T>(
 }
 
 /**
- * Which apps that declare brand hooks are active, in one query.
+ * Which apps that declare brand hooks the app gate would let run, in one
+ * query: active, and with their own migrations applied.
  *
  * Not `isAppActive`: that reads a failed lookup as "inactive", which is right
  * for a gate and wrong here — it would turn a database blip into every request
  * showing "MixOS". This throws instead, and `resolveSlot` serves the last good
- * value. A missing row is still inactive, as everywhere else.
+ * value. A missing row is still inactive, as everywhere else. The update needs
+ * no such care: a check that can't tell counts as not behind.
  */
 const getActiveBrandApps = cache(async (): Promise<Set<string>> => {
   const slugs = appRegistry.filter((a) => a.branding).map((a) => a.slug);
   if (slugs.length === 0) return new Set();
-  const { data, error } = await createServiceClient()
-    .from("apps")
-    .select("slug, is_active")
-    .in("slug", slugs);
+  const [{ data, error }, { appsBehind }] = await Promise.all([
+    createServiceClient().from("apps").select("slug, is_active").in("slug", slugs),
+    maintenanceState(),
+  ]);
   if (error) throw new Error(`apps lookup failed: ${error.message}`);
   const rows = (data ?? []) as { slug: string; is_active: boolean }[];
-  return new Set(rows.filter((r) => r.is_active === true).map((r) => r.slug));
+  return new Set(
+    rows.filter((r) => r.is_active === true && !appsBehind.has(r.slug)).map((r) => r.slug),
+  );
 });
 
 // ── logging ─────────────────────────────────────────────────────────────────
