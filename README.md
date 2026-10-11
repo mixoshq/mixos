@@ -478,7 +478,9 @@ There is no publish step. `.githooks/pre-commit` runs
 [`scripts/stamp-updated.ts`](scripts/stamp-updated.ts), which stamps `lastUpdated`
 on every app, connector, or theme with a file in the commit and re-stages the
 manifest — so the date shown in the App Manager and Connector Registry always
-matches the last commit that touched it. Preview what would be stamped with
+matches the last commit that changed it. A merge doesn't re-stamp what it only
+brings in from the other branch, so merging `main` into a pull request adds no
+date changes. Preview what would be stamped with
 `npx tsx scripts/stamp-updated.ts --dry-run`.
 
 Recent, developer-facing changes are summarized in [WHATS-NEW.md](WHATS-NEW.md);
