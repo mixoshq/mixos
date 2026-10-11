@@ -12,6 +12,7 @@
  */
 
 import type { DatabaseLocation } from "../db/locality";
+import type { HandBack } from "./hand-back";
 import type { PendingKind } from "./pending";
 import type { PendingReview } from "./review";
 
@@ -32,16 +33,17 @@ export interface Refusal {
   tone: NoticeTone;
 }
 
-/** What the catalogue says about a pending install: the publisher's claims, and where its source is. */
+/**
+ * What the catalogue says about a pending install: the publisher's claims.
+ * The link to its source is the review's own, from the install record.
+ */
 export type ListingFacts =
   | {
       state: "ok";
       /** The catalogue asked. */
       origin: string;
-      /** The publisher's claims for the installed version. Null when they couldn't be read. */
-      claims: { scope: string; reason: string }[] | null;
-      /** The source on GitHub at the commit install verified. */
-      sourceUrl: string | null;
+      /** The publisher's claims for the installed version. */
+      claims: { scope: string; reason: string }[];
       /** Anything about the answer the admin should know. */
       note: string | null;
     }
@@ -71,8 +73,6 @@ export interface Registered {
   commitSha: string;
   /** Repo-relative: `apps/<slug>`. */
   installPath: string;
-  fileCount: number;
-  byteCount: number;
   /** What install's check left to registration, which this run checked. */
   deferredChecked: number;
   /** An app's `migrations/*.sql`, which `npm run migrate:apps` applies here. */
@@ -81,6 +81,8 @@ export interface Registered {
   servesNow: boolean;
   database: DatabaseLocation;
   activation: Activation;
+  /** What to commit, and how: the files, the prepared message, the commands and the source. */
+  handBack: HandBack;
 }
 
 export type RegisterOutcome = { ok: true; result: Registered } | Refusal;
