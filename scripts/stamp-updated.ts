@@ -15,11 +15,15 @@
  * the date mean "the author ran a command" — accurate, but only when someone
  * remembered to run it, which is the failure mode this removes.
  *
- * Four rules keep the date honest:
+ * Five rules keep the date honest:
  *
  *  - A directory is stamped when ANY file under it changed — source, migrations,
  *    README, assets, and deletions too. "Changed" is the honest claim; "changed
  *    in a way I judged significant" is not something a script can assess.
+ *  - A merge or cherry-pick stamps only what it changes itself. A directory it
+ *    brings in exactly as the other side has it was stamped there, and keeps
+ *    that date. Without this, every pull request that merges `main` would
+ *    carry a one-line date change for whatever `main` changed. See planStamps().
  *  - A change that touches ONLY `lastUpdated` never re-stamps, unless the date
  *    would move BACKWARDS. Without the first half, `git commit --amend` and any
  *    re-run would rewrite the date forever; without the second, a stale index
@@ -79,7 +83,8 @@ function git(args: string[], input?: string): string {
 }
 
 /**
- * Paths staged for the in-flight commit.
+ * Paths staged for the in-flight commit: those that differ from HEAD, or from
+ * `against` when given (see incoming()).
  *
  * Three flags carry weight here:
  *  - `core.quotePath=false` + `-z`: by default git renders a non-ASCII path as a
@@ -94,7 +99,7 @@ function git(args: string[], input?: string): string {
  *    app whose manifest is still on disk. The manifest of a directory deleted
  *    outright is caught by resolveManifest()'s existence check instead.
  */
-function stagedFiles(): string[] {
+function stagedFiles(against?: string): string[] {
   const out = git([
     "-c",
     "core.quotePath=false",
@@ -104,8 +109,39 @@ function stagedFiles(): string[] {
     "--name-only",
     "--no-renames",
     "--diff-filter=ACMRD",
+    ...(against ? [against, "--"] : []),
   ]);
   return out.split("\0").map((l) => l.trim()).filter(Boolean);
+}
+
+/**
+ * For a merge or cherry-pick being concluded, planStamps()'s `incoming`: for
+ * each commit it brings in, the staged paths that differ from that commit.
+ * Null for an ordinary commit.
+ *
+ * Only a concluded one gets here. A clean `git merge` runs no pre-commit hook
+ * (git runs `pre-merge-commit`, which this repo doesn't have), and neither
+ * does a clean cherry-pick, so this is the `git commit` or `--continue` after
+ * a conflict or `--no-commit`.
+ *
+ * MERGE_HEAD is read as a file, as `git commit` reads it: an octopus merge
+ * lists one parent per line, and `rev-parse` would return only the first.
+ * REVERT_HEAD is left out on purpose. A revert is a change of its own, not one
+ * made elsewhere, so it is stamped like any other commit.
+ */
+function incoming(): { what: "merge" | "cherry-pick"; changed: string[][] } | null {
+  const mergeHead = path.resolve(ROOT, git(["rev-parse", "--git-path", "MERGE_HEAD"]).trim());
+  if (fs.existsSync(mergeHead)) {
+    const parents = fs.readFileSync(mergeHead, "utf-8").split("\n").map((l) => l.trim()).filter(Boolean);
+    return { what: "merge", changed: parents.map((p) => stagedFiles(p)) };
+  }
+  let picked: string;
+  try {
+    picked = git(["rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD^{commit}"]).trim();
+  } catch {
+    return null; // no cherry-pick in progress: an ordinary commit
+  }
+  return { what: "cherry-pick", changed: [stagedFiles(picked)] };
 }
 
 /**
@@ -136,8 +172,8 @@ function resolveManifest(
     : null;
 }
 
-/** Group changed paths into the app/connector directories they belong to. */
-function collectTargets(changed: string[]): Target[] {
+/** Group changed paths by the app/connector/theme directory they belong to. */
+function extensionDirs(changed: string[]): Map<string, string[]> {
   const byDir = new Map<string, string[]>();
 
   for (const file of changed) {
@@ -157,7 +193,46 @@ function collectTargets(changed: string[]): Target[] {
     if (list) list.push(file);
     else byDir.set(key, [file]);
   }
+  return byDir;
+}
 
+/**
+ * Which changed directories to stamp. This is the whole decision, kept apart
+ * from git so it can be tested.
+ *
+ * `changed` is every path the commit changes against HEAD, its first parent.
+ * For an ordinary commit `incoming` is empty and every directory with a
+ * changed path is stamped: the rule as it always was.
+ *
+ * A merge's diff against HEAD also holds everything the other side changed,
+ * and each of those changes was stamped where it was made. So `incoming` has
+ * an entry for each commit the merge brings in (each parent after the first,
+ * or the picked commit of a cherry-pick): the paths where the result differs
+ * from that commit. A directory is the merge's own change only when it
+ * differs from HEAD and from every one of them, because both sides changed it
+ * or the merge edited it. One that matches an incoming commit exactly is
+ * `broughtIn` and keeps the date it has there.
+ *
+ * The check is per directory, not per file, because a stamp dates a directory.
+ * If one side changed `a.css` and the other `b.css`, no file differs from both
+ * parents, yet the theme is in a state neither side had. Its `lastUpdated`
+ * lines conflict too, and the stamp settles them.
+ */
+export function planStamps(
+  changed: string[],
+  incoming: string[][] = [],
+): { own: Map<string, string[]>; broughtIn: Map<string, string[]> } {
+  const differs = incoming.map((paths) => extensionDirs(paths));
+  const own = new Map<string, string[]>();
+  const broughtIn = new Map<string, string[]>();
+  for (const [dir, files] of extensionDirs(changed)) {
+    (differs.every((d) => d.has(dir)) ? own : broughtIn).set(dir, files);
+  }
+  return { own, broughtIn };
+}
+
+/** The directories that have a manifest to stamp, in manifest order. */
+function collectTargets(byDir: Map<string, string[]>): Target[] {
   const targets: Target[] = [];
   for (const [key, files] of byDir) {
     const [root, slug] = key.split("/");
@@ -329,8 +404,13 @@ function main(): void {
     }
   }
 
-  const targets = collectTargets(changed);
-  if (targets.length === 0) return;
+  // A merge or cherry-pick being concluded stamps only what it changes itself;
+  // what it brings in was stamped where it was made. See planStamps().
+  const from = gitMode ? incoming() : null;
+  const plan = planStamps(changed, from?.changed);
+  const targets = collectTargets(plan.own);
+  const inherited = collectTargets(plan.broughtIn);
+  if (targets.length === 0 && inherited.length === 0) return;
 
   // One timestamp for the whole commit: two apps changed by the same commit
   // should carry the same date, not dates milliseconds apart.
@@ -340,6 +420,12 @@ function main(): void {
   const skipped: string[] = [];
   const manual: Target[] = [];
   const preservedWip: string[] = [];
+
+  if (from) {
+    for (const target of inherited) {
+      skipped.push(`${target.slug} (brought in as is by the ${from.what}, keeps its date)`);
+    }
+  }
 
   for (const target of targets) {
     if (target.isModule) {
@@ -391,11 +477,14 @@ function main(): void {
   }
 }
 
-try {
-  main();
-} catch (err) {
-  // Never fail the commit over the stamp. A missing date is a cosmetic problem;
-  // a pre-commit hook that blocks work over one is not.
-  console.error("[stamp] failed (commit not blocked):", err);
-  process.exit(0);
+// Run as a script. Imported, as the test imports it, nothing runs.
+if (require.main === module) {
+  try {
+    main();
+  } catch (err) {
+    // Never fail the commit over the stamp. A missing date is a cosmetic problem;
+    // a pre-commit hook that blocks work over one is not.
+    console.error("[stamp] failed (commit not blocked):", err);
+    process.exit(0);
+  }
 }

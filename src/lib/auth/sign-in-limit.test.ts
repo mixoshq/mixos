@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { test } from "node:test";
+import { afterEach, beforeEach, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { Auth, raw, skipCSRFCheck } from "@auth/core";
 import { AuthError } from "next-auth";
@@ -40,6 +40,13 @@ console.warn = (...args: unknown[]) => {
   warn(...args);
 };
 const quiet = { error() {} };
+
+// The in-memory bucket refills by Date.now(): one attempt back every 10
+// seconds. Each test runs with that clock stopped, so a burst stays a burst
+// however long its attempts take. On a loaded machine ten real password
+// hashes can take longer than the 10 seconds that bring one back.
+beforeEach(() => mock.timers.enable({ apis: ["Date"], now: Date.now() }));
+afterEach(() => mock.timers.reset());
 
 const ORIGIN = "http://localhost:3000";
 const PASSWORD = "the right password";
