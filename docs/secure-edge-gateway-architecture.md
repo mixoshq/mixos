@@ -75,8 +75,8 @@ flowchart TD
 | 2 | `appRegistry` lookup for the slug | 404 |
 | 3 | Per-IP token bucket (60 burst, 10/s). IP is the **rightmost** `x-forwarded-for` entry | 429 + `Retry-After` |
 | 4 | `resolveRoutePath()` maps URL segments to an on-disk pattern; `[]` → `api/index/route.ts` | 404 |
-| 5 | Does this mount serve any tier the route declares? Decided from the **hoisted registry contract**, so no app module is imported for a caller the route would refuse | 404 |
-| 6 | Dynamic `import()`, then method lookup. Import and dispatch are **separate**, so a module that throws at load is not reported as missing | 404 / 405 / 500 |
+| 5 | Does this mount serve any tier the route declares? Decided from the **hoisted registry contract**, so no app module is imported for a route this mount doesn't serve. The checks on the caller come after the import, from step 8 | 404 |
+| 6 | Dynamic `import()`, then method lookup. Import and dispatch are **separate**, so a module that throws at load is logged as a load failure rather than as a missing route; the caller gets 404 either way | 404 / 405 / 500 |
 | 7 | The live declaration must match what step 5 was decided on. A gate decided from one source and enforced from another is not a gate | 404 |
 | 8 | `resolveAuthTier()` — which tier has the caller earned? | 401 / 403 / 404 |
 | 9 | CSRF double-submit token — **authenticated mount, identity tiers, mutating methods only** | 403 `CSRF_FAILED` |
@@ -157,7 +157,7 @@ export const GET = defineRoute({
 `FatalManifestError` on a bare handler, and an unbranded export is a 500 at
 runtime. The reason is that everything above `handler` has to be readable by
 something other than the handler: the build checks roles against the manifest,
-the dispatcher enforces `auth` before any app code runs, and the generated client
+the dispatcher enforces `auth` before the handler runs, and the generated client
 types itself from the schemas.
 
 Rules:
