@@ -298,6 +298,26 @@ An app that returns with different files comes back inactive and flagged on
 Admin > Apps until an admin activates it; one that returns with the same files
 comes back as it left. Both are audited (§28).
 
+**A different extension under the same slug starts off, and without the old
+one's API keys.** Every release step also records each app's identity
+([`src/lib/repository/identity.ts`](../src/lib/repository/identity.ts)): for
+one installed from a Registry, the catalogue, kind, slug and GitHub repository
+from its install record (§31); for anything else, `local`. It compares them
+for every app in the build, not only for one that returns. A new version or
+commit from the same repository is the same app, so updating one changes
+nothing. Any other change means a different extension now has the slug: a
+local app reinstalled from the Registry, a release from another repository,
+or an installed app whose record was deleted. The release step switches it
+off, revokes its API keys, which were given out for the extension before it,
+and flags it **Replaces a different extension** on Admin > Apps. Its grants,
+settings and data stay. Activating it needs its slug typed, which the server
+checks (`setAppActive()` in `src/lib/apps/access.ts`); only that clears the
+flag. An app that returns as a different extension gets this flag alone,
+since it asks more of the admin than "back with different code". Migration
+0011 recorded every app the database already knew as `local`, so a local app
+reinstalled from the Registry is caught at the first release step that
+carries it.
+
 **The app's own migrations have to be applied, too.** The app gate's second
 reason, asked only of an active app: when the build carries a migration of the
 app's that the ledger (`public._migrations`) lacks, as readiness reports
@@ -1622,6 +1642,21 @@ context loads no connectors at all, and the others fail instead of going ahead.
 Activating an app does not check the switch. An app activated while a connector
 it requires is disabled runs, and its calls to that connector fail as above.
 
+**A different connector under the same name starts off.** A connector's
+credentials, and every user's connection to it, are kept by its name, so a
+different connector that takes the name would be handed them. The release
+step records each connector's identity (§3.1) as `connector.identity.<name>`
+([`scripts/sync-identities.ts`](../scripts/sync-identities.ts)). When the
+build's differs from the recorded one, it turns the connector off with this
+switch, keeping its credentials, and marks it `connector.replaced.<name>`.
+Enable then needs the connector's name typed, which the server checks
+(`setConnectorEnabled()` in `src/lib/connectors/switch-admin.ts`), and clears
+the mark. A connector an admin had already disabled stays off from when they
+did. Migration 0011 recorded every connector that held credentials then as
+`local`. A theme's identity is recorded too, as `theme.identity.<slug>`, and a
+change is only audited: a theme runs no code and holds no credentials, keys or
+data, and the build checks everything it can change.
+
 **Credentials are kept.** Disabling doesn't touch `connector_configs`, or
 anyone's grant in `user_connector_oauth`, so enabling needs nothing entered
 again. That also means disabling is not a response to a leaked credential: an
@@ -2040,7 +2075,8 @@ module is not a retention policy.
 Currently recorded: `connector.configure`, `connector.connect`,
 `connector.test`, `connector.disable`, `connector.enable`, `app.password.set`,
 `app.password.clear`, `app.setting.set`, `app.setting.clear`, `app.activate`,
-`app.deactivate`, `app.missing`, `app.returned`, `app.job.run`,
+`app.deactivate`, `app.missing`, `app.returned`, `app.identity.changed`,
+`connector.identity.changed`, `theme.identity.changed`, `app.job.run`,
 `app.job.enable`, `app.job.disable`, `scheduler.start`, `scheduler.stop`,
 `theme.apply`, `user.create`, `user.profile.update`, `user.password.set`,
 `user.admin.grant`, `user.admin.revoke`, `user.grant.add`,
@@ -2054,7 +2090,9 @@ install is refused, `app.install.rejected`, `connector.install.rejected` or
 what a stopped one left as `app.register.recover` or
 `connector.register.recover` (§31). `connector.disable` and `connector.enable`
 name the apps that declare the connector, in `details` as `requiredBy` and
-`optionalFor`.
+`optionalFor`. An `app.activate` or `connector.enable` that answered a
+different extension under the name, with the name typed, has the identity it
+replaced in `details` as `replaced`.
 
 **Connecting a connector.** An admin finishing the OAuth round trip for a
 tenant connector (§27), with Connect or Reconnect, is `connector.connect`
@@ -2072,13 +2110,17 @@ tick are `scheduler.start` and `scheduler.stop`, with no target, since they
 switch every job at once. Run now is recorded as the run starts, so a long run
 leaves its row even if the request is cut short, and a refused one leaves none.
 
-**Rows the release step writes.** `app.missing` (an app left the build) and
-`app.returned` (it came back, with whether its files changed and both hashes)
-come from the release step's registry sync, not from a person, so `actor_id` is
-null and `actor_email` is `release-step`, which can't be an address. They are
-written in the sync's own transaction, so the change and its record commit
-together: rule 2 is about not failing an admin's action, and here a failed write
-fails the step before anything it would have recorded is committed.
+**Rows the release step writes.** `app.missing` (an app left the build),
+`app.returned` (it came back, with whether its files changed, both hashes, and
+whether it came back as a different extension) and `<kind>.identity.changed`
+(a different extension under the name, with both identities: for an app,
+whether it was switched off and how many API keys were revoked; for a
+connector, whether it was turned off; for a theme, whether it is the applied
+one) come from the release step, not from a person, so `actor_id` is null and
+`actor_email` is `release-step`, which can't be an address. They are written
+in the step's own transaction, so the change and its record commit together:
+rule 2 is about not failing an admin's action, and here a failed write fails
+the step before anything it would have recorded is committed.
 
 **Rows the Register and Discard buttons write.** The same actions from Admin >
 Apps and Admin > Connectors name the signed-in admin, with `via: "button"` in
@@ -2471,8 +2513,16 @@ git, read-only (`git check-ignore`), whether the checkout's ignore rules would
 leave a file out of the commit, and names the ones that would; the admin pages
 say to check `git status`.
 
+**It decides which extension a name is.** The release step reads each
+extension's identity from its record, or `local` with none, and treats a
+change as a different extension under the same name (§3.1, §19). A new
+release from the same repository is not one. Reinstalling an extension from
+another repository is, and so is deleting a record to make an installed
+extension local.
+
 Extensions installed before installs kept a record are local. Reinstalling one
-from the Registry gives it a record.
+from the Registry gives it a record, and the next release step on each
+instance treats it as a different extension, once.
 
 ### Two locks: the register lease and the checkout lock
 

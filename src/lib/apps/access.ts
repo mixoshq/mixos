@@ -5,6 +5,7 @@
 import { cache } from "react";
 import { createServiceClient } from "@/lib/db/server";
 import { appRegistry } from "@/generated/app-registry";
+import { identityDetails, type IdentityDetails } from "@/lib/repository/identity";
 
 function getGlobalAppSlugs(): string[] {
   return appRegistry.filter((a) => a.global).map((a) => a.slug);
@@ -148,7 +149,8 @@ async function installGlobalApps(
  *
  * `apps.is_active` is an admin's switch, set on the Apps page, so it survives a
  * redeploy. The registry sync only ever turns it off, for an app that came
- * back into the build with different code. Deactivating is meant to be
+ * back into the build with different code, or that is a different extension
+ * than the one recorded under its slug. Deactivating is meant to be
  * complete rather than cosmetic: an inactive app is filtered out of every list
  * AND refused by every gate — `hasAppGrant` (pages, MCP, OAuth) and
  * `resolveAuthTier` (every API route and public page) both call this, and the
@@ -197,13 +199,41 @@ export async function filterActiveApps(slugs: string[]): Promise<string[]> {
  * Register, would otherwise update zero rows and report success for nothing.
  * The manifest supplies the columns the sync would have; a slug with no
  * manifest is refused by the caller.
+ *
+ * An app the release step found to be a different extension than the one
+ * recorded under its slug (`identity_changed_at`, scripts/sync-app-registry.ts)
+ * is activated only with its slug typed, `typedSlug`: it would be given the
+ * grants, settings and data of the extension before it. Activating it clears
+ * the flag, and returns the identity it replaced, for the audit row; any other
+ * call returns null.
  */
 export async function setAppActive(
   slug: string,
   isActive: boolean,
-): Promise<void> {
+  typedSlug?: string,
+): Promise<{ replaced: IdentityDetails } | null> {
   const manifest = appRegistry.find((a) => a.slug === slug);
   const supabase = createServiceClient();
+
+  let confirmed: { replaced: IdentityDetails } | null = null;
+  if (isActive) {
+    const { data, error } = await supabase
+      .from("apps")
+      .select("identity_changed_at, replaced_identity")
+      .eq("slug", slug)
+      .maybeSingle();
+    if (error) throw new Error(`Failed to read ${slug}: ${error.message}`);
+    const row = data as { identity_changed_at: string | null; replaced_identity: string | null } | null;
+    if (row?.identity_changed_at) {
+      if (typedSlug?.trim() !== slug) {
+        throw new Error(
+          `${slug} replaces a different extension with the same slug. Type its slug to activate it.`,
+        );
+      }
+      confirmed = { replaced: identityDetails(row.replaced_identity) };
+    }
+  }
+
   const { error } = await supabase.from("apps").upsert(
     {
       slug,
@@ -212,13 +242,16 @@ export async function setAppActive(
       icon: manifest?.icon ?? null,
       is_active: isActive,
       // Activating is the admin's answer to an app that came back into the
-      // build with different code, so it clears that flag. Deactivating leaves
-      // the question open.
-      ...(isActive ? { returned_changed_at: null } : {}),
+      // build with different code, or as a different extension, so it clears
+      // both flags. Deactivating leaves the question open.
+      ...(isActive
+        ? { returned_changed_at: null, identity_changed_at: null, replaced_identity: null }
+        : {}),
     },
     { onConflict: "slug" },
   );
   if (error) throw new Error(`Failed to update ${slug}: ${error.message}`);
+  return confirmed;
 }
 
 /** Every app's active flag, for the admin list. */
@@ -241,9 +274,20 @@ export interface AppNotInBuild {
   missingSince: string | null;
 }
 
+/** An app in this build that a release step found under a slug a different extension had. */
+export interface AppReplacement {
+  /** When the release step switched it off. */
+  at: string;
+  /** The identity it replaced, and its own (src/lib/repository/identity.ts). */
+  previous: string | null;
+  identity: string | null;
+}
+
 export interface AppBuildStatus {
   /** Apps in this build that came back with different code: slug to when. */
   returnedChanged: Record<string, string>;
+  /** Apps in this build that replace a different extension under their slug. */
+  replaced: Record<string, AppReplacement>;
   /** Apps whose rows, and data, are kept although this build lacks them. */
   notInBuild: AppNotInBuild[];
 }
@@ -265,16 +309,21 @@ export async function getAppBuildStatus(): Promise<AppBuildStatus> {
   const supabase = createServiceClient();
   const { data } = await supabase
     .from("apps")
-    .select("slug, name, icon, missing_since, returned_changed_at")
+    .select(
+      "slug, name, icon, missing_since, returned_changed_at, identity, identity_changed_at, replaced_identity",
+    )
     .order("name");
 
-  const status: AppBuildStatus = { returnedChanged: {}, notInBuild: [] };
+  const status: AppBuildStatus = { returnedChanged: {}, replaced: {}, notInBuild: [] };
   for (const row of (data ?? []) as {
     slug: string;
     name: string;
     icon: string | null;
     missing_since: string | null;
     returned_changed_at: string | null;
+    identity: string | null;
+    identity_changed_at: string | null;
+    replaced_identity: string | null;
   }[]) {
     if (!inBuild.has(row.slug)) {
       status.notInBuild.push({
@@ -283,8 +332,17 @@ export async function getAppBuildStatus(): Promise<AppBuildStatus> {
         icon: row.icon,
         missingSince: row.missing_since,
       });
-    } else if (row.returned_changed_at) {
+      continue;
+    }
+    if (row.returned_changed_at) {
       status.returnedChanged[row.slug] = row.returned_changed_at;
+    }
+    if (row.identity_changed_at) {
+      status.replaced[row.slug] = {
+        at: row.identity_changed_at,
+        previous: row.replaced_identity,
+        identity: row.identity,
+      };
     }
   }
   return status;
