@@ -68,7 +68,8 @@ change, exactly as changing `AppManifest` is.
 | Hook system | `src/lib/hooks/hook-system.ts` |
 | Build identity | `src/generated/build-info.ts` (generated: the version, from `package.json`), `src/lib/platform/version.ts` (the version, the commit and `requiresMixOS`), `src/lib/platform/build.ts` (built deployment or checkout) |
 | Schema gate | `src/lib/platform/schema-version.ts`, `src/lib/platform/app-migrations.ts`, `src/app/api/health/ready/route.ts` |
-| Instance-wide locks | `src/lib/platform/lock.ts` |
+| Instance-wide locks | `src/lib/platform/lock.ts` (a row every instance on the database shares), `src/lib/platform/checkout-lock.ts` (`.mixos/lock`, one checkout's) |
+| Installs from the Registry | `src/lib/repository/install.ts` (install), `src/lib/repository/pending.ts` (`.mixos/pending/`), `src/lib/repository/register.ts` and `scripts/register.ts` (`npm run register`) |
 | Database migrations | `supabase/migrations/` |
 | App migrations | `scripts/app-migrations.ts` (applies them, per app schema and role), `scripts/app-sql-policy.ts` (what they may contain), `src/lib/apps/app-identifiers.ts` (schema and role names) |
 | Security architecture | `docs/secure-edge-gateway-architecture.md` |

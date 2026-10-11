@@ -331,6 +331,24 @@ registered in a central file: the registry is generated from the folders
 themselves (`npm run registry`, which `dev` and `build` run for you), so adding
 a directory with a valid manifest is the whole installation step.
 
+**From the Registry.** In a checkout, Admin > Apps, Connectors and Themes can
+browse [mixos.org](https://mixos.org) and install from it. An installed app or
+connector waits in `.mixos/pending/`, where nothing runs it, until you register
+it:
+
+```bash
+npm run register                        # what is waiting
+npm run register -- app/<slug>          # move it into apps/ and run its code
+npm run register -- app/<slug> --discard
+npm run register -- --recover           # after one that stopped midway
+```
+
+Registering checks the folder is still what was verified, moves it into `apps/`
+or `connectors/` and runs the registry generator, which is the first time its
+code runs. A theme has no code, so installing it registers it. To ship either,
+commit the new folder and deploy. See
+[docs/security-architecture.md §31](docs/security-architecture.md#31-installing-from-the-repository).
+
 Each guide below is the authoritative spec — file layout, manifest fields, APIs,
 and the invariants that are easy to get wrong. Read the relevant one in full
 before writing code; don't infer conventions from surrounding code alone.
@@ -571,7 +589,8 @@ traffic: the platform schema, the app migrations, and the first admin.
 path needs and explains the release step. Deploy your fork, so the apps you add
 are in the build. To make an instance run only what it was deployed with, set
 `INSTALL_APPS`, `INSTALL_CONNECTORS` or `INSTALL_THEMES` to `false`: the
-catalogue's Browse pages and its install actions go away for that kind
+catalogue's Browse pages and its install actions go away for that kind, and
+`npm run register` won't register it
 ([details](docs/hosting/README.md#fixing-what-an-instance-runs)).
 
 Before exposing a deployment publicly, read
