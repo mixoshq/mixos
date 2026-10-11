@@ -211,6 +211,14 @@ just pulled.
   redirects, and only within the catalogue's own origin. Any other redirect,
   such as one to another host or from https to http, is refused with an error
   naming the catalogue.
+- **Withdrawn releases reach the instances running them.** Once a day the tick
+  asks mixos.org about the extensions installed from it. Admin > Apps,
+  Connectors and Themes then show a release its publisher withdrew, with the
+  reason and, for an app, a **Deactivate** button; a newer release; a listing
+  no longer published; and when mixos.org last answered. It sends a random
+  instance ID and each extension's kind, slug and version, nothing else, and
+  acts on nothing. `MIXOS_UPDATE_CHECK=false` turns it off. See
+  `docs/hosting/README.md#what-mixos-sends-to-mixosorg`.
 
 ## 2026-10-07
 
