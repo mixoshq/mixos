@@ -12,9 +12,11 @@
  * generator, which loads its code for the first time. Discard deletes it.
  * Recovery tidies up after one of them, or an install, that stopped midway.
  *
- * `npm run register` (scripts/register.ts) is the entry point today. Each
+ * Two entry points call them: `npm run register` (scripts/register.ts), and
+ * the Register and Discard buttons on Admin > Apps and Admin > Connectors
+ * (./pending-actions.ts), which follow a review of what will run. Each
  * function takes the actor its audit row names and how it was asked for
- * (`via`), so an admin page can call the same ones.
+ * (`via`: "cli" or "button").
  *
  * ── UNDER BOTH LOCKS ────────────────────────────────────────────────────────
  *
@@ -58,7 +60,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { recordAdminAction, type AdminActor } from "../apps/admin-audit";
-import { isBuiltDeployment } from "../platform/build";
+import { BUILT_DEPLOYMENT_NOTICE, isBuiltDeployment } from "../platform/build";
 import {
   CheckoutLockHeldError,
   describeCheckoutLockHolder,
@@ -110,6 +112,13 @@ export interface PendingActionOptions {
   signal?: AbortSignal;
   /** Told what a person should know that isn't a failure: a stale lock taken over. */
   notice?: (message: string) => void;
+  /**
+   * Register only: the files hash of the pending install the person reviewed
+   * (the admin pages' review prompt). Checked under the locks against the
+   * pending install's record, so what registers is what they read, even if it
+   * was discarded and installed again in between.
+   */
+  reviewedFilesHash?: string;
 }
 
 export type RegisterFailureCode =
@@ -321,11 +330,7 @@ async function registerUnderLocks(
  */
 function assertRegistrable(kind: PendingKind, root: string, generator?: string): void {
   if (isBuiltDeployment()) {
-    throw new RegisterError(
-      "This instance runs a build, so it can't register extensions. Register in a checkout " +
-        "of your repository, commit, and deploy.",
-      "unsupported-environment",
-    );
+    throw new RegisterError(BUILT_DEPLOYMENT_NOTICE, "unsupported-environment");
   }
   // Runtime paths in the checkout, never files a build should carry, so each
   // join is marked for Turbopack's tracer to leave alone (see ./pending.ts).
@@ -362,6 +367,13 @@ async function runRegister(
 
   // 1. What is pending, its record, and nothing where it would go.
   const sidecar = pendingSidecarFor(kind, slug, where);
+  if (options.reviewedFilesHash !== undefined && !contentHashesMatch(options.reviewedFilesHash, sidecar.filesHash)) {
+    throw new RegisterError(
+      `What is waiting in ${where.rel}/ isn't what you reviewed: it was discarded and installed ` +
+        "again, or replaced, since. Nothing was moved. Review it again before registering it.",
+      "changed-meanwhile",
+    );
+  }
   if (pathExists(live.dir)) {
     throw new RegisterError(
       `${live.rel} already exists in this checkout, so ${slug} can't be registered over it. ` +

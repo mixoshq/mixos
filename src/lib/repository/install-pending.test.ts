@@ -261,6 +261,7 @@ describe("an install from the Registry", { concurrency: false }, () => {
         err instanceof InstallError &&
         err.code === "already-installed" &&
         /waiting in \.mixos\/pending\/apps\/acme\//.test(err.message) &&
+        /Register or discard it in Admin > Apps/.test(err.message) &&
         /npm run register -- app\/acme --discard/.test(err.message),
     );
     assert.equal(downloads, before);

@@ -93,8 +93,10 @@ down rather than leaving it open. The flags are read per request, so changing
 one needs a restart, not a rebuild.
 
 A deployment built from the Docker image (Compose, Render, Railway) or on
-Vercel can't install from the catalogue anyway: installing writes source into a
-checkout and re-runs the registry generator, and a built artifact has neither.
+Vercel doesn't install from the catalogue in any case: installing writes source
+into a checkout and runs the registry generator, and a built artifact has
+neither (see
+[Installing from the Registry on a deployment](#installing-from-the-registry-on-a-deployment)).
 On those, the flags decide whether the catalogue can be browsed at all. They
 lock installs down on an instance that runs from a checkout.
 [docs/security-architecture.md](../security-architecture.md#turning-it-off)
@@ -104,6 +106,28 @@ Those deployments browse mixos.org. `MIXOS_REPOSITORY_URL`, which points a
 development checkout at another catalogue, is ignored there unless it names the
 deployment's own machine (`localhost`, `127.0.0.1`, `[::1]` or
 `host.docker.internal`), and the server log says when it is.
+
+### Installing from the Registry on a deployment
+
+A deployment runs what its build carries. Its Browse pages show the catalogue,
+and say: "This deployment runs a build. Install and register in a checkout of
+your repository, commit, and deploy." To add an extension:
+
+1. In a checkout of your repository, running `npm run dev`, install it from
+   Browse. An app or a connector waits in `.mixos/pending/`, where none of its
+   code runs.
+2. Review it and register it: **Review and register** on Admin > Apps or
+   Admin > Connectors, or `npm run register -- <kind>/<slug>`. A theme is
+   registered as it installs.
+3. Commit its folder, `apps/<slug>`, `connectors/<slug>` or `themes/<slug>`,
+   and deploy.
+
+An app arrives **inactive** on each instance. Activate it on that instance's
+Admin > Apps. After Register, the checkout offers **Activate in this checkout**
+only when its own database is on the same machine: loopback, a Unix socket or
+`host.docker.internal`, as with the local Docker stack. A checkout that uses a
+database other instances share doesn't offer it, because activating there would
+turn the app on for every instance on that database.
 
 ### The release step
 
