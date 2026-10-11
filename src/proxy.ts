@@ -4,17 +4,20 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { isUpdatingAppPage } from "@/lib/apps/app-gate";
+import { buildCsp, cspNonce } from "@/lib/csp";
 import { maintenanceState, type MaintenanceState } from "@/lib/platform/maintenance";
 import { appMaintenanceGate, maintenanceGate } from "@/lib/platform/maintenance-gate";
 
 /**
  * The maintenance response, then an optimistic auth check.
  *
- * While the platform schema is behind this build, every request but the two
- * health probes gets a 503 from here, before anything that could reach a route
- * and query the database (src/lib/platform/maintenance.ts). That needs the
- * database, which a proxy can reach because in Next 16 it runs on the Node.js
- * runtime, always: `runtime` can't be set in this file.
+ * While the platform schema is behind this build, every request this sees but
+ * the two health probes gets a 503 from here, before anything that could reach
+ * a route and query the database (src/lib/platform/maintenance.ts). That needs
+ * the database, which a proxy can reach because in Next 16 it runs on the
+ * Node.js runtime, always: `runtime` can't be set in this file. The routes
+ * `config.matcher` leaves out below give the same response themselves: the app
+ * API gateway on its two mounts, and the webhook route.
  *
  * While one app's own migrations are behind, that app's pages get the same
  * 503 from here, saying the app is being updated, and everything else serves.
@@ -43,7 +46,9 @@ const PUBLIC_ROUTE_PREFIXES = [
   // src/app/(public)/p/[appSlug]/[[...path]]/page.tsx and
   // src/app/api/p/[appSlug]/[[...slug]]/route.ts); the proxy must NOT
   // bounce unauthenticated visitors here, since "no session" is the
-  // expected state for the public surface.
+  // expected state for the public surface. The matcher below also leaves
+  // `/api/p/` out of the proxy entirely; `/api/p` stays here so that undoing
+  // that cannot send the public API's callers to /login.
   "/p",
   "/api/p",
   // MCP server. Authenticated by an OAuth 2.1 bearer token, not a session
@@ -106,74 +111,15 @@ function hasSessionCookie(request: NextRequest): boolean {
 }
 
 /**
- * Per-request CSP with a fresh nonce.
- *
- * WHY HERE AND NOT next.config.ts. A nonce has to be unique per request, so it
- * cannot come from static header config. Next reads the nonce out of this header
- * during SSR and applies it to its own framework scripts and bundles, which is
- * what makes `strict-dynamic` workable without hand-annotating every tag.
- *
- * The CSP is set in exactly ONE place. Two `Content-Security-Policy` headers are
- * INTERSECTED by the browser, not merged, so leaving the old static
- * `frame-ancestors` header in next.config.ts alongside this one would silently
- * produce a policy stricter than either.
- *
- * `frame-ancestors 'self'` is carried over deliberately — MixOS frames its own
- * pages, and this is the only clickjacking control (X-Frame-Options is not set,
- * and frame-ancestors supersedes it).
- *
- * `script-src` is the point of the exercise. `'strict-dynamic'` means a script
- * that carries the nonce may load further scripts, and nothing else may — so an
- * injected `<script>` an attacker plants in the DOM does not run, because it
- * cannot guess the nonce.
- *
- * `style-src` keeps `'unsafe-inline'`, and that is a considered trade rather than
- * an oversight: React writes `style={{...}}` attributes throughout the dashboard
- * (the drag-and-drop grid computes positions inline), a style attribute cannot
- * execute script, and the XSS protection here comes from `script-src`. Tightening
- * this means moving to `style-src-attr` plumbing for no meaningful gain.
- *
- * `connect-src 'self'` reinforces the egress boundary from the browser side: app
- * client code reaches its own routes through the SDK and has no business opening
- * a socket to anywhere else. Raw `fetch` is already lint-banned in `apps/**`.
- *
- * DEV. React uses `eval` in development to reconstruct server error stacks, so
- * `'unsafe-eval'` is required there and only there.
- *
- * COST, stated plainly: a nonce forces every page to be dynamically rendered,
- * because the nonce only exists once a request does. Static optimization, ISR and
- * PPR are off. For a signed-in dashboard that already reads a session cookie on
- * every page this changes almost nothing; the one surface that could have been
- * cached is the public `/p/<slug>` view.
- */
-function buildCsp(nonce: string): string {
-  const isDev = process.env.NODE_ENV === "development";
-  return [
-    "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' blob: data: https:",
-    "font-src 'self' data:",
-    "connect-src 'self'",
-    "worker-src 'self'",
-    "manifest-src 'self'",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'self'",
-    ...(isDev ? [] : ["upgrade-insecure-requests"]),
-  ].join("; ");
-}
-
-/**
- * Attach the nonce to the REQUEST headers as well as the response.
+ * The per-request CSP (src/lib/csp.ts), with the nonce attached to the REQUEST
+ * headers as well as the response.
  *
  * Next parses the nonce out of the request's `Content-Security-Policy` during
  * render; `x-nonce` is what a server component reads if it ever needs to hand
  * the nonce to a third-party script tag itself.
  */
 function withCsp(request: NextRequest): NextResponse {
-  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const nonce = cspNonce();
   const csp = buildCsp(nonce);
 
   const requestHeaders = new Headers(request.headers);
@@ -251,15 +197,29 @@ export const config = {
   // session, which is the theme-assets argument exactly — and, like
   // screenshots, only declared files are copied.
   //
-  // A path left out here is left out of the maintenance response too, so leave
-  // out only files that are served without reading the database, or a route
-  // that runs the maintenance gate itself.
+  // A path left out here gets neither of the proxy's maintenance responses, so
+  // leave out only files that are served without reading the database, or a
+  // route that runs the maintenance gate itself. Three routes do:
   //
-  // `api/webhooks/` is that route. It is left out so that a delivery's body is
-  // read only by the route, which stops at its cap, and the route runs the
-  // maintenance gate first, as this file does
-  // (src/app/api/webhooks/[name]/route.ts).
+  // `api/webhooks/` is left out so that a delivery's body is read only by the
+  // route, which stops at its cap, and the route runs the maintenance gate
+  // first, as this file does (src/app/api/webhooks/[name]/route.ts).
+  //
+  // `api/apps/` and `api/p/`, the two app API mounts, are left out for their
+  // request bodies too. On every request the proxy runs for, Next buffers a
+  // copy of the body so the proxy and the route can both read it, and keeps
+  // only the first 10 MB of it (`proxyClientMaxBodySize`, an experimental
+  // option): the route gets the body cut short as if it ended there, and the
+  // only trace is a warning in the server log. The gateway accepts bodies up to
+  // 27 MB (MAX_BODY_BYTES in src/lib/apps/dispatch.ts), so an upload between
+  // the two arrived truncated. Left out, the route reads the body as it was
+  // sent, and the gateway does for these paths what the proxy does for the
+  // rest: the maintenance response first, then this CSP on what it answers.
+  // One app's "being updated" answer comes from its app gate, as for any of
+  // that app's routes. The gateway has no cookie check, and needs none: a
+  // cookie's presence is not a session, and its auth tiers decide who is
+  // served on both mounts.
   matcher: [
-    "/((?!_next/static|_next/image|themes/[^/]+/|connector-assets/|screenshots/|branding/|api/webhooks/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
+    "/((?!_next/static|_next/image|themes/[^/]+/|connector-assets/|screenshots/|branding/|api/webhooks/|api/apps/|api/p/|favicon.ico|icon\\.|icon-|apple-icon\\.|apple-icon-).*)",
   ],
 };

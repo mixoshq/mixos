@@ -12,6 +12,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Session helpers      | `src/lib/auth/session.ts`                     |
 | Dispatcher (the pipeline) | `src/lib/apps/dispatch.ts`               |
 | Mount bindings       | `src/app/api/apps/[...slug]/route.ts`, `src/app/api/p/[appSlug]/[[...slug]]/route.ts` |
+| Request body cap     | `src/lib/apps/request-body.ts`                |
 | Auth tier resolution | `src/lib/apps/auth-tier.ts`                   |
 | Route contract       | `src/lib/apps/route.ts` (`defineRoute`)       |
 | App API keys         | `src/lib/apps/api-keys.ts`                    |
@@ -33,6 +34,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Password re-check limit | `src/lib/auth/recheck-limit.ts`            |
 | Safe error helper    | `src/lib/safe-error.ts`                       |
 | Security headers     | `next.config.ts`                              |
+| Content-Security-Policy | `src/lib/csp.ts`                           |
 | App import policy    | `src/lib/apps/import-policy.mjs`              |
 | App containment scan | `scripts/app-containment.ts`                  |
 | ESLint restrictions  | `eslint.config.mjs`                           |
@@ -56,13 +58,9 @@ No alternative entry points exist for app logic.
 flowchart TD
     BROWSER["Browser — widget or page<br/>createAppClient(slug)<br/>fetch('/api/apps/{slug}/{path}')<br/>Cookie: session token"]
 
-    BROWSER --> PROXY
+    BROWSER --> DISPATCH
 
-    PROXY["PROXY — src/proxy.ts<br/>OPTIMISTIC ONLY — NOT AUTHORIZATION<br/>runs on all routes except a small public allowlist<br/>checks only that a session COOKIE IS PRESENT<br/>it does not decode, verify or validate the JWT<br/>redirects to /login when the cookie is absent<br/>does NOT check admin, app access, or CSRF"]
-
-    PROXY -- "session valid" --> DISPATCH
-
-    DISPATCH["DISPATCHER — src/lib/apps/dispatch.ts<br/>bound at BOTH mounts, which are 40-line files that do<br/>nothing but call dispatchAppRoute()<br/>/api/apps — mount: authenticated<br/>/api/p — mount: public<br/><br/>eleven checks, in order — enumerated below"]
+    DISPATCH["DISPATCHER — src/lib/apps/dispatch.ts<br/>bound at BOTH mounts, which are 40-line files that do<br/>nothing but call dispatchAppRoute()<br/>/api/apps — mount: authenticated<br/>/api/p — mount: public<br/>NOT behind the proxy (src/proxy.ts): no cookie-presence<br/>redirect, and the maintenance response is given here<br/><br/>the checks, in order — enumerated below"]
 
     DISPATCH -- "AppContext injected" --> HANDLER
 
@@ -97,8 +95,8 @@ up checking the wrong table.
 
 | Step | Check                          | Failure | Where enforced                       |
 |------|--------------------------------|---------|--------------------------------------|
-| 0    | Session cookie present         | 302     | Proxy (`src/proxy.ts`) — presence only, never validation |
-| 1    | Body under size cap            | 413     | Dispatcher (`content-length`, before any body read) |
+| 0    | Platform schema not behind     | 503     | Dispatcher (`maintenanceGate`), before anything reads the database. Neither mount is behind the proxy, so no cookie-presence check comes first (§18) |
+| 1    | Body under size cap            | 413     | Dispatcher (`content-length`, before any body read; a body without one is counted as the route reads it, §15) |
 | 2    | App slug exists                | 404     | Dispatcher (registry lookup)         |
 | 3    | Rate limit (IP), pre-auth      | 429     | Dispatcher (`src/lib/rate-limit.ts`) |
 | 4    | URL resolves to a route pattern| 404     | Dispatcher (`resolveRoutePath`)      |
@@ -127,9 +125,9 @@ stranger the public view, from one handler, with `context.user` typed nullable s
 the compiler forces both branches to exist.
 
 **The `key` tier is implemented** (`src/lib/apps/api-keys.ts`), and is served on
-the **public mount only**. `/api/apps` sits behind the proxy's cookie-presence
-check, so a machine-to-machine caller with no cookie never reaches the dispatcher
-there; `/api/p` is the non-cookie surface an integration needs.
+the **public mount only**. `/api/p` is the non-cookie surface an integration
+needs; `/api/apps` is the mount the browser SDK calls with its session cookie,
+and does not read a key.
 
 A key is `mosk_` + 32 random bytes, shown once and stored only as an
 HMAC-SHA256 digest (key derived from `CONNECTOR_ENCRYPTION_KEY` under its own
@@ -1165,10 +1163,13 @@ through `context.http`:
 
 ## 14. Security Response Headers
 
-Split across two files, and the split matters: **the CSP carries a per-request
-nonce, so it cannot be static header config.**
+Split between static config and per-request code, and the split matters: **the
+CSP carries a per-request nonce, so it cannot be static header config.**
 
-Set per request in [`src/proxy.ts`](../src/proxy.ts):
+Built in [`src/lib/csp.ts`](../src/lib/csp.ts) and set per request by
+[`src/proxy.ts`](../src/proxy.ts), or, on the two app API mounts the proxy
+doesn't run on, by the gateway ([`src/lib/apps/dispatch.ts`](../src/lib/apps/dispatch.ts)).
+Their paths don't overlap, so a response gets it once:
 
 | Header | Value |
 |---|---|
@@ -1232,19 +1233,26 @@ the one surface that could have been cached is the public `/p/<slug>` view.
 
 The API gateway caps request bodies to blunt memory-exhaustion denial of
 service. It is an explicit check in `src/lib/apps/dispatch.ts` — step 1 of the
-pipeline, before anything else — not route segment config:
+pipeline, after only the maintenance response — not route segment config:
 
 ```
 Limit:     27 MB  (MAX_BODY_BYTES)
 Mechanism: the `content-length` request header is compared BEFORE the body
-           is read, so an oversized upload is rejected without buffering it
+           is read, so an oversized upload is rejected without buffering it.
+           A body without one (chunked transfer encoding) is counted as the
+           route reads it (src/lib/apps/request-body.ts): past the cap the
+           read fails, the rest is read and dropped, and the caller gets the
+           413 whatever the route made of the failed read
 Scope:     All app API routes, both mounts (the check is in the dispatcher)
-Response:  413 { "error": "Request body too large" }
-
-Caveat:    a request that omits `content-length` (chunked transfer encoding)
-           skips this check. Routes accepting uploads must enforce their own
-           limit while streaming rather than relying on this one alone.
+Response:  413 { "error": "Request body too large", "code": "PAYLOAD_TOO_LARGE" }
 ```
+
+Under the cap, the route reads the body exactly as it was sent. That depends on
+both mounts staying outside the proxy's matcher (`src/proxy.ts`, §18): on a
+request the proxy runs for, Next buffers a copy of the body and keeps only the
+first 10 MB (`proxyClientMaxBodySize`), so the route would get a truncated body
+and no error. As a second line, a body that ends short of its declared
+`content-length` fails the route's read rather than arriving cut.
 
 The rate limiter runs before body parsing (in the App Router, the request
 body is not read until the handler calls `request.json()`), so rate limiting
@@ -1461,10 +1469,27 @@ The matcher additionally exempts `_next/static`, `_next/image`,
 `themes/<id>/`, `connector-assets/`, `screenshots/`, `branding/`,
 `favicon.ico` and the `icon*` / `apple-icon*` file-convention paths from the
 proxy entirely, so neither the cookie check nor the maintenance response below
-applies to them. It also exempts `api/webhooks/`, so that a delivery's body is
-read only by the webhook route, which stops at its cap (§19). That route runs
+applies to them.
+
+It also exempts three API mounts whose routes read their own bodies. Each runs
 the maintenance gate itself, before anything else, so the maintenance response
-still applies to it.
+below still applies to all three:
+
+- `api/webhooks/`, so that a delivery's body is read only by the webhook route,
+  which stops at its cap (§19).
+- `api/apps/` and `api/p/`, the two app API mounts, because on a request the
+  proxy runs for, Next keeps only the first 10 MB of the body (§15). No cookie
+  check applies to either. The real gate on both is the dispatcher's auth tiers
+  (§1): `session`, `signed-in` and `public` on `/api/apps`, and `password`,
+  `key` and `public` on `/api/p`. A caller with no cookie on `/api/apps` gets
+  the dispatcher's answer, 401 for a route that needs a session and 404 for no
+  such route, rather than a redirect to `/login`. The proxy's check was
+  presence-only, so any made-up cookie got past it anyway. The dispatcher also
+  sets the CSP (§14).
+
+`/api/p` and `/api/webhooks` stay on the list above anyway, so that if the
+matcher stopped leaving them out, their callers would still not be sent to
+`/login`.
 
 **Maintenance response.** Before the public list or the cookie check, the proxy
 asks whether the platform schema is behind this build
@@ -1473,10 +1498,11 @@ because in Next 16 the proxy always runs on the Node.js runtime. While the
 schema is behind, every path except `/api/health/live` and `/api/health/ready`
 gets a 503 with `Retry-After: 30`: a static page for a page, and
 `{ "error": "This instance is being updated. Try again shortly." }` for
-`/api/*` and `/.well-known/*`. That includes `/api/cron` (the tick waits),
-`/api/mcp`, and `/api/webhooks` (senders retry), whose route answers it with
-the same gate, first, since the proxy leaves it out. The page comes from the
-proxy with no app code and no query, under its own CSP, which allows no script.
+`/api/*` and `/.well-known/*`. That includes `/api/cron` (the tick waits) and
+`/api/mcp`. `/api/webhooks` (senders retry) and both app API mounts get it
+too, from their own routes, which run the same gate first, since the proxy
+leaves them out. The page comes from the proxy with no app code and no query,
+under its own CSP, which allows no script.
 Neither body names a version or says what to run; the server log does both. A
 check that fails, or doesn't answer within 2 seconds, counts as not behind, as
 it does in readiness.
