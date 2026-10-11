@@ -362,7 +362,9 @@ work in WSL, or set `git config core.autocrlf false` in the repository:
 converting line endings changes the files, so every installed folder would
 count as modified. Extensions added before installs kept a record count as
 local. To give one a record, remove its folder and install it again from the
-Registry. See
+Registry. The release step then counts it as a different extension under the
+same name, once: it switches the app off and revokes its API keys, or
+disables the connector, until an admin types its name to turn it back on. See
 [docs/security-architecture.md §31](docs/security-architecture.md#31-installing-from-the-repository).
 
 Each guide below is the authoritative spec — file layout, manifest fields, APIs,
