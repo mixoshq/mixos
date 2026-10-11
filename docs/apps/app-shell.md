@@ -102,7 +102,7 @@ Pass `surface` to name what sits beneath the band. The active tab merges into th
 - **Things, not states.** `3` unanswered handoffs is a badge. "2 categories below target" is a *measurement* — badging it invites reading a reading as a to-do, and the number never goes down by doing anything, so it stops meaning anything.
 - **A badge you can't clear is noise.** If a count includes work that is structurally always open — a track with no SLA, a queue owned by another team — exclude it and say so in a comment where the count is built. Otherwise the badge is a permanent alarm, and users learn to stop seeing it.
 - **Exclude by construction, not by filter.** If a category (data hygiene, say) must never reach a badge, make the builder incapable of emitting it rather than filtering it at the call site. Filters get copied and forgotten.
-- **Always pass `badgeLabel`.** The circle is a bare number to a screen reader otherwise. `badgeLabel="3 handoffs need your input"` is what makes it information.
+- **Always pass `badgeLabel`.** Without it a screen reader hears the generic "3 need attention", which doesn't say what is counted. `badgeLabel="3 handoffs need your input"` is what makes it information.
 - **Zero renders nothing.** Don't badge a `0`; absence is the message.
 
 ## Cards: one shell per thing, and every card says who owns it
@@ -194,9 +194,9 @@ const [tab, setTab] = useState<TabKey>(() => {
 **And once the tab lives in state, every path into it has to go through the setter.** A `<Link href="?tab=dev-handoffs">` looks correct and does nothing: client-side navigation to the same route rewrites the query string without remounting, so the initializer never re-runs. The address bar moves and the page doesn't — a bug that reads as "the link is broken" and greps as "the link is fine". Make in-page tab jumps buttons that call `setTab`, and let one effect write the URL:
 
 ```tsx
-<button type="button" onClick={() => setTab("dev-handoffs")}>
+<Button variant="ghost" onClick={() => setTab("dev-handoffs")}>
   → Dev Handoffs board
-</button>
+</Button>
 ```
 
 Reserve `<Link href="?…">` for crossing into a *different* route, where the remount does happen.
@@ -220,7 +220,7 @@ SSR and the first client render agree, the value updates after hydration, and th
 
 ## Permission-aware UI
 
-Per-app roles are declared in `app.json` and enforced *by your route handlers* — the platform stores the role but decides nothing (see [`roles.md`](roles.md)). The UI layer on top has two rules.
+Per-app roles are declared in `app.json` and enforced on the server: a route's `roles` are checked before its handler runs, and a handler can branch further with `hasRole` (see [`roles.md`](roles.md)). The UI layer on top has two rules.
 
 ### Fail closed
 
@@ -242,7 +242,7 @@ export function CanEditProvider({ children }: { children: ReactNode }) {
 }
 ```
 
-Controls stay hidden until the role is confirmed, so a slow `/me` never briefly offers an action the user doesn't have. **This is UX only** — a spoofed `true` here still can't write, because the route checks `hasRole` independently. That separation is what makes it safe to be relaxed about the client-side value.
+Controls stay hidden until the role is confirmed, so a slow `/me` never briefly offers an action the user doesn't have. **This is UX only** — a spoofed `true` here still can't write, because the route checks the role independently. That separation is what makes it safe to be relaxed about the client-side value.
 
 ### Omit, don't disable
 
@@ -278,7 +278,8 @@ One addition at this layer: **degrade, don't fail.** When an app pulls from seve
 
 ```tsx
 {data?.gongDegraded && (
-  <div className="mb-3 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+  // No bg-warning/10 behind the text: text-warning on it is 4.39:1, under the floor.
+  <div className="mb-3 rounded-md border border-warning/30 px-3 py-2 text-sm text-warning">
     Gong call data is temporarily unavailable — last-activity timing is using monday.com activity only.
   </div>
 )}
