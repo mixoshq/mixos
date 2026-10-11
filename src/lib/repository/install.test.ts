@@ -71,49 +71,60 @@ test("a built deployment is refused before the register lock is asked for", asyn
 
 // ── writing under the lease ─────────────────────────────────────────────────
 
-test("with the lease held, the tree lands in one rename, with no file executable", async () => {
-  const { writeTree } = await install();
+test("with the lease held, the tree is staged in a dot-prefixed folder, then lands in one rename, with no file executable", async () => {
+  const { stageTree, placeTree } = await install();
   const parent = await emptyDir();
   const held = lease();
+  const dir = path.join(parent, "acme");
 
-  await writeTree(path.join(parent, "acme"), ENTRIES, held);
+  const staged = await stageTree(dir, ENTRIES, held);
+
+  // Staged where no scan looks, in a folder named for the slug, so the check
+  // can read it as the extension's own folder. Nothing in place yet.
+  assert.equal(staged, path.join(parent, ".installing-acme", "acme"));
+  assert.deepEqual(await fs.readdir(parent), [".installing-acme"]);
+
+  await placeTree(staged, dir, held);
 
   // Once before writing, once before the rename.
   assert.equal(held.checks, 2);
   assert.deepEqual(await fs.readdir(parent), ["acme"]);
-  const manifest = await fs.stat(path.join(parent, "acme", "app.json"));
+  const manifest = await fs.stat(path.join(dir, "app.json"));
   assert.equal(manifest.mode & 0o111, 0);
   assert.equal(
-    await fs.readFile(path.join(parent, "acme", "api", "items", "route.ts"), "utf8"),
+    await fs.readFile(path.join(dir, "api", "items", "route.ts"), "utf8"),
     "export {};\n",
   );
 });
 
 test("a lease lost before writing leaves the disk as it was, leftovers included", async () => {
-  const { writeTree, InstallError } = await install();
+  const { stageTree, InstallError } = await install();
   const parent = await emptyDir();
   // What an earlier run left behind. A registration clears it before writing,
   // but only while the lock is its own.
-  await fs.mkdir(path.join(parent, ".installing-acme"));
-  await fs.writeFile(path.join(parent, ".installing-acme", "app.json"), "{}");
+  await fs.mkdir(path.join(parent, ".installing-acme", "acme"), { recursive: true });
+  await fs.writeFile(path.join(parent, ".installing-acme", "acme", "app.json"), "{}");
 
   await assert.rejects(
-    writeTree(path.join(parent, "acme"), ENTRIES, lease([1])),
+    stageTree(path.join(parent, "acme"), ENTRIES, lease([1])),
     (err: unknown) =>
       err instanceof InstallError &&
       err.code === "lock-lost" &&
       /Nothing was written\./.test(err.message),
   );
   assert.deepEqual(await fs.readdir(parent), [".installing-acme"]);
-  assert.deepEqual(await fs.readdir(path.join(parent, ".installing-acme")), ["app.json"]);
+  assert.deepEqual(await fs.readdir(path.join(parent, ".installing-acme", "acme")), ["app.json"]);
 });
 
 test("a lease lost before the rename puts nothing in place and cleans nothing up", async () => {
-  const { writeTree, InstallError } = await install();
+  const { stageTree, placeTree, InstallError } = await install();
   const parent = await emptyDir();
+  const dir = path.join(parent, "acme");
+  const lost = lease([2]);
 
+  const staged = await stageTree(dir, ENTRIES, lost);
   await assert.rejects(
-    writeTree(path.join(parent, "acme"), ENTRIES, lease([2])),
+    placeTree(staged, dir, lost),
     (err: unknown) =>
       err instanceof InstallError &&
       err.code === "lock-lost" &&
@@ -121,11 +132,13 @@ test("a lease lost before the rename puts nothing in place and cleans nothing up
   );
   // No target. The staging copy stays: by now it may be the new holder's.
   assert.deepEqual(await fs.readdir(parent), [".installing-acme"]);
+  assert.deepEqual((await fs.readdir(staged)).sort(), ["api", "app.json"]);
 });
 
 test("a lease that cannot be confirmed stops it the same way, without the database's words", async () => {
-  const { writeTree, InstallError } = await install();
+  const { stageTree, placeTree, InstallError } = await install();
   const parent = await emptyDir();
+  const dir = path.join(parent, "acme");
   let checks = 0;
   const unconfirmed: PlatformLease = {
     async assertHeld() {
@@ -133,8 +146,9 @@ test("a lease that cannot be confirmed stops it the same way, without the databa
     },
   };
 
+  const staged = await stageTree(dir, ENTRIES, unconfirmed);
   await assert.rejects(
-    writeTree(path.join(parent, "acme"), ENTRIES, unconfirmed),
+    placeTree(staged, dir, unconfirmed),
     (err: unknown) =>
       err instanceof InstallError &&
       err.code === "lock-unconfirmed" &&
