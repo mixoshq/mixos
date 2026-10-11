@@ -22,6 +22,12 @@ dark before merge. Changing the theme *system* — the token contract, the
 allowlisted `.mix-*` surfaces, the compiler in `scripts/theme-css.ts` — **is** an OS
 change, exactly as changing `AppManifest` is.
 
+An extension installed from the Registry carries its install record,
+`.registry.json`, inside its own folder: `apps/<slug>/.registry.json` and the
+like. It says where the extension came from and what was verified. So committing
+an install changes only that folder, and is not an OS change. There is no
+lockfile at the root.
+
 ## PR workflow
 
 1. **Create a branch** for your OS changes.
@@ -70,6 +76,7 @@ change, exactly as changing `AppManifest` is.
 | Schema gate | `src/lib/platform/schema-version.ts`, `src/lib/platform/app-migrations.ts`, `src/app/api/health/ready/route.ts` |
 | Instance-wide locks | `src/lib/platform/lock.ts` (a row every instance on the database shares), `src/lib/platform/checkout-lock.ts` (`.mixos/lock`, one checkout's) |
 | Installs from the Registry | `src/lib/repository/install.ts` (install), `src/lib/repository/pending.ts` (`.mixos/pending/`), `src/lib/repository/register.ts` and `scripts/register.ts` (`npm run register`), `src/lib/repository/pending-actions.ts` and `src/components/admin/pending/` (the review, Register and Discard in Admin) |
+| The install record | `src/lib/repository/install-record.ts` (`.registry.json` and the files hash), `src/generated/registry-installs.ts` (generated: what a build installed from a Registry, and whether each was modified), `src/lib/repository/hand-back.ts` (the commit Register hands back) |
 | Database migrations | `supabase/migrations/` |
 | App migrations | `scripts/app-migrations.ts` (applies them, per app schema and role), `scripts/app-sql-policy.ts` (what they may contain), `src/lib/apps/app-identifiers.ts` (schema and role names) |
 | Security architecture | `docs/secure-edge-gateway-architecture.md` |

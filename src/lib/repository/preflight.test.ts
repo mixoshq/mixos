@@ -122,6 +122,20 @@ describe("git control files at any depth", () => {
   });
 });
 
+// ── an install record of its own ────────────────────────────────────────────
+
+describe("a file named like the install record, at any depth", () => {
+  for (const p of [".registry.json", "lib/.registry.json", ".Registry.JSON", "assets/.registry.json/x.txt"]) {
+    test(p, () => {
+      assertRefused(refusal(p), /named like the install record \(\.registry\.json\), which only an install writes/);
+    });
+  }
+
+  test("a name that only resembles it is fine", () => {
+    assert.equal(refusal("registry.json", "lib/.registry.jsonc", "docs/.registry.json.md"), null);
+  });
+});
+
 // ── order and shape ─────────────────────────────────────────────────────────
 
 test("the path rules come before the manifest, and every problem is listed at once", () => {

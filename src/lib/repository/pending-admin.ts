@@ -30,14 +30,13 @@ import { BUILT_DEPLOYMENT_NOTICE } from "../platform/build";
 import { CheckoutLockHeldError } from "../platform/checkout-lock";
 import { LockUnavailableError } from "../platform/lock";
 import { safeErrorMessage } from "../safe-error";
-import { fetchExtension, fetchInstallManifest, repositoryBaseUrl } from "./client";
+import { fetchInstallManifest, repositoryBaseUrl } from "./client";
 import { checkoutRoot } from "./install";
 import { liveLocation, type PendingKind } from "./pending";
 import { describeRegisterFailure, discardPending, registerPending } from "./register";
 import {
   MAX_LINE_CHARS,
   ReviewError,
-  githubSourceUrl,
   migrationCount,
   reviewPendingInstall,
   shownText,
@@ -76,7 +75,7 @@ export interface PendingContext {
 }
 
 export interface ReviewContext extends PendingContext {
-  /** The publisher's claims and the source link, from the catalogue: listingFacts(). */
+  /** The publisher's claims, from the catalogue: listingFacts(). */
   listing(review: PendingReview): Promise<ListingFacts>;
 }
 
@@ -184,9 +183,13 @@ export async function reviewForButton(input: unknown, ctx: ReviewContext): Promi
 }
 
 /**
- * The publisher's claims for the installed version, and a link to its source
- * at the installed commit, from the catalogue it was installed from. Never
- * throws: the review stands without them, and says why they're missing.
+ * The publisher's claims for the installed version, from the catalogue it was
+ * installed from. Never throws: the review stands without them, and says why
+ * they're missing.
+ *
+ * The link to the source isn't asked for: the review builds it from the
+ * pending install's own record, which names the repository and the commit
+ * install downloaded and verified, rather than what the listing says now.
  */
 export async function listingFacts(review: PendingReview): Promise<ListingFacts> {
   const { kind, slug } = review;
@@ -203,50 +206,33 @@ export async function listingFacts(review: PendingReview): Promise<ListingFacts>
       origin: source,
       message:
         `It was installed from ${source}, and this instance now uses ${origin}, so the ` +
-        `publisher's claims and the source link aren't shown. Read the code in ${review.folder}/.`,
+        `publisher's claims aren't shown. Read the code in ${review.folder}/.`,
     };
   }
 
-  const [manifest, listing] = await Promise.allSettled([
-    fetchInstallManifest(kind, slug, version),
-    fetchExtension(kind, slug),
-  ]);
-  const why = (r: PromiseRejectedResult) => (r.reason instanceof Error ? r.reason.message : String(r.reason));
-  if (manifest.status === "rejected" && listing.status === "rejected") {
+  let manifest: Awaited<ReturnType<typeof fetchInstallManifest>>;
+  try {
+    manifest = await fetchInstallManifest(kind, slug, version);
+  } catch (err) {
     return {
       state: "unavailable",
       origin,
       message:
-        `${origin} couldn't be asked for the publisher's claims or the source link (${why(manifest)}). ` +
-        `Read the code in ${review.folder}/.`,
+        `${origin} couldn't be asked for the publisher's claims ` +
+        `(${err instanceof Error ? err.message : String(err)}). Read the code in ${review.folder}/.`,
     };
   }
-
-  const notes: string[] = [];
-  let claims: { scope: string; reason: string }[] | null = null;
-  let subpath: string | null | undefined = null;
-  if (manifest.status === "fulfilled") {
-    claims = manifest.value.permissions.map((p) => ({
-      scope: shownText(p.scope),
-      reason: shownText(p.reason, MAX_LINE_CHARS),
-    }));
-    subpath = manifest.value.subpath;
-    if (manifest.value.commitSha !== commitSha) {
-      notes.push(
-        `${origin} now lists commit ${manifest.value.commitSha.slice(0, 12)} for ${version}, not the ` +
-          `${commitSha.slice(0, 12)} installed here. The link is to what was installed.`,
-      );
-    }
-  } else {
-    notes.push(`The publisher's claims for ${version} couldn't be read: ${why(manifest)}`);
-  }
-  let sourceUrl: string | null = null;
-  if (listing.status === "fulfilled") {
-    sourceUrl = githubSourceUrl(listing.value.sourceRepo, commitSha, subpath ?? listing.value.sourceRepo.subpath);
-  } else {
-    notes.push(`The listing couldn't be read, so there's no link to the source: ${why(listing)}`);
-  }
-  return { state: "ok", origin, claims, sourceUrl, note: notes.length > 0 ? notes.join(" ") : null };
+  const claims = manifest.permissions.map((p) => ({
+    scope: shownText(p.scope),
+    reason: shownText(p.reason, MAX_LINE_CHARS),
+  }));
+  const note =
+    manifest.commitSha !== commitSha
+      ? `${origin} now lists commit ${manifest.commitSha.slice(0, 12)} for ${version}, not the ` +
+        `${commitSha.slice(0, 12)} installed here. The claims are for the version, and the source link ` +
+        `is to what was installed.`
+      : null;
+  return { state: "ok", origin, claims, note };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -301,13 +287,12 @@ export async function registerFromButton(input: unknown, ctx: RegisterContext): 
       gitTag: result.gitTag,
       commitSha: result.commitSha,
       installPath: result.installPath,
-      fileCount: result.fileCount,
-      byteCount: result.byteCount,
       deferredChecked: result.deferred.length,
       migrations: kind === "app" ? migrationCount(liveLocation(root, kind, slug).dir) : 0,
       servesNow,
       database,
       activation: activationFor(kind, database, servesNow),
+      handBack: result.handBack,
     },
   };
 }

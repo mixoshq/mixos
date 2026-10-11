@@ -17,6 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { checkoutLockFile, readCheckoutLock, tryAcquireCheckoutLock } from "../src/lib/platform/checkout-lock";
 import { filesHash, hashFileTree } from "../src/lib/repository/content-hash";
+import { INSTALL_RECORD_FILE, serializeInstallRecord } from "../src/lib/repository/install-record";
 import { pendingLocation, writeSidecar, type PendingKind } from "../src/lib/repository/pending";
 import type { TarEntry } from "../src/lib/repository/tar";
 import { cliActor, parseArgs, printable, resolveTarget, runCli } from "./register-cli";
@@ -63,25 +64,31 @@ beforeEach(() => {
 
 const TREE: TarEntry[] = [{ path: "app.json", mode: 0o644, data: Buffer.from('{"name":"Acme"}\n') }];
 
-function pend(kind: PendingKind, slug: string) {
+function pend(kind: PendingKind, slug: string, tree: TarEntry[] = TREE) {
   const where = pendingLocation(root, kind, slug);
   fs.mkdirSync(where.folder, { recursive: true });
-  for (const e of TREE) fs.writeFileSync(path.join(where.folder, e.path), e.data);
+  for (const e of tree) fs.writeFileSync(path.join(where.folder, e.path), e.data);
+  fs.writeFileSync(
+    path.join(where.folder, INSTALL_RECORD_FILE),
+    serializeInstallRecord({
+      source: "https://mixos.org",
+      kind,
+      slug,
+      version: "1.2.0",
+      gitTag: null,
+      commitSha: "d".repeat(40),
+      contentHash: hashFileTree(tree),
+      filesHash: filesHash(tree),
+      repository: { owner: "acme", name: `mixos-${slug}`, subpath: null },
+      requiresMixOS: null,
+    }),
+  );
   writeSidecar(where.sidecar, {
     kind,
     slug,
-    source: "https://mixos.org",
-    version: "1.2.0",
-    gitTag: null,
-    commitSha: "d".repeat(40),
-    contentHash: hashFileTree(TREE),
-    filesHash: filesHash(TREE),
-    requiresMixOS: null,
     yankedAccepted: false,
     installedAt: "2026-10-11T09:00:00.000Z",
     installedBy: "admin@example.com",
-    fileCount: 1,
-    byteCount: TREE[0].data.length,
     check: { verdict: "accepted", deferred: [] },
   });
   return where;
@@ -160,14 +167,65 @@ describe("running it", () => {
     assert.match(t.out.join("\n"), /app\/acme 1\.2\.0, installed .* by admin@example\.com\n {4}npm run register -- app\/acme/);
   });
 
-  test("registers by slug alone, and says what to do next", async () => {
+  test("registers by slug alone, and hands back what to commit and how", async () => {
     pend("app", "acme");
     const t = terminal();
     assert.equal(await cli(["acme"], t), 0, t.err.join("\n"));
-    assert.match(t.out.join("\n"), /Registered app\/acme 1\.2\.0 from commit dddddddddddd\./);
-    assert.match(t.out.join("\n"), /commit apps\/acme and deploy/);
+    const out = t.out.join("\n");
+    assert.match(out, /Registered app\/acme 1\.2\.0 from commit dddddddddddd\./);
+    assert.match(out, /It runs in this checkout now, and nowhere else until you commit apps\/acme and deploy it\./);
+    assert.match(out, /Files added in apps\/acme\/ \(2 files, \d+ B\):\n {4}\.registry\.json +\d+ B\n {4}app\.json +16 B/);
+    // The commands, unindented, so a here-document's lines are the message's.
+    assert.match(
+      out,
+      /^git switch -c add-app-acme\ngit add apps\/acme\ngit commit -F - -- apps\/acme <<'MSG'\nfeat\(acme\): add app acme 1\.2\.0 from mixos\.org\n/m,
+    );
+    assert.match(out, /^Registry-Listing: https:\/\/mixos\.org\/extend\/apps\/acme\nMSG\ngit push -u origin HEAD$/m);
+    assert.match(out, /Or run \/mixos deploy/);
+    assert.match(out, /https:\/\/github\.com\/acme\/mixos-acme\/tree\/d{40}/);
+    assert.match(out, /It arrives inactive on each instance/);
+    assert.doesNotMatch(out, /\.gitignore leaves/);
     assert.ok(fs.existsSync(path.join(root, "apps", "acme", "app.json")));
+    assert.ok(fs.existsSync(path.join(root, "apps", "acme", INSTALL_RECORD_FILE)));
     assert.deepEqual(audit, [{ actor_id: null, actor_email: "cli:tester@test-host", action: "app.register" }]);
+  });
+
+  test("warns, and adds by name, a file the checkout's .gitignore would leave out of the commit", async (t) => {
+    const git = (...args: string[]) => spawnSync("git", args, { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH ?? "", HOME: tmp } as unknown as NodeJS.ProcessEnv });
+    if (git("init", "-q").status !== 0) {
+      t.skip("git isn't available");
+      return;
+    }
+    fs.writeFileSync(path.join(root, ".gitignore"), "*.pem\n.env*\n!.env*.example\n");
+    pend("app", "acme", [
+      ...TREE,
+      { path: "cert.pem", mode: 0o644, data: Buffer.from("-----BEGIN CERTIFICATE-----\n") },
+      { path: ".env.example", mode: 0o644, data: Buffer.from("A=1\n") },
+    ]);
+    const term = terminal();
+    assert.equal(await cli(["app/acme"], term), 0, term.err.join("\n"));
+    const out = term.out.join("\n");
+    assert.match(out, /Your \.gitignore leaves this file out of `git add apps\/acme`/);
+    assert.match(out, /apps\/acme\/cert\.pem {2}\(\.gitignore:1:\*\.pem\)/);
+    // A rule that keeps a file in isn't a warning.
+    assert.doesNotMatch(out, /apps\/acme\/\.env\.example {2}\(/);
+    assert.match(out, /^git add apps\/acme\ngit add -f apps\/acme\/cert\.pem\n/m);
+  });
+
+  test("asks git nothing it would change, and stays quiet outside a git checkout", async () => {
+    const calls: string[][] = [];
+    const fake = ((command: string, args: string[]) => {
+      calls.push([command, ...args]);
+      return { status: 128, stdout: "", stderr: "fatal: not a git repository", error: undefined };
+    }) as unknown as typeof spawnSync;
+    pend("app", "acme");
+    const t = terminal();
+    assert.equal(
+      await runCli(["app/acme"], { root, io: t.io, generator: STAND_IN, actor: { id: null, email: "cli:tester@test-host" }, git: fake }),
+      0,
+    );
+    assert.deepEqual(calls, [["git", "check-ignore", "--verbose", "-z", "--stdin"]]);
+    assert.doesNotMatch(t.out.join("\n"), /\.gitignore leaves/);
   });
 
   test("a refusal exits 1 with the reason", async () => {

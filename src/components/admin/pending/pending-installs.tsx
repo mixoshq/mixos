@@ -29,7 +29,7 @@ export default function PendingInstalls({ kind }: { kind: PendingKind }) {
       slug: p.slug,
       name: pendingDisplayName(root, p.kind, p.slug),
       path: p.path,
-      version: p.sidecar?.version ?? null,
+      version: p.record?.version ?? null,
       installed: p.sidecar
         ? `Installed ${formatLastUpdated(Date.parse(p.sidecar.installedAt))} by ${p.sidecar.installedBy}`
         : null,
