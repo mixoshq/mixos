@@ -2195,11 +2195,20 @@ wiring, schema and role clashes, user-scoped connectors in scheduled jobs — ov
 the manifests already registered in `src/generated/`, with this one added. It
 reads those registered manifests as text, too.
 
-What it leaves out is the point of it. It imports none of the extension's code,
-so an app's `widgets.ts` and the `defineRoute` contract in each `route.ts` are
-listed in the verdict as deferred, checked at registration, which loads them. A
-connector's and a theme's checks never load code, so the check runs all of them.
-It writes nothing to `src/generated/` or `public/`, and does not stamp the build.
+What it leaves out is the point of it. It imports none of the extension's code.
+For an app's routes, it reads the `defineRoute({...})` options each `route.ts`
+writes out, from the source, and refuses what the build would refuse on three
+of its rules, in the build's words: a method exported as anything but a
+`defineRoute()` result, a role that `app.json` does not declare, and `raw: true`
+without the `raw-response` escape. What it cannot read as written is listed in
+the verdict as deferred, with the reason, and checked at registration, which
+loads it: options built from a variable, a spread, a call or a computed key, a
+role that is not a string written out, a method from another file, an export
+the file uses elsewhere, and an app's `widgets.ts`. It never guesses, so it
+refuses nothing it cannot read. Registration also loads every route and checks
+the rest of its contract, such as its schemas and its `auth`. A connector's and
+a theme's checks never load code, so the check runs all of them. It writes
+nothing to `src/generated/` or `public/`, and does not stamp the build.
 
 **The verdict is a file.** The check writes one verdict,
 `{"verdict":"accepted"|"rejected","problems":[…],"deferred":[…]}`, to a path in a
