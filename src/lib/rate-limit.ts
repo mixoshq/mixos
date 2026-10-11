@@ -62,6 +62,13 @@ export interface RateLimiterOptions {
 export interface RateLimiter {
   /** Charge a token. Postgres is the authority; falls back to memory on failure. */
   consume(identity: string): Promise<RateLimitResult>;
+  /**
+   * Whether a charge would be allowed now, without making one. This is for a
+   * limit that charges only failures: `check` before the work, `consume` after
+   * a failure. Postgres is the authority, a memory denial short-circuits, and
+   * it falls back to memory on failure, as `consume` does.
+   */
+  check(identity: string): Promise<RateLimitResult>;
   /** Memory-only view. Never awaits, never authoritative — for diagnostics. */
   peek(identity: string): RateLimitResult;
 }
@@ -77,6 +84,17 @@ interface Entry {
  */
 function subjectFor(name: string, identity: string): string {
   return `${name}::${identity}`;
+}
+
+/** What a bucket holding `tokens` answers, without charging it. */
+function standing(tokens: number, refillRatePerSecond: number): RateLimitResult {
+  return tokens >= 1
+    ? { allowed: true, remaining: Math.floor(tokens), retryAfterMs: 0 }
+    : {
+        allowed: false,
+        remaining: 0,
+        retryAfterMs: Math.ceil(((1 - tokens) / refillRatePerSecond) * 1000),
+      };
 }
 
 export function createRateLimiter({
@@ -198,6 +216,38 @@ export function createRateLimiter({
     };
   }
 
+  /**
+   * The bucket as it stands, refilled to now, and nothing charged. A plain
+   * read: it writes nothing, so it needs none of the locked-row care above. No
+   * row means nobody has been charged lately, which is a full bucket.
+   */
+  async function checkPostgres(identity: string): Promise<RateLimitResult> {
+    const rows = (await sql`
+      select least(
+               ${maxTokens}::float8,
+               tokens
+                 + extract(epoch from now() - last_refill) * ${refillRatePerSecond}::float8
+             ) as tokens
+      from public.rate_buckets
+      where scope = ${scope} and subject = ${subjectFor(name, identity)}
+    `) as unknown as { tokens: number }[];
+
+    if (rows.length === 0) return { allowed: true, remaining: maxTokens, retryAfterMs: 0 };
+    return standing(Number(rows[0].tokens), refillRatePerSecond);
+  }
+
+  function peekMemory(identity: string): RateLimitResult {
+    const entry = store.get(identity);
+    if (!entry) {
+      return { allowed: true, remaining: maxTokens, retryAfterMs: 0 };
+    }
+    const elapsed = (Date.now() - entry.lastRefill) / 1000;
+    return standing(
+      Math.min(maxTokens, entry.tokens + elapsed * refillRatePerSecond),
+      refillRatePerSecond,
+    );
+  }
+
   return {
     async consume(identity: string): Promise<RateLimitResult> {
       const memory = consumeMemory(identity);
@@ -213,21 +263,22 @@ export function createRateLimiter({
         return memory;
       }
     },
-    peek(identity: string): RateLimitResult {
-      const entry = store.get(identity);
-      if (!entry) {
-        return { allowed: true, remaining: maxTokens, retryAfterMs: 0 };
+    async check(identity: string): Promise<RateLimitResult> {
+      // The same two tiers as `consume`: this instance's own charges are a
+      // subset of the global ones, so its memory denying settles it.
+      const memory = peekMemory(identity);
+      if (!memory.allowed) return memory;
+      try {
+        return await checkPostgres(identity);
+      } catch (err) {
+        console.warn(
+          `[rate-limit] postgres unavailable for "${name}", falling back to in-memory:`,
+          err,
+        );
+        return memory;
       }
-      const elapsed = (Date.now() - entry.lastRefill) / 1000;
-      const tokens = Math.min(maxTokens, entry.tokens + elapsed * refillRatePerSecond);
-      return tokens >= 1
-        ? { allowed: true, remaining: Math.floor(tokens), retryAfterMs: 0 }
-        : {
-            allowed: false,
-            remaining: 0,
-            retryAfterMs: Math.ceil(((1 - tokens) / refillRatePerSecond) * 1000),
-          };
     },
+    peek: peekMemory,
   };
 }
 
@@ -236,9 +287,10 @@ export function createRateLimiter({
  *
  * THE INVARIANT: this TTL must exceed `maxTokens / refillRatePerSecond` for
  * every configured limiter, or GC forgives an abuser mid-penalty. The slowest
- * limiter today is OAuth dynamic registration at 10 tokens / 0.05 per second =
- * 200 seconds, so an hour leaves ~18x headroom. A slower limiter than that needs
- * either a longer TTL here or per-row budget columns to make the delete exact.
+ * limiter today is the password re-check (src/lib/auth/recheck-limit.ts) at 5
+ * tokens / one every 300 seconds = 1,500 seconds, so an hour leaves ~2.4x
+ * headroom. A slower limiter than that needs either a longer TTL here or
+ * per-row budget columns to make the delete exact.
  */
 export async function pruneRateBuckets(): Promise<number> {
   try {
