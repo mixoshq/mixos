@@ -40,6 +40,7 @@
  */
 
 import { isBuiltDeployment } from "../platform/build";
+import { MAX_REDIRECTS, fetchCheckingRedirects } from "./redirects";
 import {
   ExtensionSchema,
   InstallManifestSchema,
@@ -230,26 +231,69 @@ const REQUEST_TIMEOUT_MS = 8_000;
  */
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
+/**
+ * Whether a catalogue request may follow a redirect to `target`: only within
+ * the catalogue's own origin, the scheme, host and port it was sent to.
+ *
+ * A redirect is a URL the catalogue's answer chose, and the catalogue's answers
+ * are where the checksums come from. Followed anywhere else, to another host or
+ * from https down to http, whoever answers there chooses the hash every install
+ * verifies against: the hole the https rule above exists to close. Within the
+ * origin, it is the same catalogue over the same transport.
+ *
+ * The transport rule is restated here rather than inherited from
+ * `repositoryBaseUrl`: https, or http on one of the LOCAL_HOSTS. And no
+ * credentials in the URL, which `fetch` refuses with an error quoting the URL,
+ * credentials and all.
+ */
+function withinCatalogue(target: URL, catalogue: URL): boolean {
+  return (
+    target.origin === catalogue.origin &&
+    (target.protocol === "https:" || LOCAL_HOSTS.has(target.hostname)) &&
+    !target.username &&
+    !target.password
+  );
+}
+
+/** GET one catalogue endpoint and parse its JSON. Every call below goes through here. */
 async function getJson(path: string, params?: URLSearchParams): Promise<unknown> {
   const url = new URL(path, repositoryBaseUrl());
   if (params) url.search = params.toString();
 
-  let res: Response;
-  try {
-    res = await fetch(url, {
+  // One timeout for the whole exchange: every redirect, and the body read below.
+  const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const res = await fetchCheckingRedirects(url, {
+    init: () => ({
       headers: { accept: "application/json" },
       // Catalogue answers are advisory and change; nothing downstream trusts a
       // cached copy, since what is actually trusted is the content hash.
       cache: "no-store",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      redirect: "follow",
-    });
-  } catch (err) {
-    throw new RepositoryError(
-      `Could not reach ${url.origin}: ${err instanceof Error ? err.message : String(err)}`,
-      "unreachable",
-    );
-  }
+      signal,
+    }),
+    // Neither the target nor any part of it goes in the message: it is the
+    // other end's choice, and can be long or made to mislead.
+    check: (target, status) => {
+      if (!withinCatalogue(target, url)) {
+        throw new RepositoryError(
+          `The repository at ${url.origin} redirected ${path} elsewhere. ` +
+            `Catalogue requests follow a redirect only within ${url.origin}.`,
+          "status",
+          status,
+        );
+      }
+    },
+    unreachable: (hop, err) =>
+      new RepositoryError(
+        `Could not reach ${hop.origin}: ${err instanceof Error ? err.message : String(err)}`,
+        "unreachable",
+      ),
+    tooManyRedirects: (status) =>
+      new RepositoryError(
+        `The repository at ${url.origin} redirected ${path} more than ${MAX_REDIRECTS} times.`,
+        "status",
+        status,
+      ),
+  });
 
   if (res.status === 404) {
     throw new RepositoryError(`Not found in the repository: ${path}`, "not-found", 404);

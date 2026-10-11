@@ -178,6 +178,10 @@ just pulled.
   Any other event gets a 404, as an app that doesn't exist does, and records
   nothing. The audit log records an admin connecting a tenant connector through
   OAuth, as `connector.connect`, with the scopes the provider granted.
+- **Fix:** Registry search, listings and install manifests follow at most three
+  redirects, and only within the catalogue's own origin. Any other redirect,
+  such as one to another host or from https to http, is refused with an error
+  naming the catalogue.
 
 ## 2026-10-07
 
