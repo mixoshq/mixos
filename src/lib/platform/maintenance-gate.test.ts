@@ -6,9 +6,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AppMigrationStatus } from "./app-migrations";
 import {
+  APP_UPDATING_MESSAGE,
+  appMaintenanceGate,
+  appPagePath,
   cachedMaintenanceState,
   maintenanceGate,
   maintenanceStateOf,
+  type AppPagePath,
   type MaintenanceState,
 } from "./maintenance-gate";
 import type { SchemaVersionStatus } from "./schema-version";
@@ -230,5 +234,146 @@ test("a check that answers late is kept once it does", async () => {
   await new Promise((resolve) => setTimeout(resolve, 40));
   // ...and once it has answered, that answer is the one kept.
   assert.equal((await maintenanceGate("/", state))?.status, 503);
+  assert.equal(reads, 1);
+});
+
+// ── one app being updated ───────────────────────────────────────────────────
+
+const NOTES_BEHIND = maintenanceStateOf(schemaCurrent, appsBehind);
+
+/** The app gate's answer for a page, recording what it was asked. */
+function gateFor(updating: (page: AppPagePath) => boolean) {
+  const asked: AppPagePath[] = [];
+  return {
+    asked,
+    updating: async (page: AppPagePath) => {
+      asked.push(page);
+      return updating(page);
+    },
+  };
+}
+
+test("an app's pages are found under /apps and /p, with the page's key", () => {
+  assert.deepEqual(appPagePath("/apps/notes"), { surface: "apps", slug: "notes", pageKey: "" });
+  assert.deepEqual(appPagePath("/apps/notes/"), { surface: "apps", slug: "notes", pageKey: "" });
+  assert.deepEqual(appPagePath("/apps/notes/settings/advanced"), {
+    surface: "apps",
+    slug: "notes",
+    pageKey: "settings/advanced",
+  });
+  assert.deepEqual(appPagePath("/p/notes"), { surface: "p", slug: "notes", pageKey: "" });
+  assert.deepEqual(appPagePath("/p/notes/report%20one"), {
+    surface: "p",
+    slug: "notes",
+    pageKey: "report one",
+  });
+});
+
+test("nothing else is an app page: the gateway answers for API routes", () => {
+  for (const path of [
+    "/",
+    "/apps",
+    "/apps/",
+    "/apps/guide",
+    "/p",
+    "/p/",
+    "/api/apps/notes/items",
+    "/api/p/notes",
+    "/admin/apps",
+    "/login",
+    "/p/notes/%E0%A4%A",
+  ]) {
+    assert.equal(appPagePath(path), null, path);
+  }
+});
+
+test("an app being updated: its page gets a static 503 page, Retry-After, no numbers", async () => {
+  for (const path of ["/apps/notes", "/apps/notes/settings", "/p/notes", "/p/notes/report"]) {
+    const res = await appMaintenanceGate(path, always(NOTES_BEHIND), gateFor(() => true).updating);
+    assert.ok(res, path);
+    assert.equal(res.status, 503, path);
+    assert.equal(res.headers.get("retry-after"), "30", path);
+    assert.equal(res.headers.get("cache-control"), "no-store", path);
+    assert.match(res.headers.get("content-type") ?? "", /^text\/html/, path);
+    assert.match(res.headers.get("content-security-policy") ?? "", /default-src 'none'/, path);
+
+    const body = await res.text();
+    assert.match(body, /<title>Being updated<\/title>/, path);
+    assert.ok(body.includes(APP_UPDATING_MESSAGE), path);
+    assert.doesNotMatch(body.replace(/<\/?h1>/g, ""), /\d/, path);
+    assert.doesNotMatch(body, /<script/i, path);
+    const lower = body.toLowerCase();
+    for (const word of ["migration", "release", "schema", "version", "npm", "notes", ".sql"]) {
+      assert.ok(!lower.includes(word), `${path} says "${word}"`);
+    }
+  }
+});
+
+test("the gate is asked only for an app that is behind, with the page it addresses", async () => {
+  const { asked, updating } = gateFor(() => true);
+  await appMaintenanceGate("/p/notes/report", always(NOTES_BEHIND), updating);
+  assert.deepEqual(asked, [{ surface: "p", slug: "notes", pageKey: "report" }]);
+
+  // Another app's pages are decided from the kept answer alone: no query.
+  const other = gateFor(() => true);
+  for (const path of ["/apps/tasks", "/p/tasks", "/apps/tasks/board"]) {
+    assert.equal(await appMaintenanceGate(path, always(NOTES_BEHIND), other.updating), null, path);
+  }
+  assert.deepEqual(other.asked, []);
+});
+
+test("a page the gate doesn't hold back for the update is served as usual", async () => {
+  // A switched-off app's page, or a public page its manifest doesn't open:
+  // the page route answers those as it always has.
+  const { updating } = gateFor(() => false);
+  for (const path of ["/apps/notes", "/p/notes", "/p/notes/admin"]) {
+    assert.equal(await appMaintenanceGate(path, always(NOTES_BEHIND), updating), null, path);
+  }
+});
+
+test("an app's API routes, and every other path, are not the proxy's to answer", async () => {
+  const { asked, updating } = gateFor(() => true);
+  let read = 0;
+  const state = async () => {
+    read++;
+    return NOTES_BEHIND;
+  };
+  for (const path of [...APIS, "/", "/login", "/admin/apps", "/apps", "/api/p/notes/items"]) {
+    assert.equal(await appMaintenanceGate(path, state, updating), null, path);
+  }
+  assert.equal(read, 0, "a path that isn't an app page read the state");
+  assert.deepEqual(asked, []);
+});
+
+test("can't tell serves an app's pages", async () => {
+  const { asked, updating } = gateFor(() => true);
+  const cantTell = maintenanceStateOf(schemaCantTell, appsCantTell);
+  const failing = cachedMaintenanceState(async () => {
+    throw new Error("connect ECONNREFUSED");
+  });
+  const silent = cachedMaintenanceState(() => new Promise<MaintenanceState>(() => {}), { waitMs: 5 });
+  for (const state of [always(cantTell), failing, silent]) {
+    assert.equal(await appMaintenanceGate("/p/notes", state, updating), null);
+  }
+  assert.deepEqual(asked, []);
+});
+
+test("two copies kept in one store share one answer and one read", async () => {
+  // The proxy and the routes are bundled apart, each with its own copy of the
+  // module: one store per process keeps them agreeing.
+  const store = {};
+  let reads = 0;
+  const read = async () => {
+    reads++;
+    return NOTES_BEHIND;
+  };
+  const proxyCopy = cachedMaintenanceState(read, { store });
+  const routeCopy = cachedMaintenanceState(read, { store });
+
+  const [a, b] = await Promise.all([proxyCopy(), routeCopy()]);
+  assert.equal(reads, 1);
+  assert.deepEqual([...a.appsBehind], ["notes"]);
+  assert.equal(b, a);
+  assert.equal(await routeCopy(), a);
   assert.equal(reads, 1);
 });

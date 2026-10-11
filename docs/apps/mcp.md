@@ -268,10 +268,14 @@ view-model your UI renders and strip everything that only exists to be looked at
 The broker rejects with a code, delivered to the model as a readable tool result
 (not a protocol error — that would be invisible to it and just abort the turn):
 
-`NOT_FOUND` · `NOT_EXPOSED` · `NOT_CONSENTED` · `FORBIDDEN_USER` · `NO_HANDLER` ·
-`INVALID_INPUT` · `TIMEOUT` (30s) · `PAYLOAD_TOO_LARGE` (1 MB) · `TOOL_ERROR`
+`NOT_FOUND` · `NOT_EXPOSED` · `NOT_CONSENTED` · `FORBIDDEN_USER` · `APP_UPDATING` ·
+`NO_HANDLER` · `INVALID_INPUT` · `TIMEOUT` (30s) · `PAYLOAD_TOO_LARGE` (1 MB) ·
+`TOOL_ERROR`
 
 Your thrown errors become `TOOL_ERROR`, passed through `safeErrorMessage()`.
+`APP_UPDATING` means your app's own migrations are behind this build: a call
+answers "This app is being updated. Try again shortly.", and your tools are
+left out of the tool list until the migrations are applied.
 
 ## What the operator sees
 
@@ -283,9 +287,8 @@ never has to opt into seeing it. In **Administration → Analytics**:
   Every app exposing tools is listed, so a `0` means "reachable by a model but
   never used", not "missing".
 - **Select your app** — per-tool call counts (including declared-but-never-called
-  tools), a daily trend, which connected client drove the requests, and which
-  users were asking. Your app appears in the selector on the strength of its
-  `mcp` block alone.
+  tools), a daily trend, and which users were asking. Your app appears in the
+  selector on the strength of its `mcp` block alone.
 
 Use it to spot the two failure modes docs can't catch: a tool nobody calls
 (usually a weak `description`), and a tool called far more than expected (usually

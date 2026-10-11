@@ -64,6 +64,19 @@ Note what is absent: no `fetch`, no `if (!res.ok) throw`, no `Authorization`
 header, no retry loop. Adding any of them by hand means opting out of the
 behaviour below.
 
+Every public method also goes in the manifest's `telemetry` list, or the build
+fails. For this class:
+
+```json
+"telemetry": [
+  { "method": "getItem",    "description": "Read one item" },
+  { "method": "listItems",  "description": "Listed items" },
+  { "method": "createItem", "description": "Created an item", "mutates": true }
+]
+```
+
+See [Telemetry](telemetry.md).
+
 ## `this.request()`
 
 ```ts
@@ -115,7 +128,7 @@ deliberately never reads them.
 `configured` is a cheap synchronous check that the credential fields are
 non-empty. It cannot tell you a key was pasted with a trailing space or points
 at the wrong environment. `testConnection()` makes one real call and proves it,
-and is what the Registry's **Test Connection** button runs.
+and is what the Registry's **Verify connection** button runs.
 
 Pick the cheapest authenticated endpoint the API has — `/me`, `/account`, a
 one-item list. Let failures throw.

@@ -11,16 +11,23 @@
  * with a gate the authenticated one never had and the authenticated one ended up
  * checking the wrong table.
  *
+ * Neither mount is behind the proxy (src/proxy.ts, `config.matcher`): Next
+ * would cut any request body the proxy sees at 10 MB. So the gateway gives
+ * these paths what the proxy gives the rest, itself: the maintenance response
+ * first, and the CSP on everything else it answers.
+ *
  * The order below is load-bearing and is written out so a change to it is a
  * deliberate act:
  *
- *   1. Body cap, before anything reads a body.
+ *   0. The maintenance response.                      → 503
+ *   1. Body cap, before anything reads a body, and
+ *      again as the route reads it.                   → 413
  *   2. App exists.                                    → 404
  *   3. Per-IP rate limit, before any authentication work.
  *   4. Resolve the URL to an on-disk route pattern.   → 404
  *   5. Pre-import eligibility, from the REGISTRY.     → 404
  *   6. The app gate, then import the module and find
- *      the declaration.                               → 404 / 405 / 500
+ *      the declaration.                               → 404 / 503 / 405 / 500
  *   7. Live declaration must agree with the registry. → 404
  *   8. Resolve the auth tier the caller presents.     → 401 / 403 / 404
  *   9. Per-user and per-route rate limits, now that we know who is calling.
@@ -29,15 +36,20 @@
  *
  * Step 5 exists so a route that does not serve this mount never gets the chance
  * to run its module-scope code for a caller it would have refused. The app gate
- * that opens step 6 does the same for a whole app: one an admin switched off
- * never runs its module-scope code, for anyone. Step 8 checks activation again,
- * as a second line. Step 7 exists because step 5 trusted the generated
- * registry, and a gate decided from one source and enforced from another is
- * not a gate.
+ * that opens step 6 does the same for a whole app: one an admin switched off,
+ * or one whose own migrations are behind this build, never runs its
+ * module-scope code, for anyone. Step 8 checks activation again, as a second
+ * line. Step 7 exists because step 5 trusted the generated registry, and a
+ * gate decided from one source and enforced from another is not a gate.
  */
 
 import { NextResponse } from "next/server";
 import { appRegistry } from "@/generated/app-registry";
+import {
+  APP_UPDATING_MESSAGE,
+  MAINTENANCE_HEADERS,
+  maintenanceGate,
+} from "@/lib/platform/maintenance-gate";
 import { resolveRoutePath } from "@/lib/apps/api-router";
 import { checkAppGate } from "@/lib/apps/app-gate";
 import { buildAppContext, buildPublicAppContext } from "@/lib/apps/context";
@@ -50,16 +62,20 @@ import {
 import { createRateLimiter } from "@/lib/rate-limit";
 import { resolveAuthTier, type AppMount } from "@/lib/apps/auth-tier";
 import { needsCsrf, verifyCsrf } from "@/lib/apps/csrf";
+import { capRequestBody } from "@/lib/apps/request-body";
 import type { RouteAuth } from "@/lib/apps/types";
+import { buildCsp, cspNonce } from "@/lib/csp";
+import { maintenanceState } from "@/lib/platform/maintenance";
 
 /**
  * Cap request bodies at 27 MB. Routes still validate their own payloads; this is
  * the memory-DoS backstop. 27 MB = a 25 MB user-facing limit plus ~2 MB for
  * multipart boundaries and form fields. Raise consciously.
  *
- * Caveat: a request omitting `content-length` (chunked transfer encoding) skips
- * this check, so a route accepting uploads must enforce its own limit while
- * streaming rather than relying on this alone.
+ * A declared `content-length` over the cap is refused before the body is read.
+ * A body sent without one (chunked transfer encoding) is counted as the route
+ * reads it, and refused the same way once it passes the cap
+ * (src/lib/apps/request-body.ts).
  */
 const MAX_BODY_BYTES = 27_000_000;
 
@@ -94,7 +110,20 @@ const routeLimiter = createRateLimiter({
   refillRatePerSecond: 3,
 });
 
-export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+/** The methods both mounts export. Next serves HEAD from GET. */
+const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+
+export type HttpMethod = (typeof HTTP_METHODS)[number];
+
+/** What Next's own OPTIONS answer would list for the mount files. */
+const ALLOW = [...HTTP_METHODS, "HEAD", "OPTIONS"].sort().join(", ");
+
+function payloadTooLarge() {
+  return NextResponse.json(
+    { error: "Request body too large", code: "PAYLOAD_TOO_LARGE" },
+    { status: 413 },
+  );
+}
 
 function tooManyRequests(retryAfterMs: number) {
   return NextResponse.json(
@@ -114,6 +143,20 @@ function notFound() {
   );
 }
 
+/**
+ * The app's own migrations are behind this build. Not a 404, which is a
+ * switched-off app's answer and tells a client the route is gone: this one is
+ * back once the release step has run, which is what 503 and `Retry-After` say
+ * to every HTTP client. `UNAVAILABLE` is the code `callAppRoute()` throws for
+ * it too.
+ */
+function appUpdating() {
+  return NextResponse.json(
+    { error: APP_UPDATING_MESSAGE, code: "UNAVAILABLE" },
+    { status: 503, headers: MAINTENANCE_HEADERS },
+  );
+}
+
 export interface DispatchOptions {
   request: Request;
   method: HttpMethod;
@@ -123,20 +166,67 @@ export interface DispatchOptions {
   mount: AppMount;
 }
 
-export async function dispatchAppRoute({
+export function dispatchAppRoute(options: DispatchOptions): Promise<Response> {
+  return atTheEdge(options.request, () => dispatch(options));
+}
+
+/**
+ * OPTIONS on either mount: Next's own answer for these files, 204 and the
+ * methods they serve, after the maintenance response, which Next's answer
+ * alone would skip.
+ */
+export function appRouteOptions(request: Request): Promise<Response> {
+  return atTheEdge(
+    request,
+    async () => new Response(null, { status: 204, headers: { Allow: ALLOW } }),
+  );
+}
+
+/**
+ * What the proxy does for every path it runs on, done here for the two mounts
+ * it doesn't (src/proxy.ts, `config.matcher`).
+ */
+async function atTheEdge(request: Request, serve: () => Promise<Response>): Promise<Response> {
+  // 0 — the maintenance response, before anything that could reach the
+  // database. Its own answer, without the CSP, as the proxy's is.
+  const maintenance = await maintenanceGate(new URL(request.url).pathname, maintenanceState);
+  if (maintenance) return maintenance;
+  return withCsp(await serve());
+}
+
+/**
+ * The proxy's CSP (src/lib/csp.ts), replacing any the route set, as the
+ * proxy's did. A Response whose headers can't change, a `Response.redirect()`
+ * or one passed through from `context.http`, is copied first.
+ */
+function withCsp(response: Response): Response {
+  const csp = buildCsp(cspNonce());
+  try {
+    response.headers.set("Content-Security-Policy", csp);
+    return response;
+  } catch {
+    const headers = new Headers(response.headers);
+    headers.set("Content-Security-Policy", csp);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+}
+
+async function dispatch({
   request,
   method,
   appSlug,
   segments,
   mount,
 }: DispatchOptions): Promise<Response> {
-  // 1 — body cap, checked from the header before the body is read.
+  // 1 — body cap. A declared length is checked here, before the body is read;
+  // a body without one is counted as the route reads it (step 12).
   const contentLength = request.headers.get("content-length");
   if (contentLength && Number(contentLength) > MAX_BODY_BYTES) {
-    return NextResponse.json(
-      { error: "Request body too large", code: "PAYLOAD_TOO_LARGE" },
-      { status: 413 },
-    );
+    return payloadTooLarge();
   }
 
   // 2 — the app exists.
@@ -169,8 +259,13 @@ export async function dispatchAppRoute({
 
   // 6 — the app gate, before the import, because importing runs the module's
   // top-level code. An app that is off is a 404, like a route that was never
-  // here, which is also what step 8 answers for it.
-  if (!(await checkAppGate(appSlug)).open) return notFound();
+  // here, which is also what step 8 answers for it. One whose own migrations
+  // are behind is a 503 until the release step has run. That answer comes
+  // before authentication, because authenticating needs the declaration this
+  // import would load, so it reaches anyone step 5 lets through: it says only
+  // that the app is being updated.
+  const gate = await checkAppGate(appSlug);
+  if (!gate.open) return gate.reason === "updating" ? appUpdating() : notFound();
 
   // Import and dispatch are separated so a route that throws at module scope is
   // not reported as missing. That distinction cost real debugging time.
@@ -251,8 +346,8 @@ export async function dispatchAppRoute({
   }
   if (resolution.kind === "unauthenticated") {
     // On the public mount an identity challenge would confirm the route exists,
-    // so it stays a 404 there. On the authenticated mount the caller is already
-    // known to be a browser with a session cookie, and 401 is the useful answer.
+    // so it stays a 404 there. The authenticated mount is the one the browser
+    // SDK calls with its session cookie, and 401 is the useful answer there.
     return mount === "public"
       ? notFound()
       : NextResponse.json(
@@ -332,13 +427,23 @@ export async function dispatchAppRoute({
 
   // 12 — run it. Role enforcement lives inside runRoute so every caller of a
   // route, including Phase 2's in-process `context.call()`, passes through it.
-  return runRoute(declaration, request, {
+  // The route reads the body through step 1's cap, counted as it arrives.
+  const body = capRequestBody(request, MAX_BODY_BYTES);
+  const response = await runRoute(declaration, body.request, {
     context,
     appSlug,
     routePattern: routeKey,
     method,
     pathParams: extractPathParams(routePath, segments),
   });
+
+  // The body passed the cap as the route read it. The read failed, and whatever
+  // the route made of that, a raw route included, the caller gets step 1's 413.
+  if (body.exceeded()) {
+    await response.body?.cancel().catch(() => {});
+    return payloadTooLarge();
+  }
+  return response;
 }
 
 /**

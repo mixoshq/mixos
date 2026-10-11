@@ -90,15 +90,15 @@ const USER_MESSAGES: Record<ConnectorErrorCategory, string> = {
  */
 const ADMIN_HINTS: Record<ConnectorErrorCategory, string> = {
   unconfigured:
-    "Open Administration → Connector Registry and enter this connector's credentials.",
+    "Open Administration → Connectors and enter this connector's credentials.",
   auth_failed:
-    "The stored credential is invalid, expired, or revoked. Re-enter it (or reconnect) in the Connector Registry, then use Test Connection.",
+    "The stored credential is invalid, expired, or revoked. Re-enter it (or reconnect) in Administration → Connectors, then verify the connection.",
   forbidden:
     "The credential authenticated but lacks the required scope. Re-provision it upstream with the scopes listed in the connector's description.",
   rate_limited:
     "The upstream rate limit was hit. If this is frequent, reduce call volume or request a higher quota.",
   not_found:
-    "Either the record genuinely doesn't exist, or the configured base URL points at the wrong environment. Check the base URL in the Connector Registry.",
+    "Either the record genuinely doesn't exist, or the configured base URL points at the wrong environment. Check the base URL in Administration → Connectors.",
   invalid_request:
     "The connector sent something the upstream rejected. This is a bug in the connector or the calling app, not a configuration problem.",
   conflict:

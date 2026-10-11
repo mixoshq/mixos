@@ -10,7 +10,7 @@ cp -r themes/_template themes/my-theme
 
 The folder name is the slug. It ends up in a CSS attribute selector, so lowercase letters, digits and hyphens only. Fill in `name` and `description` in `theme.json` — the description is what an admin reads in the picker, so write it for them, not for you.
 
-## 2. Set the light tokens
+## 2. Set the tokens
 
 Work through `:root` in `theme.css` top to bottom. The template is ordered by how much each group matters, not alphabetically.
 
@@ -94,9 +94,9 @@ Keep the published values in `--brand-*`, where they are legal for large text an
 
 This is the pattern to reach for whenever a brand colour fails. It is not a compromise on the brand — `#0369A1` is *in* the brand palette.
 
-### Let the dark theme be the better half
+### The dark theme substitutes too
 
-A brand drawn for dark spreads usually clears AA on a dark ground at its published values. `mixos-dark` uses brand cyan-400 for `--primary` at 8.33:1, with no substitution anywhere, while `mixos` has to step down to cyan-700 on white. If the book's own layouts are dark, expect this — and consider authoring the dark theme first, then deriving the light one.
+A dark ground moves the substitution to the other end of the ramp; it does not remove it. On `mixos-dark`'s slate, published cyan is 4.36:1 and violet 3.13:1, both short of AA. So `--primary` takes brand cyan-400 (8.33:1) and `--cat-2` a lighter violet, `#a78bfa`, just as `mixos` steps `--primary` down to cyan-700 on white. Measure every candidate on the ground it will sit on.
 
 ### Map type by role, not by name
 

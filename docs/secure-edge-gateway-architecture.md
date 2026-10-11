@@ -30,8 +30,15 @@ function:
 Both files ([`/api/apps/[...slug]/route.ts`](../src/app/api/apps/%5B...slug%5D/route.ts),
 [`/api/p/[appSlug]/[[...slug]]/route.ts`](../src/app/api/p/%5BappSlug%5D/%5B%5B...slug%5D%5D/route.ts))
 do nothing but call `dispatchAppRoute({ ..., mount })` and re-export it under the
-five HTTP methods. **All the logic lives in
+five HTTP methods, plus an `OPTIONS` that gives the maintenance response or
+Next's usual 204. **All the logic lives in
 [`src/lib/apps/dispatch.ts`](../src/lib/apps/dispatch.ts).**
+
+Neither mount is behind the proxy ([`src/proxy.ts`](../src/proxy.ts)). For a
+request the proxy runs on, Next keeps only the first 10 MB of the body, and the
+dispatcher takes up to 27 MB. So the dispatcher gives these paths what the proxy
+gives every other path: the maintenance response first, and the CSP on what it
+answers.
 
 They were parallel implementations once. That is how the public mount acquired a
 gate the authenticated one never had, and the authenticated one ended up checking
@@ -52,13 +59,9 @@ flowchart TD
 
     FETCH["fetch('/api/apps/{slug}/{path}')<br/>Cookie: session token"]
 
-    FETCH --> PROXY
+    FETCH --> DISPATCH
 
-    PROXY["PROXY — src/proxy.ts<br/>optimistic only<br/>cookie PRESENCE check, else 307 /login<br/>no decode, no validation, no admin check, no CSRF<br/>public prefixes (incl. /api/p) skip it entirely"]
-
-    PROXY --> DISPATCH
-
-    DISPATCH["dispatchAppRoute() — src/lib/apps/dispatch.ts<br/>twelve checks, in order — enumerated below<br/>413 · 404 · 429 · 405 · 401 · 403 · 500"]
+    DISPATCH["dispatchAppRoute() — src/lib/apps/dispatch.ts<br/>not behind the proxy: no cookie-presence redirect<br/>the maintenance response, then twelve checks, in order — enumerated below<br/>503 · 413 · 404 · 429 · 405 · 401 · 403 · 500"]
 
     DISPATCH --> DB["Scoped DB<br/>the app's own schema"]
     DISPATCH --> CONN["Connector<br/>(Gmail, …)"]
@@ -71,12 +74,13 @@ flowchart TD
 
 | # | Step | Fails with |
 |---|------|------------|
-| 1 | Body cap — `content-length` compared against `MAX_BODY_BYTES` (27 MB) **before the body is read** | 413 |
+| 0 | Maintenance response — the platform schema is behind this build. The same answer the proxy gives every other path, before anything reads the database | 503 + `Retry-After` |
+| 1 | Body cap — `content-length` compared against `MAX_BODY_BYTES` (27 MB) **before the body is read**. A body without one is counted as the route reads it, and passing the cap is the same 413 whatever the route made of the failed read | 413 |
 | 2 | `appRegistry` lookup for the slug | 404 |
 | 3 | Per-IP token bucket (60 burst, 10/s). IP is the **rightmost** `x-forwarded-for` entry | 429 + `Retry-After` |
 | 4 | `resolveRoutePath()` maps URL segments to an on-disk pattern; `[]` → `api/index/route.ts` | 404 |
-| 5 | Does this mount serve any tier the route declares? Decided from the **hoisted registry contract**, so no app module is imported for a caller the route would refuse | 404 |
-| 6 | Dynamic `import()`, then method lookup. Import and dispatch are **separate**, so a module that throws at load is not reported as missing | 404 / 405 / 500 |
+| 5 | Does this mount serve any tier the route declares? Decided from the **hoisted registry contract**, so no app module is imported for a route this mount doesn't serve. The checks on the caller come after the import, from step 8 | 404 |
+| 6 | Dynamic `import()`, then method lookup. Import and dispatch are **separate**, so a module that throws at load is logged as a load failure rather than as a missing route; the caller gets 404 either way | 404 / 405 / 500 |
 | 7 | The live declaration must match what step 5 was decided on. A gate decided from one source and enforced from another is not a gate | 404 |
 | 8 | `resolveAuthTier()` — which tier has the caller earned? | 401 / 403 / 404 |
 | 9 | CSRF double-submit token — **authenticated mount, identity tiers, mutating methods only** | 403 `CSRF_FAILED` |
@@ -89,8 +93,8 @@ not a decision it skips.
 
 Step 8 also answers differently per mount. On the public mount an identity
 challenge would confirm the route exists, so an unauthenticated caller gets 404.
-On the authenticated mount the caller is already known to be a browser with a
-cookie, so 401 is the useful answer.
+The authenticated mount is the one the browser SDK calls with its session
+cookie, so 401 is the useful answer there.
 
 ---
 
@@ -126,8 +130,8 @@ acquire any.
 keys are `mixk_`-prefixed random strings stored as HMAC-SHA256 digests, bound to
 one app, and scope-checked per method and route pattern — a key minted for one
 endpoint does not become a key for the whole app. It is served on the public
-mount only, because `/api/apps` sits behind the proxy's cookie check and a
-machine caller has no cookie.
+mount only: `/api/p` is the surface for a caller with no session cookie, and
+`/api/apps` is the one the browser SDK calls with its cookie.
 
 ---
 
@@ -157,7 +161,7 @@ export const GET = defineRoute({
 `FatalManifestError` on a bare handler, and an unbranded export is a 500 at
 runtime. The reason is that everything above `handler` has to be readable by
 something other than the handler: the build checks roles against the manifest,
-the dispatcher enforces `auth` before any app code runs, and the generated client
+the dispatcher enforces `auth` before the handler runs, and the generated client
 types itself from the schemas.
 
 Rules:
