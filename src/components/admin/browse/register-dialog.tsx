@@ -28,6 +28,7 @@ import type {
   InstallManifest,
 } from "@/lib/repository/types";
 import { KIND_LABEL } from "@/lib/repository/types";
+import { leftOutLine } from "@/lib/repository/left-out";
 import HandBackPanel from "../pending/hand-back";
 import type { PendingTarget } from "../pending/review-dialog";
 
@@ -391,6 +392,7 @@ function Row({
 function OutcomePanel({ outcome }: { outcome: InstallOutcome }) {
   if (outcome.ok) {
     const r = outcome.result;
+    const leftOut = leftOutLine(r.leftOut);
     return (
       <div className="space-y-4">
         <Notice
@@ -430,6 +432,7 @@ function OutcomePanel({ outcome }: { outcome: InstallOutcome }) {
           </Row>
           <Row label="Contents">
             {r.fileCount} files · {Math.round(r.byteCount / 1024)} KB
+            {leftOut && <span className="mt-1 block text-muted-foreground">{leftOut}</span>}
           </Row>
         </dl>
         {/* A theme registers as it installs, so it is ready to commit now. */}

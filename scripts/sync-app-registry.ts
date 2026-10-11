@@ -49,8 +49,22 @@
 // coming back (a rollback, a skip that ended) are the same app; anything else
 // waits for an admin.
 //
-// Leaving and returning are audited, with the release step as the actor
-// (RELEASE_STEP_ACTOR): `app.missing` and `app.returned`.
+// SAME SLUG, DIFFERENT EXTENSION. Every run also records each app's identity
+// (src/lib/repository/identity.ts): where it came from, by its install record,
+// or `local`. A new version or commit from the same repository is the same
+// app, so an update changes nothing here. Any other change, at any release
+// step and not only when an app returns, means a different extension now has
+// the slug: a local app reinstalled from the Registry, one from another
+// repository, or an installed one whose record was deleted. That one is
+// switched off and flagged (`identity_changed_at`), and its API keys are
+// revoked, since they were given out for the extension before it. Activating
+// it again needs its slug typed (setAppActive() in src/lib/apps/access.ts).
+// When it is also an app coming back with different files, this flag is the
+// one it gets: it says more, and asks more of the admin.
+//
+// Leaving, returning and a change of identity are audited, with the release
+// step as the actor (RELEASE_STEP_ACTOR): `app.missing`, `app.returned` and
+// `app.identity.changed`.
 //
 // One transaction under the release step's lock (scripts/migration-lock.ts), so
 // the mirror and its audit rows are written whole or not at all, and two runners
@@ -60,7 +74,10 @@ import path from "path";
 import type { Sql, TransactionSql } from "postgres";
 import type { AppManifest } from "../src/lib/apps/types";
 import { appRegistry as builtRegistry } from "../src/generated/app-registry";
+import { registryInstalls as builtInstalls } from "../src/generated/registry-installs";
 import { RELEASE_STEP_ACTOR } from "../src/lib/apps/audit-actors";
+import { extensionIdentity, identityDetails } from "../src/lib/repository/identity";
+import type { RegistryInstall } from "../src/lib/repository/install-record";
 import { appCodeHash } from "./app-code-hash";
 import { takeMigrationLock } from "./migration-lock";
 
@@ -78,6 +95,20 @@ export interface ReturnedApp {
   slug: string;
   /** Its files differ from the hash recorded before it left. */
   codeChanged: boolean;
+  /** It came back as a different extension, so it is in `replaced` too. */
+  identityChanged: boolean;
+}
+
+export interface ReplacedApp {
+  slug: string;
+  /** The identity recorded before this run. */
+  previous: string;
+  /** This build's. */
+  identity: string;
+  /** True when this run switched off an app that was active. */
+  deactivated: boolean;
+  /** How many of its API keys this run revoked. */
+  apiKeysRevoked: number;
 }
 
 export interface AppRegistrySyncResult {
@@ -88,6 +119,8 @@ export interface AppRegistrySyncResult {
   stillMissing: string[];
   /** Missing until this run. */
   returned: ReturnedApp[];
+  /** A different extension than the one recorded under the slug. */
+  replaced: ReplacedApp[];
 }
 
 /** What the mirror records of each app. */
@@ -98,12 +131,13 @@ interface AppRow {
   is_active: boolean;
   missing_since: Date | null;
   code_hash: string | null;
+  identity: string | null;
 }
 
 /** One row in admin_audit_log, in the sync's own transaction. */
 async function audit(
   tx: TransactionSql,
-  action: "app.missing" | "app.returned",
+  action: "app.missing" | "app.returned" | "app.identity.changed",
   slug: string,
   details: Record<string, unknown>,
 ): Promise<void> {
@@ -115,18 +149,21 @@ async function audit(
 }
 
 /**
- * `appRegistry` is this build's registry and `appsDir` where its folders are. A
- * test passes its own, the way it passes the app migration runner its own apps.
+ * `appRegistry` is this build's registry, `appsDir` where its folders are, and
+ * `installs` what it installed from a Registry. A test passes its own, the way
+ * it passes the app migration runner its own apps.
  */
 export async function syncAppRegistry(
   sql: Sql,
   appRegistry: readonly MirroredApp[] = builtRegistry,
   appsDir: string = APPS_DIR,
+  installs: readonly RegistryInstall[] = builtInstalls,
 ): Promise<AppRegistrySyncResult> {
   const slugs = appRegistry.map((a) => a.slug);
   // Before the transaction: the files are this build's, and reading them has
   // no business holding the lock.
   const hashes = new Map(slugs.map((slug) => [slug, appCodeHash(path.join(appsDir, slug))]));
+  const identities = new Map(slugs.map((slug) => [slug, extensionIdentity("app", slug, installs)]));
 
   return sql.begin(async (tx) => {
     await takeMigrationLock(tx);
@@ -134,46 +171,88 @@ export async function syncAppRegistry(
     // Read under the lock, since a runner that went first may already have
     // marked or cleared what this one is about to.
     const rows = await tx<AppRow[]>`
-      select slug, is_active, missing_since, code_hash from public.apps
+      select slug, is_active, missing_since, code_hash, identity from public.apps
     `;
     const bySlug = new Map(rows.map((r) => [r.slug, r]));
 
     const returned: ReturnedApp[] = [];
+    const replaced: ReplacedApp[] = [];
     for (const app of appRegistry) {
       const codeHash = hashes.get(app.slug) ?? null;
+      const identity = identities.get(app.slug)!;
       await tx`
-        insert into public.apps (slug, name, description, icon, is_active, code_hash)
-        values (${app.slug}, ${app.name}, ${app.description}, ${app.icon}, false, ${codeHash})
+        insert into public.apps (slug, name, description, icon, is_active, code_hash, identity)
+        values (${app.slug}, ${app.name}, ${app.description}, ${app.icon}, false, ${codeHash}, ${identity})
         on conflict (slug) do update set
           name          = excluded.name,
           description   = excluded.description,
           icon          = excluded.icon,
           code_hash     = excluded.code_hash,
+          identity      = excluded.identity,
           missing_since = null
       `;
 
+      // New to this database: it arrives inactive, with nothing to compare.
       const row = bySlug.get(app.slug);
-      if (!row?.missing_since) continue;
+      if (!row) continue;
 
+      // Null is a row activation wrote before any release step recorded one,
+      // for this same build's app: nothing to compare with yet.
+      const identityChanged = row.identity !== null && row.identity !== identity;
+      const returning = row.missing_since !== null;
       // Back after a run without it. A hash missing on either side counts as
       // changed: the safe reading of "can't tell" is the one an admin settles.
-      const codeChanged = codeHash === null || row.code_hash !== codeHash;
-      if (codeChanged) {
+      const codeChanged = returning && (codeHash === null || row.code_hash !== codeHash);
+
+      if (identityChanged) {
+        // The first replaced identity, and when, are kept while an admin
+        // hasn't answered: a second change doesn't hide what came first.
+        await tx`
+          update public.apps
+          set is_active = false,
+              identity_changed_at = coalesce(identity_changed_at, now()),
+              replaced_identity = coalesce(replaced_identity, ${row.identity})
+          where slug = ${app.slug}
+        `;
+        const revoked = await tx`
+          update public.app_api_keys
+          set revoked_at = now()
+          where app_slug = ${app.slug} and revoked_at is null
+          returning id
+        `;
+        await audit(tx, "app.identity.changed", app.slug, {
+          previous: identityDetails(row.identity),
+          identity: identityDetails(identity),
+          // True when this run switched off an app that was active.
+          deactivated: row.is_active,
+          apiKeysRevoked: revoked.length,
+        });
+        replaced.push({
+          slug: app.slug,
+          previous: row.identity!,
+          identity,
+          deactivated: row.is_active,
+          apiKeysRevoked: revoked.length,
+        });
+      } else if (codeChanged) {
         await tx`
           update public.apps
           set is_active = false, returned_changed_at = now()
           where slug = ${app.slug}
         `;
       }
+
+      if (!returning) continue;
       await audit(tx, "app.returned", app.slug, {
         codeChanged,
         previousCodeHash: row.code_hash,
         codeHash,
-        missingSince: row.missing_since.toISOString(),
+        missingSince: row.missing_since!.toISOString(),
+        identityChanged,
         // True when this run switched off an app that was active when it left.
-        deactivated: codeChanged && row.is_active,
+        deactivated: (codeChanged || identityChanged) && row.is_active,
       });
-      returned.push({ slug: app.slug, codeChanged });
+      returned.push({ slug: app.slug, codeChanged, identityChanged });
     }
 
     // `= any(...)` rather than `not in (...)`: an empty registry would make
@@ -202,6 +281,7 @@ export async function syncAppRegistry(
         .map((r) => r.slug)
         .sort(),
       returned,
+      replaced,
     };
   });
 }

@@ -136,7 +136,10 @@ Browse says so: "Installed from mixos.org · 1.2.0". An installed folder edited
 after install shows "modified locally".
 
 An app arrives **inactive** on each instance. Activate it on that instance's
-Admin > Apps. After Register, the checkout offers **Activate in this checkout**
+Admin > Apps. One that takes the name of a different extension that instance
+had asks for its name typed; see
+[When a different extension takes a name](#when-a-different-extension-takes-a-name).
+After Register, the checkout offers **Activate in this checkout**
 only when its own database is on the same machine: loopback, a Unix socket or
 `host.docker.internal`, as with the local Docker stack. A checkout that uses a
 database other instances share doesn't offer it, because activating there would
@@ -188,7 +191,7 @@ checking one extension, delete its `.registry.json`.
 
 ### The release step
 
-[`scripts/release.ts`](../../scripts/release.ts) runs three things, in order:
+[`scripts/release.ts`](../../scripts/release.ts) runs four things, in order:
 
 1. **The platform schema**, `supabase/migrations/*.sql`, by
    [`scripts/platform-migrations.ts`](../../scripts/platform-migrations.ts).
@@ -204,8 +207,15 @@ checking one extension, delete its `.registry.json`.
    runs; see
    [docs/apps/database.md](../apps/database.md#what-a-migration-may-contain).
    An app the build no longer carries is not deleted; see
-   [When an app leaves the build](#when-an-app-leaves-the-build).
-3. **The first admin**, from `INITIAL_ADMIN_*`, only if that account does not
+   [When an app leaves the build](#when-an-app-leaves-the-build). An app that
+   is a different extension than the one recorded under its slug is switched
+   off; see
+   [When a different extension takes a name](#when-a-different-extension-takes-a-name).
+3. **Where each connector and theme came from**, by
+   [`scripts/sync-identities.ts`](../../scripts/sync-identities.ts), which
+   `npm run migrate:apps` also runs. A connector that is a different one than
+   the one recorded under its name is disabled.
+4. **The first admin**, from `INITIAL_ADMIN_*`, only if that account does not
    exist yet.
 
 It is safe to run on every deploy, and safe to run twice at once: each
@@ -270,6 +280,31 @@ recorded:
 
 The audit log records both, as `app.missing` and `app.returned`, with
 `release-step` as the actor.
+
+### When a different extension takes a name
+
+The release step also records where each app, connector and theme came from:
+the catalogue and GitHub repository in its `.registry.json`, or local when it
+has none. A new release from the same repository is an update, and changes
+nothing. Anything else means a different extension now has the name, for
+example a local app you removed and installed again from the Registry, or a
+release from another repository. The release step then:
+
+- **switches an app off**, marks it **Replaces a different extension** on
+  Admin > Apps, and revokes its API keys. Its grants, settings and data stay.
+  To turn it on, check what it does, press **Activate** and type its slug.
+- **disables a connector**, keeping its credentials. To turn it on, press
+  **Enable** on Admin > Connectors and type its name.
+- **records a theme**, and nothing more. A theme runs no code and holds no
+  data.
+
+The audit log records each as `app.identity.changed`,
+`connector.identity.changed` or `theme.identity.changed`, with both
+identities. Every app the database knew before this check existed counts as
+local, and so does every connector that held credentials then. So the first
+release step after you reinstall one of those from the Registry switches it
+off once. Deleting an installed extension's `.registry.json` makes it local,
+which counts as a different extension too.
 
 ### Which build is running
 
