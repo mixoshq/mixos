@@ -24,19 +24,32 @@
  * 6.  Pre-flight: the manifest exists, parses and is for this slug, and no
  *     path would land on disk as something other than what it names.
  * 7.  Write to a staging directory beside the target, never to the target.
- * 8.  Rename staging into place. This is the first moment the tree is live.
- * 9.  Run the project registry generator — the authoritative validation.
- * 10. If the generator rejected it, remove the directory and regenerate again,
- *     so a failed registration leaves the instance exactly as it was.
+ * 8.  **Check the staged copy without running it**: the generator's `--check`,
+ *     which reads the extension's text, imports none of its code, and writes
+ *     its verdict to a file this process names. Rejected, or no verdict at
+ *     all: delete the staged copy and stop.
+ * 9.  Rename staging into place. This is the first moment the tree is live.
+ * 10. Run the project registry generator, which loads the extension's code for
+ *     the first time to read what only its code can say.
+ * 11. If that run left the extension out or stopped, remove the directory and
+ *     regenerate again, so a failed registration leaves the instance exactly
+ *     as it was.
  *
- * Steps 7, 8 and 10 each begin by confirming the lock is still this
+ * Steps 7, 9 and 11 each begin by confirming the lock is still this
  * registration's (`lease.assertHeld()`, see `installExtension`), and stop
- * without touching the disk when it is not.
+ * without touching the disk when it is not. So does deleting a staged copy the
+ * check refused.
  *
  * Steps 3–5 are ordered that way deliberately: nothing untrusted touches the
  * filesystem before the hash has been checked. An extract-then-verify pipeline
  * has a window where a tampered tree is on disk, and then depends on its
  * cleanup path being correct for that not to matter.
+ *
+ * Steps 8–10 are ordered the same way for the code: nothing the package ships
+ * runs before the text of all of it has been checked, and the check's answer
+ * comes from a file, never from what the check prints, which repeats what the
+ * package says about itself. Both generator runs get `PATH` and `TMPDIR` as
+ * their whole environment (`generatorEnv`).
  *
  * ── WHAT THIS CANNOT DO, AND SAYS SO ────────────────────────────────────────
  *
@@ -54,8 +67,14 @@
  */
 
 import fs from "fs/promises";
+import os from "os";
 import path from "path";
 import { spawn } from "child_process";
+import {
+  CHECK_VERDICT_MAX_BYTES,
+  parseCheckVerdict,
+  type CheckVerdict,
+} from "./check-verdict";
 import { fetchInstallManifest } from "./client";
 import { fetchExtensionTree } from "./fetch-source";
 import { verifyContentHash } from "./content-hash";
@@ -208,21 +227,23 @@ export class InstallError extends Error {
   }
 }
 
+/** How the registry generator's run went, once the check accepted the extension. */
 export interface RegistryOutcome {
   /** Whether the generator could be run at all in this environment. */
   ran: boolean;
+  /** Whether it finished, and the extension is in the generated registry. */
   ok: boolean;
   /**
-   * Set when the generator itself failed rather than judging the package.
+   * Set when the run stopped (a non-zero exit) rather than finishing.
    *
-   * The distinction is the generator's own contract: a per-item problem is a
-   * `Skipping <dir>/ — ...` warning and the run still exits 0, because one bad
-   * app must not break everyone else's build. A NON-ZERO exit therefore never
-   * means "your extension is invalid" — it means the generator could not
-   * complete, which is a fact about this machine. Reporting the two as one
-   * outcome is how a broken toolchain gets blamed on a publisher.
+   * A run that finishes without the extension has refused it: the generator
+   * leaves out one bad app and still exits 0, because one bad app must not
+   * break everyone else's build. A run that stops has refused nothing in
+   * particular. This run is the first to load the extension's code, which the
+   * check does not, so the cause can be that code or this checkout, and the
+   * admin is told it could be either.
    */
-  brokenToolchain: boolean;
+  stopped: boolean;
   /** The generator's output, trimmed. Shown to the admin verbatim on failure. */
   output: string;
 }
@@ -546,63 +567,144 @@ export function preflight(kind: ExtensionKind, slug: string, entries: TarEntry[]
 /* -------------------------------------------------------------------------- */
 
 /**
- * Write the verified tree to a staging directory, then rename it into place.
+ * Where an extension waits while it is checked: `<kind dir>/.installing-<slug>/`,
+ * holding the staged copy in a folder named for the slug.
+ *
+ * Dot-prefixed, because the generator never scans a dot-prefixed folder, so a
+ * crash at any point here leaves nothing a later build will read. And the copy
+ * sits one level down, in `<slug>/`, so that the check can treat it as the
+ * extension's own folder: the folder's name is the slug the import rules and
+ * every message use.
+ */
+function stagingHolder(dir: string): string {
+  return path.join(path.dirname(dir), `.installing-${path.basename(dir)}`);
+}
+
+/**
+ * Write the verified tree to a staging directory, for the check to read.
+ * Returns the staged copy's folder. placeTree() then moves it into place.
  *
  * Staging-then-rename rather than writing straight to the target: a partial
  * write into `apps/<slug>` is a half-extension that the generator will meet on
- * its next run — including the run that `next dev` triggers on its own. The
- * rename is the only step that makes the tree visible, and it is atomic on
- * every filesystem this runs on.
+ * its next run — including the run that `next dev` triggers on its own — and a
+ * tree the check refuses must never be in place at all. The rename is the only
+ * step that makes the tree visible, and it is atomic on every filesystem this
+ * runs on.
  *
- * The staging directory is dot-prefixed because the generator skips entries
- * beginning with `.`, so even a crash between write and rename leaves nothing
- * that a later build will try to read.
- *
- * Each of the two steps starts by confirming the lease: writing, which first
- * clears what an earlier run left in the staging directory, and the rename.
- * Neither check sits inside a cleanup path. A registration that has lost the
- * lock may share that staging directory with the one that holds it now, so it
- * leaves it as a crash would, for the next registration of the slug to clear.
+ * Starts by confirming the lease, then clears what an earlier run left in the
+ * staging directory. A write that fails is cleaned up straight away. A
+ * registration that has lost the lock may share that staging directory with
+ * the one that holds it now, so it leaves it as a crash would, for the next
+ * registration of the slug to clear.
  *
  * Exported for its tests; `runInstall` is the only caller.
  */
-export async function writeTree(
+export async function stageTree(
   dir: string,
   entries: TarEntry[],
   lease: PlatformLease,
-): Promise<void> {
-  const staging = path.join(path.dirname(dir), `.installing-${path.basename(dir)}`);
+): Promise<string> {
+  const holder = stagingHolder(dir);
+  const staged = path.join(holder, path.basename(dir));
 
   await fence(lease, "Nothing was written.");
-  await fs.rm(staging, { recursive: true, force: true });
+  await fs.rm(holder, { recursive: true, force: true });
   try {
     for (const entry of entries) {
-      const target = path.resolve(staging, entry.path);
+      const target = path.resolve(staged, entry.path);
       // Third and last containment check, this one on the fully-joined path.
-      if (!target.startsWith(staging + path.sep)) {
+      if (!target.startsWith(staged + path.sep)) {
         throw new InstallError(
           `The package tried to write outside its own directory: ${entry.path}`,
           "invalid-package",
         );
       }
       await fs.mkdir(path.dirname(target), { recursive: true });
-      // Never carry the archive's mode across wholesale. Source files are data
-      // to this project — nothing here execs them — and an archive that can set
-      // the mode of a file it places in the checkout can set the setuid bit.
+      // Never carry the archive's mode across wholesale. An archive that can
+      // set the mode of a file it places in the checkout can set the setuid
+      // bit, and no file an extension ships is a program to execute.
       await fs.writeFile(target, entry.data, { mode: 0o644 });
     }
   } catch (err) {
-    await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(holder, { recursive: true, force: true }).catch(() => {});
     throw asWriteFailure(err);
   }
+  return staged;
+}
+
+/**
+ * Move a staged copy the check accepted into place, at `dir`: the first moment
+ * the tree is live. Confirms the lease first, and puts nothing in place without
+ * it.
+ *
+ * Exported for its tests; `runInstall` is the only caller.
+ */
+export async function placeTree(
+  staged: string,
+  dir: string,
+  lease: PlatformLease,
+): Promise<void> {
+  const holder = path.dirname(staged);
 
   await fence(lease, "Nothing was moved into place.");
   try {
-    await fs.rename(staging, dir);
+    await fs.rename(staged, dir);
   } catch (err) {
-    await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+    await fs.rm(holder, { recursive: true, force: true }).catch(() => {});
     throw asWriteFailure(err);
   }
+  // Empty now. `rmdir` removes nothing else, if anything else is there.
+  await fs.rmdir(holder).catch(() => {});
+}
+
+/**
+ * Check a staged copy, and stop the install unless the check accepted it.
+ * Returns the accepted outcome; throws an InstallError otherwise, once the
+ * staged copy is deleted.
+ *
+ * Deleting it waits on the lease, as every change to the disk here does. A
+ * registration that has lost the lock leaves the copy where it is: it is
+ * dot-prefixed, so nothing scans it, and the next registration of the slug
+ * clears it.
+ *
+ * `options` are checkExtension()'s, for tests. Exported for its tests;
+ * `runInstall` is the only caller.
+ */
+export async function checkStagedTree(
+  kind: ExtensionKind,
+  dir: string,
+  staged: string,
+  lease: PlatformLease,
+  options?: Parameters<typeof checkExtension>[2],
+): Promise<CheckOutcome> {
+  const slug = path.basename(dir);
+  const check = await checkExtension(kind, staged, options);
+  if (check.ran && check.accepted) return check;
+
+  const detail = check.ran ? check.problems.join("\n") : check.output;
+  await fence(
+    lease,
+    `The staged copy in ${INSTALL_SEGMENT[kind]}/.installing-${slug}/ is still on disk; ` +
+      `nothing reads it, and installing ${slug} again clears it.`,
+    detail,
+  );
+  await fs.rm(stagingHolder(dir), { recursive: true, force: true }).catch(() => {});
+
+  // Two different failures, and saying the wrong one sends the admin to argue
+  // with a publisher about their own machine.
+  throw check.ran
+    ? new InstallError(
+        `${slug} did not pass this instance's registry checks and was not installed.`,
+        "rejected-by-registry",
+        detail,
+      )
+    : new InstallError(
+        `This instance could not complete its registry check, so ${slug} was not checked ` +
+          `and was not installed. The check runs none of the extension's code. Run ` +
+          `\`npm run registry\` in this checkout to see whether its generator runs.`,
+        "generator-failed",
+        detail,
+      );
 }
 
 function asWriteFailure(err: unknown): InstallError {
@@ -648,20 +750,155 @@ async function fence(lease: PlatformLease, left: string, detail?: string): Promi
 }
 
 /* -------------------------------------------------------------------------- */
-/*  The registry generator — the authoritative validation                      */
+/*  The registry generator: the check, then the registration                  */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Run `scripts/generate-project-registry.ts` and decide whether it accepted the
- * new directory.
+ * The whole environment a registry generator run gets: `PATH` and `TMPDIR`,
+ * where they are set, and nothing else.
  *
- * WHY THE EXIT CODE IS NOT ENOUGH. The generator's per-item failure path is a
- * `Skipping <dir>/ — ...` warning, not an abort: an app with an invalid
- * manifest is left out of the registry and the run still succeeds, because one
- * bad app must not break everyone else's build. That is right for the build and
- * wrong as an answer to "did MY extension pass", so acceptance is decided by
- * three facts together — the run succeeded, it did not skip this directory, and
- * the identifier is actually present in the generated module.
+ * The server's own environment holds `DATABASE_URL`, `AUTH_SECRET` and
+ * `CONNECTOR_ENCRYPTION_KEY`, and the generator needs none of it: it reads
+ * files and writes files. The run that registers an extension also loads that
+ * extension's code for the first time. `PATH` is there for anything the
+ * toolchain starts, and `TMPDIR` for where tsx keeps its compile cache.
+ */
+export function generatorEnv(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of ["PATH", "TMPDIR"]) {
+    const value = env[key];
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
+/** What an install's check made of a staged extension. */
+export interface CheckOutcome {
+  /**
+   * Whether the check reached a verdict. False when it could not be started,
+   * exited non-zero, ran out of time, or left anything other than exactly one
+   * well-formed verdict in its file.
+   */
+  ran: boolean;
+  accepted: boolean;
+  /** Why it was rejected, one line each, each naming its file. */
+  problems: string[];
+  /** What it left to registration, which loads the extension's code. */
+  deferred: string[];
+  /** What the check printed, for an admin to read. Nothing is read from it. */
+  output: string;
+}
+
+/** The verdict's name in the directory made for it. */
+const VERDICT_FILE = "verdict.json";
+
+/**
+ * Run the generator's `--check` on a staged extension, and read its verdict.
+ *
+ * `dir` is the staged copy, in a folder named for the slug (stagingHolder()).
+ * The check reads the extension's text and runs none of its code: what it does,
+ * and what it leaves to registration, is described where it lives, at the end
+ * of scripts/generate-project-registry.ts.
+ *
+ * THE VERDICT COMES FROM A FILE. The check writes it to a path in a directory
+ * made for this run, which the check must create and nothing else may already
+ * hold. It counts only when the check exited 0 and that directory holds
+ * exactly one well-formed verdict. What the check prints is display only: it
+ * repeats file names, manifest strings and the text of schema errors, all of
+ * which the extension chooses, so a line in it can be made to look like a
+ * verdict, or like the absence of a refusal. Nothing is ever matched in it.
+ *
+ * `options` are for tests: another script in the generator's place, another
+ * directory of registered manifests, a shorter time limit.
+ */
+export async function checkExtension(
+  kind: ExtensionKind,
+  dir: string,
+  options: { generator?: string; registryDir?: string; timeoutMs?: number } = {},
+): Promise<CheckOutcome> {
+  const verdictDir = await fs.mkdtemp(path.join(os.tmpdir(), "mixos-check-"));
+  const verdictFile = path.join(verdictDir, VERDICT_FILE);
+  try {
+    const run = await spawnCapture(
+      process.execPath,
+      [
+        TSX_CLI,
+        options.generator ?? GENERATOR,
+        "--check",
+        kind,
+        dir,
+        "--verdict-file",
+        verdictFile,
+        ...(options.registryDir ? ["--registry-dir", options.registryDir] : []),
+      ],
+      PROJECT_ROOT,
+      options.timeoutMs,
+      generatorEnv(),
+    );
+
+    const noVerdict = (why: string): CheckOutcome => ({
+      ran: false,
+      accepted: false,
+      problems: [],
+      deferred: [],
+      output: [run.output, why].filter(Boolean).join("\n\n"),
+    });
+    if (run.code === null) return noVerdict("The check could not be run to the end.");
+    if (run.code !== 0) return noVerdict(`The check exited with code ${run.code}, without a verdict.`);
+
+    const verdict = await readVerdict(verdictDir);
+    if (!verdict) return noVerdict("The check finished without leaving exactly one well-formed verdict.");
+    return {
+      ran: true,
+      accepted: verdict.verdict === "accepted",
+      problems: verdict.problems,
+      deferred: verdict.deferred,
+      output: run.output,
+    };
+  } finally {
+    await fs.rm(verdictDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * The one verdict in `dir`, or null: when the directory holds anything but
+ * that one file, when it is a link or not a regular file, when it is too large
+ * to be one the check wrote, or when its text is not exactly one verdict.
+ */
+async function readVerdict(dir: string): Promise<CheckVerdict | null> {
+  const names = await fs.readdir(dir).catch(() => null);
+  if (!names || names.length !== 1 || names[0] !== VERDICT_FILE) return null;
+
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    // O_NOFOLLOW: a verdict is a file the check wrote, never a link to one.
+    handle = await fs.open(
+      path.join(dir, VERDICT_FILE),
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+    );
+    const stat = await handle.stat();
+    if (!stat.isFile() || stat.size > CHECK_VERDICT_MAX_BYTES) return null;
+    return parseCheckVerdict(await handle.readFile("utf8"));
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+/**
+ * Run `scripts/generate-project-registry.ts` once the check has accepted the
+ * extension and it is in place, and say whether it is now registered.
+ *
+ * This is the run that loads the extension's code: `widgets.ts` and every
+ * `route.ts`, which the check left to it. It can refuse the extension for what
+ * only that code shows, and a refusal there is not an abort: the generator
+ * leaves one bad app out and still exits 0, because one bad app must not break
+ * everyone else's build. So the extension is registered when the run exits 0
+ * AND its identifier is in the generated module, a file this process reads.
+ * Nothing in the run's output decides it.
  */
 async function regenerateRegistry(
   kind: ExtensionKind,
@@ -673,22 +910,16 @@ async function regenerateRegistry(
     // would be free to go to the network for a package that is missing.
     [TSX_CLI, GENERATOR],
     PROJECT_ROOT,
+    GENERATOR_TIMEOUT_MS,
+    generatorEnv(),
   );
 
   if (run.code === null) {
-    return { ran: false, ok: false, brokenToolchain: true, output: run.output };
+    return { ran: false, ok: false, stopped: true, output: run.output };
   }
   if (run.code !== 0) {
-    // See RegistryOutcome.brokenToolchain: a non-zero exit is the generator
-    // failing, never its verdict on one extension.
-    return { ran: true, ok: false, brokenToolchain: true, output: run.output };
-  }
-
-  const skipped = new RegExp(
-    `Skipping\\s+(?:${INSTALL_SEGMENT[kind]}/)?${escapeRe(slug)}/`,
-  ).test(run.output);
-  if (skipped) {
-    return { ran: true, ok: false, brokenToolchain: false, output: run.output };
+    // See RegistryOutcome.stopped: a run that stopped has not said why.
+    return { ran: true, ok: false, stopped: true, output: run.output };
   }
 
   const generated = await fs.readFile(registryFile(kind), "utf8").catch(() => "");
@@ -696,15 +927,11 @@ async function regenerateRegistry(
   return {
     ran: true,
     ok: present,
-    brokenToolchain: false,
+    stopped: false,
     output: present
       ? run.output
       : `${run.output}\n\nThe generator ran without error but ${slug} is not in ${REGISTRY_FILE_LABEL[kind]}.`,
   };
-}
-
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Generator runs are seconds; a minute is a hang, not a slow machine. */
@@ -726,18 +953,28 @@ const GENERATOR_TIMEOUT_MS = 120_000;
  */
 const OWN_PROCESS_GROUP = process.platform !== "win32";
 
-/** Exported for its tests; `timeoutMs` is theirs to shorten. */
+/**
+ * Run a generator to the end or to its time limit, and collect what it printed,
+ * stdout and stderr together, for display. `env` is the child's whole
+ * environment, `generatorEnv()` unless a caller says otherwise.
+ *
+ * Exported for its tests; `timeoutMs` is theirs to shorten.
+ */
 export function spawnCapture(
   command: string,
   args: string[],
   cwd: string,
   timeoutMs: number = GENERATOR_TIMEOUT_MS,
+  env: Record<string, string> = generatorEnv(),
 ): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(command, args, {
         cwd,
+        // The cast is only for Next's types, which declare NODE_ENV on every
+        // environment. A generator run has none, deliberately.
+        env: env as NodeJS.ProcessEnv,
         stdio: ["ignore", "pipe", "pipe"],
         detached: OWN_PROCESS_GROUP,
       });
@@ -871,13 +1108,15 @@ export async function resolveInstall(
  * longer than that: a laptop running `next dev` goes to sleep mid-download,
  * wakes up and carries on. So the lease renews itself every minute while this
  * runs, and `lease.assertHeld()` comes before writing the staging tree, before
- * the rename and before the rollback. A registration that finds the lock gone
- * stops there with `lock-lost`, says what it left on disk, and cleans nothing
- * up: what it would remove may be the new holder's.
+ * deleting a staged copy the check refused, before the rename and before the
+ * rollback. A registration that finds the lock gone stops there with
+ * `lock-lost`, says what it left on disk, and cleans nothing up: what it would
+ * remove may be the new holder's.
  *
  * Renewal holds the lock for as long as this runs, so everything here has a
- * time limit: the repository and GitHub requests, and the generator, whose
- * whole process group `spawnCapture` ends at the limit.
+ * time limit: the repository and GitHub requests, and both generator runs, the
+ * check and the registration, whose whole process group `spawnCapture` ends at
+ * the limit.
  */
 export async function installExtension(
   kind: ExtensionKind,
@@ -968,9 +1207,17 @@ async function runInstall(
 
   preflight(kind, slug, entries);
 
-  // Steps 7 and 8, each fenced by the lease (see writeTree).
-  await writeTree(dir, entries, lease);
+  // Step 7, fenced by the lease (see stageTree).
+  const staged = await stageTree(dir, entries, lease);
 
+  // Step 8. The staged copy is judged before it is anywhere a build or the dev
+  // server would look, and before any of its code has run.
+  await checkStagedTree(kind, dir, staged, lease);
+
+  // Step 9, fenced by the lease (see placeTree).
+  await placeTree(staged, dir, lease);
+
+  // Step 10: registration, the first time any of the extension's code runs.
   const registry = await regenerateRegistry(kind, slug);
   if (registry.ran && !registry.ok) {
     // Undo. Removing the directory is not enough on its own: the failed run may
@@ -989,18 +1236,20 @@ async function runInstall(
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     await regenerateRegistry(kind, slug).catch(() => {});
 
-    // Two different failures, and saying the wrong one sends the admin to
-    // argue with a publisher about their own machine.
-    throw registry.brokenToolchain
+    // The check passed, so what refused it here is what the check leaves to
+    // registration: the extension's code, loaded for the first time. A run
+    // that stopped could also be this checkout, and install cannot tell which.
+    throw registry.stopped
       ? new InstallError(
-          `This instance could not run its registry generator, so ${slug} could not be ` +
-            `validated and was not installed. Nothing is wrong with the extension — ` +
-            `run \`npm run registry\` in this checkout to see the same failure directly.`,
+          `The registry generator stopped while registering ${slug}, after its check had ` +
+            `passed, so it was not installed. Registering loads the extension's code for the ` +
+            `first time, so the output below may be about that code or about this checkout.`,
           "generator-failed",
           registry.output,
         )
       : new InstallError(
-          `${slug} did not pass this instance's registry checks and was not installed.`,
+          `${slug} passed this instance's registry check, but the registry generator left it ` +
+            `out once it loaded the extension's code, so it was not installed.`,
           "rejected-by-registry",
           registry.output,
         );

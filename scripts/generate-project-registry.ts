@@ -59,7 +59,11 @@ import {
   scanHooks,
   validateHookWiring,
 } from "./hook-checks";
-import { formatFindings, scanAppContainment } from "./app-containment";
+import {
+  formatFindings,
+  scanAppContainment,
+  type ContainmentFinding,
+} from "./app-containment";
 import { isScannedFile } from "../src/lib/apps/import-policy.mjs";
 import { routeContract } from "./route-contracts";
 import {
@@ -76,7 +80,12 @@ import {
   screenshotUrl,
 } from "../src/lib/screenshots";
 import { BRAND_HOOKS } from "../src/lib/branding/types";
+import {
+  buildCheckVerdict,
+  serializeCheckVerdict,
+} from "../src/lib/repository/check-verdict";
 import * as ts from "typescript";
+import { z } from "zod";
 
 /**
  * Thrown when an app is refused for what its code does, not for a malformed
@@ -84,11 +93,16 @@ import * as ts from "typescript";
  * scripts/hook-checks.ts). Takes the per-app `Skipping ...`
  * path like any other per-app failure, but prints its own message rather than
  * "invalid manifest", which would send the author to the wrong file.
+ *
+ * `problems` is the same refusal one finding per line, each naming its file
+ * from the folder that holds the app, for the verdict `--check` writes.
  */
 class AppRejectedError extends Error {
-  constructor(message: string) {
+  readonly problems: string[];
+  constructor(message: string, problems?: string[]) {
     super(message);
     this.name = "AppRejectedError";
+    this.problems = problems && problems.length > 0 ? problems : [message];
   }
 }
 
@@ -158,6 +172,20 @@ const PUBLIC_SCREENSHOTS_DIR = path.resolve(__dirname, "../public/screenshots");
 // before anyone has a session. Only declared files are copied.
 const PUBLIC_BRANDING_DIR = path.resolve(__dirname, "../public/branding");
 
+/**
+ * Whether a folder in apps/, connectors/ or themes/ is an extension to scan.
+ *
+ * Not `_template` and its kin, which are scaffolds. And not a folder whose name
+ * starts with a dot, which is something kept beside the extensions rather than
+ * one of them: an install's staging copy (`.installing-<slug>/`, see
+ * src/lib/repository/install.ts) left by a crash, a backup, an editor's
+ * metadata. Scanned, a staging copy of an app would be imported and registered
+ * as an app of its own.
+ */
+function isExtensionFolder(entry: fs.Dirent): boolean {
+  return entry.isDirectory() && !entry.name.startsWith("_") && !entry.name.startsWith(".");
+}
+
 function scanPages(dir: string, slug: string, prefix: string, out: string[]) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
@@ -207,7 +235,7 @@ function countPages(dir: string): number {
  * widget's `component`, a page, a job, a sync, a service, an MCP tool or
  * `hooks.ts`. Each is named by the manifest or found on disk, so each is held
  * to the same rule here. Routes are checked before the generator imports them,
- * in scanApiRoutes().
+ * in findRouteFiles().
  */
 function unscannedEntryPoints(appDir: string, manifest: AppManifest): string[] {
   const real = fs.realpathSync(appDir);
@@ -235,31 +263,27 @@ function unscannedEntryPoints(appDir: string, manifest: AppManifest): string[] {
 }
 
 /**
- * Load an app manifest.
+ * Read an app manifest, `app.json`, as text. Null when the app has none.
  *
  * `app.json` is the only manifest form. It is static text, which means the
  * install path can schema-check the bytes BEFORE anything executes — see
- * preflight() in src/lib/repository/install.ts. An earlier design also accepted
- * an `app.ts` whose default export was the whole manifest; that inverted the
- * order, because the module had to be imported before there was anything to
- * validate. For apps arriving from the Registry that is the wrong way round.
+ * preflight() in src/lib/repository/install.ts, and `--check` below. An earlier
+ * design also accepted an `app.ts` whose default export was the whole manifest;
+ * that inverted the order, because the module had to be imported before there
+ * was anything to validate. For apps arriving from the Registry that is the
+ * wrong way round.
  *
  * The one thing JSON cannot express is a config field built from a helper, so
- * that — and only that — moved to an optional `widgets.ts`. See
- * applyWidgetConfigs() in ./widget-configs.ts.
+ * that — and only that — moved to an optional `widgets.ts`, merged in once the
+ * app's code is loaded (loadAppCode() below, and applyWidgetConfigs() in
+ * ./widget-configs.ts).
  */
-async function loadAppManifest(
-  appDir: string,
-): Promise<Record<string, unknown> | null> {
+function readAppJson(appDir: string): Record<string, unknown> | null {
   const jsonPath = path.join(appDir, "app.json");
   if (!fs.existsSync(jsonPath)) return null;
 
-  const manifest = JSON.parse(
-    fs.readFileSync(jsonPath, "utf-8"),
-  ) as Record<string, unknown>;
-
-  await applyWidgetConfigs(appDir, manifest);
-  return manifest;
+  // Anything but an object is the schema's to refuse, as it always was.
+  return JSON.parse(fs.readFileSync(jsonPath, "utf-8")) as Record<string, unknown>;
 }
 
 /**
@@ -358,34 +382,27 @@ function validateSchedules(
   }));
 }
 
+/** One `route.ts` under an app's `api/`, found without importing it. */
+interface RouteFile {
+  /** Absolute path of the `route.ts`. */
+  file: string;
+  /** POSIX, relative to `api/`; `""` for `api/index/route.ts`. */
+  routePath: string;
+}
+
 /**
- * Walk `apps/<slug>/api/`, import every `route.ts`, and hoist each declared
- * route contract into the registry.
- *
- * WHY THIS IMPORTS APP CODE. Every other on-disk check in this file reads
- * source as *text* — `validateMcpTools` even says so, to avoid "the blast
- * radius of executing app code at build time". A route contract cannot be read
- * that way: `auth`, `roles` and `budget` could be recovered from an AST, but
- * the Zod schemas cannot, and a contract the build can only half-read is one
- * the build can only half-enforce. So it imports, as `widgets.ts` does for
- * config fields a manifest cannot express in JSON.
- *
- * The blast radius is real and worth naming: a module-level side effect in a
- * route or anything it imports will run during `npm run build`. That is an
- * argument for keeping module scope free of side effects — which is already
- * true of every module in this codebase, whose clients are all constructed
- * lazily — not an argument for a contract nobody can check.
+ * Walk `apps/<slug>/api/` and list every `route.ts`, refusing what the walk
+ * alone can tell is wrong: a `.tsx` route, a root `api/route.ts`, an optional
+ * catch-all, a route the containment scan does not read, two files for one
+ * path. Reads the tree only, so `--check` runs it too.
  */
-async function scanApiRoutes(
-  appDir: string,
-  slug: string,
-): Promise<RouteContract[]> {
+function findRouteFiles(appDir: string, slug: string): RouteFile[] {
   const apiDir = path.join(appDir, "api");
   if (!fs.existsSync(apiDir)) return [];
 
-  const contracts: RouteContract[] = [];
+  const found: RouteFile[] = [];
 
-  async function walk(dir: string, segments: string[]): Promise<void> {
+  function walk(dir: string, segments: string[]): void {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
 
     // `route.ts` only. `resolveRoutePath` (src/lib/apps/api-router.ts) ends with
@@ -435,54 +452,88 @@ async function scanApiRoutes(
       }
 
       // A route in a directory the containment scan skips (a dot-directory,
-      // say) is code nobody judged, and importing it here would run it.
+      // say) is code nobody judged, and importing it would run it.
       if (!isScannedFile(fs.realpathSync(appDir), fs.realpathSync(routeFile))) {
+        const rel = `api/${segments.join("/")}/route.ts`;
         throw new AppRejectedError(
-          `api/${segments.join("/")}/route.ts is in a directory the containment scan does not read, so it cannot be a route.`,
+          `${rel} is in a directory the containment scan does not read, so it cannot be a route.`,
+          [`apps/${slug}/${rel} is in a directory the containment scan does not read, so it cannot be a route.`],
         );
       }
 
-      let mod: Record<string, unknown>;
-      try {
-        // `?t=` defeats the ESM module cache, so a re-run in the same process
-        // (watch mode) sees edits. Same idiom as loadAppManifest.
-        mod = (await import(
-          `${pathToFileURL(routeFile).href}?t=${Date.now()}`
-        )) as Record<string, unknown>;
-      } catch (err) {
-        throw new FatalManifestError(
-          `apps/${slug}/api/${routePath || "index"}/route.ts could not be imported: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-
-      contracts.push(routeContract(slug, routePath, mod));
+      found.push({ file: routeFile, routePath });
     }
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      await walk(path.join(dir, entry.name), [...segments, entry.name]);
+      walk(path.join(dir, entry.name), [...segments, entry.name]);
     }
   }
 
-  await walk(apiDir, []);
+  walk(apiDir, []);
 
   // Two contracts sharing a path would make `routes.find(...)` — which the
   // public mount uses to decide a route's auth gate — resolve by array order.
   const byPath = new Set<string>();
-  for (const c of contracts) {
-    if (byPath.has(c.path)) {
+  for (const { routePath } of found) {
+    if (byPath.has(routePath)) {
       throw new FatalManifestError(
-        `apps/${slug}: two route files resolve to the same path "${c.path || "(root)"}". ` +
+        `apps/${slug}: two route files resolve to the same path "${routePath || "(root)"}". ` +
           `One of them is unreachable, and which one decides the route's auth would be an accident of ordering.`,
       );
     }
-    byPath.add(c.path);
+    byPath.add(routePath);
   }
 
+  return found;
+}
+
+/**
+ * Import each route file and hoist its declared contract into the registry.
+ *
+ * WHY THIS IMPORTS APP CODE. Every other on-disk check in this file reads
+ * source as *text* — `validateMcpTools` even says so, to avoid "the blast
+ * radius of executing app code at build time". A route contract cannot be read
+ * that way: `auth`, `roles` and `budget` could be recovered from an AST, but
+ * the Zod schemas cannot, and a contract the build can only half-read is one
+ * the build can only half-enforce. So it imports, as `widgets.ts` does for
+ * config fields a manifest cannot express in JSON.
+ *
+ * The blast radius is real and worth naming: a module-level side effect in a
+ * route or anything it imports will run during `npm run build`. That is an
+ * argument for keeping module scope free of side effects — which is already
+ * true of every module in this codebase, whose clients are all constructed
+ * lazily — not an argument for a contract nobody can check. It is also why an
+ * install's `--check` never gets here: it lists each route as deferred, to be
+ * read when the app is registered.
+ */
+async function importRouteContracts(
+  slug: string,
+  files: readonly RouteFile[],
+): Promise<RouteContract[]> {
+  const contracts: RouteContract[] = [];
+  for (const { file, routePath } of files) {
+    let mod: Record<string, unknown>;
+    try {
+      // `?t=` defeats the ESM module cache, so a re-run in the same process
+      // (watch mode) sees edits. Same idiom as applyWidgetConfigs.
+      mod = (await import(`${pathToFileURL(file).href}?t=${Date.now()}`)) as Record<string, unknown>;
+    } catch (err) {
+      throw new FatalManifestError(
+        `apps/${slug}/api/${routePath || "index"}/route.ts could not be imported: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+    contracts.push(routeContract(slug, routePath, mod));
+  }
   contracts.sort((a, b) => a.path.localeCompare(b.path));
   return contracts;
+}
+
+/** Walk `apps/<slug>/api/`, import every `route.ts`, and return the contracts. */
+async function scanApiRoutes(appDir: string, slug: string): Promise<RouteContract[]> {
+  return importRouteContracts(slug, findRouteFiles(appDir, slug));
 }
 
 /**
@@ -1083,89 +1134,64 @@ function validateThemeFonts(
   return fonts;
 }
 
-async function scanThemes(): Promise<{
-  themes: ThemeManifest[];
-  css: string;
-  tokens: Record<string, Record<string, string>>;
-}> {
-  if (!fs.existsSync(THEMES_DIR)) {
-    return { themes: [], css: "", tokens: {} };
+/** One theme as its files describe it: its registry entry and its compiled CSS. */
+interface ThemeText {
+  theme: ThemeManifest;
+  compiled: ReturnType<typeof compileTheme>;
+}
+
+/**
+ * Every check on one theme, and its registry entry. Null when the folder has
+ * no `theme.json`. A theme is text and assets with no code, and this writes
+ * nothing, so an install's `--check` runs it on the staged copy as it is.
+ */
+function readTheme(dir: string, slug: string): ThemeText | null {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+    throw new ThemeError(
+      `themes/${slug}: a theme folder name is its slug and appears in a CSS attribute ` +
+        `selector — use lowercase letters, digits and hyphens.`,
+    );
   }
 
-  const themes: ThemeManifest[] = [];
-  const cssParts: string[] = [];
-  const tokens: Record<string, Record<string, string>> = {};
+  const manifestPath = path.join(dir, "theme.json");
+  if (!fs.existsSync(manifestPath)) return null;
 
-  const entries = fs
-    .readdirSync(THEMES_DIR, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && !e.name.startsWith("_"))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  for (const entry of entries) {
-    const slug = entry.name;
-    const dir = path.join(THEMES_DIR, slug);
-
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
-      throw new ThemeError(
-        `themes/${slug}: a theme folder name is its slug and appears in a CSS attribute ` +
-          `selector — use lowercase letters, digits and hyphens.`,
-      );
-    }
-
-    const manifestPath = path.join(dir, "theme.json");
-    if (!fs.existsSync(manifestPath)) {
-      // As with apps: plans/ may precede the thing it plans.
-      if (fs.existsSync(path.join(dir, "plans"))) {
-        console.log(`  themes/${slug}/ — planned, not yet built (plans/ only)`);
-      } else {
-        console.warn(`  Skipping themes/${slug}/ — no theme.json`);
-      }
-      continue;
-    }
-
-    const parsed = RawThemeManifestSchema.safeParse(
-      JSON.parse(fs.readFileSync(manifestPath, "utf-8")),
+  const parsed = RawThemeManifestSchema.safeParse(
+    JSON.parse(fs.readFileSync(manifestPath, "utf-8")),
+  );
+  if (!parsed.success) {
+    throw new ThemeError(
+      `themes/${slug}/theme.json failed validation:\n${formatZodError(parsed.error)}`,
     );
-    if (!parsed.success) {
-      throw new ThemeError(
-        `themes/${slug}/theme.json failed validation:\n${formatZodError(parsed.error)}`,
-      );
-    }
-    const r = parsed.data;
+  }
+  const r = parsed.data;
 
-    const compiled = compileTheme({
-      slug,
-      dir,
-      escapes: r.escapes ?? [],
-      declaredSurfaces: r.surfaces ?? [],
-      declaredFonts: (r.fonts ?? []).map((f) => f.file),
-    });
+  const compiled = compileTheme({
+    slug,
+    dir,
+    escapes: r.escapes ?? [],
+    declaredSurfaces: r.surfaces ?? [],
+    declaredFonts: (r.fonts ?? []).map((f) => f.file),
+  });
 
-    const fonts = validateThemeFonts(r.fonts ?? [], slug, dir);
-    const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
-    const screenshots = validateScreenshots(r.screenshots, "themes", slug, dir);
-    const logo = assets.logo
-      ? resolveThemeLogo(slug, dir, assets.logo, "assets.logo")
-      : null;
-    const branding = {
-      name: r.branding?.name ?? null,
-      menuBarLogo: r.branding?.menuBarLogo
-        ? resolveThemeLogo(slug, dir, r.branding.menuBarLogo, "branding.menuBarLogo")
-        : null,
-      loginLogo: r.branding?.loginLogo
-        ? resolveThemeLogo(slug, dir, r.branding.loginLogo, "branding.loginLogo")
-        : null,
-    };
+  const fonts = validateThemeFonts(r.fonts ?? [], slug, dir);
+  const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
+  const screenshots = validateScreenshots(r.screenshots, "themes", slug, dir);
+  const logo = assets.logo
+    ? resolveThemeLogo(slug, dir, assets.logo, "assets.logo")
+    : null;
+  const branding = {
+    name: r.branding?.name ?? null,
+    menuBarLogo: r.branding?.menuBarLogo
+      ? resolveThemeLogo(slug, dir, r.branding.menuBarLogo, "branding.menuBarLogo")
+      : null,
+    loginLogo: r.branding?.loginLogo
+      ? resolveThemeLogo(slug, dir, r.branding.loginLogo, "branding.loginLogo")
+      : null,
+  };
 
-    copyDir(path.join(dir, "assets"), path.join(PUBLIC_THEMES_DIR, slug));
-    copyScreenshots(screenshots, "themes", slug, dir);
-
-    cssParts.push(
-      `/* ── ${slug} ─────────────────────────────── */\n${compiled.css}`,
-    );
-    tokens[slug] = compiled.tokens;
-
-    themes.push({
+  return {
+    theme: {
       slug,
       name: r.name,
       description: r.description,
@@ -1181,9 +1207,61 @@ async function scanThemes(): Promise<{
       swatches: compiled.swatches,
       typefaces: compiled.typefaces,
       lastUpdated: parseLastUpdated(r.lastUpdated),
-    });
+    },
+    compiled,
+  };
+}
 
-    const escaped = (r.escapes ?? []).length;
+async function scanThemes(
+  themesDir: string = THEMES_DIR,
+  { emit = true }: { emit?: boolean } = {},
+): Promise<{
+  themes: ThemeManifest[];
+  css: string;
+  tokens: Record<string, Record<string, string>>;
+}> {
+  if (!fs.existsSync(themesDir)) {
+    return { themes: [], css: "", tokens: {} };
+  }
+
+  const themes: ThemeManifest[] = [];
+  const cssParts: string[] = [];
+  const tokens: Record<string, Record<string, string>> = {};
+
+  const entries = fs
+    .readdirSync(themesDir, { withFileTypes: true })
+    // Not templates, and nothing dot-prefixed (see isExtensionFolder).
+    .filter(isExtensionFolder)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const entry of entries) {
+    const slug = entry.name;
+    const dir = path.join(themesDir, slug);
+
+    const read = readTheme(dir, slug);
+    if (!read) {
+      // As with apps: plans/ may precede the thing it plans.
+      if (fs.existsSync(path.join(dir, "plans"))) {
+        console.log(`  themes/${slug}/ — planned, not yet built (plans/ only)`);
+      } else {
+        console.warn(`  Skipping themes/${slug}/ — no theme.json`);
+      }
+      continue;
+    }
+    const { theme, compiled } = read;
+
+    if (emit) {
+      copyDir(path.join(dir, "assets"), path.join(PUBLIC_THEMES_DIR, slug));
+      copyScreenshots(theme.screenshots, "themes", slug, dir);
+    }
+
+    cssParts.push(
+      `/* ── ${slug} ─────────────────────────────── */\n${compiled.css}`,
+    );
+    tokens[slug] = compiled.tokens;
+    themes.push(theme);
+
+    const escaped = theme.escapes.length;
     console.log(
       `  ${slug} — ${compiled.report.length} contrast pairs verified` +
         (escaped > 0 ? `, ${escaped} escaped` : ""),
@@ -1207,6 +1285,9 @@ async function scanThemes(): Promise<{
  * timestamp.
  *
  * Returns the `updatedAt` columns with their defaults filled in.
+ *
+ * The migrations are read from `appDir`, the folder being scanned, which for an
+ * install's `--check` is the staged copy rather than apps/<slug>/.
  */
 async function validateAppDatabase(
   raw: {
@@ -1214,8 +1295,9 @@ async function validateAppDatabase(
     updatedAt?: { table: string; column?: string }[];
   },
   slug: string,
+  appDir: string,
 ): Promise<UpdatedAtColumn[]> {
-  const files = appMigrationFiles(APPS_DIR, slug);
+  const files = appMigrationFiles(path.dirname(appDir), path.basename(appDir));
   const updatedAt = (raw.updatedAt ?? []).map((c) => ({
     table: c.table,
     column: c.column ?? "updated_at",
@@ -1241,7 +1323,7 @@ async function validateAppDatabase(
   const texts: string[] = [];
   const problems: string[] = [];
   for (const file of files) {
-    const text = fs.readFileSync(path.join(APPS_DIR, slug, "migrations", file), "utf-8");
+    const text = fs.readFileSync(path.join(appDir, "migrations", file), "utf-8");
     texts.push(text);
     const found = await checkAppMigrationSql(text, schema);
     if (found.length > 0) {
@@ -1276,27 +1358,321 @@ async function validateAppDatabase(
   return updatedAt;
 }
 
-async function scanApps(): Promise<AppManifest[]> {
-  if (!fs.existsSync(APPS_DIR)) {
-    fs.mkdirSync(APPS_DIR, { recursive: true });
+// ── apps: what the text says, then what the code says ────────────────────────
+
+type RawApp = z.infer<typeof RawAppManifestSchema>;
+
+/**
+ * What an app's files say, read without running any of its code: everything
+ * the build checks on an app except the two things only its code can tell it.
+ */
+interface AppText {
+  slug: string;
+  dir: string;
+  /** `app.json` as parsed, before `widgets.ts` adds anything to it. */
+  raw: Record<string, unknown>;
+  /**
+   * The registry entry, less what only the code can say: `routes` is empty,
+   * and each widget carries only the config `app.json` declares.
+   */
+  manifest: AppManifest;
+  apiVisibility: Record<string, RouteAuth[]> | undefined;
+  /** Every `route.ts`, found and not imported. */
+  routeFiles: RouteFile[];
+  /** Whether a `widgets.ts` will add config fields once the code is loaded. */
+  hasWidgetsTs: boolean;
+}
+
+/** The registry's widget entries for a parsed manifest's `widgets`. */
+function buildWidgets(widgets: RawApp["widgets"]): AppManifest["widgets"] {
+  return (widgets ?? []).map((w) => {
+    const component = w.component;
+    const filename = path.basename(component, path.extname(component));
+    return {
+      ...w,
+      id: filename,
+      component,
+      defaultSize: w.defaultSize ?? { w: 4, h: 3 },
+    };
+  });
+}
+
+/** One containment finding as a line of a verdict, naming its file. */
+function findingProblem(slug: string, f: ContainmentFinding): string {
+  return `apps/${slug}/${f.file}${f.line > 0 ? `:${f.line}` : ""} — ${f.what ? `${f.what} ${f.why}` : f.why}`;
+}
+
+/**
+ * Every check on one app that reads its files and runs none of its code, in
+ * the order the build runs them, ending in its registry entry less what only
+ * the code can say. A build runs this and then loadAppCode(); an install's
+ * `--check` runs only this, on the staged copy.
+ *
+ * `slug` is the folder's name, and messages name files where they will live,
+ * as apps/<slug>/…, whichever folder is being read. The containment scan and
+ * reading `app.json` come first, in scanApps() and checkStagedApp(), because
+ * each reports its findings its own way.
+ *
+ * Throws what the build always has: FatalManifestError for a manifest that is
+ * wrong, AppRejectedError for code that does what an app may not.
+ */
+async function readAppText(
+  appDir: string,
+  slug: string,
+  raw: Record<string, unknown>,
+): Promise<AppText> {
+  // The folder name is the slug, and it names the app's schema and role
+  // (src/lib/apps/app-identifiers.ts), its URLs and its hooks. A slug that
+  // could not name a schema unambiguously never gets as far as having one.
+  const slugProblem = appSlugProblem(slug);
+  if (slugProblem) {
+    throw new FatalManifestError(`apps/${slug}: ${slugProblem}`);
   }
 
-  const entries = fs.readdirSync(APPS_DIR, { withFileTypes: true });
+  const pagesDir = path.join(appDir, "pages");
+  const hasPages =
+    fs.existsSync(pagesDir) && fs.readdirSync(pagesDir).length > 0;
+  // Zero is possible while `hasPages` is true — a `pages/` directory
+  // holding only a component with no `Main.tsx` beside it serves nothing.
+  const pageCount = hasPages ? countPages(pagesDir) : 0;
+
+  // Schema-validate the on-disk manifest: types, required fields, unknown
+  // keys, and the defaultRole↔roles cross-check. A violation aborts the
+  // whole build (FatalManifestError) — a malformed manifest is a developer
+  // error that must fail loudly, not silently drop the app. Config fields a
+  // `widgets.ts` adds are held to the same schema in loadAppCode().
+  const parsed = RawAppManifestSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new FatalManifestError(
+      `apps/${slug}/app.json failed validation:\n${formatZodError(parsed.error)}`,
+    );
+  }
+  const r = parsed.data;
+
+  // Schema validates the visibility *values*; this additionally verifies
+  // each key resolves to a real file on disk.
+  const pageVisibility = validateVisibilityMap(
+    r.pageVisibility,
+    slug,
+    appDir,
+    "pageVisibility",
+    "pages",
+    ["Main.tsx", "Main.ts"],
+  );
+  const apiVisibility = validateVisibilityMap(
+    r.apiVisibility,
+    slug,
+    appDir,
+    "apiVisibility",
+    "api",
+    ["route.ts"],
+  );
+
+  // Schema validates the schedule shape; this verifies each job name
+  // resolves to a real handler file on disk.
+  const schedules = validateSchedules(r.schedules, slug, appDir);
+
+  // Every api/**/route.ts, found and not yet imported: loadAppCode() imports
+  // each one and reads its contract.
+  const routeFiles = findRouteFiles(appDir, slug);
+
+  // What the code fires and listens to, held to the app's own namespace and
+  // its `listensTo`. A finding skips this app, as a containment finding
+  // does. validateHookWiring, in validateAppsTogether(), holds each
+  // `listensTo` to the emitter's `consumers`, and a mismatch there still
+  // aborts the run.
+  const hookScan = scanHooks(appDir, slug);
+  const hookFindings = checkHookNamespaces(
+    slug,
+    hookScan.calls,
+    r.listensTo ?? [],
+  );
+  if (hookFindings.length > 0) {
+    throw new AppRejectedError(
+      `its hook calls break the cross-app hook rules:${formatHookFindings(hookFindings)}`,
+      hookFindings.map((f) => `apps/${slug}/${f.file}:${f.line} — ${f.why}`),
+    );
+  }
+
+  const updatedAt = await validateAppDatabase(r, slug, appDir);
+
+  const manifest: AppManifest = {
+    slug,
+    name: r.name,
+    description: r.description ?? "",
+    tagline: r.tagline ?? null,
+    icon: r.icon ?? "box",
+    connectors: r.connectors ?? [],
+    optionalConnectors: r.optionalConnectors ?? [],
+    database: r.database ?? false,
+    updatedAt,
+    notifications: r.notifications ?? false,
+    hasPages,
+    pageCount,
+    global: r.global ?? false,
+    roles: r.roles ?? [],
+    defaultRole: r.defaultRole ?? null,
+    hookCounts: hookScan.counts,
+    hooks: { emits: hookScan.emits, listens: hookScan.listens },
+    authors: normalizeAuthors(r.authors),
+    keywords: r.keywords ?? [],
+    screenshots: validateScreenshots(r.screenshots, "apps", slug, appDir),
+    license: r.license ?? null,
+    appUrl: r.appUrl ?? null,
+    appSupportUrl: r.appSupportUrl ?? null,
+    lastUpdated: parseLastUpdated(raw.lastUpdated),
+    widgets: buildWidgets(r.widgets),
+    schedules,
+    sync: validateSyncs(r.sync, slug, appDir, [
+      ...(r.connectors ?? []),
+      ...(r.optionalConnectors ?? []),
+    ]),
+    emits: r.emits ?? [],
+    listensTo: r.listensTo ?? [],
+    branding: validateAppBranding(r.branding, slug, appDir),
+    escapes: validateEscapes(r.escapes, slug),
+    env: validateEnv(r.env, slug),
+    egress: r.egress ?? [],
+    // Read off the code, in loadAppCode().
+    routes: [],
+    telemetry: validateAppTelemetry(r.telemetry, slug),
+    provides: validateProvides(r.provides, slug, appDir),
+    consumes: normalizeConsumes(r.consumes),
+    mcp: validateMcpTools(r.mcp, slug, appDir, [
+      ...(r.connectors ?? []),
+      ...(r.optionalConnectors ?? []),
+    ]),
+    ...(pageVisibility ? { pageVisibility } : {}),
+    ...(apiVisibility ? { apiVisibility } : {}),
+  };
+
+  const unscanned = unscannedEntryPoints(appDir, manifest);
+  if (unscanned.length > 0) {
+    throw new AppRejectedError(
+      `the platform would load ${unscanned.join(", ")}, which the containment scan does not read: ` +
+        `code in a dot-directory, in assets/, plans/, migrations/ or screenshots/, or outside the app. ` +
+        `Move it beside the rest of the app's source.`,
+      unscanned.map(
+        (rel) =>
+          `apps/${slug}/${rel}: the platform would load it, but the containment scan does not read it ` +
+          `(code in a dot-directory, in assets/, plans/, migrations/ or screenshots/, or outside the app). ` +
+          `Move it beside the rest of the app's source.`,
+      ),
+    );
+  }
+
+  return {
+    slug,
+    dir: appDir,
+    raw,
+    manifest,
+    apiVisibility,
+    routeFiles,
+    hasWidgetsTs: fs.existsSync(path.join(appDir, "widgets.ts")),
+  };
+}
+
+/**
+ * The checks only the app's code can answer, once readAppText() has passed:
+ * the config fields `widgets.ts` builds, and every route's contract. This is
+ * the first point at which a build runs any of an app's code, and an install's
+ * `--check` never reaches it.
+ */
+async function loadAppCode(app: AppText): Promise<AppManifest> {
+  const { slug, dir } = app;
+
+  let widgets = app.manifest.widgets;
+  if (app.hasWidgetsTs) {
+    // A copy, so what readAppText() read stays as it read it.
+    const merged = structuredClone(app.raw);
+    await applyWidgetConfigs(dir, merged);
+    // The config fields widgets.ts supplied are held to the schema too.
+    const parsed = RawAppManifestSchema.safeParse(merged);
+    if (!parsed.success) {
+      throw new FatalManifestError(
+        `apps/${slug}/app.json failed validation:\n${formatZodError(parsed.error)}`,
+      );
+    }
+    widgets = buildWidgets(parsed.data.widgets);
+  }
+
+  // Import every api/**/route.ts and hoist its declared contract. This is
+  // also where a bare `export async function GET` fails the build.
+  const routes = await importRouteContracts(slug, app.routeFiles);
+  validateRouteContracts(routes, slug, app.manifest.roles, app.apiVisibility);
+
+  // The one remaining escape is load-bearing: a route that owns its own
+  // Response registers only when the manifest says so, with a reason, where
+  // a reviewer and the admin dialog can see it.
+  const rawRoutes = routes.flatMap((route) =>
+    route.methods
+      .filter((m) => m.raw)
+      .map((m) => `${m.method} /${route.path}`),
+  );
+  const declaresRaw = app.manifest.escapes.some((e) => e.rule === "raw-response");
+  if (rawRoutes.length > 0 && !declaresRaw) {
+    throw new AppRejectedError(
+      `${rawRoutes.join(", ")} ${rawRoutes.length === 1 ? "returns its" : "return their"} own Response ` +
+        `(\`raw: true\`), which needs { "rule": "raw-response", "reason": "…" } under \`escapes\` in app.json.`,
+    );
+  }
+  if (rawRoutes.length === 0 && declaresRaw) {
+    // Not a refusal — the declaration costs nothing — but a stale one tells
+    // a reviewer something about the app that is no longer true.
+    console.warn(
+      `    apps/${slug}/app.json declares the raw-response escape, but no route sets \`raw: true\`. Remove it.`,
+    );
+  }
+
+  return { ...app.manifest, widgets, routes };
+}
+
+/** Publish what an accepted app ships for unauthenticated pages: screenshots and brand marks. */
+function emitAppFiles(manifest: AppManifest, appDir: string): void {
+  copyScreenshots(manifest.screenshots, "apps", manifest.slug, appDir);
+  copyBrandLogos(manifest.branding, manifest.slug, appDir);
+}
+
+/**
+ * The checks that span apps, over every app registered together: App
+ * Services' two-sided consent, the same for hooks, and no two apps sharing a
+ * schema or a role. Each failure aborts the run.
+ */
+function validateAppsTogether(manifests: AppManifest[]): void {
+  // App Services two-sided consent: every consumes ↔ provides pair must agree.
+  validateServiceWiring(manifests);
+  validateHookWiring(manifests);
+
+  // No two apps may share a schema or a role. With valid slugs the encoding
+  // cannot produce a clash; this is what would catch a change that let one.
+  const clashes = appIdentifierProblems(manifests.filter((m) => m.database).map((m) => m.slug));
+  if (clashes.length > 0) throw new FatalManifestError(clashes.join("\n"));
+}
+
+async function scanApps(
+  appsDir: string = APPS_DIR,
+  { emit = true }: { emit?: boolean } = {},
+): Promise<AppManifest[]> {
+  if (!fs.existsSync(appsDir)) {
+    fs.mkdirSync(appsDir, { recursive: true });
+  }
+
+  const entries = fs.readdirSync(appsDir, { withFileTypes: true });
   const manifests: AppManifest[] = [];
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name.startsWith("_")) continue; // template directories
+    // Not templates, and nothing dot-prefixed (see isExtensionFolder).
+    if (!isExtensionFolder(entry)) continue;
 
-    const appDir = path.join(APPS_DIR, entry.name);
+    const appDir = path.join(appsDir, entry.name);
 
-    // Containment runs FIRST, before anything imports the app's code: loading
-    // the manifest imports widgets.ts and scanning routes imports every
-    // route.ts, and an import runs the module's top level. A finding skips the
-    // app rather than aborting the run — on the install path a `Skipping
-    // <slug>/` line is a `rejected-by-registry`, rolled back, which is the
-    // right verdict on the extension (see regenerateRegistry() in
-    // src/lib/repository/install.ts). See scripts/app-containment.ts.
+    // Containment runs FIRST, before anything imports the app's code:
+    // loadAppCode() imports widgets.ts and every route.ts, and an import runs
+    // the module's top level. A finding skips the app rather than aborting
+    // the run. An install never gets this far with such an app: its `--check`
+    // runs this same scan on the staged copy and rejects it before it is put
+    // in place (checkExtension() in src/lib/repository/install.ts). See
+    // scripts/app-containment.ts.
     const findings = scanAppContainment(appDir);
     if (findings.length > 0) {
       console.warn(
@@ -1307,11 +1683,8 @@ async function scanApps(): Promise<AppManifest[]> {
 
     let raw: Record<string, unknown> | null;
     try {
-      raw = await loadAppManifest(appDir);
+      raw = readAppJson(appDir);
     } catch (err) {
-      // A widgets.ts that disagrees with app.json is a manifest error like any
-      // other, and aborts the run rather than dropping the app.
-      if (err instanceof FatalManifestError) throw err;
       console.warn(
         `  Skipping ${entry.name}/ — failed to load manifest: ${err}`,
       );
@@ -1332,176 +1705,10 @@ async function scanApps(): Promise<AppManifest[]> {
     }
 
     try {
-      // The folder name is the slug, and it names the app's schema and role
-      // (src/lib/apps/app-identifiers.ts), its URLs and its hooks. A slug that
-      // could not name a schema unambiguously never gets as far as having one.
-      const slugProblem = appSlugProblem(entry.name);
-      if (slugProblem) {
-        throw new FatalManifestError(`apps/${entry.name}: ${slugProblem}`);
-      }
+      // Every check that reads text, then the two that need the code.
+      const manifest = await loadAppCode(await readAppText(appDir, entry.name, raw));
 
-      const pagesDir = path.join(APPS_DIR, entry.name, "pages");
-      const hasPages =
-        fs.existsSync(pagesDir) && fs.readdirSync(pagesDir).length > 0;
-      // Zero is possible while `hasPages` is true — a `pages/` directory
-      // holding only a component with no `Main.tsx` beside it serves nothing.
-      const pageCount = hasPages ? countPages(pagesDir) : 0;
-
-      // Schema-validate the on-disk manifest: types, required fields, unknown
-      // keys, and the defaultRole↔roles cross-check. A violation aborts the
-      // whole build (FatalManifestError) — a malformed manifest is a developer
-      // error that must fail loudly, not silently drop the app.
-      const parsed = RawAppManifestSchema.safeParse(raw);
-      if (!parsed.success) {
-        throw new FatalManifestError(
-          `apps/${entry.name}/app.json failed validation:\n${formatZodError(parsed.error)}`,
-        );
-      }
-      const r = parsed.data;
-
-      // Schema validates the visibility *values*; this additionally verifies
-      // each key resolves to a real file on disk.
-      const pageVisibility = validateVisibilityMap(
-        r.pageVisibility,
-        entry.name,
-        appDir,
-        "pageVisibility",
-        "pages",
-        ["Main.tsx", "Main.ts"],
-      );
-      const apiVisibility = validateVisibilityMap(
-        r.apiVisibility,
-        entry.name,
-        appDir,
-        "apiVisibility",
-        "api",
-        ["route.ts"],
-      );
-
-      // Schema validates the schedule shape; this verifies each job name
-      // resolves to a real handler file on disk.
-      const schedules = validateSchedules(r.schedules, entry.name, appDir);
-
-      // Import every api/**/route.ts and hoist its declared contract. This is
-      // also where a bare `export async function GET` fails the build.
-      const routes = await scanApiRoutes(appDir, entry.name);
-      validateRouteContracts(routes, entry.name, r.roles ?? [], apiVisibility);
-
-      // The one remaining escape is load-bearing: a route that owns its own
-      // Response registers only when the manifest says so, with a reason, where
-      // a reviewer and the admin dialog can see it.
-      const rawRoutes = routes.flatMap((route) =>
-        route.methods
-          .filter((m) => m.raw)
-          .map((m) => `${m.method} /${route.path}`),
-      );
-      const declaresRaw = (r.escapes ?? []).some((e) => e.rule === "raw-response");
-      if (rawRoutes.length > 0 && !declaresRaw) {
-        throw new AppRejectedError(
-          `${rawRoutes.join(", ")} ${rawRoutes.length === 1 ? "returns its" : "return their"} own Response ` +
-            `(\`raw: true\`), which needs { "rule": "raw-response", "reason": "…" } under \`escapes\` in app.json.`,
-        );
-      }
-      if (rawRoutes.length === 0 && declaresRaw) {
-        // Not a refusal — the declaration costs nothing — but a stale one tells
-        // a reviewer something about the app that is no longer true.
-        console.warn(
-          `    apps/${entry.name}/app.json declares the raw-response escape, but no route sets \`raw: true\`. Remove it.`,
-        );
-      }
-
-      // What the code fires and listens to, held to the app's own namespace and
-      // its `listensTo`. A finding skips this app, as a containment finding
-      // does. validateHookWiring, after the loop, holds each `listensTo` to the
-      // emitter's `consumers`, and a mismatch there still aborts the run.
-      const hookScan = scanHooks(path.join(APPS_DIR, entry.name), entry.name);
-      const hookFindings = checkHookNamespaces(
-        entry.name,
-        hookScan.calls,
-        r.listensTo ?? [],
-      );
-      if (hookFindings.length > 0) {
-        throw new AppRejectedError(
-          `its hook calls break the cross-app hook rules:${formatHookFindings(hookFindings)}`,
-        );
-      }
-
-      const updatedAt = await validateAppDatabase(r, entry.name);
-
-      const manifest: AppManifest = {
-        slug: entry.name,
-        name: r.name,
-        description: r.description ?? "",
-        tagline: r.tagline ?? null,
-        icon: r.icon ?? "box",
-        connectors: r.connectors ?? [],
-        optionalConnectors: r.optionalConnectors ?? [],
-        database: r.database ?? false,
-        updatedAt,
-        notifications: r.notifications ?? false,
-        hasPages,
-        pageCount,
-        global: r.global ?? false,
-        roles: r.roles ?? [],
-        defaultRole: r.defaultRole ?? null,
-        hookCounts: hookScan.counts,
-        hooks: { emits: hookScan.emits, listens: hookScan.listens },
-        authors: normalizeAuthors(r.authors),
-        keywords: r.keywords ?? [],
-        screenshots: validateScreenshots(
-          r.screenshots,
-          "apps",
-          entry.name,
-          appDir,
-        ),
-        license: r.license ?? null,
-        appUrl: r.appUrl ?? null,
-        appSupportUrl: r.appSupportUrl ?? null,
-        lastUpdated: parseLastUpdated(raw.lastUpdated),
-        widgets: (r.widgets ?? []).map((w) => {
-          const component = w.component;
-          const filename = path.basename(component, path.extname(component));
-          return {
-            ...w,
-            id: filename,
-            component,
-            defaultSize: w.defaultSize ?? { w: 4, h: 3 },
-          };
-        }),
-        schedules,
-        sync: validateSyncs(r.sync, entry.name, appDir, [
-          ...(r.connectors ?? []),
-          ...(r.optionalConnectors ?? []),
-        ]),
-        emits: r.emits ?? [],
-        listensTo: r.listensTo ?? [],
-        branding: validateAppBranding(r.branding, entry.name, appDir),
-        escapes: validateEscapes(r.escapes, entry.name),
-        env: validateEnv(r.env, entry.name),
-        egress: r.egress ?? [],
-        routes,
-        telemetry: validateAppTelemetry(r.telemetry, entry.name),
-        provides: validateProvides(r.provides, entry.name, appDir),
-        consumes: normalizeConsumes(r.consumes),
-        mcp: validateMcpTools(r.mcp, entry.name, appDir, [
-          ...(r.connectors ?? []),
-          ...(r.optionalConnectors ?? []),
-        ]),
-        ...(pageVisibility ? { pageVisibility } : {}),
-        ...(apiVisibility ? { apiVisibility } : {}),
-      };
-
-      const unscanned = unscannedEntryPoints(appDir, manifest);
-      if (unscanned.length > 0) {
-        throw new AppRejectedError(
-          `the platform would load ${unscanned.join(", ")}, which the containment scan does not read: ` +
-            `code in a dot-directory, in assets/, plans/, migrations/ or screenshots/, or outside the app. ` +
-            `Move it beside the rest of the app's source.`,
-        );
-      }
-
-      copyScreenshots(manifest.screenshots, "apps", entry.name, appDir);
-      copyBrandLogos(manifest.branding, entry.name, appDir);
+      if (emit) emitAppFiles(manifest, appDir);
 
       manifests.push(manifest);
       console.log(`  App: ${manifest.name} (/${manifest.slug})`);
@@ -1528,15 +1735,7 @@ async function scanApps(): Promise<AppManifest[]> {
     }
   }
 
-  // App Services two-sided consent: every consumes ↔ provides pair must agree.
-  validateServiceWiring(manifests);
-  validateHookWiring(manifests);
-
-  // No two apps may share a schema or a role. With valid slugs the encoding
-  // cannot produce a clash; this is what would catch a change that let one.
-  const clashes = appIdentifierProblems(manifests.filter((m) => m.database).map((m) => m.slug));
-  if (clashes.length > 0) throw new FatalManifestError(clashes.join("\n"));
-
+  validateAppsTogether(manifests);
   return manifests;
 }
 
@@ -1626,89 +1825,103 @@ function validateConnectorIcon(icon: string, name: string, dir: string): void {
   }
 }
 
-async function scanConnectors(): Promise<ConnectorManifestOut[]> {
-  if (!fs.existsSync(CONNECTORS_DIR)) {
-    fs.mkdirSync(CONNECTORS_DIR, { recursive: true });
+/**
+ * Every check on one connector, and its registry entry. All of them read text
+ * (the generator never imports a connector's code), and nothing is written, so
+ * an install's `--check` runs this on the staged copy as it is.
+ */
+function readConnector(connectorDir: string, name: string): ConnectorManifestOut {
+  const manifestPath = path.join(connectorDir, "connector.json");
+  const rawJson = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+
+  // Schema-validate the manifest shape (types, required fields, unknown
+  // keys, credential-field types). Hard-fails the build on any violation.
+  const parsed = RawConnectorManifestSchema.safeParse(rawJson);
+  if (!parsed.success) {
+    throw new Error(
+      `connector.json failed validation:\n${formatZodError(parsed.error)}`,
+    );
+  }
+  const raw = parsed.data;
+
+  // Folder name is the source of truth for the connector name (invariant).
+  if (raw.name !== name) {
+    throw new Error(
+      `connector.json "name" ("${raw.name}") must match the folder name ("${name}").`,
+    );
+  }
+
+  // Icon: proven to exist and to be a square >= 512x512 before anything
+  // references it, then copied out with the rest of the connector's assets.
+  // The registry contract first: a missing icon and a missing setup guide
+  // are one report, not a build each.
+  validateRegistryContract(name, raw);
+  if (raw.icon) validateConnectorIcon(raw.icon, name, connectorDir);
+  // Completeness of the capability list, which the Access tab presents as
+  // exhaustive. Runs before the manifest is emitted so a gap cannot ship.
+  validateConnectorMethods(
+    name,
+    connectorDir,
+    validateConnectorTelemetry(raw.telemetry, name),
+  );
+
+  return {
+    name: raw.name,
+    displayName: raw.displayName,
+    // Stored as the URL the browser will request, not the authoring path,
+    // so no call site has to know where assets get copied to.
+    ...(raw.icon
+      ? {
+          // `assets/` is where the file lives in the repo; the copy lands
+          // directly under the connector's public directory, so strip it.
+          icon: `/connector-assets/${name}/${raw.icon.replace(/^assets\//, "")}`,
+        }
+      : {}),
+    ...(raw.userScoped ? { userScoped: true } : {}),
+    description: raw.description ?? "",
+    ...(raw.setup ? { setup: raw.setup as ConnectorSetupGuide } : {}),
+    credentialFields: raw.credentialFields ?? [],
+    authors: normalizeAuthors(raw.authors),
+    lastUpdated: parseLastUpdated(raw.lastUpdated),
+    telemetry: validateConnectorTelemetry(raw.telemetry, name),
+    // Declarative transport/auth policy. Omitted keys stay omitted so the
+    // runtime defaults in HttpConnector apply rather than being baked in
+    // here — the registry records what was declared, not what was assumed.
+    ...(raw.auth ? { auth: raw.auth as ConnectorAuthPolicy } : {}),
+    ...(raw.http ? { http: raw.http as ConnectorHttpPolicy } : {}),
+    ...(raw.webhook
+      ? { webhook: raw.webhook as ConnectorWebhookPolicy }
+      : {}),
+  };
+}
+
+async function scanConnectors(
+  connectorsDir: string = CONNECTORS_DIR,
+  { emit = true }: { emit?: boolean } = {},
+): Promise<ConnectorManifestOut[]> {
+  if (!fs.existsSync(connectorsDir)) {
+    fs.mkdirSync(connectorsDir, { recursive: true });
     return [];
   }
 
-  const entries = fs.readdirSync(CONNECTORS_DIR, { withFileTypes: true });
+  const entries = fs.readdirSync(connectorsDir, { withFileTypes: true });
   const connectors: ConnectorManifestOut[] = [];
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name.startsWith("_")) continue; // template directories
+    // Not templates, and nothing dot-prefixed (see isExtensionFolder).
+    if (!isExtensionFolder(entry)) continue;
 
-    const connectorDir = path.join(CONNECTORS_DIR, entry.name);
-    const manifestPath = path.join(connectorDir, "connector.json");
-    if (!fs.existsSync(manifestPath)) continue;
+    const connectorDir = path.join(connectorsDir, entry.name);
+    if (!fs.existsSync(path.join(connectorDir, "connector.json"))) continue;
 
     try {
-      const rawJson = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-
-      // Schema-validate the manifest shape (types, required fields, unknown
-      // keys, credential-field types). Hard-fails the build on any violation.
-      const parsed = RawConnectorManifestSchema.safeParse(rawJson);
-      if (!parsed.success) {
-        throw new Error(
-          `connector.json failed validation:\n${formatZodError(parsed.error)}`,
+      const manifest = readConnector(connectorDir, entry.name);
+      if (emit) {
+        copyDir(
+          path.join(connectorDir, "assets"),
+          path.join(PUBLIC_CONNECTORS_DIR, entry.name),
         );
       }
-      const raw = parsed.data;
-
-      // Folder name is the source of truth for the connector name (invariant).
-      if (raw.name !== entry.name) {
-        throw new Error(
-          `connector.json "name" ("${raw.name}") must match the folder name ("${entry.name}").`,
-        );
-      }
-
-      // Icon: proven to exist and to be a square >= 512x512 before anything
-      // references it, then copied out with the rest of the connector's assets.
-      // The registry contract first: a missing icon and a missing setup guide
-      // are one report, not a build each.
-      validateRegistryContract(entry.name, raw);
-      if (raw.icon) validateConnectorIcon(raw.icon, entry.name, connectorDir);
-      // Completeness of the capability list, which the Access tab presents as
-      // exhaustive. Runs before the manifest is emitted so a gap cannot ship.
-      validateConnectorMethods(
-        entry.name,
-        connectorDir,
-        validateConnectorTelemetry(raw.telemetry, entry.name),
-      );
-      copyDir(
-        path.join(connectorDir, "assets"),
-        path.join(PUBLIC_CONNECTORS_DIR, entry.name),
-      );
-
-      const manifest: ConnectorManifestOut = {
-        name: raw.name,
-        displayName: raw.displayName,
-        // Stored as the URL the browser will request, not the authoring path,
-        // so no call site has to know where assets get copied to.
-        ...(raw.icon
-          ? {
-              // `assets/` is where the file lives in the repo; the copy lands
-              // directly under the connector's public directory, so strip it.
-              icon: `/connector-assets/${entry.name}/${raw.icon.replace(/^assets\//, "")}`,
-            }
-          : {}),
-        ...(raw.userScoped ? { userScoped: true } : {}),
-        description: raw.description ?? "",
-        ...(raw.setup ? { setup: raw.setup as ConnectorSetupGuide } : {}),
-        credentialFields: raw.credentialFields ?? [],
-        authors: normalizeAuthors(raw.authors),
-        lastUpdated: parseLastUpdated(raw.lastUpdated),
-        telemetry: validateConnectorTelemetry(raw.telemetry, entry.name),
-        // Declarative transport/auth policy. Omitted keys stay omitted so the
-        // runtime defaults in HttpConnector apply rather than being baked in
-        // here — the registry records what was declared, not what was assumed.
-        ...(raw.auth ? { auth: raw.auth as ConnectorAuthPolicy } : {}),
-        ...(raw.http ? { http: raw.http as ConnectorHttpPolicy } : {}),
-        ...(raw.webhook
-          ? { webhook: raw.webhook as ConnectorWebhookPolicy }
-          : {}),
-      };
 
       connectors.push(manifest);
       console.log(`  Connector: ${manifest.displayName} (${manifest.name})`);
@@ -2127,7 +2340,370 @@ export function getTheme(slug: string): ThemeManifest {
   );
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
+/* -------------------------------------------------------------------------- */
+/*  An install's check: --check                                               */
+/* -------------------------------------------------------------------------- */
+
+/*
+  generate-project-registry.ts --check <kind> <dir> --verdict-file <path>
+
+  What an install from the Registry runs on the extension it has staged, before
+  anything is put in place (checkExtension() in src/lib/repository/install.ts).
+  It treats <dir> as the extension's own folder, with the folder's name as its
+  slug, and runs every check that reads text:
+
+   - for an app, readAppText(): the containment scan and the import allowlist,
+     `app.json` against its schema, the SQL check on its migrations, and the
+     file and text checks;
+   - for a connector or a theme, readConnector() or readTheme(): everything the
+     build checks, since none of it runs code;
+   - and the checks that span extensions (App Services and hook wiring, schema
+     and role clashes, user-scoped connectors in scheduled jobs) over the
+     manifests already registered in src/generated/, with this one added. On
+     its own, an app that consumes another app's service would fail them.
+
+  What it leaves out is the point of it. It imports none of the extension's
+  code, so `widgets.ts` and each `route.ts` are listed as deferred: they are
+  checked at registration, which loads them. It writes nothing to
+  src/generated/ or public/, and does not stamp the build. The install path
+  runs it with PATH and TMPDIR as its whole environment (generatorEnv()).
+
+  It writes one verdict, to the named file, which must not exist yet:
+  {"verdict":"accepted"|"rejected","problems":[…],"deferred":[…]}. Exit 0 means
+  that verdict was written, and any other exit means there is none. What it
+  prints is for a person to read: it repeats file names and manifest strings,
+  which the extension chooses, so the install path never parses it.
+
+  `--registry-dir <dir>` reads the registered manifests from a directory other
+  than src/generated/, for tests.
+*/
+
+const CHECK_USAGE =
+  "Usage: generate-project-registry.ts --check <app|connector|theme> <dir> " +
+  "--verdict-file <absolute path> [--registry-dir <dir>]";
+
+type CheckKind = "app" | "connector" | "theme";
+
+/** What a check found: `problems` empty means accepted. */
+interface Judgement {
+  problems: string[];
+  deferred: string[];
+}
+
+/** The manifests registered in src/generated/, as the checks that span extensions need them. */
+interface Registered {
+  apps: AppManifest[];
+  connectors: ConnectorManifestOut[];
+}
+
+class CheckUsageError extends Error {}
+
+/** An error as one line of a verdict. */
+function errorText(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err);
+  return text || "an error with no message";
+}
+
+function parseCheckArgs(args: readonly string[]): {
+  kind: CheckKind;
+  dir: string;
+  verdictFile: string;
+  registryDir: string;
+} {
+  const [flag, kind, dir, ...rest] = args;
+  if (flag !== "--check" || !kind || !dir) throw new CheckUsageError(CHECK_USAGE);
+  if (kind !== "app" && kind !== "connector" && kind !== "theme") {
+    throw new CheckUsageError(`"${kind}" is not a kind of extension. ${CHECK_USAGE}`);
+  }
+
+  const options = new Map<string, string>();
+  for (let i = 0; i < rest.length; i += 2) {
+    const [name, value] = [rest[i], rest[i + 1]];
+    if ((name !== "--verdict-file" && name !== "--registry-dir") || value === undefined || options.has(name)) {
+      throw new CheckUsageError(CHECK_USAGE);
+    }
+    options.set(name, value);
+  }
+
+  const verdictFile = options.get("--verdict-file");
+  if (!verdictFile || !path.isAbsolute(verdictFile)) throw new CheckUsageError(CHECK_USAGE);
+  return {
+    kind,
+    dir: path.resolve(dir),
+    verdictFile,
+    registryDir: path.resolve(options.get("--registry-dir") ?? OUTPUT_DIR),
+  };
+}
+
+// What the checks that span extensions read from a registered manifest, held
+// to its shape so that a registry written by another version of this
+// generator is reported as unreadable rather than blamed on the extension.
+const consumersSchema = z.union([z.literal("*"), z.array(z.string())]);
+const RegisteredAppSchema = z.looseObject({
+  slug: z.string().min(1),
+  database: z.boolean(),
+  connectors: z.array(z.string()),
+  optionalConnectors: z.array(z.string()),
+  schedules: z.array(z.looseObject({ name: z.string() })),
+  sync: z.array(z.looseObject({ name: z.string() })),
+  provides: z.array(z.looseObject({ name: z.string(), consumers: consumersSchema })),
+  consumes: z.array(z.looseObject({ app: z.string(), service: z.string() })),
+  emits: z.array(z.looseObject({ name: z.string(), consumers: consumersSchema })),
+  listensTo: z.array(z.looseObject({ app: z.string(), hook: z.string() })),
 });
+const RegisteredConnectorSchema = z.looseObject({
+  name: z.string().min(1),
+  userScoped: z.boolean().optional(),
+});
+
+/**
+ * The value a generated registry module gives `name`, read as text: the module
+ * is never imported. The generator wrote it with JSON.stringify, so the
+ * initializer's text is JSON.
+ */
+function generatedValue(file: string, name: string): unknown {
+  const source = ts.createSourceFile(
+    file,
+    fs.readFileSync(file, "utf-8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (
+        ts.isIdentifier(declaration.name) &&
+        declaration.name.text === name &&
+        declaration.initializer
+      ) {
+        return JSON.parse(declaration.initializer.getText(source));
+      }
+    }
+  }
+  throw new Error(`it declares no \`${name}\``);
+}
+
+/**
+ * The apps and connectors registered in `registryDir`, src/generated/ unless a
+ * test says otherwise. Throws when either module is missing or unreadable:
+ * that is this checkout's problem, and the check then has no verdict to give.
+ */
+function readRegistered(registryDir: string): Registered {
+  function read<T>(file: string, name: string, schema: z.ZodType<T>): T[] {
+    const full = path.join(registryDir, file);
+    try {
+      return z.array(schema).parse(generatedValue(full, name));
+    } catch (err) {
+      throw new Error(
+        `Could not read the registered manifests in ${full}: ${errorText(err)}\n` +
+          `Run \`npm run registry\` in this checkout, then try again.`,
+      );
+    }
+  }
+  return {
+    apps: read("app-registry.ts", "appRegistry", RegisteredAppSchema) as unknown as AppManifest[],
+    connectors: read(
+      "connector-registry.ts",
+      "connectorRegistry",
+      RegisteredConnectorSchema,
+    ) as unknown as ConnectorManifestOut[],
+  };
+}
+
+/** The deferred list for an app: what the check would have to import to read. */
+function appDeferred(app: AppText): string[] {
+  const out: string[] = [];
+  if (app.hasWidgetsTs) {
+    out.push(
+      `apps/${app.slug}/widgets.ts: the widget config fields it builds are checked at registration, which loads it.`,
+    );
+  }
+  for (const { routePath } of app.routeFiles) {
+    out.push(
+      `apps/${app.slug}/api/${routePath || "index"}/route.ts: its defineRoute contract is checked at registration, which loads it.`,
+    );
+  }
+  return out;
+}
+
+/** One staged app: readAppText() and the checks across apps, with nothing loaded. */
+async function checkStagedApp(dir: string, slug: string, registered: Registered): Promise<Judgement> {
+  const findings = scanAppContainment(dir);
+  if (findings.length > 0) {
+    return { problems: findings.map((f) => findingProblem(slug, f)), deferred: [] };
+  }
+
+  let raw: Record<string, unknown> | null;
+  try {
+    raw = readAppJson(dir);
+  } catch (err) {
+    return { problems: [`apps/${slug}/app.json could not be read: ${errorText(err)}`], deferred: [] };
+  }
+  if (!raw) return { problems: [`apps/${slug} has no app.json.`], deferred: [] };
+
+  let app: AppText;
+  try {
+    app = await readAppText(dir, slug, raw);
+  } catch (err) {
+    const problems =
+      err instanceof AppRejectedError
+        ? err.problems
+        : err instanceof FatalManifestError
+          ? [err.message]
+          : [`apps/${slug}: invalid manifest: ${errorText(err)}`];
+    return { problems, deferred: [] };
+  }
+
+  // The registered apps, with this one in place of any registered entry of the
+  // same slug: what the build would register once it is installed.
+  const apps = [...registered.apps.filter((a) => a.slug !== slug), app.manifest];
+  try {
+    validateAppsTogether(apps);
+    validateUserScopedUsage(apps, registered.connectors);
+  } catch (err) {
+    return { problems: [errorText(err)], deferred: appDeferred(app) };
+  }
+  return { problems: [], deferred: appDeferred(app) };
+}
+
+/** One staged connector: readConnector(), then user-scoped use by the registered apps. */
+function checkStagedConnector(dir: string, name: string, registered: Registered): Judgement {
+  if (!fs.existsSync(path.join(dir, "connector.json"))) {
+    return { problems: [`connectors/${name} has no connector.json.`], deferred: [] };
+  }
+  let connector: ConnectorManifestOut;
+  try {
+    connector = readConnector(dir, name);
+  } catch (err) {
+    return { problems: [`connectors/${name}: ${errorText(err)}`], deferred: [] };
+  }
+  try {
+    validateUserScopedUsage(registered.apps, [
+      ...registered.connectors.filter((c) => c.name !== name),
+      connector,
+    ]);
+  } catch (err) {
+    return { problems: [errorText(err)], deferred: [] };
+  }
+  return { problems: [], deferred: [] };
+}
+
+/** One staged theme: readTheme(). A theme stands alone, so nothing spans themes. */
+function checkStagedTheme(dir: string, slug: string): Judgement {
+  try {
+    if (!readTheme(dir, slug)) return { problems: [`themes/${slug} has no theme.json.`], deferred: [] };
+  } catch (err) {
+    return {
+      problems: [err instanceof ThemeError ? err.message : `themes/${slug}: ${errorText(err)}`],
+      deferred: [],
+    };
+  }
+  return { problems: [], deferred: [] };
+}
+
+/**
+ * Judge one staged extension, the folder's name as its slug. Imports none of
+ * its code and writes nothing.
+ */
+async function checkStaged(kind: CheckKind, dir: string, registered: Registered): Promise<Judgement> {
+  const slug = path.basename(dir);
+  switch (kind) {
+    case "app":
+      return checkStagedApp(dir, slug, registered);
+    case "connector":
+      return checkStagedConnector(dir, slug, registered);
+    case "theme":
+      return checkStagedTheme(dir, slug);
+  }
+}
+
+/**
+ * `--check`, from its arguments to its exit code: 0 once the verdict is
+ * written, 2 for arguments it cannot use, and 1, by throwing, for a check that
+ * could not run. Never writes anything but the verdict file.
+ */
+async function runCheck(args: readonly string[]): Promise<number> {
+  let parsed: ReturnType<typeof parseCheckArgs>;
+  try {
+    parsed = parseCheckArgs(args);
+  } catch (err) {
+    console.error(errorText(err));
+    return 2;
+  }
+  const { kind, verdictFile, registryDir } = parsed;
+
+  let dir: string;
+  try {
+    dir = fs.realpathSync(parsed.dir);
+    if (!fs.statSync(dir).isDirectory()) throw new Error("it is not a directory");
+  } catch (err) {
+    console.error(`Cannot check ${parsed.dir}: ${errorText(err)}`);
+    return 2;
+  }
+
+  // Whose problem each failure is decides how it is reported. The registered
+  // manifests are this checkout's, so failing to read them throws, and the
+  // check has no verdict. Everything about the extension itself is a verdict.
+  const registered: Registered =
+    kind === "theme" ? { apps: [], connectors: [] } : readRegistered(registryDir);
+
+  const label = `${kind === "app" ? "apps" : kind === "connector" ? "connectors" : "themes"}/${path.basename(dir)}`;
+  console.log(`Checking ${label} without running any of its code...`);
+
+  const { problems, deferred } = await checkStaged(kind, dir, registered);
+  const verdict = buildCheckVerdict(problems, deferred);
+
+  // `wx` refuses a file that already exists, so the verdict the install path
+  // reads is the one written here, and there is only one.
+  fs.writeFileSync(verdictFile, serializeCheckVerdict(verdict), { flag: "wx", mode: 0o600 });
+
+  if (verdict.verdict === "rejected") {
+    console.log(`  Rejected:\n${verdict.problems.map((p) => `    ${p}`).join("\n")}`);
+  } else {
+    console.log("  Accepted.");
+  }
+  if (verdict.deferred.length > 0) {
+    console.log(`  Checked at registration:\n${verdict.deferred.map((d) => `    ${d}`).join("\n")}`);
+  }
+  return 0;
+}
+
+/*
+  Run as a script: the full generator with no arguments, or an install's check
+  with `--check`. Imported, as the tests import it, nothing runs.
+*/
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  if (args.length === 0) {
+    main().catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
+  } else if (args[0] === "--check") {
+    runCheck(args).then(
+      (code) => {
+        process.exitCode = code;
+      },
+      (err) => {
+        console.error(err instanceof Error ? err.message : err);
+        process.exitCode = 1;
+      },
+    );
+  } else {
+    // Never a full run on arguments it does not know: a caller that meant
+    // `--check` and lost the flag would otherwise rewrite src/generated/.
+    console.error(`Unknown arguments: ${args.join(" ")}\n${CHECK_USAGE}`);
+    process.exitCode = 2;
+  }
+}
+
+export {
+  checkStaged,
+  readRegistered,
+  scanApps,
+  scanConnectors,
+  scanThemes,
+  type CheckKind,
+  type Judgement,
+  type Registered,
+};
