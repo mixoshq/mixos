@@ -1021,6 +1021,8 @@ export default function ConnectorConfigureDialog({
                 <p className="mt-0.5 text-sm text-muted-foreground">
                   Apps can&apos;t call it, and Connect and Verify are refused
                   until it is enabled. Its credentials are kept.
+                  {connector.replacement &&
+                    " A different connector had this name before, so enabling it asks you to type its name."}
                 </p>
               </div>
             )}
