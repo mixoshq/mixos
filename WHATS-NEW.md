@@ -152,6 +152,11 @@ just pulled.
   one gets a 413, with or without a `content-length`. Without a session cookie,
   `/api/apps` now answers with a JSON 401 or 404 instead of a redirect to
   `/login`.
+- **Fix:** `/api/analytics/track` and `/api/analytics/app-open` record an event
+  only for an app the user holds, while it is active and not being updated.
+  Any other event gets a 404, as an app that doesn't exist does, and records
+  nothing. The audit log records an admin connecting a tenant connector through
+  OAuth, as `connector.connect`, with the scopes the provider granted.
 
 ## 2026-10-07
 
