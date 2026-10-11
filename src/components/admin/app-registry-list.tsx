@@ -7,6 +7,7 @@
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
+import type { AppReplacement } from "@/lib/apps/access";
 import AppTile from "./app-tile";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,8 @@ interface Props {
   activeBySlug: Record<string, boolean>;
   /** Apps the release step brought back with different code: slug to when. */
   returnedChangedBySlug: Record<string, string>;
+  /** Apps the release step found under a slug a different extension had. */
+  replacedBySlug: Record<string, AppReplacement>;
 }
 
 export default function AppRegistryList({
@@ -35,6 +38,7 @@ export default function AppRegistryList({
   tableCountsBySlug,
   activeBySlug,
   returnedChangedBySlug,
+  replacedBySlug,
 }: Props) {
   const [query, setQuery] = useState("");
   const lower = query.toLowerCase();
@@ -91,6 +95,7 @@ export default function AppRegistryList({
               // appeared, which is not the same as active.
               isActive={activeBySlug[app.slug] === true}
               returnedChangedAt={returnedChangedBySlug[app.slug] ?? null}
+              replacement={replacedBySlug[app.slug] ?? null}
             />
           ))}
         </div>
