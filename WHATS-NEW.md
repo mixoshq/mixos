@@ -60,7 +60,8 @@ just pulled.
   `MIXOS_COMMIT=$(git rev-parse HEAD)`, and on Coolify set
   `MIXOS_COMMIT=$SOURCE_COMMIT`. See `docs/hosting/README.md`. **Breaking:** an
   extension's `requiresMixOS` is now checked in a checkout too, against
-  `package.json`; bump it locally to try an extension that needs a newer MixOS.
+  `package.json`; bump it locally to try an extension that needs a newer MixOS,
+  but don't commit the bump: `/mixos deploy` leaves it out.
 - **A built deployment browses mixos.org.** The Docker image on any host, and
   Vercel, ignore `MIXOS_REPOSITORY_URL` unless it names their own machine
   (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), and log it.
@@ -194,6 +195,11 @@ just pulled.
   redirects, and only within the catalogue's own origin. Any other redirect,
   such as one to another host or from https to http, is refused with an error
   naming the catalogue.
+- **`/mixos deploy` leaves a version bump out.** A change to `"version"` in
+  `package.json`, or to the version in `package-lock.json`, stays out of its
+  commits and is listed under "Left out". Only a release PR changes the
+  version: a committed local bump makes `scripts/release-prep.ts` refuse the
+  next release.
 
 ## 2026-10-07
 
