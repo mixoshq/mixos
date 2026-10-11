@@ -7,10 +7,12 @@
 import { useState, useTransition } from "react";
 import { AlertCircle } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
+import type { AppReplacement } from "@/lib/apps/access";
 import LucideIcon from "@/components/lucide-icon";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status";
 import { setAppActiveAction } from "@/lib/apps/admin-actions";
+import { describeIdentity } from "@/lib/repository/identity";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
@@ -23,6 +25,7 @@ import {
 import AppDetailsDialog, {
   MissingConnectorWarning,
 } from "./app-details-dialog";
+import TypedConfirmDialog from "./typed-confirm-dialog";
 
 interface MissingConnector {
   name: string;
@@ -43,6 +46,12 @@ interface AppTileProps {
    * clears it.
    */
   returnedChangedAt: string | null;
+  /**
+   * Set when the release step found this app under a slug a different
+   * extension had, switched it off and revoked its API keys. Activating needs
+   * the slug typed, and clears it.
+   */
+  replacement: AppReplacement | null;
 }
 
 /**
@@ -60,7 +69,8 @@ interface AppTileProps {
  * the registry is the whole of being valid — so tinting each card would invent
  * a status to report. Colour stays reserved for the things on this page that
  * genuinely need an admin: the unconfigured-connector strip, and the strip on
- * an app that came back into the build with different code.
+ * an app that came back into the build with different code, or that replaces
+ * a different extension under its slug.
  */
 export default function AppTile({
   app,
@@ -69,13 +79,39 @@ export default function AppTile({
   tableCount,
   isActive,
   returnedChangedAt,
+  replacement,
 }: AppTileProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  /** Activate's typed confirmation, for an app that replaces a different extension. */
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+
+  // One message at a time. An app that came back as a different extension
+  // usually came back with different code too, and the replacement is what
+  // the admin has to answer: it asks more of them.
+  const replaced = replacement !== null;
+  const backChanged = returnedChangedAt !== null && !replaced;
 
   function toggleActive() {
+    if (!isActive && replaced) {
+      setConfirmError(null);
+      setConfirming(true);
+      return;
+    }
     startTransition(async () => {
       await setAppActiveAction(app.slug, !isActive);
+    });
+  }
+
+  function activateReplaced(typed: string) {
+    startTransition(async () => {
+      try {
+        await setAppActiveAction(app.slug, true, typed);
+        setConfirming(false);
+      } catch {
+        setConfirmError("It couldn't be activated. Reload the page and try again.");
+      }
     });
   }
 
@@ -163,14 +199,17 @@ export default function AppTile({
         badge its own fill, which reads as four severities when it is really
         four measurements — and six of those would be a traffic light.
       */}
-      {(pills.length > 0 || !isActive || returnedChangedAt) && (
+      {(pills.length > 0 || !isActive || backChanged || replaced) && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {/* The pills here that are states rather than measurements, so the
               ones that get a tone. Nothing marks an active app: active is
               what every app in a working instance is, and a green pill on
               every tile would be a row of decoration. */}
           {!isActive && <StatusPill tone="warning">Inactive</StatusPill>}
-          {returnedChangedAt && (
+          {replaced && (
+            <StatusPill tone="warning">Replaces a different extension</StatusPill>
+          )}
+          {backChanged && (
             <StatusPill tone="warning">Back with different code</StatusPill>
           )}
           {pills.map((text) => (
@@ -197,7 +236,21 @@ export default function AppTile({
       {/* Why the pill above is there, and what clears it. The same strip as
           the connector warning: one fact about this app that needs an admin
           before it is used. */}
-      {returnedChangedAt && (
+      {replacement && (
+        <div className="mt-3 rounded-lg border-l-4 border-brand-accent bg-brand-accent/10 py-2 pl-3 pr-3">
+          <p className="flex items-start gap-2 text-xs text-foreground">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+            <span>
+              A different extension had this slug before, so this app was
+              switched off and its API keys were revoked. Its grants, settings
+              and data were kept. Before: {describeIdentity(replacement.previous)}. Now:{" "}
+              {describeIdentity(replacement.identity)}. Check what it does,
+              then activate it by typing its slug.
+            </span>
+          </p>
+        </div>
+      )}
+      {backChanged && (
         <div className="mt-3 rounded-lg border-l-4 border-brand-accent bg-brand-accent/10 py-2 pl-3 pr-3">
           <p className="flex items-start gap-2 text-xs text-foreground">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
@@ -289,6 +342,43 @@ export default function AppTile({
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}
       />
+
+      {confirming && replacement && (
+        <TypedConfirmDialog
+          onClose={() => setConfirming(false)}
+          title={`Activate ${app.name}?`}
+          word={app.slug}
+          confirmLabel="Activate"
+          busyLabel="Activating…"
+          busy={pending}
+          error={confirmError}
+          onConfirm={activateReplaced}
+        >
+          <p className="text-muted-foreground">
+            A different extension had the slug{" "}
+            <code className="font-mono text-foreground">{app.slug}</code>{" "}
+            before this one.
+          </p>
+          <dl className="space-y-1">
+            <div className="flex flex-wrap gap-x-2">
+              <dt className="text-muted-foreground">Before</dt>
+              <dd className="text-foreground">
+                {describeIdentity(replacement.previous)}
+              </dd>
+            </div>
+            <div className="flex flex-wrap gap-x-2">
+              <dt className="text-muted-foreground">Now</dt>
+              <dd className="text-foreground">
+                {describeIdentity(replacement.identity)}
+              </dd>
+            </div>
+          </dl>
+          <p className="text-muted-foreground">
+            Activating it gives it the grants, settings and data kept under
+            this slug. The API keys made for the one before were revoked.
+          </p>
+        </TypedConfirmDialog>
+      )}
     </div>
   );
 }

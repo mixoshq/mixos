@@ -250,8 +250,11 @@ export async function installExtensionAction(input: {
         // install's sidecar; the row says how much there was.
         verdict: "accepted",
         deferred: result.deferred.length,
+        // What was written; what install left out is counted by name,
+        // `{ ".gitignore": 1 }`, and covered by contentHash, not filesHash.
         fileCount: result.fileCount,
         byteCount: result.byteCount,
+        leftOut: result.leftOut,
         // A theme registers as it installs; nothing else has run the
         // generator yet.
         registryValidated: result.registry?.ok ?? null,

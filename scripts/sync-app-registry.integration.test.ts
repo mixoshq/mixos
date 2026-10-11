@@ -227,6 +227,7 @@ describe("an app leaving the build and coming back", { skip }, () => {
           previousCodeHash: firstHash,
           codeHash: firstHash,
           missingSince: left.toISOString(),
+          identityChanged: false,
           deactivated: false,
         },
       },
@@ -260,6 +261,7 @@ describe("an app leaving the build and coming back", { skip }, () => {
         previousCodeHash: firstHash,
         codeHash: newHash,
         missingSince: left.toISOString(),
+        identityChanged: false,
         deactivated: true,
       },
     });

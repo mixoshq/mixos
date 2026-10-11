@@ -7,16 +7,20 @@
 //
 //   1. The platform schema, supabase/migrations/   (scripts/platform-migrations.ts)
 //   2. The app registry mirror and app migrations  (scripts/app-migrations.ts)
-//   3. The first admin, only if it does not exist  (scripts/admin-seed.ts)
+//   3. Where each connector and theme came from    (scripts/sync-identities.ts)
+//   4. The first admin, only if it does not exist  (scripts/admin-seed.ts)
 //
-// Step 3 runs only when INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD are both
+// Step 4 runs only when INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD are both
 // set, and never touches an account that already exists. Step 2 marks apps that
 // are no longer in this build's registry as missing and keeps everything they
 // had, brings back any that returned (switched off, if their files changed while
-// they were gone; scripts/sync-app-registry.ts) — the same thing `npm run
-// migrate:apps` does on every local boot — and runs each app's migrations as
-// that app's own role, in its own schema, once every pending statement has
-// passed scripts/app-sql-policy.ts.
+// they were gone; scripts/sync-app-registry.ts), switches off any that is a
+// different extension than the one recorded under its slug — the same thing
+// `npm run migrate:apps` does on every local boot — and runs each app's
+// migrations as that app's own role, in its own schema, once every pending
+// statement has passed scripts/app-sql-policy.ts. Step 3 does the identity
+// check for connectors, turning off one that is a different connector than
+// the one recorded under its name, and records themes.
 //
 // Each step takes the same lock and re-reads what it is about to change once it
 // holds it (scripts/migration-lock.ts), so two release steps at once — two
@@ -57,6 +61,7 @@ import { flagProblems } from "../src/lib/repository/policy";
 import { seedAdmin } from "./admin-seed";
 import { migrateAppSchemas } from "./app-migrations";
 import { migratePlatform } from "./platform-migrations";
+import { syncAndReportIdentities } from "./sync-identities";
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -112,6 +117,9 @@ async function main() {
 
     console.log("");
     await migrateAppSchemas(sql);
+
+    console.log("");
+    await syncAndReportIdentities(sql);
 
     const email = process.env.INITIAL_ADMIN_EMAIL;
     const password = process.env.INITIAL_ADMIN_PASSWORD;

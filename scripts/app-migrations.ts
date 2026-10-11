@@ -42,6 +42,8 @@ import type { Sql, TransactionSql } from "postgres";
 import { appRegistry } from "../src/generated/app-registry";
 import { appIdentifierProblems, appRoleName, appSchemaName } from "../src/lib/apps/app-identifiers";
 import type { AppManifest } from "../src/lib/apps/types";
+import { describeIdentity } from "../src/lib/repository/identity";
+import type { RegistryInstall } from "../src/lib/repository/install-record";
 import { listAppMigrations, undeclaredMigrations } from "./app-migration-files";
 import { checkAppMigrationSql, formatSqlProblems, lineAtCharacter } from "./app-sql-policy";
 import { takeMigrationLock } from "./migration-lock";
@@ -58,6 +60,8 @@ export interface MigrateAppsOptions {
   apps?: readonly MigratedApp[];
   /** Where their folders are. Defaults to this checkout's apps/. */
   appsDir?: string;
+  /** What this build installed from a Registry. Defaults to the generated list. */
+  installs?: readonly RegistryInstall[];
 }
 
 /**
@@ -605,7 +609,7 @@ export async function migrateAppSchemas(
   const appsDir = options.appsDir ?? APPS_DIR;
 
   console.log("Syncing the app registry into public.apps...");
-  const sync = await syncAppRegistry(sql, apps, appsDir);
+  const sync = await syncAppRegistry(sql, apps, appsDir, options.installs);
   console.log(`  ${sync.upserted} app(s) in the registry`);
   // Reported as it happens, so whoever reads a deploy's log learns that an app
   // left the build from the log, not from the first person who can't open it.
@@ -614,11 +618,22 @@ export async function migrateAppSchemas(
       `  ${slug}: not in this build — marked missing; its activation, grants, settings and data are kept`,
     );
   }
-  for (const { slug, codeChanged } of sync.returned) {
+  // One line per app: an app that came back as a different extension is
+  // reported as that, below, and not as a return.
+  for (const { slug, codeChanged, identityChanged } of sync.returned) {
+    if (identityChanged) continue;
     console.log(
       codeChanged
         ? `  ${slug}: back in the build with different code — inactive until an admin activates it`
         : `  ${slug}: back in the build, unchanged`,
+    );
+  }
+  for (const r of sync.replaced) {
+    const back = sync.returned.some((a) => a.slug === r.slug) ? "back in the build, and " : "";
+    console.log(
+      `  ${r.slug}: ${back}a different extension than before (was ${describeIdentity(r.previous)}; ` +
+        `now ${describeIdentity(r.identity)}) — inactive, with ${r.apiKeysRevoked} API key(s) revoked, ` +
+        `until an admin activates it by typing its slug`,
     );
   }
   if (sync.stillMissing.length > 0) {

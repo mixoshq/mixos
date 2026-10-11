@@ -50,9 +50,9 @@ just pulled.
   install names. A refused extension never reaches `apps/`, `connectors/` or
   `themes/`. A generator an install starts gets only `PATH` and `TMPDIR` from
   the environment. Installs also refuse a package with paths that differ only
-  in case or Unicode form, a control or bidi character in a path, or a
-  `.gitattributes`, `.gitignore` or `.git` at any depth. The generator now
-  skips folders whose names start with a dot.
+  in case or Unicode form, a control or bidi character in a path, or a `.git`
+  at any depth, and leave out any `.gitignore` or `.gitattributes`. The
+  generator now skips folders whose names start with a dot.
 - **Every build knows its version.** The admin pages show it with the commit,
   e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
   into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
@@ -60,7 +60,8 @@ just pulled.
   `MIXOS_COMMIT=$(git rev-parse HEAD)`, and on Coolify set
   `MIXOS_COMMIT=$SOURCE_COMMIT`. See `docs/hosting/README.md`. **Breaking:** an
   extension's `requiresMixOS` is now checked in a checkout too, against
-  `package.json`; bump it locally to try an extension that needs a newer MixOS.
+  `package.json`; bump it locally to try an extension that needs a newer MixOS,
+  but don't commit the bump: `/mixos deploy` leaves it out.
 - **A built deployment browses mixos.org.** The Docker image on any host, and
   Vercel, ignore `MIXOS_REPOSITORY_URL` unless it names their own machine
   (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), and log it.
@@ -211,6 +212,37 @@ just pulled.
   redirects, and only within the catalogue's own origin. Any other redirect,
   such as one to another host or from https to http, is refused with an error
   naming the catalogue.
+- **`/mixos deploy` leaves a version bump out.** A change to `"version"` in
+  `package.json`, or to the version in `package-lock.json`, stays out of its
+  commits and is listed under "Left out". Only a release PR changes the
+  version: a committed local bump makes `scripts/release-prep.ts` refuse the
+  next release.
+- **Fix:** the headers of Admin > Apps, Connectors, Themes, Analytics and the
+  Browse pages no longer run off a phone or tablet screen. Below 1024px wide,
+  the buttons sit under the title and wrap.
+- **Fix:** an extension whose repository has a `.gitignore` can be installed.
+  Installs refused a package with a `.gitignore` or `.gitattributes` at any
+  depth; now they leave those files out, in any case, and install the rest.
+  The content hash is still checked over the package as published, and the
+  files hash in `.registry.json` covers what was written. The install result,
+  `npm run register` and the install's audit row say what was left out. A
+  `.git` or a `.registry.json` is still refused.
+- **A different extension under the same name starts off.** The release step
+  and `npm run migrate:apps` record where each app, connector and theme came
+  from: the catalogue and GitHub repository in its `.registry.json`, or local.
+  A new release from the same repository is an update and changes nothing.
+  Anything else, such as a local app reinstalled from the Registry or a
+  release from another repository, is caught at every release step. An app is
+  switched off, marked **Replaces a different extension** on Admin > Apps, and
+  loses its API keys; activating it needs its slug typed. A connector is
+  disabled, keeping its credentials, until an admin enables it by typing its
+  name. A theme's change is only recorded. The audit log records each as
+  `<kind>.identity.changed`, with both identities. Migration 0011; run
+  `npm run db:local` to apply it. **Breaking:** every app the database already
+  knows, and every connector with saved credentials, counts as local. Each one
+  installed from the Registry, before or after this change, is switched off
+  once at the first release step that carries it, and an app's API keys are
+  revoked.
 - **Withdrawn releases reach the instances running them.** Once a day the tick
   asks mixos.org about the extensions installed from it. Admin > Apps,
   Connectors and Themes then show a release its publisher withdrew, with the
