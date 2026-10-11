@@ -26,9 +26,15 @@
  */
 
 import { sql } from "@/lib/db/client";
+import { isUnverifiedActor } from "./audit-actors";
 
+/**
+ * Who did it. `id` is the signed-in admin's user id; null for an actor no
+ * sign-in checked, whose `email` is then a name from ./audit-actors.ts, such as
+ * the CLI's `cli:<os user>@<hostname>`.
+ */
 export interface AdminActor {
-  id: string;
+  id: string | null;
   email: string;
 }
 
@@ -88,6 +94,12 @@ export interface AdminAuditRow {
   id: string;
   actorId: string | null;
   actorEmail: string;
+  /**
+   * False for a row no signed-in admin wrote: the CLI's or the release step's
+   * (./audit-actors.ts). Show those as unverified: nothing checked who they
+   * name.
+   */
+  actorVerified: boolean;
   action: string;
   targetType: string | null;
   targetId: string | null;
@@ -112,6 +124,7 @@ function toAuditRow(r: RawAuditRow): AdminAuditRow {
     id: r.id,
     actorId: r.actor_id,
     actorEmail: r.actor_email,
+    actorVerified: !isUnverifiedActor(r.actor_email),
     action: r.action,
     targetType: r.target_type,
     targetId: r.target_id,
