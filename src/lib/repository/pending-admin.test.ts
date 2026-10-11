@@ -24,6 +24,7 @@ import type { DatabaseLocation } from "../db/locality";
 import { BUILT_DEPLOYMENT_NOTICE } from "../platform/build";
 import { tryAcquireCheckoutLock } from "../platform/checkout-lock";
 import { filesHash, hashFileTree } from "./content-hash";
+import { INSTALL_RECORD_FILE, serializeInstallRecord } from "./install-record";
 import { pendingLocation, writeSidecar, type PendingKind } from "./pending";
 import {
   LOCKED_MESSAGE,
@@ -128,28 +129,38 @@ const ACME = [
   file("migrations/0001_items.sql", "create table items (id integer primary key);\n"),
 ];
 
-/** A pending install, as install leaves one. Returns the files hash a review shows. */
-function pend(kind: PendingKind, slug: string, entries: TarEntry[] = ACME): string {
+/**
+ * A pending install, as install leaves one: the tree with its record, from
+ * `source`, and the sidecar beside it. Returns the files hash a review shows.
+ */
+function pend(kind: PendingKind, slug: string, entries: TarEntry[] = ACME, source = "https://mixos.org"): string {
   const where = pendingLocation(root, kind, slug);
+  fs.mkdirSync(where.folder, { recursive: true });
   for (const e of entries) {
     fs.mkdirSync(path.dirname(path.join(where.folder, e.path)), { recursive: true });
     fs.writeFileSync(path.join(where.folder, e.path), e.data, { mode: 0o644 });
   }
+  fs.writeFileSync(
+    path.join(where.folder, INSTALL_RECORD_FILE),
+    serializeInstallRecord({
+      source,
+      kind,
+      slug,
+      version: "1.2.0",
+      gitTag: "v1.2.0",
+      commitSha: "c".repeat(40),
+      contentHash: hashFileTree(entries),
+      filesHash: filesHash(entries),
+      repository: { owner: "acme", name: "mixos-apps", subpath: `apps/${slug}` },
+      requiresMixOS: null,
+    }),
+  );
   writeSidecar(where.sidecar, {
     kind,
     slug,
-    source: "https://mixos.org",
-    version: "1.2.0",
-    gitTag: "v1.2.0",
-    commitSha: "c".repeat(40),
-    contentHash: hashFileTree(entries),
-    filesHash: filesHash(entries),
-    requiresMixOS: null,
     yankedAccepted: false,
     installedAt: "2026-10-11T09:00:00.000Z",
     installedBy: "admin@example.com",
-    fileCount: entries.length,
-    byteCount: entries.reduce((s, e) => s + e.data.length, 0),
     check: { verdict: "accepted", deferred: ["apps/acme/api/items/route.ts: checked at registration."] },
   });
   return filesHash(entries);
@@ -294,6 +305,13 @@ describe("Register", () => {
     assert.equal(row.actor_email, ADMIN.email);
     assert.equal(row.details.via, "button");
     assert.equal(row.details.filesHash, reviewed);
+
+    // What to commit, and how, from the record now in apps/acme/.
+    const { handBack } = outcome.result;
+    assert.equal(handBack.folder, "apps/acme");
+    assert.ok(handBack.files.some((f) => f.path === INSTALL_RECORD_FILE));
+    assert.equal(handBack.commitMessage.split("\n")[0], "feat(acme): add app acme 1.2.0 from mixos.org");
+    assert.equal(handBack.sourceUrl, `https://github.com/acme/mixos-apps/tree/${"c".repeat(40)}/apps/acme`);
   });
 
   test("a connector registers too, with nothing to activate", async () => {
@@ -471,12 +489,13 @@ describe("Activate in this checkout", () => {
 describe("the review", () => {
   test("is the pending install's own, with what the catalogue says beside it", async () => {
     pend("app", "acme");
-    const facts: ListingFacts = { state: "ok", origin: "https://mixos.org", claims: [], sourceUrl: null, note: null };
+    const facts: ListingFacts = { state: "ok", origin: "https://mixos.org", claims: [], note: null };
     const ctx: ReviewContext = { ...registerContext(), listing: async () => facts };
     const outcome = await reviewForButton({ kind: "app", slug: "acme" }, ctx);
     assert.ok(outcome.ok, JSON.stringify(outcome));
     assert.equal(outcome.review.slug, "acme");
     assert.equal(outcome.review.release.filesHash, filesHash(ACME));
+    assert.equal(outcome.review.sourceUrl, `https://github.com/acme/mixos-apps/tree/${"c".repeat(40)}/apps/acme`);
     assert.equal(outcome.listing, facts);
     // Reading changes nothing, and takes no lock.
     assert.equal(lockStatements, 0);
@@ -494,7 +513,7 @@ describe("the review", () => {
 
 // ── what the catalogue says ─────────────────────────────────────────────────
 
-describe("the publisher's claims and the source link", () => {
+describe("the publisher's claims", () => {
   const sha = "c".repeat(40);
   let installCommit = sha;
   let answering = true;
@@ -520,21 +539,12 @@ describe("the publisher's claims and the source link", () => {
       );
       return;
     }
-    if (url.pathname === "/api/v1/apps/acme") {
-      res.writeHead(200, { "content-type": "application/json" }).end(
-        JSON.stringify({
-          slug: "acme",
-          kind: "app",
-          name: "Acme",
-          author: { handle: "acme" },
-          sourceRepo: { host: "github", owner: "acme", name: "mixos-apps", url: "https://github.com/acme/mixos-apps" },
-        }),
-      );
-      return;
-    }
+    asked.push(url.pathname);
     res.writeHead(404).end("{}");
   });
   let origin = "";
+  /** The paths the catalogue was asked, other than the install manifest. */
+  let asked: string[] = [];
   const before = process.env.MIXOS_REPOSITORY_URL;
 
   beforeEach(async () => {
@@ -543,6 +553,7 @@ describe("the publisher's claims and the source link", () => {
     process.env.MIXOS_REPOSITORY_URL = origin;
     installCommit = sha;
     answering = true;
+    asked = [];
   });
   afterEach(() => {
     if (before === undefined) delete process.env.MIXOS_REPOSITORY_URL;
@@ -556,23 +567,25 @@ describe("the publisher's claims and the source link", () => {
     return { ...review, release: { ...review.release, source } };
   }
 
-  test("come from the catalogue it was installed from, for the installed version", async () => {
+  test("come from the catalogue it was installed from, for the installed version, and nothing else is asked", async () => {
     const facts = await listingFacts(reviewFrom(origin));
     assert.deepEqual(facts, {
       state: "ok",
       origin,
       claims: [{ scope: "network:api.acme.example", reason: "Reads boards from Acme." }],
-      sourceUrl: `https://github.com/acme/mixos-apps/tree/${sha}/apps/acme`,
       note: null,
     });
+    // The source link is the record's: the listing isn't asked for it.
+    assert.deepEqual(asked, []);
   });
 
-  test("link to the commit that was installed, and say when the catalogue now names another", async () => {
+  test("say when the catalogue now names another commit, while the review links to the one installed", async () => {
     installCommit = "d".repeat(40);
-    const facts = await listingFacts(reviewFrom(origin));
+    const review = reviewFrom(origin);
+    const facts = await listingFacts(review);
     assert.equal(facts.state, "ok");
-    assert.equal(facts.state === "ok" && facts.sourceUrl, `https://github.com/acme/mixos-apps/tree/${sha}/apps/acme`);
     assert.match(facts.state === "ok" ? (facts.note ?? "") : "", /now lists commit dddddddddddd/);
+    assert.equal(review.sourceUrl, `https://github.com/acme/mixos-apps/tree/${sha}/apps/acme`);
   });
 
   test("aren't asked of a different catalogue than the one it came from", async () => {

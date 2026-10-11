@@ -71,26 +71,14 @@ test("a built deployment is refused before the register lock is asked for", asyn
 
 // ── writing under the locks ─────────────────────────────────────────────────
 
-const SIDECAR = async () => {
-  const { filesHash, hashFileTree } = await import("./content-hash");
-  return {
-    kind: "app" as const,
-    slug: "acme",
-    source: "https://mixos.org",
-    version: "1.0.0",
-    gitTag: null,
-    commitSha: "b".repeat(40),
-    contentHash: hashFileTree(ENTRIES),
-    filesHash: filesHash(ENTRIES),
-    requiresMixOS: null,
-    yankedAccepted: false,
-    installedAt: new Date().toISOString(),
-    installedBy: "admin@example.com",
-    fileCount: ENTRIES.length,
-    byteCount: 26,
-    check: { verdict: "accepted" as const, deferred: [] },
-  };
-};
+const SIDECAR = async () => ({
+  kind: "app" as const,
+  slug: "acme",
+  yankedAccepted: false,
+  installedAt: new Date().toISOString(),
+  installedBy: "admin@example.com",
+  check: { verdict: "accepted" as const, deferred: [] },
+});
 
 test("with the locks held, an app is staged under .mixos/staging/, then moves to .mixos/pending/ with its sidecar, with no file executable", async () => {
   const { stageTree, placePending } = await install();

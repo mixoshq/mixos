@@ -170,6 +170,23 @@ just pulled.
   instance that serves it. Browse no longer has Install & Activate, and a
   deployment that runs a build says to install and register in a checkout,
   commit, and deploy.
+- **Installs keep a record in the extension's folder.** An install from the
+  Registry writes `.registry.json` into the extension's folder: the catalogue
+  it came from, the release, its commit and the hashes that were verified. It
+  waits in pending with the extension and is committed with it, and a package
+  that ships its own is refused. The pending sidecar keeps only who installed
+  it, when, and the check's verdict. The registry generator writes
+  `src/generated/registry-installs.ts` from the records, and marks an extension
+  modified when its files no longer match. Browse says where an installed one
+  came from: "Installed from mixos.org · 1.2.0" (with "modified locally"), "A
+  local extension uses this name", or "Installed from <host>; not checked
+  here". After Register, the result and `npm run register` list the files
+  added, give a commit message built from the record and the commands to
+  commit and push it, link to the source at the verified commit, and say what
+  shipping means on each host. The pre-commit stamp leaves installed folders
+  alone. **Breaking:** an install made before this has no record, so Register
+  refuses it: discard it and install it again. An extension installed before
+  this counts as local; reinstall it to give it a record.
 - **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
   and `my-app` and `my_app` no longer share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's
