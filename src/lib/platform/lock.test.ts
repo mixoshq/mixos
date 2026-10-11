@@ -6,9 +6,12 @@
  * When the lease talks to the database, with the database replaced by a
  * stand-in that answers as a free lock would. What each statement does in
  * Postgres is lock.integration.test.ts's job.
+ *
+ * The lease's timer runs on node:test's mocked clock, which moves only when a
+ * test moves it, so what a test sees doesn't depend on how busy the machine is.
  */
 
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { LockLostError, withPlatformLock, type LockName } from "./lock";
 
@@ -30,7 +33,23 @@ let ours = true;
 };
 
 const renewals = () => sent.filter((verb) => verb === "update").length;
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** One turn of the event loop, with the mocked clock left where it is. */
+const turn = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * Move the mocked clock on `ms`, a millisecond at a time, with a turn of the
+ * event loop before each step and after the last, so a renewal the timer
+ * starts has its answer before the next one is due, as it would from a
+ * database that answers at once.
+ */
+async function elapse(ms: number): Promise<void> {
+  for (let i = 0; i < ms; i++) {
+    await turn();
+    mock.timers.tick(1);
+  }
+  await turn();
+}
 
 function reset(): void {
   sent.length = 0;
@@ -39,22 +58,28 @@ function reset(): void {
 
 // ── renewal ─────────────────────────────────────────────────────────────────
 
-test("a holder renews its lease while it works, and not once it has released", async () => {
+test("a holder renews its lease while it works, and not once it has released", async (t) => {
   reset();
-  await withPlatformLock(NAME, () => sleep(140), { renewEveryMs: 25 });
+  mock.timers.enable({ apis: ["setInterval"] });
+  t.after(() => mock.timers.reset());
 
-  assert.ok(renewals() >= 3, `expected at least 3 renewals, saw ${renewals()}`);
+  await withPlatformLock(NAME, () => elapse(140), { renewEveryMs: 25 });
+
+  // One for each 25 ms the work took: at 25, 50, 75, 100 and 125.
+  assert.equal(renewals(), 5);
   assert.equal(sent.at(-1), "delete");
 
   const after = sent.length;
-  await sleep(100);
+  await elapse(100);
   assert.equal(sent.length, after, "a renewal ran after the release");
 });
 
 // ── the fence ───────────────────────────────────────────────────────────────
 
-test("assertHeld() renews while the row is this holder's, and stops it for good once not", async () => {
+test("assertHeld() renews while the row is this holder's, and stops it for good once not", async (t) => {
   reset();
+  mock.timers.enable({ apis: ["setInterval"] });
+  t.after(() => mock.timers.reset());
   await withPlatformLock(
     NAME,
     async (lease) => {
@@ -71,7 +96,7 @@ test("assertHeld() renews while the row is this holder's, and stops it for good 
       ours = true;
       const asked = renewals();
       await assert.rejects(lease.assertHeld(), LockLostError);
-      await sleep(80);
+      await elapse(80);
       assert.equal(renewals(), asked);
     },
     { renewEveryMs: 20 },
