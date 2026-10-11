@@ -88,7 +88,9 @@ line 1 and the notice directly below it.
 - **Before pushing,** run `npm run lint` and `npm run typecheck`. CI runs both.
 - **Manifests** under `apps/`, `connectors/` and `themes/` are validated by the
   pre-commit hook (`.githooks/pre-commit`, enabled by `npm install`). If it
-  blocks your commit, the error names the field to fix.
+  blocks your commit, the error names the field to fix. The hook also stamps
+  `lastUpdated` on each app, connector or theme your commit changes. Merging
+  `main` into your branch doesn't re-stamp the ones only `main` changed.
 - **Larger changes:** open an issue first, or add a plan under
   [`docs/plans/`](docs/plans/README.md), so the approach can be agreed before
   the code is written.

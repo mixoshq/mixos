@@ -207,7 +207,7 @@ style requires its own parameters; every credential key referenced by `auth`
 or `webhook` must exist in `credentialFields`; and any strategy but `none` needs
 at least one credential field.
 
-> **Tool-written:** `lastUpdated` lives in `connector.json` as an ISO 8601 date-time (e.g. `"2026-08-24T03:21:40.694Z"`) and is stamped automatically: `.githooks/pre-commit` runs [`scripts/stamp-updated.ts`](../../scripts/stamp-updated.ts), which rewrites the date on every connector with a file in the commit and re-stages the manifest. It records when the connector last changed, so a dependency bump or a formatting pass inside it moves the date too. A commit that touches only `lastUpdated` never re-stamps. Don't edit it by hand; an invalid value fails the build. A connector with no date yet shows **"Not yet committed"**.
+> **Tool-written:** `lastUpdated` lives in `connector.json` as an ISO 8601 date-time (e.g. `"2026-08-24T03:21:40.694Z"`) and is stamped automatically: `.githooks/pre-commit` runs [`scripts/stamp-updated.ts`](../../scripts/stamp-updated.ts), which rewrites the date on every connector with a file in the commit and re-stages the manifest. It records when the connector last changed, so a dependency bump or a formatting pass inside it moves the date too. A commit that touches only `lastUpdated` never re-stamps, and nor does a merge, for a connector it brings in exactly as the other branch has it. Don't edit it by hand; an invalid value fails the build. A connector with no date yet shows **"Not yet committed"**.
 
 ## How Connectors Work
 
