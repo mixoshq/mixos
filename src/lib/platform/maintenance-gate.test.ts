@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import type { AppMigrationStatus } from "./app-migrations";
 import {
@@ -53,6 +53,22 @@ const BEHIND = maintenanceStateOf(schemaBehind, appsCurrent);
 
 function always(state: MaintenanceState) {
   return async () => state;
+}
+
+/** One turn of the event loop, with the mocked clock left where it is. */
+const turn = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * Move the mocked clock on `ms`, a millisecond at a time, with a turn of the
+ * event loop before each step and after the last, so whatever a timer sets off
+ * has run before the clock moves again.
+ */
+async function elapse(ms: number): Promise<void> {
+  for (let i = 0; i < ms; i++) {
+    await turn();
+    mock.timers.tick(1);
+  }
+  await turn();
 }
 
 /** A page, an app's API, and the three non-browser callers the instance has. */
@@ -217,7 +233,12 @@ test("requests that arrive together share one check", async () => {
   assert.ok(answers.every((a) => a.platformBehind));
 });
 
-test("a check that answers late is kept once it does", async () => {
+test("a check that answers late is kept once it does", async (t) => {
+  // On the mocked clock the read answers at 30 ms, after both requests' 5 ms
+  // waits, however busy the machine is. Date is mocked too, so the kept
+  // answer's age is measured on the same clock.
+  mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  t.after(() => mock.timers.reset());
   let reads = 0;
   const state = cachedMaintenanceState(
     () => {
@@ -226,14 +247,28 @@ test("a check that answers late is kept once it does", async () => {
     },
     { waitMs: 5 },
   );
+  // Each request's status once it is answered, null for served as usual. The
+  // test checks this list instead of awaiting a request: awaiting one that is
+  // still waiting when the clock stops would hang the test, not fail it.
+  const answered: (number | null)[] = [];
+  const request = () => {
+    void maintenanceGate("/", state).then((res) => answered.push(res?.status ?? null));
+  };
 
   // The first request doesn't wait for it...
-  assert.equal(await maintenanceGate("/", state), null);
+  request();
+  await elapse(5);
+  assert.deepEqual(answered, [null]);
   // ...a request while it is still running waits on the same read...
-  assert.equal(await maintenanceGate("/", state), null);
-  await new Promise((resolve) => setTimeout(resolve, 40));
-  // ...and once it has answered, that answer is the one kept.
-  assert.equal((await maintenanceGate("/", state))?.status, 503);
+  request();
+  await elapse(5);
+  assert.deepEqual(answered, [null, null]);
+  // ...and once it has answered, that answer is the one kept: the next request
+  // has it without the clock moving.
+  await elapse(30);
+  request();
+  await turn();
+  assert.deepEqual(answered, [null, null, 503]);
   assert.equal(reads, 1);
 });
 
