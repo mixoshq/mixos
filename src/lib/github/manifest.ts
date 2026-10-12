@@ -31,8 +31,8 @@ export type Permissions = Readonly<Record<string, PermissionLevel>>;
 
 /**
  * The two shapes an operation's token takes, each narrowed to the one linked
- * repository. Write is for a proposal's writes only, which nothing in this
- * release makes yet; read is for everything that looks.
+ * repository. Write is for a proposal's writes only (./propose.ts), and
+ * ./repository.ts limits what it may write; read is for everything that looks.
  */
 export const TOKEN_SHAPES = {
   write: { contents: "write", pull_requests: "write" },
