@@ -109,6 +109,70 @@ export const PLATFORM_KEYS = {
 export type PlatformKeyName = keyof typeof PLATFORM_KEYS;
 
 /**
+ * Keys a deployment may leave unset, each turning on one feature. Unset means
+ * the feature is off; set, they follow the same rules as PLATFORM_KEYS: 32
+ * random bytes, independent of every other key, and a malformed value is an
+ * error naming the variable, never a quiet "off".
+ *
+ * Not in PLATFORM_KEYS on purpose: `npm run keys:generate` prints those for
+ * every deployment, and a key here is opted into, so it is printed only when
+ * asked for (`npm run keys:generate -- --github-app`).
+ */
+export const OPTIONAL_PLATFORM_KEYS = {
+  githubAppEncryption: {
+    env: "GITHUB_APP_ENCRYPTION_KEY",
+    purpose:
+      "AES-256-GCM encryption of the GitHub App's private key in platform_settings. Unset, the GitHub App is off.",
+    rotationEffect:
+      "The stored App key can't be read until `npm run keys:rotate-github-app` re-encrypts it, given the old and the new key. Nothing else changes.",
+  },
+} as const satisfies Record<string, PlatformKeySpec>;
+
+export type OptionalPlatformKeyName = keyof typeof OPTIONAL_PLATFORM_KEYS;
+
+/** The 32 bytes `raw` spells, or null when it is neither spelling of 32 bytes. */
+export function parseKeyValue(raw: string): Buffer | null {
+  return decodeKey(raw);
+}
+
+/**
+ * Read one optional key: null when it is unset or empty, which turns its
+ * feature off. Throws, naming the variable, when it is set to anything that
+ * isn't 32 bytes: a mistyped key must not read as "off" any more than a
+ * required one may read as "on".
+ */
+export function optionalPlatformKey(name: OptionalPlatformKeyName): Buffer | null {
+  const spec = OPTIONAL_PLATFORM_KEYS[name];
+  const raw = process.env[spec.env];
+  if (!raw) return null;
+  const key = decodeKey(raw);
+  if (!key) {
+    throw new Error(
+      `${spec.env} must be ${KEY_BYTES} random bytes, as ${KEY_BYTES * 2} hex characters or ` +
+        `as base64; got ${raw.length} character(s). Unset it to turn the feature off, or ` +
+        `generate one with: npm run keys:generate -- --github-app`,
+    );
+  }
+  return key;
+}
+
+/** The optional keys that are set but malformed, in the shape `missingPlatformKeys()` uses. */
+export function malformedOptionalKeys(): { env: string; reason: string }[] {
+  const malformed: { env: string; reason: string }[] = [];
+  for (const name of Object.keys(OPTIONAL_PLATFORM_KEYS) as OptionalPlatformKeyName[]) {
+    try {
+      optionalPlatformKey(name);
+    } catch (err) {
+      malformed.push({
+        env: OPTIONAL_PLATFORM_KEYS[name].env,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return malformed;
+}
+
+/**
  * The two other secrets every deployment needs. Not platform keys, because
  * nothing here decodes them: Auth.js reads AUTH_SECRET itself, and /api/cron
  * compares CRON_SECRET as an opaque string, so any value works and only an

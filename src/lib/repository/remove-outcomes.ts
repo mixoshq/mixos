@@ -12,6 +12,7 @@
  * the database.
  */
 
+import type { DataDeleteOutcome, DataPreview } from "./delete-data-outcomes";
 import type { RemovalHandBack } from "./hand-back";
 import type { Refusal } from "./pending-outcomes";
 import type { RemovalNote } from "./remove";
@@ -41,6 +42,12 @@ export interface RemovalPreview {
   pending: string | null;
   /** The same, in a terminal in this checkout. */
   command: string;
+  /**
+   * What deleting its data from this checkout's database too would delete, and
+   * whether that would be refused. Null for a theme, for one that can't be
+   * removed, and when the database can't be read.
+   */
+  data: DataPreview | null;
 }
 
 export type PreviewOutcome = { ok: true; preview: RemovalPreview } | Refusal;
@@ -60,6 +67,8 @@ export interface Removed {
   servesNow: boolean;
   /** What to commit, and how. */
   handBack: RemovalHandBack;
+  /** Deleting its data too, when that was asked for: what went, or why it was kept. */
+  data: DataDeleteOutcome | null;
 }
 
 export type RemoveOutcome = { ok: true; result: Removed } | Refusal;

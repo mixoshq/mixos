@@ -60,6 +60,7 @@ on its own.
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind and install from it. See [Fixing what an instance runs](#fixing-what-an-instance-runs). |
 | `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance asks mixos.org once a day about the extensions it installed from there, so admins see a release its publisher withdrew, and about new releases of MixOS. `false` sends nothing. See [What MixOS sends to mixos.org](#what-mixos-sends-to-mixosorg). |
 | `MIXOS_RELEASE_CHANNEL` | No, default `stable` | Which releases of MixOS the admin pages tell you about: `stable`, or `prerelease` to include prereleases. See [New releases of MixOS](#new-releases-of-mixos). |
+| `GITHUB_APP_ENCRYPTION_KEY` | No | Turns on Admin > GitHub, which links the instance to its repository through a GitHub App you own. 32 random bytes; `npm run keys:generate -- --github-app` prints one. The App's private key is stored encrypted under it, so **back it up**. See [Linking your GitHub repository](#linking-your-github-repository). |
 | `MIXOS_COMMIT` | No | The commit the admin pages show beside the MixOS version. For the Docker image it's a build argument. See [Which build is running](#which-build-is-running). |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated domains allowed to sign in. Blank: any. |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | No | Web Push, for apps that send notifications. |
@@ -290,6 +291,66 @@ value is read as `stable`, and the release step reports it.
 **Turning it off.** `MIXOS_UPDATE_CHECK=false` turns this check off along with
 the update check. Nothing is sent, and the admin pages say the checks are off.
 
+### Linking your GitHub repository
+
+Admin > GitHub links an instance to the repository it is built from, through
+a private GitHub App you own. It is off until `GITHUB_APP_ENCRYPTION_KEY` is
+set. Generate a value, set it where the instance runs, and restart it:
+
+```
+npm run keys:generate -- --github-app
+```
+
+Keep a copy: the App's private key is stored encrypted under it. Link from the
+deployed instance, not from a development checkout.
+
+1. **Create the App.** Choose your account, or the organization that owns the
+   repository. The App asks for contents and pull requests to write, and
+   checks, commit statuses and metadata to read. It doesn't ask for workflows
+   or any webhook event.
+2. **Install it** on GitHub. Choose **Only select repositories**, then the one
+   repository this instance is built from.
+3. **Finish linking.** The instance checks that the installation covers one
+   chosen repository, and that it isn't upstream MixOS, then records it.
+
+Before every operation, the instance checks the installation again. If it
+covers every repository, or more than one, the link turns off. Narrow it on
+GitHub, then choose **Check again**.
+
+**Add a ruleset.** The App can write to any branch, and your host deploys the
+default branch, so require pull requests there. In the repository's
+**Settings > Rules > Rulesets**:
+
+- a branch ruleset on the default branch, with **Require a pull request before
+  merging** and **Restrict deletions**;
+- a tag ruleset on all tags, with **Restrict creations** and
+  **Restrict updates**.
+
+Don't put the App on either bypass list. Admin > GitHub shows whether a pull
+request rule applies. It reads rulesets only, so if you use classic branch
+protection, or your repository is private on GitHub Free, which has no
+rulesets, confirm that on the page instead. Linking doesn't need the rule;
+proposing changes through the App will.
+
+**Replace the private key** by generating a new one in the App's settings on
+GitHub and pasting it on the page. The instance checks it with GitHub before
+storing it. Then delete the old key on GitHub.
+
+**Unlink** uninstalls the App from GitHub, then deletes its key and the link
+here. If GitHub refuses, nothing is deleted. Then delete the App in its
+settings on GitHub.
+
+**Rotating `GITHUB_APP_ENCRYPTION_KEY`.** Re-encrypt the stored key with the
+old and the new key, then set the new key and restart:
+
+```
+GITHUB_APP_ENCRYPTION_KEY_OLD=<old key> GITHUB_APP_ENCRYPTION_KEY_NEW=<new key> \
+  DATABASE_URL=<database> npm run keys:rotate-github-app
+```
+
+With Docker Compose, put both in the shell's environment and run
+`docker compose -f deploy/docker-compose.yml run --rm -e GITHUB_APP_ENCRYPTION_KEY_OLD -e GITHUB_APP_ENCRYPTION_KEY_NEW migrate node ops/rekey-github-app.cjs`.
+
 ### The release step
 
 [`scripts/release.ts`](../../scripts/release.ts) runs four things, in order:
@@ -315,8 +376,13 @@ the update check. Nothing is sent, and the admin pages say the checks are off.
 3. **Where each connector and theme came from**, by
    [`scripts/sync-identities.ts`](../../scripts/sync-identities.ts), which
    `npm run migrate:apps` also runs. A connector that is a different one than
-   the one recorded under its name is disabled.
-4. **The first admin**, from `INITIAL_ADMIN_*`, only if that account does not
+   the one recorded under its name is disabled. A connector the build no
+   longer has, whose credentials the database keeps, is marked missing, and
+   keeps them.
+4. **What this build carries**: its apps and connectors, which Delete data on
+   every instance sharing the database counts; see
+   [Deleting an extension's data](#deleting-an-extensions-data).
+5. **The first admin**, from `INITIAL_ADMIN_*`, only if that account does not
    exist yet.
 
 It is safe to run on every deploy, and safe to run twice at once: each
@@ -382,6 +448,14 @@ recorded:
 The audit log records both, as `app.missing` and `app.returned`, with
 `release-step` as the actor.
 
+A connector the build no longer has keeps its credentials and its users'
+connections the same way. The release step marks it missing, as
+`connector.missing`, and clears the mark when it comes back, as
+`connector.returned`. Admin > Connectors lists it under **Not in this build**.
+
+What an app or a connector kept stays until an admin deletes it; see
+[Deleting an extension's data](#deleting-an-extensions-data).
+
 ### When a different extension takes a name
 
 The release step also records where each app, connector and theme came from:
@@ -423,13 +497,60 @@ Removing an extension is a change to your repository, as installing one is:
 
 Its data stays in each database: an app's tables, settings, API keys, grants
 and scheduled jobs, and a connector's credentials. The release step marks a
-removed app missing and keeps all of it; see
-[When an app leaves the build](#when-an-app-leaves-the-build). A theme holds no
+removed app or connector missing and keeps all of it; see
+[When an app leaves the build](#when-an-app-leaves-the-build). An admin deletes
+it on each instance once the removal is deployed there; see
+[Deleting an extension's data](#deleting-an-extensions-data). A theme holds no
 data. An instance that applies a removed theme shows the first theme by name
 until an admin applies another.
 
 A removal that stops midway leaves the folder in `.mixos/backup/`, and
 `npm run remove -- --recover` puts it back.
+
+### Deleting an extension's data
+
+Admin > Apps and Admin > Connectors list under **Not in this build** each app
+or connector whose data the database keeps and the build doesn't have. Keeping
+it costs nothing and needs nothing. To delete it, press **Delete data…** on its
+entry, read what goes, and type its name.
+
+- **An app** loses its schema, `app_<slug>`, with its tables, and its database
+  role, `mixos_app_<slug>`; its settings, API keys, scheduled jobs and their
+  runs, the record of which of its migrations ran, its telemetry and recorded
+  opens; its place in each MCP authorization; and its row, with its grants,
+  user installs, password and widgets.
+- **A connector** loses its saved credentials, every user's own connection,
+  its granted scopes, webhook replay markers and telemetry, and its switch and
+  marks.
+
+The audit log is never touched, and gains a row for the deletion,
+`app.data.delete` or `connector.data.delete`, with how much went. Nothing else
+is touched either: another extension whose name starts with the same letters
+keeps all of its data. Afterwards nothing under the name is left, so a later
+extension with the same name starts with nothing. Deleting can't be undone, so
+back up the database first if you might want the data back.
+
+It is refused:
+
+- while the build serving this instance has it;
+- until a release step has run on this database without it. Deploy the
+  removal, or run `npm run migrate:apps` in a checkout. A host's rollback
+  serves an older build without a release step, so a build that lacks an
+  extension doesn't show on its own that it has gone;
+- while any other build that used this database in the last 24 hours has it.
+
+Each build records which apps and connectors it carries at its release step,
+when its server starts, and on the cron tick, at most every ten minutes. A
+deployment is known by its commit and what it carries, and a checkout by the
+random id in `.mixos/checkout-id`. The instance asking doesn't count against
+itself.
+
+In a checkout, the Remove dialog also has **Remove code and delete this
+checkout's data**, which asks for the name typed and deletes the data right
+after the code, with the same checks. On a database only this machine reaches,
+the removal counts as the release step having run. On a shared one it doesn't:
+run `npm run migrate:apps` or deploy first, then use Delete data. If the data
+can't be deleted, the code still goes and the data stays.
 
 ### Which build is running
 
