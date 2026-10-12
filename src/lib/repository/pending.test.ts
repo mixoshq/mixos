@@ -195,6 +195,31 @@ describe("the sidecar", () => {
     }
   });
 
+  test("an update records what it replaces, and a record of it that isn't one reads as unreadable", () => {
+    const file = path.join(tmp, `sidecar-${n++}.json`);
+    const replaces = {
+      version: "1.2.0",
+      gitTag: "v1.2.0",
+      commitSha: "a".repeat(40),
+      filesHash: filesHash(TREE),
+      folderHash: null,
+      localChangesDiscarded: true,
+      direction: "older" as const,
+    };
+    writeSidecar(file, sidecar({ replaces }));
+    const read = readSidecar(file);
+    assert.deepEqual(read.state === "ok" && read.sidecar.replaces, replaces);
+    for (const bad of [
+      { ...replaces, version: "1.2 beta" },
+      { ...replaces, direction: "sideways" },
+      { ...replaces, folderHash: "not a hash" },
+      { ...replaces, extra: true },
+    ]) {
+      fs.writeFileSync(file, JSON.stringify({ ...sidecar(), replaces: bad }));
+      assert.equal(readSidecar(file).state, "unreadable", JSON.stringify(bad));
+    }
+  });
+
   test("a registration under way is recorded in it", () => {
     const file = path.join(tmp, `sidecar-${n++}.json`);
     const register = { token: "0123456789abcdef-token", pid: 123, hostname: "host", startedAt: new Date().toISOString() };

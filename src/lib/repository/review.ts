@@ -40,6 +40,7 @@ import {
   kindDir,
   listPendingInstalls,
   pendingLocation,
+  pendingUpdateProblem,
   readSidecar,
   recordProblem,
   type PendingKind,
@@ -146,8 +147,11 @@ function readText(file: string, limit: number): string | null {
   }
 }
 
-/** The manifest in a pending folder, parsed as JSON and nothing more, or null. */
-function readManifest(folder: string, kind: PendingKind): Record<string, unknown> | null {
+/**
+ * The manifest in an extension's folder, pending or in place, parsed as JSON
+ * and nothing more, or null.
+ */
+export function readManifest(folder: string, kind: PendingKind): Record<string, unknown> | null {
   const file = path.join(/* turbopackIgnore: true */ folder, kind === "app" ? "app.json" : "connector.json");
   const text = readText(file, MAX_MANIFEST_BYTES);
   if (text === null) return null;
@@ -242,13 +246,17 @@ const records = (value: unknown): Record<string, unknown>[] =>
 const field = (record: Record<string, unknown>, key: string): string | null =>
   typeof record[key] === "string" ? (record[key] as string) : null;
 
+/** Every value, made fit to show, once each. */
 function declaration(label: string, values: (string | null)[]): Declaration {
   const kept = values.filter((v): v is string => typeof v === "string" && v.trim() !== "").map((v) => shownText(v));
-  const unique = [...new Set(kept)];
+  return { label, values: [...new Set(kept)] };
+}
+
+/** At most MAX_VALUES of them, and how many more, for a review to list. */
+function capped({ label, values }: Declaration): Declaration {
   return {
     label,
-    values:
-      unique.length > MAX_VALUES ? [...unique.slice(0, MAX_VALUES), `and ${unique.length - MAX_VALUES} more`] : unique,
+    values: values.length > MAX_VALUES ? [...values.slice(0, MAX_VALUES), `and ${values.length - MAX_VALUES} more`] : values,
   };
 }
 
@@ -266,9 +274,18 @@ function hostOf(url: unknown): string | null {
  * claims: egress, env, database, connectors, services, hooks and MCP tools for
  * an app; the hosts it reaches, its credentials, per-user accounts and webhooks
  * for a connector. Read field by field from JSON install's check already
- * validated, and shown as text.
+ * validated, and shown as text, at most MAX_VALUES per declaration.
  */
 export function declaredBy(kind: PendingKind, manifest: Record<string, unknown>): Declaration[] {
+  return declaredValues(kind, manifest).map(capped);
+}
+
+/**
+ * The same, with every value, for comparing two manifests: an update's dialog
+ * says what a release adds and drops (./update.ts). Read loosely, as the
+ * review reads it, so it also reads a manifest no check has seen yet.
+ */
+export function declaredValues(kind: PendingKind, manifest: Record<string, unknown>): Declaration[] {
   if (kind === "connector") {
     const auth = (manifest.auth ?? {}) as Record<string, unknown>;
     const http = (manifest.http ?? {}) as Record<string, unknown>;
@@ -356,6 +373,8 @@ export function reviewPendingInstall(root: string, kind: PendingKind, slug: stri
   let problem: string | null = null;
   if (sidecar.register) {
     problem = "A registration of it stopped before it finished. Run `npm run register -- --recover` in this checkout.";
+  } else if (sidecar.replaces) {
+    problem = pendingUpdateProblem(kind, slug, sidecar.replaces, record.version);
   } else {
     try {
       if (!contentHashesMatch(folderFilesHash(where.folder), record.filesHash)) {

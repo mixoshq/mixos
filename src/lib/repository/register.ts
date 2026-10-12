@@ -46,6 +46,10 @@
  *    stays in the folder, to be committed with it.
  * 6. Audited: `<kind>.register`, or `<kind>.register.rejected` with the reason.
  *
+ * A pending update (./update.ts), which would replace a folder already in
+ * place, is refused at step 1, before anything moves, and says to discard it
+ * (pendingUpdateProblem() in ./pending.ts).
+ *
  * The result hands back what to commit and how (./hand-back.ts): the folder's
  * files, a commit message built from the record, and the commands.
  *
@@ -118,6 +122,7 @@ import {
   liveLocation,
   pathExists,
   pendingLocation,
+  pendingUpdateProblem,
   readSidecar,
   recordProblem,
   writeSidecar,
@@ -166,7 +171,8 @@ export type RegisterFailureCode =
   | "lock-lost"
   | "lock-unconfirmed"
   | "stopped"
-  | "changed-meanwhile";
+  | "changed-meanwhile"
+  | "update-pending";
 
 export class RegisterError extends Error {
   constructor(
@@ -578,6 +584,16 @@ function pendingInstallFor(
     );
   }
   const record = readInstallRecord(where.folder);
+  // An update replaces the folder in place, which Register doesn't do yet
+  // (pendingUpdateProblem() in ./pending.ts). Nothing has moved.
+  if (read.sidecar.replaces) {
+    const own = record.state === "ok" && recordProblem(where, kind, slug, record) === null;
+    const to = own && record.state === "ok" ? record.record.version : null;
+    throw new RegisterError(
+      pendingUpdateProblem(kind, slug, read.sidecar.replaces, to, `${where.rel}/`),
+      "update-pending",
+    );
+  }
   const problem = recordProblem(where, kind, slug, record);
   if (problem || record.state !== "ok") {
     throw new RegisterError(`${where.rel}/ can't be registered. ${problem} ${discard}`, "unregistrable");
@@ -667,6 +683,8 @@ export async function discardPending(
           }
         : { installRecord: "missing or unreadable" }),
       ...(s ? { installedBy: s.installedBy, installedAt: s.installedAt } : { record: "missing or unreadable" }),
+      // A pending update: the release it would have replaced, which stays.
+      ...(s?.replaces ? { replaces: { version: s.replaces.version, commitSha: s.replaces.commitSha } } : {}),
     },
   });
   return result;
