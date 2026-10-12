@@ -118,6 +118,26 @@ describe("describeUpdate", () => {
     assert.equal(describeUpdate(result({ withdrawn: true }), { name: "Files", host: "mixos.org" })?.type, "withdrawn");
   });
 
+  test("withdrawn, with a reason that ends its own sentence: one mark, not two", () => {
+    assert.equal(
+      describeFiles(result({ withdrawn: true, reason: "Corrupts the same board.", latest: "1.2.1" })),
+      "Files 1.2.0 was withdrawn by its publisher: “Corrupts the same board.” The current release is 1.2.1.",
+    );
+    assert.equal(
+      describeFiles(result({ withdrawn: true, reason: "Don't use it!", latest: null })),
+      "Files 1.2.0 was withdrawn by its publisher: “Don't use it!” There is no release to move to.",
+    );
+    assert.equal(
+      describeFiles(result({ withdrawn: true, reason: "Why was this published?", latest: "1.2.1" })),
+      "Files 1.2.0 was withdrawn by its publisher: “Why was this published?” The current release is 1.2.1.",
+    );
+    // Any other last character still gets the full stop after the quote.
+    assert.equal(
+      describeFiles(result({ withdrawn: true, reason: "See the notes for 1.2.1 (the fix)", latest: "1.2.1" })),
+      "Files 1.2.0 was withdrawn by its publisher: “See the notes for 1.2.1 (the fix)”. The current release is 1.2.1.",
+    );
+  });
+
   test("withdrawn, without a reason", () => {
     assert.equal(
       describeFiles(result({ withdrawn: true, latest: "1.2.1" })),
