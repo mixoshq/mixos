@@ -361,7 +361,11 @@ deletes its folder from the checkout and regenerates the registry, once it has
 said what goes and what stays. It is refused while an app depends on it, and
 for the last theme. Its data stays in each database. Commit the deletion and
 deploy: removing hands back the commands and a commit message, as Register
-does. `npm run remove -- --recover` puts back one that stopped midway.
+does. `npm run remove -- --recover` puts back one that stopped midway. Then, on
+each instance, **Delete data…** under Not in this build on Admin > Apps or
+Connectors deletes what it kept, once no build that uses that database still
+has it; see
+[Deleting an extension's data](docs/hosting/README.md#deleting-an-extensions-data).
 
 Don't edit an installed folder. The registry generator compares it with its
 record, and Browse then says "modified locally". On Windows,
