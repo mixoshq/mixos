@@ -41,6 +41,7 @@ import type {
   ThemeManifest,
 } from "../src/lib/themes/types";
 import { compileTheme, ThemeError } from "./theme-css";
+import { PublicCopies, type CopyPlace } from "./public-copies";
 import { applyWidgetConfigs } from "./widget-configs";
 import { FatalManifestError } from "./manifest-errors";
 import { readImageSize } from "./image-size";
@@ -178,26 +179,21 @@ const THEME_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "theme-registry.ts");
 const THEMES_CSS_FILE = path.resolve(OUTPUT_DIR, "themes.css");
 const THEME_TOKENS_FILE = path.resolve(OUTPUT_DIR, "theme-tokens.json");
 const REGISTRY_INSTALLS_FILE = path.resolve(OUTPUT_DIR, "registry-installs.ts");
-const PUBLIC_THEMES_DIR = path.resolve(__dirname, "../public/themes");
-// NOT public/connectors: `/connectors/*` is already a signed-in page route
-// (/connectors/guide), so assets served from there redirect to /login for
-// anyone without a session — including next/image's optimizer, which fetches
-// the source URL server-side with no cookies and would fail on every icon.
-const PUBLIC_CONNECTORS_DIR = path.resolve(
-  __dirname,
-  "../public/connector-assets",
-);
-// Listing galleries for apps and themes, copied out of <ext>/screenshots/.
-// One prefix for both kinds, segmented by kind underneath, because the rules
-// are identical and a second prefix would be a second proxy exemption to keep
-// in step. Exempted from the auth matcher in src/proxy.ts for the same reason
-// theme assets and connector icons are: a listing is read by someone deciding
-// whether to install, which is necessarily before they have a session.
-const PUBLIC_SCREENSHOTS_DIR = path.resolve(__dirname, "../public/screenshots");
-// Marks an app ships for the brand hooks, copied out of apps/<slug>/branding/.
-// Proxy-exempt for the reason theme assets are: the sign-in page renders them
-// before anyone has a session. Only declared files are copied.
-const PUBLIC_BRANDING_DIR = path.resolve(__dirname, "../public/branding");
+// What each extension publishes for pages read without a session is copied
+// into public/, each into a folder of its own, at one of five places:
+// themes/<slug>/ (a theme's assets/), connector-assets/<name>/ (NOT
+// connectors/: `/connectors/*` is already a signed-in page route,
+// /connectors/guide, so assets served from there redirect to /login for anyone
+// without a session — including next/image's optimizer, which fetches the
+// source URL server-side with no cookies and would fail on every icon),
+// screenshots/<apps|themes>/<slug>/ (listing galleries: one prefix for both
+// kinds, because the rules are identical and a second prefix would be a second
+// proxy exemption to keep in step) and branding/apps/<slug>/ (an app's marks
+// for the brand hooks, which the sign-in page renders). Each is exempt from the
+// auth matcher in src/proxy.ts. Every copy is recorded, and a full run deletes
+// the ones it no longer makes: scripts/public-copies.ts.
+const PUBLIC_DIR = path.resolve(__dirname, "../public");
+const PUBLIC_COPIES_FILE = path.resolve(OUTPUT_DIR, "public-copies.json");
 
 /**
  * Whether a folder in apps/, connectors/ or themes/ is an extension to scan.
@@ -651,7 +647,7 @@ function copyBrandLogos(
   appDir: string,
 ): void {
   if (!branding || branding.logos.length === 0) return;
-  const dest = path.join(PUBLIC_BRANDING_DIR, "apps", slug);
+  const dest = publicFolder("branding/apps", slug);
   fs.mkdirSync(dest, { recursive: true });
   for (const logo of branding.logos) {
     fs.copyFileSync(
@@ -1088,7 +1084,7 @@ function copyScreenshots(
   dir: string,
 ): void {
   if (screenshots.length === 0) return;
-  const dest = path.join(PUBLIC_SCREENSHOTS_DIR, kind, slug);
+  const dest = publicFolder(kind === "apps" ? "screenshots/apps" : "screenshots/themes", slug);
   fs.mkdirSync(dest, { recursive: true });
   for (const shot of screenshots) {
     fs.copyFileSync(
@@ -1098,9 +1094,26 @@ function copyScreenshots(
   }
 }
 
+// ── public/ ──────────────────────────────────────────────────────────────────
+
+/** This run's copies into public/: made by main(), and by the first copy outside it. */
+let publicCopies: PublicCopies | null = null;
+
+/** The folder in public/ to copy an extension's files into, recorded first (scripts/public-copies.ts). */
+function publicFolder(place: CopyPlace, name: string): string {
+  publicCopies ??= new PublicCopies(PUBLIC_DIR, PUBLIC_COPIES_FILE);
+  return publicCopies.folder(place, name);
+}
+
+/** Copy an extension's assets/ folder, when it has one, to its folder at `place`. */
+function copyAssets(from: string, place: "themes" | "connector-assets", name: string): void {
+  if (!fs.existsSync(from)) return;
+  copyDir(from, publicFolder(place, name));
+}
+
 // ── themes ───────────────────────────────────────────────────────────────────
 
-/** Recursively copy a theme's assets into public/themes/<slug>/. */
+/** Recursively copy a folder, a theme's or a connector's assets/, into public/. */
 function copyDir(from: string, to: string): void {
   if (!fs.existsSync(from)) return;
   fs.mkdirSync(to, { recursive: true });
@@ -1274,7 +1287,7 @@ async function scanThemes(
     const { theme, compiled } = read;
 
     if (emit) {
-      copyDir(path.join(dir, "assets"), path.join(PUBLIC_THEMES_DIR, slug));
+      copyAssets(path.join(dir, "assets"), "themes", slug);
       copyScreenshots(theme.screenshots, "themes", slug, dir);
     }
 
@@ -1936,12 +1949,7 @@ async function scanConnectors(
 
     try {
       const manifest = readConnector(connectorDir, entry.name);
-      if (emit) {
-        copyDir(
-          path.join(connectorDir, "assets"),
-          path.join(PUBLIC_CONNECTORS_DIR, entry.name),
-        );
-      }
+      if (emit) copyAssets(path.join(connectorDir, "assets"), "connector-assets", entry.name);
 
       connectors.push(manifest);
       console.log(`  Connector: ${manifest.displayName} (${manifest.name})`);
@@ -2295,6 +2303,9 @@ async function main() {
   if (!fs.existsSync(OUTPUT_DIR)) {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
   }
+  // What earlier runs copied into public/, which this one prunes at its end.
+  const copies = new PublicCopies(PUBLIC_DIR, PUBLIC_COPIES_FILE);
+  publicCopies = copies;
 
   // The stamp lists only the migrations of apps the scan accepts, so it is
   // written after the scan. A fresh checkout still gets one first, in case a
@@ -2562,6 +2573,13 @@ export function getTheme(slug: string): ThemeManifest {
   const floors = checkInstalledFloors(installs, version);
   for (const warning of floors.warnings) console.warn(`  ${warning}`);
   if (floors.error) throw new Error(floors.error);
+
+  // Last, once everything else is written: a run that stops before here
+  // deletes nothing from public/.
+  const pruned = copies.prune();
+  if (pruned.length > 0) {
+    console.log(`Deleted ${pruned.length} copy(ies) in public/ this build no longer makes: ${pruned.join(", ")}`);
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2917,8 +2935,8 @@ async function runCheck(args: readonly string[]): Promise<number> {
   generate-project-registry.ts [--lock-token <token>]
 
   A full run rewrites src/generated/ and public/ from apps/, connectors/ and
-  themes/, which an install, a registration or a discard in this checkout also
-  changes. So it holds the checkout lock, `.mixos/lock`
+  themes/, which an install, a registration, a discard or a removal in this
+  checkout also changes. So it holds the checkout lock, `.mixos/lock`
   (src/lib/platform/checkout-lock.ts), for as long as it runs. While another
   process holds it, a run waits, saying who for, and gives up after
   LOCK_WAIT_MS. A lock whose holder has stopped on this machine is taken over;

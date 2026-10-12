@@ -21,12 +21,14 @@ import { getUserTokens } from "@/lib/connectors/user-config";
 import { getConnectorLog, grantedScopes } from "@/lib/connectors/access";
 import { getScopeStatus } from "@/lib/connectors/scope-status";
 import { getConnectorDependents } from "@/lib/connectors/dependents";
+import { getConnectorsNotInBuild } from "@/lib/connectors/not-in-build";
 import { getDisabledConnectors, getReplacedConnectors } from "@/lib/connectors/switch";
 import { setConnectorEnabled } from "@/lib/connectors/switch-admin";
 import { TOKEN_KEYS, redirectUriFor } from "@/lib/connectors/oauth";
 import { runConnectorTest } from "@/lib/connectors/test-connection";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import ConnectorRegistryList from "@/components/admin/connector-registry-list";
+import ConnectorsNotInBuild from "@/components/admin/connectors-not-in-build";
 import PendingInstalls from "@/components/admin/pending/pending-installs";
 import RegistryNotices from "@/components/admin/registry-notices";
 import { recordAdminAction, redactedKeys } from "@/lib/apps/admin-audit";
@@ -104,6 +106,11 @@ export default async function ConnectorsAdminPage({
   // Which of them the release step turned off because a different connector
   // took the name. Enabling one needs its name typed.
   const replaced = await getReplacedConnectors(
+    connectorRegistry.map((c) => c.name),
+  );
+  // Connectors this database keeps credentials or connections for that this
+  // build doesn't carry, each with Delete data.
+  const notInBuild = await getConnectorsNotInBuild(
     connectorRegistry.map((c) => c.name),
   );
 
@@ -357,6 +364,7 @@ export default async function ConnectorsAdminPage({
         testAction={testConnector}
         switchAction={switchConnector}
       />
+      <ConnectorsNotInBuild connectors={notInBuild} />
     </div>
   );
 }

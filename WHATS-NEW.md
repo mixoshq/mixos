@@ -262,6 +262,55 @@ just pulled.
   instance ID and each extension's kind, slug and version, nothing else, and
   acts on nothing. `MIXOS_UPDATE_CHECK=false` turns it off. See
   `docs/hosting/README.md#what-mixos-sends-to-mixosorg`.
+- **Smoke-test an app as you register it, and in every pull request that
+  changes one.** `npm run register -- app/<slug> --smoke` registers the app,
+  then runs its migrations, activates it, grants it to the user you sign in as
+  (`SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`) and runs
+  `scripts/smoke-test-app.ts` against your dev server. It reports and never
+  rolls back. It refuses a database that isn't on your machine unless you pass
+  `--database-is-disposable`, and an app that replaces a different extension
+  unless you pass `--confirm-replaces <slug>`. A new workflow,
+  `.github/workflows/extensions.yml`, fails a pull request that changes
+  `apps/`, `connectors/` or `themes/` when an installed folder no longer matches
+  its `.registry.json`, or when a changed app fails the smoke test on a fresh
+  instance. It has read-only access and no secrets. See
+  `docs/hosting/README.md`.
+- **The admin pages say when a newer MixOS is out.** Once a day the tick reads
+  mixos.org's list of MixOS releases, an anonymous `GET` that sends nothing
+  about the instance and that mixos.org doesn't record. When a newer release
+  is out, the top of every admin page says so: "MixOS 0.5.0 is available (this
+  instance runs 0.4.2). A minor release: it may need changes." Its notes are
+  collapsed, with links shown as text, and the notice links to the release's
+  page on mixos.org and to the upgrade guide. Nothing is applied for you.
+  `MIXOS_RELEASE_CHANNEL=prerelease` adds prereleases, and
+  `MIXOS_UPDATE_CHECK=false` turns this check off too. See
+  `docs/hosting/README.md#new-releases-of-mixos`.
+- **Remove an extension's code.** Admin > Apps, Connectors and Themes have
+  **Remove** on each tile, and `npm run remove -- <kind>/<slug>` does the same
+  in a checkout. It says first what goes and what stays, then moves the folder
+  to `.mixos/backup/`, regenerates the registry without it, and deletes it, or
+  puts it back if the generator fails. It is refused while an app requires the
+  connector or uses the app's services or hooks, and for the last theme, and it
+  warns about an app that uses the connector optionally and about the applied
+  theme. The data stays in each database. It hands back the commit that
+  deletes the folder, `.registry.json` included. The audit log records
+  `<kind>.remove`, and `npm run remove -- --recover` puts back one that stopped
+  midway. The registry generator now also deletes its copies in `public/` of
+  an extension that is gone.
+- **Delete an extension's data.** Admin > Apps and Admin > Connectors list
+  under **Not in this build** what the database keeps for an app or a
+  connector the build no longer has, each with **Delete data…**: destructive,
+  with its name typed. Keeping is the default. For an app it drops the schema
+  and database role and deletes its rows, grants and settings; for a connector,
+  its credentials and every user's connection. It is refused while the build
+  serving the instance has it, until a release step has run without it, and
+  while another build that used the database in the last 24 hours has it. The
+  release step now marks a connector its build lacks, as it does an app, and
+  each build records which apps and connectors it carries at its release step,
+  when its server starts and on the cron tick. The Remove dialog adds **Remove
+  code and delete this checkout's data**, under the same checks. The audit log
+  records `<kind>.data.delete`, `connector.missing` and `connector.returned`.
+  Migration 0012; run `npm run db:local` to apply it.
 - **Link your repository on Admin > GitHub.** An admin creates a private GitHub
   App from the page, installs it on the one repository the instance is built
   from, and finishes linking. The instance refuses an installation on every
