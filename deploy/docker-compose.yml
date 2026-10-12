@@ -69,6 +69,8 @@ x-app-env: &app-env
   INSTALL_THEMES: ${INSTALL_THEMES:-true}
   # The daily update check with mixos.org (docs/hosting/README.md). false sends nothing.
   MIXOS_UPDATE_CHECK: ${MIXOS_UPDATE_CHECK:-true}
+  # Optional. Set, it turns on Admin > GitHub (docs/hosting/README.md). Blank: off.
+  GITHUB_APP_ENCRYPTION_KEY: ${GITHUB_APP_ENCRYPTION_KEY:-}
   VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
   VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
   VAPID_SUBJECT: ${VAPID_SUBJECT:-}
