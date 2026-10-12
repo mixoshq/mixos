@@ -147,6 +147,40 @@ only when its own database is on the same machine: loopback, a Unix socket or
 database other instances share doesn't offer it, because activating there would
 turn the app on for every instance on that database.
 
+`npm run register -- app/<slug> --smoke` follows the same rule. After Register
+it runs the app's migrations, activates it, grants it to the user you sign in
+as (`SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`) and runs the smoke
+test against your dev server. It reports and never rolls back. On a database
+that isn't on your machine it refuses, before registering anything, unless you
+pass `--database-is-disposable`.
+
+### The pull-request check
+
+[`.github/workflows/extensions.yml`](../../.github/workflows/extensions.yml)
+runs on pull requests that change `apps/`, `connectors/` or `themes/`. It fails
+the pull request when:
+
+- **An installed folder doesn't match its `.registry.json`.** It hashes each
+  folder as committed, so an edit after install fails it, and so does a file the
+  commit left out. Your `.gitignore` can leave one out (`*.pem`, `.npmrc`);
+  `npm run register` names any it would. Commit the file with `git add -f`,
+  install the release again, or delete the `.registry.json` to keep the folder
+  as your own local extension. To run this check yourself:
+  `npx tsx scripts/check-install-records.ts`.
+- **A changed app fails its smoke test.** The job starts a fresh MixOS: a
+  Postgres that lives as long as the job, keys made for the run, the release
+  step, `npm run build` and `npm run start`. It activates and grants each app
+  the pull request changes, then runs `scripts/smoke-test-app.ts` as the first
+  admin. A 5xx, a timeout or a refused request fails it. The job has no
+  connector credentials, so a route that answers 503 UNAVAILABLE is skipped,
+  not failed. A pull request that changes only a connector or a theme gets the
+  folder check and no smoke test.
+
+The job can read the repository and nothing else: no secrets, and a read-only
+token it doesn't keep. It runs only when those paths change, so GitHub would
+wait for it forever on other pull requests if you made it a required check.
+Read its result on the pull request instead.
+
 ### When an extension needs a newer MixOS
 
 A release of an extension can name the oldest MixOS it runs on, and its

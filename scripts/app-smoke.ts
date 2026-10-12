@@ -25,6 +25,12 @@
  * NO BYPASS. The caller is an ordinary signed-in user. An app that is inactive,
  * or that the user isn't granted, is reported as such. Nothing here activates
  * an app, grants it, or reaches around the gateway.
+ *
+ * WHERE NOTHING IS CONFIGURED. A route that needs a connector's credentials, or
+ * anything else an admin sets up, answers 503 with the code UNAVAILABLE until
+ * it has them. That fails the run, which is right in a checkout: configure it,
+ * then test the live path. CI has no credentials, so it runs with
+ * `skipUnavailable`, which lists those routes as skipped instead.
  */
 
 import type {
@@ -333,6 +339,12 @@ function describeError(text: string | undefined): string | undefined {
   return flat.length > 200 ? `${flat.slice(0, 199)}…` : flat;
 }
 
+/** The platform's error code in an error body (`toErrorResponse()`), if it has one. */
+function errorCode(text: string | undefined): string | undefined {
+  const code = (parseJson(text) as { code?: unknown } | null | undefined)?.code;
+  return typeof code === "string" ? code : undefined;
+}
+
 /** Empty, or JSON with nothing in it: `null`, `""`, `{}`, `[]`. */
 export function isEmptyBody(text: string): boolean {
   if (text.trim() === "") return true;
@@ -358,6 +370,16 @@ export interface SentRequest {
   contract: RouteMethodContract;
 }
 
+/** How the answers are read. */
+export interface ClassifyOptions {
+  /**
+   * A 503 whose body has the code UNAVAILABLE is skipped, not failed: the
+   * route needs something this server hasn't configured, such as a
+   * connector's credentials. For CI, which has none.
+   */
+  skipUnavailable?: boolean;
+}
+
 /**
  * One response on its own. Some answers mean something only next to the rest
  * of the app's — a 404 everywhere is an inactive app — and `settleApp`
@@ -366,6 +388,7 @@ export interface SentRequest {
 export function classify(
   req: SentRequest,
   obs: Observation,
+  options: ClassifyOptions = {},
 ): { result: Result; note?: string } {
   if (obs.error === "timeout") {
     return { result: "fail", note: `no answer in ${(obs.ms / 1000).toFixed(1)}s` };
@@ -378,6 +401,9 @@ export function classify(
   const detail = describeError(obs.body);
   const withDetail = (lead: string) => (detail ? `${lead} ${detail}` : lead);
 
+  if (status === 503 && options.skipUnavailable && errorCode(obs.body) === "UNAVAILABLE") {
+    return { result: "skipped", note: `not tested: ${withDetail("503")}` };
+  }
   if (status >= 500) return { result: "fail", note: withDetail(`${status}`) };
 
   if (status >= 300 && status < 400) {
@@ -554,6 +580,8 @@ export interface RunOptions {
   graceMs?: number;
   /** Called with each app as soon as it's settled, for progress output. */
   onApp?: (app: AppResult) => void;
+  /** See ClassifyOptions: for CI, which has no credentials. */
+  skipUnavailable?: boolean;
 }
 
 /** Smoke-test each app in turn, one request at a time. */
@@ -578,7 +606,14 @@ export async function runSmoke(opts: RunOptions): Promise<AppResult[]> {
         p.contract.budget.ms + grace,
       );
       const req = { method: p.method, route: p.route, contract: p.contract };
-      const { result, note } = classify(req, obs);
+      let { result, note } = classify(req, obs, { skipUnavailable: opts.skipUnavailable });
+      // HEAD has no body to read a code from. It runs the GET handler, which
+      // was sent just before it, so a 503 here follows a GET that was skipped.
+      const get = p.method === "HEAD" ? sent.find((s) => s.method === "GET" && s.url === p.url) : undefined;
+      if (opts.skipUnavailable && obs.status === 503 && get?.result === "skipped" && get.obs.status === 503) {
+        result = "skipped";
+        note = "not tested: 503, as GET";
+      }
       sent.push({
         ...req,
         path: p.path,
@@ -802,4 +837,64 @@ export async function sessionUser(opts: {
   const body = (await res.json().catch(() => null)) as { user?: { email?: unknown } } | null;
   const email = body?.user?.email;
   return typeof email === "string" && email ? email : null;
+}
+
+/**
+ * A base URL as the smoke test uses it: an http or https origin and path,
+ * without a trailing slash. Throws SmokeSetupError for anything else.
+ */
+export function normalizeBaseUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new SmokeSetupError(`--base-url ${raw} is not a URL`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new SmokeSetupError(`--base-url must be http or https, not ${url.protocol}`);
+  }
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+/**
+ * The session to test with, from the environment, and whose it is: SMOKE_COOKIE,
+ * which wins when both are set, or SMOKE_EMAIL and SMOKE_PASSWORD, signed in
+ * through Auth.js. `onCookie` is given the Cookie header before anything is
+ * asked with it, so the caller can keep its values out of what it prints.
+ *
+ * Throws SmokeSetupError, never quoting the password or the cookie.
+ */
+export async function signInFromEnv(opts: {
+  baseUrl: string;
+  env?: Readonly<Record<string, string | undefined>>;
+  fetch?: Fetch;
+  onCookie?: (cookie: string) => void;
+}): Promise<{ cookie: string; user: string }> {
+  const { SMOKE_COOKIE, SMOKE_EMAIL, SMOKE_PASSWORD } = opts.env ?? process.env;
+  const { baseUrl } = opts;
+  let cookie: string;
+  if (SMOKE_COOKIE) {
+    // A line break would make fetch throw an error that quotes the value.
+    if (/[\r\n\0]/.test(SMOKE_COOKIE)) {
+      throw new SmokeSetupError("SMOKE_COOKIE holds a line break or a NUL. Copy the value again.");
+    }
+    cookie = cookieHeaderFrom(SMOKE_COOKIE, baseUrl);
+  } else if (SMOKE_EMAIL && SMOKE_PASSWORD) {
+    cookie = await signIn({ baseUrl, email: SMOKE_EMAIL, password: SMOKE_PASSWORD, fetch: opts.fetch });
+  } else {
+    throw new SmokeSetupError(
+      "no sign-in. Set SMOKE_EMAIL and SMOKE_PASSWORD, or SMOKE_COOKIE, for a user the apps are granted to.",
+    );
+  }
+  opts.onCookie?.(cookie);
+
+  const user = await sessionUser({ baseUrl, cookie, fetch: opts.fetch });
+  if (!user) {
+    throw new SmokeSetupError(
+      SMOKE_COOKIE
+        ? "SMOKE_COOKIE wasn't accepted: it may have expired, or come from another server."
+        : "the server didn't accept the session it just issued.",
+    );
+  }
+  return { cookie, user };
 }
