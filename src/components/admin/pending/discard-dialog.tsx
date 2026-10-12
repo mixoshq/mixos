@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { discardPendingAction } from "@/lib/repository/pending-actions";
 import type { DiscardOutcome } from "@/lib/repository/pending-outcomes";
 import { KIND_LABEL } from "@/lib/repository/types";
-import Notice from "./notice";
+import Notice from "@/components/ui/notice";
 import type { PendingTarget } from "./review-dialog";
 import WithCode from "./with-code";
 

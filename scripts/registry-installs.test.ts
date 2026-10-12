@@ -5,8 +5,10 @@
 /**
  * The registry generator and install records: scanRegistryInstalls() lists
  * the accepted extensions installed from a Registry, says which no longer
- * match their record, and warns about records it can't use; and a record in
- * a folder changes nothing else the generator, or an install's check, does.
+ * match their record, and warns about records it can't use;
+ * checkInstalledFloors() fails the build on one that needs a newer MixOS; and
+ * a record in a folder changes nothing else the generator, or an install's
+ * check, does.
  */
 
 import { after, describe, test } from "node:test";
@@ -22,6 +24,7 @@ import {
 } from "../src/lib/repository/install-record";
 import type { TarEntry } from "../src/lib/repository/tar";
 import {
+  checkInstalledFloors,
   checkStaged,
   readRegistered,
   scanApps,
@@ -148,6 +151,76 @@ describe("scanRegistryInstalls", () => {
       "connector/crm:false",
       "theme/dusk:false",
     ]);
+  });
+});
+
+describe("checkInstalledFloors: requiresMixOS at build", () => {
+  /** What scanRegistryInstalls() lists for a vendored folder whose record has `floor`. */
+  const listed = (slug: string, floor: string | null, kind: InstallRecord["kind"] = "app") =>
+    scanRegistryInstalls([
+      { kind, slug, dir: folder(slug, FILES, serializeInstallRecord(record({ kind, slug, requiresMixOS: floor }))) },
+    ]).installs;
+
+  test("a floor above the build's version fails it, naming the extension, its floor and the version", () => {
+    const { error, warnings } = checkInstalledFloors(listed("files", "0.2.0"), "0.1.0");
+    assert.equal(
+      error,
+      "This build is MixOS 0.1.0, and an extension installed from a Registry needs a newer one:\n" +
+        "  apps/files/.registry.json: release 1.2.0 requires MixOS 0.2.0 or newer.\n" +
+        "Upgrade MixOS, or install an older release of it that runs on 0.1.0. " +
+        "The build stops rather than leave it out of this deploy.",
+    );
+    assert.deepEqual(warnings, []);
+  });
+
+  test("every extension that needs a newer MixOS is named, of every kind", () => {
+    const { error } = checkInstalledFloors(
+      [...listed("files", "0.2.0"), ...listed("met", "0.1.0"), ...listed("crm", "v1.0", "connector")],
+      "0.1.0",
+    );
+    assert.match(error ?? "", /^This build is MixOS 0\.1\.0, and 2 extensions installed from a Registry need a newer one:\n/);
+    assert.match(error ?? "", /^ {2}apps\/files\/\.registry\.json: release 1\.2\.0 requires MixOS 0\.2\.0 or newer\.$/m);
+    assert.match(error ?? "", /^ {2}connectors\/crm\/\.registry\.json: release 1\.2\.0 requires MixOS v1\.0 or newer\.$/m);
+    assert.doesNotMatch(error ?? "", /apps\/met/);
+    assert.match(error ?? "", /install an older release of each that runs on 0\.1\.0\. The build stops rather than leave them out/);
+  });
+
+  test("a floor at or below the build's version, or none, passes", () => {
+    for (const floor of ["0.1.0", "0.0.9", ">=0.1", "v0.1.0", "0.1.0-beta.2", null]) {
+      assert.deepEqual(checkInstalledFloors(listed("files", floor), "0.1.0"), { error: null, warnings: [] }, String(floor));
+    }
+  });
+
+  test("a version bumped locally on unreleased work lets the coming release's floor through", () => {
+    const installs = listed("files", "0.2.0");
+    assert.notEqual(checkInstalledFloors(installs, "0.1.0").error, null);
+    assert.deepEqual(checkInstalledFloors(installs, "0.2.0"), { error: null, warnings: [] });
+    assert.deepEqual(checkInstalledFloors(installs, "0.2.0-rc.1"), { error: null, warnings: [] });
+  });
+
+  test("a floor that isn't a version passes with a warning, as install lets it through", () => {
+    const { error, warnings } = checkInstalledFloors(listed("files", "soon"), "0.1.0");
+    assert.equal(error, null);
+    assert.deepEqual(warnings, [
+      'apps/files/.registry.json: requiresMixOS "soon" isn\'t a version, so it isn\'t checked, here or at install.',
+    ]);
+  });
+
+  test("a local extension has no record, so nothing about it is checked", () => {
+    // The same folder without its record, beside one with a floor no build meets.
+    const local = folder("wall-e", FILES);
+    const vendored = folder("files", FILES, serializeInstallRecord(record({ requiresMixOS: "999.0.0" })));
+    const { installs } = scanRegistryInstalls([
+      { kind: "app", slug: "wall-e", dir: local },
+      { kind: "app", slug: "files", dir: vendored },
+    ]);
+    const { error } = checkInstalledFloors(installs, "0.1.0");
+    assert.match(error ?? "", /apps\/files\/\.registry\.json: release 1\.2\.0 requires MixOS 999\.0\.0 or newer/);
+    assert.doesNotMatch(error ?? "", /wall-e/);
+    assert.deepEqual(checkInstalledFloors(scanRegistryInstalls([{ kind: "app", slug: "wall-e", dir: local }]).installs, "0.1.0"), {
+      error: null,
+      warnings: [],
+    });
   });
 });
 

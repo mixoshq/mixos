@@ -37,6 +37,7 @@
  */
 
 import { z } from "zod";
+import { parseReleaseVersion } from "../platform/version-floor";
 
 /** The three things that can be installed into an instance. */
 export const ExtensionKindSchema = z.enum(["app", "connector", "theme"]);
@@ -337,6 +338,106 @@ export const InstallManifestSchema = z.object({
   yankedReason: z.string().nullish(),
 });
 export type InstallManifest = z.infer<typeof InstallManifestSchema>;
+
+/**
+ * One extension in an update check's request: what `POST /api/v1/updates`
+ * sends for each extension installed from the catalogue, and nothing more.
+ */
+export interface UpdateItem {
+  kind: ExtensionKind;
+  slug: string;
+  version: string;
+}
+
+/**
+ * mixos.org's answer for one extension in an update check
+ * (`POST /api/v1/updates`; `UpdateResult` in its
+ * `src/lib/registry/instance-api.ts`).
+ *
+ * Only what the notices read is parsed: `tarballUrl` and the latest release's
+ * commit and hashes are left out, because nothing here acts on the answer. It
+ * drives notices, and installing a release goes through the install manifest
+ * and its own checks.
+ *
+ * `listingStatus` is a plain string, not `ListingStatusSchema`: mixos.org's
+ * states are now `draft`, `published` and `archived`, and a value this enum
+ * doesn't know would drop the whole item. Only `published` is compared with.
+ *
+ * Every text field is the catalogue's to choose, so update-check.ts cleans
+ * each one before it is stored or shown (`keepAnswersFor()` in ./updates.ts).
+ */
+export const UpdateResultSchema = z.object({
+  kind: ExtensionKindSchema,
+  slug: z.string(),
+  listingStatus: z.string(),
+  installedVersion: z.string(),
+  installedYanked: z.boolean(),
+  installedYankedReason: z.string().nullish(),
+  /** Null when nothing is installable: no releases, or every one withdrawn. */
+  latestVersion: z.string().nullish(),
+  latestReleasedAt: z.string().nullish(),
+  latestRequiresMixOS: z.string().nullish(),
+  /** "Not the same string as the version sent", not "newer". */
+  differsFromInstalled: z.boolean().nullish(),
+});
+export type UpdateResult = z.infer<typeof UpdateResultSchema>;
+
+/**
+ * The whole answer. `items` is read one entry at a time: a malformed entry is
+ * dropped, as mixos.org drops a malformed item in the request, rather than
+ * costing every other extension its answer.
+ */
+export const UpdateCheckResponseSchema = z.object({
+  checkedAt: z.string().nullish(),
+  items: z.array(z.unknown()),
+});
+
+/**
+ * A release tag on mixos.org's list of MixOS releases: `vX.Y.Z`, with an
+ * optional suffix for a prerelease. mixos.org itself lists only `-rc.N`
+ * suffixes; any suffix here is a prerelease all the same.
+ */
+export const CORE_RELEASE_TAG = /^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/;
+
+/** The most one release's notes may hold, in UTF-8 bytes: mixos.org's own cap. */
+export const CORE_RELEASE_NOTES_MAX_BYTES = 20 * 1024;
+
+/**
+ * One release of MixOS itself, from `GET /api/v1/mixos/releases`
+ * (`CoreRelease` in mixos.org's `src/lib/core-releases.mjs`).
+ *
+ * Strict, because the notice builds its link to the release's page from the
+ * tag, and shows the notes to every admin. The tag must match
+ * `CORE_RELEASE_TAG` and be a version in full, so leading zeros and empty
+ * identifiers are refused (`parseReleaseVersion()`). `notes` is untrusted
+ * Markdown, made from commit subjects, and is rendered without links, images
+ * or HTML (src/components/admin/release-notes.tsx). Unknown keys are dropped,
+ * as `z.object` does.
+ */
+export const CoreReleaseSchema = z.object({
+  tag: z
+    .string()
+    .regex(CORE_RELEASE_TAG, "expected a tag such as v0.5.0")
+    .refine((tag) => parseReleaseVersion(tag) !== null, "not a version"),
+  commitSha: CommitShaSchema,
+  publishedAt: z.iso.datetime({ offset: true }),
+  prerelease: z.boolean(),
+  notes: z
+    .string()
+    .refine(
+      (notes) => new TextEncoder().encode(notes).length <= CORE_RELEASE_NOTES_MAX_BYTES,
+      `over ${CORE_RELEASE_NOTES_MAX_BYTES} bytes`,
+    ),
+});
+export type CoreRelease = z.infer<typeof CoreReleaseSchema>;
+
+/**
+ * The whole list. `releases` is read one entry at a time: a malformed entry is
+ * left out, not the list.
+ */
+export const CoreReleaseListSchema = z.object({
+  releases: z.array(z.unknown()),
+});
 
 /**
  * Is this a checksum that can actually verify anything?
