@@ -316,9 +316,12 @@ describe("the GitHub link", { skip }, () => {
     const rules = await p.withLinkedRepository("read", ADMIN, (repo) => p.readBranchRules(repo));
     assert.equal(rules.pullRequest, true);
 
-    // The write shape, narrowed the same way.
+    // The write shape, narrowed the same way. It needs a scope: the one
+    // folder its writes may touch (./repository.ts).
     fake.requests.length = 0;
-    await p.withLinkedRepository("write", ADMIN, async () => undefined);
+    await assert.rejects(p.withLinkedRepository("write", ADMIN, async () => undefined), /needs a write scope/);
+    assert.equal(fake.calls().filter((c) => c.endsWith("/access_tokens")).length, 0, "refused before a token is minted");
+    await p.withLinkedRepository("write", ADMIN, async () => undefined, { scope: { folder: "apps/files" } });
     assert.deepEqual(fake.requests.filter((r) => r.path.endsWith("/access_tokens")).map((r) => r.body)[1], {
       repository_ids: [501],
       permissions: { contents: "write", pull_requests: "write" },

@@ -56,6 +56,7 @@ export async function readPageState(): Promise<GitHubPageState> {
       link: null,
       branchRule: null,
       override: null,
+      previewChecklist: null,
     };
   }
 
@@ -108,5 +109,6 @@ export async function readPageState(): Promise<GitHubPageState> {
         }
       : null,
     override: state.override ? { reason: state.override.reason, at: state.override.at, by: state.override.by } : null,
+    previewChecklist: state.previewChecklist ? { at: state.previewChecklist.at, by: state.previewChecklist.by } : null,
   };
 }
