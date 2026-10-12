@@ -13,7 +13,7 @@ import {
   type Registered,
 } from "@/lib/repository/pending-outcomes";
 import HandBackPanel from "./hand-back";
-import Notice from "./notice";
+import Notice from "@/components/ui/notice";
 import WithCode from "./with-code";
 
 /**

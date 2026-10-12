@@ -243,6 +243,25 @@ just pulled.
   installed from the Registry, before or after this change, is switched off
   once at the first release step that carries it, and an app's API keys are
   revoked.
+- **The build checks each installed extension's MixOS floor.** When an
+  extension's `.registry.json` says it needs a newer MixOS than the version
+  being built, `package.json`'s, the registry generator stops the build, naming
+  the extension, its floor and the version: upgrade MixOS, or install an older
+  release of the extension. A local extension isn't checked, and a floor that
+  isn't a version is a warning, as at install. The install dialog and the
+  review before Register now say whether this checkout meets a release's floor:
+  "Requires MixOS 0.2.0 or newer. This checkout runs 0.1.0, which doesn't meet
+  it." **Breaking:** a checkout or a deploy that carries such an extension no
+  longer builds. To try one before its MixOS is released, bump `package.json`
+  locally, and don't ship the extension until that release is merged.
+- **Withdrawn releases reach the instances running them.** Once a day the tick
+  asks mixos.org about the extensions installed from it. Admin > Apps,
+  Connectors and Themes then show a release its publisher withdrew, with the
+  reason and, for an app, a **Deactivate** button; a newer release; a listing
+  no longer published; and when mixos.org last answered. It sends a random
+  instance ID and each extension's kind, slug and version, nothing else, and
+  acts on nothing. `MIXOS_UPDATE_CHECK=false` turns it off. See
+  `docs/hosting/README.md#what-mixos-sends-to-mixosorg`.
 - **Smoke-test an app as you register it, and in every pull request that
   changes one.** `npm run register -- app/<slug> --smoke` registers the app,
   then runs its migrations, activates it, grants it to the user you sign in as

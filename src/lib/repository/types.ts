@@ -339,6 +339,59 @@ export const InstallManifestSchema = z.object({
 export type InstallManifest = z.infer<typeof InstallManifestSchema>;
 
 /**
+ * One extension in an update check's request: what `POST /api/v1/updates`
+ * sends for each extension installed from the catalogue, and nothing more.
+ */
+export interface UpdateItem {
+  kind: ExtensionKind;
+  slug: string;
+  version: string;
+}
+
+/**
+ * mixos.org's answer for one extension in an update check
+ * (`POST /api/v1/updates`; `UpdateResult` in its
+ * `src/lib/registry/instance-api.ts`).
+ *
+ * Only what the notices read is parsed: `tarballUrl` and the latest release's
+ * commit and hashes are left out, because nothing here acts on the answer. It
+ * drives notices, and installing a release goes through the install manifest
+ * and its own checks.
+ *
+ * `listingStatus` is a plain string, not `ListingStatusSchema`: mixos.org's
+ * states are now `draft`, `published` and `archived`, and a value this enum
+ * doesn't know would drop the whole item. Only `published` is compared with.
+ *
+ * Every text field is the catalogue's to choose, so update-check.ts cleans
+ * each one before it is stored or shown (`keepAnswersFor()` in ./updates.ts).
+ */
+export const UpdateResultSchema = z.object({
+  kind: ExtensionKindSchema,
+  slug: z.string(),
+  listingStatus: z.string(),
+  installedVersion: z.string(),
+  installedYanked: z.boolean(),
+  installedYankedReason: z.string().nullish(),
+  /** Null when nothing is installable: no releases, or every one withdrawn. */
+  latestVersion: z.string().nullish(),
+  latestReleasedAt: z.string().nullish(),
+  latestRequiresMixOS: z.string().nullish(),
+  /** "Not the same string as the version sent", not "newer". */
+  differsFromInstalled: z.boolean().nullish(),
+});
+export type UpdateResult = z.infer<typeof UpdateResultSchema>;
+
+/**
+ * The whole answer. `items` is read one entry at a time: a malformed entry is
+ * dropped, as mixos.org drops a malformed item in the request, rather than
+ * costing every other extension its answer.
+ */
+export const UpdateCheckResponseSchema = z.object({
+  checkedAt: z.string().nullish(),
+  items: z.array(z.unknown()),
+});
+
+/**
  * Is this a checksum that can actually verify anything?
  *
  * Separate from parsing so the answer can be reported as what it is. The one
