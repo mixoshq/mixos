@@ -5,8 +5,8 @@
 "use client";
 
 import Image from "next/image";
-import { Plug } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Plug, Trash2 } from "lucide-react";
+import { Button, IconButton } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status";
 import {
   renderAuthors,
@@ -59,6 +59,7 @@ export default function ConnectorTile({
   onConfigure,
   onDisable,
   onEnable,
+  onRemove,
   switching,
 }: {
   connector: ConnectorWithStatus;
@@ -66,6 +67,8 @@ export default function ConnectorTile({
   /** Opens Disable's confirmation; nothing changes until it is confirmed. */
   onDisable: () => void;
   onEnable: () => void;
+  /** Opens the Remove dialog, which says what goes and what stays before it removes anything. */
+  onRemove: () => void;
   /** A Disable or Enable is in flight somewhere in the grid. */
   switching: boolean;
 }) {
@@ -156,7 +159,10 @@ export default function ConnectorTile({
             fact the configure dialog puts beside its footer, in the same mono
             treatment: the row below says when it changed and who changed it,
             this says where to go to change it yourself. */}
-        <code className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+        <code
+          className="min-w-0 truncate font-mono text-xs text-muted-foreground"
+          title={`/connectors/${connector.name}/`}
+        >
           /connectors/{connector.name}/
         </code>
         <div className="flex shrink-0 items-center gap-2">
@@ -180,6 +186,14 @@ export default function ConnectorTile({
           >
             Configure
           </Button>
+          {/* The app tile's Remove, in the same place and weight. */}
+          <IconButton
+            variant="ghost"
+            size="sm"
+            label={`Remove ${connector.displayName}`}
+            icon={<Trash2 className="h-4 w-4" aria-hidden />}
+            onClick={onRemove}
+          />
         </div>
       </div>
 
