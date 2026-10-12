@@ -8,6 +8,8 @@
 //   npm run register                              list what is waiting in .mixos/pending/
 //   npm run register -- <kind>/<slug>             register it
 //   npm run register -- <slug>                    the same, when only one kind has it pending
+//   npm run register -- app/<slug> --smoke        register it, then migrate, activate, grant and
+//                                                 smoke-test it in this checkout's local database
 //   npm run register -- <kind>/<slug> --discard   delete it from pending
 //   npm run register -- --recover                 tidy up after one that stopped midway
 //   npm run register -- --break-lock              show who holds the checkout lock, and ask
@@ -21,7 +23,8 @@
 // runs the generator with PATH and TMPDIR only. With `npm run dev:docker`, run
 // it from your terminal: it reaches the stack's database as the dev server does.
 //
-// The work is in scripts/register-cli.ts and src/lib/repository/register.ts.
+// The work is in scripts/register-cli.ts and src/lib/repository/register.ts,
+// and for --smoke, scripts/register-smoke.ts.
 
 import path from "path";
 import readline from "readline";
