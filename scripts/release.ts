@@ -8,9 +8,10 @@
 //   1. The platform schema, supabase/migrations/   (scripts/platform-migrations.ts)
 //   2. The app registry mirror and app migrations  (scripts/app-migrations.ts)
 //   3. Where each connector and theme came from    (scripts/sync-identities.ts)
-//   4. The first admin, only if it does not exist  (scripts/admin-seed.ts)
+//   4. What this build carries                     (scripts/record-build.ts)
+//   5. The first admin, only if it does not exist  (scripts/admin-seed.ts)
 //
-// Step 4 runs only when INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD are both
+// Step 5 runs only when INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD are both
 // set, and never touches an account that already exists. Step 2 marks apps that
 // are no longer in this build's registry as missing and keeps everything they
 // had, brings back any that returned (switched off, if their files changed while
@@ -20,7 +21,11 @@
 // migrations as that app's own role, in its own schema, once every pending
 // statement has passed scripts/app-sql-policy.ts. Step 3 does the identity
 // check for connectors, turning off one that is a different connector than
-// the one recorded under its name, and records themes.
+// the one recorded under its name, and records themes. It also marks each
+// connector the database holds credentials for that this build lacks, and
+// clears the mark when one returns. Step 4 records the apps and connectors
+// this build carries, which Delete data on every instance sharing the
+// database counts (src/lib/platform/builds-seen.ts).
 //
 // Each step takes the same lock and re-reads what it is about to change once it
 // holds it (scripts/migration-lock.ts), so two release steps at once — two
@@ -61,6 +66,7 @@ import { installFlagProblems } from "../src/lib/repository/policy";
 import { seedAdmin } from "./admin-seed";
 import { migrateAppSchemas } from "./app-migrations";
 import { migratePlatform } from "./platform-migrations";
+import { recordAndReportBuild } from "./record-build";
 import { syncAndReportIdentities } from "./sync-identities";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -119,6 +125,9 @@ async function main() {
 
     console.log("");
     await syncAndReportIdentities(sql);
+
+    console.log("");
+    await recordAndReportBuild(sql);
 
     const email = process.env.INITIAL_ADMIN_EMAIL;
     const password = process.env.INITIAL_ADMIN_PASSWORD;
