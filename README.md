@@ -622,7 +622,9 @@ Register, from the page or `npm run register`, won't register it
 Once a day, each instance asks mixos.org about the extensions it installed from
 there, so admins see a release its publisher withdrew. It sends a random
 instance ID and each of those extensions' kind, slug and version, and nothing
-else. `MIXOS_UPDATE_CHECK=false` turns it off
+else. It also reads mixos.org's list of MixOS releases, sending nothing about
+the instance, so admins see when a newer one is out.
+`MIXOS_UPDATE_CHECK=false` turns both off
 ([what is sent and kept](docs/hosting/README.md#what-mixos-sends-to-mixosorg)).
 
 Before exposing a deployment publicly, read

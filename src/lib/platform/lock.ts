@@ -64,9 +64,11 @@ import { sql } from "@/lib/db/client";
  * Named so that two unrelated operations do not serialise against each other.
  * `repository.update-check` keeps two instances sharing a database, or two
  * overlapping ticks, from checking with the catalogue at once
- * (src/lib/repository/update-check.ts).
+ * (src/lib/repository/update-check.ts), and `platform.release-check` does the
+ * same for the check for new releases of MixOS
+ * (src/lib/platform/release-check.ts).
  */
-export type LockName = "repository.register" | "repository.update-check";
+export type LockName = "repository.register" | "repository.update-check" | "platform.release-check";
 
 /**
  * Many renewals long, so a database that drops a few cannot cost a live holder

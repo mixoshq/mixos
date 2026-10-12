@@ -56,9 +56,11 @@ services:
       # and it has to be bound beyond loopback to be reachable at all
       # (`astro dev --host`).
       - MIXOS_REPOSITORY_URL=${MIXOS_REPOSITORY_URL:-}
-      # The same for the daily update check: MIXOS_UPDATE_CHECK=false npm run
-      # dev:docker turns it off. Empty means unset, which is on.
+      # The same for the daily checks: MIXOS_UPDATE_CHECK=false npm run
+      # dev:docker turns them off. Empty means unset, which is on. And
+      # MIXOS_RELEASE_CHANNEL=prerelease adds prereleases to the release notice.
       - MIXOS_UPDATE_CHECK=${MIXOS_UPDATE_CHECK:-}
+      - MIXOS_RELEASE_CHANNEL=${MIXOS_RELEASE_CHANNEL:-}
       # Who owns the checkout, on Linux and in WSL, so the dev server writes it
       # as them rather than as root — see scripts/container-dev.sh. Empty on
       # macOS, where the container stays root as it always has.
@@ -174,6 +176,7 @@ services:
       # (`astro dev --host`).
       - MIXOS_REPOSITORY_URL=${MIXOS_REPOSITORY_URL:-}
       - MIXOS_UPDATE_CHECK=${MIXOS_UPDATE_CHECK:-}
+      - MIXOS_RELEASE_CHANNEL=${MIXOS_RELEASE_CHANNEL:-}
     networks:
       default:
         # The same alias app-dev carries — one cron URL for both profiles.
