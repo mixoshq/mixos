@@ -54,8 +54,9 @@ const nextConfig: NextConfig = {
   },
 
   // Never in a build: `.mixos/` holds this checkout's installs from the
-  // Registry that nobody has registered yet, and the checkout lock
-  // (src/lib/repository/pending.ts). src/lib/repository/install.ts names it by a
+  // Registry that nobody has registered yet, the checkout lock, and an
+  // extension's folder while it is being removed (src/lib/repository/pending.ts,
+  // src/lib/repository/backup.ts). src/lib/repository/install.ts names it by a
   // path the tracer can follow, so it is left out by name, wherever a build runs
   // from a checkout that has some.
   outputFileTracingExcludes: {

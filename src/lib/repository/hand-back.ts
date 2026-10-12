@@ -10,6 +10,11 @@
  * (scripts/register-cli.ts), and the Register result in Admin shows it, as
  * does a theme's install result, since a theme registers as it installs.
  *
+ * Removing an extension's code hands back the other half (removalHandBackFor()):
+ * the files the commit deletes, its message and the commands. An extension
+ * installed from a Registry takes its install record with it, so the same
+ * commit deletes both.
+ *
  * The server never runs git. A web process committing to its own checkout
  * would commit whatever else is in it, and a developer's checkout usually has
  * other work on the branch, so the commands are for a person, or for
@@ -31,13 +36,17 @@
  * its sizes already written out.
  */
 
+import { isExtensionName } from "./backup";
 import {
+  INSTALL_RECORD_FILE,
   recordListingUrl,
   recordSourceUrl,
   type FolderFile,
   type InstallRecord,
 } from "./install-record";
 import { sourceHost } from "./provenance";
+import { KEPT_DATA } from "./remove-outcomes";
+import type { ExtensionKind } from "./types";
 
 /** Files listed by name; the rest are counted. */
 const MAX_LISTED = 100;
@@ -236,5 +245,167 @@ export function handBackLines(
     SHIPPING.compose,
   );
   if (isApp) lines.push("It arrives inactive on each instance: activate it there, in Admin > Apps.");
+  return lines;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Removal                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** What a removal's commit is built from: identifiers, each validated before it gets here. */
+export interface RemovalTarget {
+  kind: ExtensionKind;
+  /** The folder's name, which isExtensionName() holds to letters, digits, `-` and `_`. */
+  slug: string;
+  /** Where it was installed from, from its own install record, or null for a local one. */
+  installed: Pick<InstallRecord, "source" | "version"> | null;
+}
+
+/** What removal hands back: the commit that deletes the folder, and how to make it. */
+export interface RemovalHandBack {
+  /** Repo-relative: `apps/files`. */
+  folder: string;
+  /** The files the commit deletes, by path in the folder, sorted, at most MAX_LISTED. */
+  files: { path: string; size: string }[];
+  /** How many more there are than `files` lists. */
+  more: number;
+  fileCount: number;
+  /** Every file's size, together: `12 KB`. */
+  totalSize: string;
+  /** The prepared commit message: subject, body and, for an install, two trailers. */
+  commitMessage: string;
+  /** `remove-app-files`. */
+  branch: string;
+  /** The commands, ready to paste into bash or zsh. */
+  commands: string;
+  /** The catalogue's host it was installed from, `mixos.org`, or null for a local one. */
+  installedFrom: string | null;
+}
+
+function assertRemovalTarget(target: RemovalTarget): void {
+  // The record's schema has checked the version and the source already. The
+  // name comes from the folder, so it is checked here, where it becomes words
+  // in a commit.
+  if (!isExtensionName(target.slug)) throw new Error(`"${target.slug}" is not the name of an extension folder.`);
+}
+
+/** `feat(files): remove app files 1.2.0 from mixos.org`, or `feat(files): remove app files` for a local one. */
+export function removalSubject(target: RemovalTarget): string {
+  assertRemovalTarget(target);
+  const base = `feat(${target.slug}): remove ${target.kind} ${target.slug}`;
+  return target.installed ? `${base} ${target.installed.version} from ${sourceHost(target.installed.source)}` : base;
+}
+
+/** `text` in lines of at most `width` columns, broken between words; a longer word gets a line of its own. */
+function wrap(text: string, width = 72): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    if (line && line.length + 1 + word.length > width) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  return line ? [...lines, line] : lines;
+}
+
+/** The commit message for deleting `folder` (repo-relative): subject, body and, for an install, its trailers. */
+export function removalCommitMessage(target: RemovalTarget, folder: string): string {
+  const body = [
+    ...wrap(`Removed in a checkout. ${KEPT_DATA[target.kind]}`),
+    ...(target.installed ? ["", ...wrap(`Its install record, ${folder}/${INSTALL_RECORD_FILE}, goes with it.`)] : []),
+  ];
+  const trailers = target.installed
+    ? ["", `Registry-Source: ${target.installed.source}`, `Registry-Version: ${target.installed.version}`]
+    : [];
+  const message = [removalSubject(target), "", ...body, ...trailers].join("\n");
+  const marker = ciSkipMarker(message);
+  // Unreachable while the name and the record hold to their patterns: checked
+  // anyway, as the last thing before a person commits it.
+  if (marker) throw new Error(`A prepared commit message would hold ${JSON.stringify(marker)}.`);
+  return message;
+}
+
+/** `remove-app-files`: a branch name from the kind and the name. */
+export function removalBranchName(target: Pick<RemovalTarget, "kind" | "slug">): string {
+  return `remove-${target.kind}-${target.slug}`;
+}
+
+/**
+ * The commands that commit the deletion on a branch of its own and push it.
+ * The folder is already gone from the disk: `git rm -r` stages that, and
+ * `git commit … -- <folder>` commits the folder only, whatever else is staged.
+ * The message goes in on standard input, from a quoted here-document, so the
+ * shell expands nothing in it.
+ */
+export function removalCommandsFor(handBack: Pick<RemovalHandBack, "branch" | "folder" | "commitMessage">): string {
+  return [
+    `git switch -c ${handBack.branch}`,
+    `git rm -r ${shellWord(handBack.folder)}`,
+    `git commit -F - -- ${shellWord(handBack.folder)} <<'MSG'`,
+    handBack.commitMessage,
+    "MSG",
+    "git push -u origin HEAD",
+  ].join("\n");
+}
+
+/** The hand-back for removing `folder` (repo-relative), which held `files`. */
+export function removalHandBackFor(
+  target: RemovalTarget,
+  folder: string,
+  files: readonly FolderFile[],
+): RemovalHandBack {
+  const listed = files.slice(0, MAX_LISTED);
+  const message = removalCommitMessage(target, folder);
+  const branch = removalBranchName(target);
+  return {
+    folder,
+    files: listed.map((f) => ({ path: f.path, size: formatSize(f.bytes) })),
+    more: Math.max(0, files.length - listed.length),
+    fileCount: files.length,
+    totalSize: formatSize(files.reduce((n, f) => n + f.bytes, 0)),
+    commitMessage: message,
+    branch,
+    commands: removalCommandsFor({ branch, folder, commitMessage: message }),
+    installedFrom: target.installed ? sourceHost(target.installed.source) : null,
+  };
+}
+
+/**
+ * The removal's hand-back as lines for a terminal, after `npm run remove` has
+ * said what it removed and what each instance keeps. `tracked` is whether git
+ * tracked any of the folder, which `npm run remove` asks it, read-only: false
+ * means there is nothing to commit, and null that it couldn't tell.
+ */
+export function removalHandBackLines(
+  handBack: RemovalHandBack,
+  { tracked = null }: { tracked?: boolean | null } = {},
+): string[] {
+  const width = Math.max(0, ...handBack.files.map((f) => f.path.length));
+  const lines = [
+    "",
+    `It is gone from this checkout only. Commit the deletion of ${handBack.folder} and deploy to remove it from your instances.`,
+    "",
+    `Files deleted from ${handBack.folder}/ (${handBack.fileCount} ${handBack.fileCount === 1 ? "file" : "files"}, ${handBack.totalSize}):`,
+    ...handBack.files.map((f) => `    ${f.path.padEnd(width)}  ${f.size}`),
+    ...(handBack.more > 0 ? [`    and ${handBack.more} more`] : []),
+    "",
+  ];
+  if (tracked === false) {
+    lines.push(`Git doesn't track ${handBack.folder}: it was never committed, so there is nothing to commit.`);
+  } else {
+    lines.push(
+      "Commit it on a branch of its own, and push. The message records what was removed:",
+      "",
+      removalCommandsFor(handBack),
+      "",
+      "Or run /mixos deploy, which branches, commits, pushes and opens a pull request.",
+      "",
+      SHIPPING.hosted,
+      SHIPPING.compose,
+    );
+  }
   return lines;
 }
