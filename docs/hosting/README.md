@@ -407,6 +407,30 @@ release step after you reinstall one of those from the Registry switches it
 off once. Deleting an installed extension's `.registry.json` makes it local,
 which counts as a different extension too.
 
+### Removing an extension
+
+Removing an extension is a change to your repository, as installing one is:
+
+1. In a checkout of your repository, running `npm run dev`, press **Remove** on
+   its tile in Admin > Apps, Connectors or Themes, or run
+   `npm run remove -- <kind>/<slug>`. Either says first what goes and what
+   stays. It is refused while an app depends on it (an app that requires the
+   connector, or uses the app's services or hooks), and for the last theme.
+2. Commit the deletion and open a pull request. Removing hands back the
+   commands and a commit message; `/mixos deploy` does the same. An extension
+   installed from the Registry takes its `.registry.json` with it.
+3. Merge it into the branch your host deploys.
+
+Its data stays in each database: an app's tables, settings, API keys, grants
+and scheduled jobs, and a connector's credentials. The release step marks a
+removed app missing and keeps all of it; see
+[When an app leaves the build](#when-an-app-leaves-the-build). A theme holds no
+data. An instance that applies a removed theme shows the first theme by name
+until an admin applies another.
+
+A removal that stops midway leaves the folder in `.mixos/backup/`, and
+`npm run remove -- --recover` puts it back.
+
 ### Which build is running
 
 The admin pages show the MixOS version and the commit the deployment was built

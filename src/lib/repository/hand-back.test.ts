@@ -5,8 +5,12 @@
 /**
  * The hand-back after Register: a commit message built from the install
  * record's identifiers alone, which can never turn a repository's workflows
- * off, the commands that commit it, and what the CLI prints. The last test
- * runs the commands in a scratch repository and reads the commit back.
+ * off, the commands that commit it, and what the CLI prints. A test runs the
+ * commands in a scratch repository and reads the commit back.
+ *
+ * And the hand-back after removing an extension's code: the commit that
+ * deletes the folder, built from the kind, the name and, for an install, the
+ * record's version and source; run the same way.
  */
 
 import { after, describe, test } from "node:test";
@@ -25,6 +29,11 @@ import {
   formatSize,
   handBackFor,
   handBackLines,
+  removalBranchName,
+  removalCommitMessage,
+  removalHandBackFor,
+  removalHandBackLines,
+  removalSubject,
   shellWord,
 } from "./hand-back";
 import { InstallRecordSchema, type InstallRecord } from "./install-record";
@@ -252,5 +261,119 @@ describe("what it hands back", () => {
     assert.match(text, /With Docker Compose on your own server, pull it there, then build, migrate and start/);
     assert.match(text, /It arrives inactive on each instance/);
     assert.doesNotMatch(handBackLines(handBack, { isApp: false }).join("\n"), /\.gitignore leaves|arrives inactive/);
+  });
+});
+
+describe("the removal's commit", () => {
+  const INSTALLED = { source: "https://mixos.org", version: "1.2.0" };
+
+  test("its subject is the kind and the name, and for an install the version and the catalogue's host", () => {
+    assert.equal(removalSubject({ kind: "app", slug: "files", installed: null }), "feat(files): remove app files");
+    assert.equal(
+      removalSubject({ kind: "theme", slug: "dusk", installed: INSTALLED }),
+      "feat(dusk): remove theme dusk 1.2.0 from mixos.org",
+    );
+    assert.equal(removalBranchName({ kind: "connector", slug: "acme-crm" }), "remove-connector-acme-crm");
+  });
+
+  test("its body says what stays, and an install's trailers are its source and version alone", () => {
+    const local = removalCommitMessage({ kind: "app", slug: "my_app", installed: null }, "apps/my_app");
+    const [subject, blank, ...body] = local.split("\n");
+    assert.deepEqual([subject, blank], ["feat(my_app): remove app my_app", ""]);
+    assert.equal(body.join(" "), "Removed in a checkout. Each instance keeps the app's data until an admin deletes it there.");
+    assert.doesNotMatch(local, /Registry-/);
+    const installed = removalCommitMessage({ kind: "connector", slug: "probe", installed: INSTALLED }, "connectors/probe");
+    assert.deepEqual(installed.split("\n\n").at(-1)!.split("\n"), [
+      "Registry-Source: https://mixos.org",
+      "Registry-Version: 1.2.0",
+    ]);
+    const prose = installed.split("\n\n").slice(1, -1).join(" ").replace(/\n/g, " ");
+    assert.match(prose, /Its install record, connectors\/probe\/\.registry\.json, goes with it\./);
+    assert.match(prose, /Each instance keeps the connector's credentials until an admin deletes them there\./);
+    assert.match(
+      removalCommitMessage({ kind: "theme", slug: "dusk", installed: null }, "themes/dusk"),
+      /\n\nRemoved in a checkout\. A theme holds no data\.$/,
+    );
+    for (const line of installed.split("\n").filter((l) => !l.includes("://"))) assert.ok(line.length <= 72, line);
+  });
+
+  test("it never holds anything that turns a repository's workflows off, and refuses a name that isn't one", () => {
+    for (const slug of ["skip-ci", "ci-skip", "no-ci", "skip_actions", "skip-checks", "a1"]) {
+      for (const kind of ["app", "connector", "theme"] as const) {
+        for (const installed of [null, INSTALLED, { source: "http://localhost:4321", version: "9f2be41" }]) {
+          const message = removalCommitMessage({ kind, slug, installed }, `${kind}s/${slug}`);
+          assert.equal(ciSkipMarker(message), null, message);
+        }
+      }
+    }
+    for (const slug of ["[skip ci]", "files [no ci]", "a\n\nskip-checks: true", "../x", "Files", ""]) {
+      assert.throws(() => removalCommitMessage({ kind: "app", slug, installed: null }, "apps/x"), /not the name/, slug);
+    }
+  });
+
+  test("for a terminal: the files deleted, and the commands unindented", () => {
+    const handBack = removalHandBackFor({ kind: "app", slug: "files", installed: INSTALLED }, "apps/files", [
+      { path: ".registry.json", bytes: 612 },
+      { path: "app.json", bytes: 1260 },
+    ]);
+    assert.equal(handBack.installedFrom, "mixos.org");
+    const text = removalHandBackLines(handBack, { tracked: true }).join("\n");
+    assert.match(text, /It is gone from this checkout only\. Commit the deletion of apps\/files and deploy/);
+    assert.match(text, /Files deleted from apps\/files\/ \(2 files, 1\.8 KB\):\n {4}\.registry\.json {2}612 B\n {4}app\.json {8}1\.2 KB/);
+    assert.match(text, /^git switch -c remove-app-files\ngit rm -r apps\/files\ngit commit -F - -- apps\/files <<'MSG'\nfeat\(files\): remove app files 1\.2\.0 from mixos\.org$/m);
+    assert.match(text, /^MSG\ngit push -u origin HEAD$/m);
+    assert.match(text, /Or run \/mixos deploy/);
+    assert.match(text, /then build, migrate and start, as in docs\/hosting\/docker-compose\.md#upgrading\.$/);
+    // Never committed: nothing to commit, and no commands.
+    const untracked = removalHandBackLines(handBack, { tracked: false }).join("\n");
+    assert.match(untracked, /Git doesn't track apps\/files: it was never committed, so there is nothing to commit\./);
+    assert.doesNotMatch(untracked, /git switch/);
+  });
+
+  test("run in a repository, they commit the folder's deletion alone, with the message", (t) => {
+    const env = {
+      PATH: process.env.PATH ?? "",
+      HOME: tmp,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_AUTHOR_NAME: "Test",
+      GIT_AUTHOR_EMAIL: "test@example.com",
+      GIT_COMMITTER_NAME: "Test",
+      GIT_COMMITTER_EMAIL: "test@example.com",
+    } as unknown as NodeJS.ProcessEnv;
+    const git = (cwd: string, ...args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8", env });
+    const repo = path.join(tmp, "removal-repo");
+    fs.mkdirSync(repo);
+    if (git(repo, "init", "-q", "-b", "main").status !== 0) {
+      t.skip("git isn't available");
+      return;
+    }
+    fs.mkdirSync(path.join(repo, "apps", "files"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "apps", "files", "app.json"), "{}\n");
+    fs.writeFileSync(path.join(repo, "apps", "files", ".registry.json"), "{}\n");
+    fs.writeFileSync(path.join(repo, "README.md"), "# A fork\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "init");
+    // Other work, staged, which the commit must leave alone.
+    fs.writeFileSync(path.join(repo, "other.txt"), "staged, not ours\n");
+    git(repo, "add", "other.txt");
+    // What removal leaves: the folder gone from the disk.
+    fs.rmSync(path.join(repo, "apps", "files"), { recursive: true });
+
+    const handBack = removalHandBackFor({ kind: "app", slug: "files", installed: INSTALLED }, "apps/files", [
+      { path: ".registry.json", bytes: 3 },
+      { path: "app.json", bytes: 3 },
+    ]);
+    const script = handBack.commands.replace(/\ngit push -u origin HEAD$/, "\n");
+    const run = spawnSync("bash", ["-e", "-c", script], { cwd: repo, encoding: "utf8", env });
+    assert.equal(run.status, 0, run.stderr);
+
+    assert.equal(git(repo, "branch", "--show-current").stdout.trim(), "remove-app-files");
+    assert.equal(git(repo, "log", "-1", "--format=%B").stdout.trim(), handBack.commitMessage);
+    assert.equal(git(repo, "log", "-1", "--format=%(trailers:key=Registry-Version,valueonly)").stdout.trim(), "1.2.0");
+    assert.deepEqual(git(repo, "show", "--name-status", "--format=", "HEAD").stdout.trim().split("\n").sort(), [
+      "D\tapps/files/.registry.json",
+      "D\tapps/files/app.json",
+    ]);
+    assert.equal(git(repo, "diff", "--cached", "--name-only").stdout.trim(), "other.txt");
   });
 });

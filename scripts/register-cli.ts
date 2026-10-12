@@ -67,7 +67,7 @@ export const USAGE = `Usage:
   npm run register -- app/<slug> --smoke           register it, then migrate, activate, grant and smoke-test it
                                                    in this checkout's database, which has to be on this machine
   npm run register -- <kind>/<slug> --discard      delete it from ${MIXOS_DIR}/pending/
-  npm run register -- --recover                    tidy up after an install or registration that stopped midway
+  npm run register -- --recover                    tidy up after an install, registration or removal that stopped midway
   npm run register -- --break-lock                 show who holds this checkout's lock, and ask before removing it
 
 With --smoke:
@@ -398,7 +398,11 @@ function list(root: string, say: (line: string) => void): number {
   return 0;
 }
 
-async function breakLock(root: string, say: (line: string) => void, io: CliIo): Promise<number> {
+/**
+ * `--break-lock`: who holds the checkout lock, and, once a person agrees,
+ * remove it. `npm run remove -- --break-lock` is the same (scripts/remove-cli.ts).
+ */
+export async function breakLock(root: string, say: (line: string) => void, io: CliIo): Promise<number> {
   const state = readCheckoutLock(root);
   if (!state.exists) {
     say("This checkout isn't locked.");
@@ -440,7 +444,12 @@ async function breakLock(root: string, say: (line: string) => void, io: CliIo): 
   return 1;
 }
 
-async function recover(
+/**
+ * `--recover`: what a stopped install, registration, discard or removal left,
+ * and, once a person agrees, deal with it. `npm run remove -- --recover` is the
+ * same (scripts/remove-cli.ts).
+ */
+export async function recover(
   shared: Omit<RecoverOptions, "confirm">,
   say: (line: string) => void,
   io: CliIo,
@@ -463,7 +472,7 @@ async function recover(
   });
 
   if (result.items.length === 0) {
-    say("Nothing to recover: no install, registration or discard was left unfinished.");
+    say("Nothing to recover: no install, registration, discard or removal was left unfinished.");
     return 0;
   }
   if (result.cancelled) {
