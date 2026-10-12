@@ -20,6 +20,10 @@ const PLATFORM = Object.values(PLATFORM_KEYS).map((k) => k.env);
 const EVERY_KEY = ["AUTH_SECRET", "CRON_SECRET", ...PLATFORM];
 
 function keys(args: string[], env: Record<string, string> = {}) {
+  // Every key it reads is passed explicitly, so a .env.local in this checkout
+  // can't fill one in. GITHUB_APP_ENCRYPTION_KEY is optional, so it is passed
+  // empty unless a test sets it.
+  env = { GITHUB_APP_ENCRYPTION_KEY: "", ...env };
   return spawnSync(
     process.execPath,
     ["--import", "tsx", path.join(REPO, "scripts", "generate-keys.ts"), ...args],
@@ -71,4 +75,31 @@ test("--missing prints only the keys that are not set", () => {
   const run = keys(["--missing"], environment({ AUTH_SECRET: "", MCP_TOKEN_KEY: "too-short" }));
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual([...assignments(run.stdout).keys()].sort(), ["AUTH_SECRET", "MCP_TOKEN_KEY"]);
+});
+
+test("the GitHub App's key is opted into: left out by default, printed by --github-app", () => {
+  const all = keys([]);
+  assert.equal(all.status, 0, all.stderr);
+  assert.equal(assignments(all.stdout).has("GITHUB_APP_ENCRYPTION_KEY"), false);
+  assert.match(all.stdout, /--github-app/);
+
+  const run = keys(["--github-app"]);
+  assert.equal(run.status, 0, run.stderr);
+  const printed = assignments(run.stdout);
+  assert.deepEqual([...printed.keys()], ["GITHUB_APP_ENCRYPTION_KEY"]);
+  assert.match(printed.get("GITHUB_APP_ENCRYPTION_KEY") ?? "", /^[0-9a-f]{64}$/);
+});
+
+test("keys:check passes with the GitHub App's key unset or well-formed, and fails when it is malformed", () => {
+  const unset = keys(["--check"], environment());
+  assert.equal(unset.status, 0, unset.stderr);
+  assert.match(unset.stdout, /GITHUB_APP_ENCRYPTION_KEY is not set/);
+
+  const set = keys(["--check"], environment({ GITHUB_APP_ENCRYPTION_KEY: randomBytes(32).toString("base64") }));
+  assert.equal(set.status, 0, set.stderr);
+  assert.match(set.stdout, /GITHUB_APP_ENCRYPTION_KEY is set and well-formed/);
+
+  const malformed = keys(["--check"], environment({ GITHUB_APP_ENCRYPTION_KEY: "not-32-bytes" }));
+  assert.equal(malformed.status, 1, malformed.stdout);
+  assert.match(malformed.stderr, /GITHUB_APP_ENCRYPTION_KEY/);
 });

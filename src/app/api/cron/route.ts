@@ -11,6 +11,7 @@ import { pruneUnlockFailures } from "@/lib/apps/unlock-rate-limit";
 import { pruneRouteTelemetry } from "@/lib/apps/telemetry";
 import { pruneWebhookEvents } from "@/lib/connectors/webhook";
 import { runReleaseCheck, type ReleaseCheckOutcome } from "@/lib/platform/release-check";
+import { recordThisBuild } from "@/lib/platform/this-build";
 import { runUpdateCheck, type UpdateCheckOutcome } from "@/lib/repository/update-check";
 
 /**
@@ -84,6 +85,10 @@ export async function GET(request: NextRequest) {
       .map((c) => c.name),
   );
   const prunedUnlockFailures = await pruneUnlockFailures();
+  // Which apps and connectors this build carries, for Delete data on every
+  // instance sharing the database (src/lib/platform/builds-seen.ts). At most
+  // every ten minutes, and it never throws.
+  const buildSeen = await recordThisBuild();
 
   // The update check, last and in a catch of its own: it asks the catalogue
   // about this build's installs when a check is due, which is about once a
@@ -114,6 +119,7 @@ export async function GET(request: NextRequest) {
     prunedRouteEvents,
     prunedUnlockFailures,
     prunedWebhookEvents,
+    buildSeen,
     updateCheck,
     releaseCheck,
   });

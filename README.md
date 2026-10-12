@@ -362,7 +362,11 @@ deletes its folder from the checkout and regenerates the registry, once it has
 said what goes and what stays. It is refused while an app depends on it, and
 for the last theme. Its data stays in each database. Commit the deletion and
 deploy: removing hands back the commands and a commit message, as Register
-does. `npm run remove -- --recover` puts back one that stopped midway.
+does. `npm run remove -- --recover` puts back one that stopped midway. Then, on
+each instance, **Delete data…** under Not in this build on Admin > Apps or
+Connectors deletes what it kept, once no build that uses that database still
+has it; see
+[Deleting an extension's data](docs/hosting/README.md#deleting-an-extensions-data).
 
 Don't edit an installed folder. The registry generator compares it with its
 record, and Browse then says "modified locally". A pull request with an
@@ -633,6 +637,11 @@ else. It also reads mixos.org's list of MixOS releases, sending nothing about
 the instance, so admins see when a newer one is out.
 `MIXOS_UPDATE_CHECK=false` turns both off
 ([what is sent and kept](docs/hosting/README.md#what-mixos-sends-to-mixosorg)).
+
+An admin can link a deployment to the repository it is built from, on
+**Admin > GitHub**, through a private GitHub App of your own, installed on that
+one repository. It is off until `GITHUB_APP_ENCRYPTION_KEY` is set
+([linking your repository](docs/hosting/README.md#linking-your-github-repository)).
 
 Before exposing a deployment publicly, read
 [docs/security-architecture.md](docs/security-architecture.md) — the trust
