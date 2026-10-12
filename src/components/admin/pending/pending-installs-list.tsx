@@ -25,6 +25,8 @@ export interface PendingItem {
   version: string | null;
   /** "Installed 3 mins ago by admin@example.com", or null when its record can't be read. */
   installed: string | null;
+  /** For an update of an extension in place: the version it would replace, which stays. */
+  updateFrom: string | null;
   /** What stands in the way of registering it, or null. */
   problem: string | null;
   canRegister: boolean;
@@ -48,7 +50,9 @@ export default function PendingInstallsList({
   items: PendingItem[];
 }) {
   const [reviewing, setReviewing] = useState<PendingTarget | null>(null);
-  const [discarding, setDiscarding] = useState<(PendingTarget & { path: string }) | null>(null);
+  const [discarding, setDiscarding] = useState<(PendingTarget & { path: string; updateFrom: string | null }) | null>(
+    null,
+  );
   const many = kind === "app" ? "apps" : "connectors";
 
   return (
@@ -101,7 +105,13 @@ export default function PendingInstallsList({
                       variant="ghost"
                       size="sm"
                       onClick={() =>
-                        setDiscarding({ kind: item.kind, slug: item.slug, name: item.name, path: item.path })
+                        setDiscarding({
+                          kind: item.kind,
+                          slug: item.slug,
+                          name: item.name,
+                          path: item.path,
+                          updateFrom: item.updateFrom,
+                        })
                       }
                     >
                       Discard

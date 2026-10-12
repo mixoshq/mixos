@@ -31,8 +31,10 @@ export default function PendingInstalls({ kind }: { kind: PendingKind }) {
       path: p.path,
       version: p.record?.version ?? null,
       installed: p.sidecar
-        ? `Installed ${formatLastUpdated(Date.parse(p.sidecar.installedAt))} by ${p.sidecar.installedBy}`
+        ? `${p.sidecar.replaces ? `Update from ${p.sidecar.replaces.version}, downloaded` : "Installed"} ` +
+          `${formatLastUpdated(Date.parse(p.sidecar.installedAt))} by ${p.sidecar.installedBy}`
         : null,
+      updateFrom: p.sidecar?.replaces?.version ?? null,
       problem: p.problem,
       canRegister: p.problem === null,
       canDiscard: !p.sidecar?.register,
