@@ -13,6 +13,10 @@
 // files out of the commit (ignoredByGit()), which the admin pages can't,
 // because the server never runs git.
 //
+// `--smoke` adds a smoke test of an app: checks before Register, and after it
+// the app's migrations, its activation and a grant, then the smoke script, in
+// this checkout's database only (./register-smoke.ts).
+//
 // Library only. Exported for its tests, which give it a checkout, a stand-in
 // generator and their own input and output.
 
@@ -46,32 +50,85 @@ import {
   type RecoveryItem,
 } from "../src/lib/repository/register";
 import { SlugSchema } from "../src/lib/repository/types";
+import { SmokeSetupError, normalizeBaseUrl } from "./app-smoke";
+import {
+  checkoutSmokeSteps,
+  smokeAfterRegister,
+  smokeBeforeRegister,
+  type SmokePlan,
+  type SmokeRequest,
+  type SmokeSteps,
+} from "./register-smoke";
 
 export const USAGE = `Usage:
   npm run register                                 list what is waiting in ${MIXOS_DIR}/pending/
   npm run register -- <app|connector>/<slug>       register it: move it into place and run its code
   npm run register -- <slug>                       the same, when only one kind has that slug pending
+  npm run register -- app/<slug> --smoke           register it, then migrate, activate, grant and smoke-test it
+                                                   in this checkout's database, which has to be on this machine
   npm run register -- <kind>/<slug> --discard      delete it from ${MIXOS_DIR}/pending/
   npm run register -- --recover                    tidy up after an install or registration that stopped midway
-  npm run register -- --break-lock                 show who holds this checkout's lock, and ask before removing it`;
+  npm run register -- --break-lock                 show who holds this checkout's lock, and ask before removing it
+
+With --smoke:
+  --base-url <url>             the running server to test (default http://localhost:3000)
+  --confirm-replaces <slug>    go ahead with an app that replaces a different extension under its slug
+  --database-is-disposable     allow a database that isn't on this machine, when it is yours alone to throw away
+  Sign in with SMOKE_EMAIL and SMOKE_PASSWORD, or SMOKE_COOKIE, as for scripts/smoke-test-app.ts.`;
 
 export type Command =
   | { mode: "list" }
-  | { mode: "register"; target: string }
+  | { mode: "register"; target: string; smoke?: SmokeRequest }
   | { mode: "discard"; target: string }
   | { mode: "recover" }
   | { mode: "break-lock" };
 
+/** The modes, of which a command gives at most one. */
+const MODE_FLAGS = ["--discard", "--recover", "--break-lock"];
+/** What only --smoke takes. */
+const SMOKE_FLAGS = ["--base-url", "--confirm-replaces", "--database-is-disposable"];
+/** Flags with a value: `--flag value` or `--flag=value`. */
+const VALUE_FLAGS = ["--base-url", "--confirm-replaces"];
+
 /** The command in `args`, or why there isn't one. */
 export function parseArgs(args: readonly string[]): Command | { error: string } {
-  const flags = args.filter((a) => a.startsWith("--"));
-  const words = args.filter((a) => !a.startsWith("--"));
-  const unknown = flags.filter((f) => !["--discard", "--recover", "--break-lock"].includes(f));
-  if (unknown.length > 0) return { error: `Unknown option ${unknown[0]}.` };
-  if (new Set(flags).size !== flags.length || flags.length > 1) {
-    return { error: "Give one of --discard, --recover or --break-lock at a time." };
+  const flags: string[] = [];
+  const words: string[] = [];
+  const values = new Map<string, string>();
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!arg.startsWith("--")) {
+      words.push(arg);
+      continue;
+    }
+    // `--flag value` or `--flag=value`, for the flags that take one.
+    const eq = arg.indexOf("=");
+    const name = eq > 0 && VALUE_FLAGS.includes(arg.slice(0, eq)) ? arg.slice(0, eq) : arg;
+    if (VALUE_FLAGS.includes(name)) {
+      const value = eq > 0 ? arg.slice(eq + 1) : args[++i];
+      if (value === undefined || value === "" || (eq < 0 && value.startsWith("--"))) {
+        return { error: `${name} needs a value.` };
+      }
+      values.set(name, value);
+    }
+    flags.push(name);
   }
-  const flag = flags[0];
+
+  const known = [...MODE_FLAGS, "--smoke", ...SMOKE_FLAGS];
+  const unknown = flags.filter((f) => !known.includes(f));
+  if (unknown.length > 0) return { error: `Unknown option ${unknown[0]}.` };
+  if (new Set(flags).size !== flags.length) {
+    const twice = flags.find((f, i) => flags.indexOf(f) !== i);
+    return { error: `Give ${twice} once.` };
+  }
+  const modes = flags.filter((f) => MODE_FLAGS.includes(f));
+  if (modes.length > 1) return { error: "Give one of --discard, --recover or --break-lock at a time." };
+  const flag = modes[0];
+
+  const smoke = flags.includes("--smoke");
+  const smokeOnly = flags.filter((f) => SMOKE_FLAGS.includes(f));
+  if (!smoke && smokeOnly.length > 0) return { error: `${smokeOnly[0]} goes with --smoke.` };
+  if (smoke && flag) return { error: `--smoke goes with registering an app, not with ${flag}.` };
 
   if (flag === "--recover" || flag === "--break-lock") {
     if (words.length > 0) return { error: `${flag} takes no extension.` };
@@ -82,7 +139,29 @@ export function parseArgs(args: readonly string[]): Command | { error: string } 
     if (words.length === 0) return { error: "--discard needs the extension to discard: <kind>/<slug>." };
     return { mode: "discard", target: words[0] };
   }
-  return words.length === 0 ? { mode: "list" } : { mode: "register", target: words[0] };
+  if (words.length === 0) {
+    return smoke ? { error: "--smoke needs the app to register: app/<slug>." } : { mode: "list" };
+  }
+  if (!smoke) return { mode: "register", target: words[0] };
+
+  const baseUrl = values.get("--base-url");
+  if (baseUrl !== undefined) {
+    try {
+      normalizeBaseUrl(baseUrl);
+    } catch (err) {
+      return { error: `${err instanceof SmokeSetupError ? err.message : String(err)}.` };
+    }
+  }
+  const confirmReplaces = values.get("--confirm-replaces");
+  return {
+    mode: "register",
+    target: words[0],
+    smoke: {
+      databaseIsDisposable: flags.includes("--database-is-disposable"),
+      ...(baseUrl !== undefined ? { baseUrl } : {}),
+      ...(confirmReplaces !== undefined ? { confirmReplaces } : {}),
+    },
+  };
 }
 
 const KIND_WORDS: Record<string, PendingKind | "theme"> = {
@@ -198,6 +277,8 @@ export interface CliOptions {
   signal?: AbortSignal;
   /** Tests: what runs `git check-ignore`. */
   git?: typeof spawnSync;
+  /** Tests: stand-ins for what --smoke reaches: the database, the server and its child processes. */
+  smoke?: SmokeSteps;
 }
 
 /** Run one command. Returns the exit code: 0 done, 1 refused or failed, 2 a usage error. */
@@ -238,6 +319,35 @@ export async function runCli(args: readonly string[], options: CliOptions): Prom
           say(`Discarded ${target.kind}/${target.slug}: deleted ${result.pendingPath}/ and its record.`);
           return 0;
         }
+
+        // --smoke: its checks come first, so a refusal leaves nothing registered.
+        const smokeSteps = command.smoke ? (options.smoke ?? checkoutSmokeSteps(options.root, options.signal)) : null;
+        let plan: SmokePlan | null = null;
+        if (command.smoke && smokeSteps) {
+          if (target.kind !== "app") {
+            io.err(
+              `--smoke tests an app's routes, and a ${target.kind} has none of its own. Register it without ` +
+                "--smoke, then smoke-test an app that uses it.",
+            );
+            return 2;
+          }
+          const typed = command.smoke.confirmReplaces;
+          if (typed !== undefined && typed !== target.slug) {
+            io.err(printable(`--confirm-replaces names ${typed}, and this registers ${target.slug}. Type the slug of the app you are registering.`));
+            return 2;
+          }
+          const before = await smokeBeforeRegister(target.slug, command.smoke, {
+            root: options.root,
+            steps: smokeSteps,
+            say,
+          });
+          if (!before.ok) {
+            io.err(printable(before.message));
+            return 1;
+          }
+          plan = before.plan;
+        }
+
         say(`Registering ${target.kind}/${target.slug}. This runs its code for the first time...`);
         const result = await registerPending(target.kind, target.slug, shared);
         say(
@@ -256,6 +366,7 @@ export async function runCli(args: readonly string[], options: CliOptions): Prom
           options.git,
         );
         for (const line of handBackLines(result.handBack, { isApp: result.kind === "app", ignored })) say(line);
+        if (plan && smokeSteps) return await smokeAfterRegister(plan, { steps: smokeSteps, say, actor: shared.actor.email });
         return 0;
       }
     }

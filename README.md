@@ -340,6 +340,7 @@ first shows what will run, or in a terminal:
 ```bash
 npm run register                        # what is waiting
 npm run register -- app/<slug>          # move it into apps/ and run its code
+npm run register -- app/<slug> --smoke  # and migrate, activate and smoke-test it here
 npm run register -- app/<slug> --discard
 npm run register -- --recover           # after one that stopped midway
 ```
@@ -357,7 +358,10 @@ commands. `/mixos deploy` does the same and opens the pull request. Check that
 and `npm run register` warns when one does.
 
 Don't edit an installed folder. The registry generator compares it with its
-record, and Browse then says "modified locally". On Windows,
+record, and Browse then says "modified locally". A pull request with an
+installed folder that no longer matches its record fails the extensions check
+(`.github/workflows/extensions.yml`), which also smoke-tests each app a pull
+request changes. On Windows,
 work in WSL, or set `git config core.autocrlf false` in the repository:
 converting line endings changes the files, so every installed folder would
 count as modified. Extensions added before installs kept a record count as
