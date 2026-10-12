@@ -297,6 +297,18 @@ just pulled.
   `<kind>.remove`, and `npm run remove -- --recover` puts back one that stopped
   midway. The registry generator now also deletes its copies in `public/` of
   an extension that is gone.
+- **Preparing an update of an extension.** Install has an update mode: it
+  downloads any release of an app or a connector installed from mixos.org,
+  verifies and checks it as an install does, and leaves it in
+  `.mixos/pending/` with a record of what it replaces. The folder in place
+  isn't touched. Local changes to the folder, found from its `.registry.json`,
+  an older release and a withdrawn one each need an explicit yes. An update
+  dialog lists the releases with their dates and shows what the chosen one
+  changes: the publisher's claims, what its manifest declares, new migrations,
+  or for an older release the ones it lacks, and which files were changed
+  locally. The audit log records `<kind>.update`. No admin page opens the
+  dialog yet, and Register refuses a pending update and says to discard it,
+  until Register can put an update in place.
 
 ## 2026-10-07
 
