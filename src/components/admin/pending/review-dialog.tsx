@@ -22,7 +22,7 @@ import type {
 } from "@/lib/repository/pending-outcomes";
 import type { PendingReview } from "@/lib/repository/review";
 import { KIND_LABEL } from "@/lib/repository/types";
-import Notice from "./notice";
+import Notice from "@/components/ui/notice";
 import RegisterResult from "./register-result";
 import ReviewPanel from "./review-panel";
 import WithCode from "./with-code";

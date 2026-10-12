@@ -21,6 +21,7 @@ import { INSTALL_RECORD_FILE, serializeInstallRecord } from "../src/lib/reposito
 import { pendingLocation, writeSidecar, type PendingKind, type PendingSidecar } from "../src/lib/repository/pending";
 import type { TarEntry } from "../src/lib/repository/tar";
 import { cliActor, parseArgs, printable, resolveTarget, runCli } from "./register-cli";
+import { childEnv, type ChildRun, type SmokeSteps } from "./register-smoke";
 
 // ── the database: the register lock and the audit rows ──────────────────────
 
@@ -130,6 +131,41 @@ describe("arguments", () => {
     assert.deepEqual(parseArgs(["--break-lock"]), { mode: "break-lock" });
     for (const bad of [["--force"], ["--discard"], ["--recover", "acme"], ["a", "b"], ["--recover", "--break-lock"], ["acme", "--discard", "--discard"]]) {
       assert.ok("error" in parseArgs(bad), bad.join(" "));
+    }
+  });
+
+  test("--smoke and what goes with it", () => {
+    assert.deepEqual(parseArgs(["app/acme", "--smoke"]), {
+      mode: "register",
+      target: "app/acme",
+      smoke: { databaseIsDisposable: false },
+    });
+    assert.deepEqual(
+      parseArgs(["--smoke", "acme", "--base-url", "http://localhost:3118", "--confirm-replaces=acme", "--database-is-disposable"]),
+      {
+        mode: "register",
+        target: "acme",
+        smoke: { databaseIsDisposable: true, baseUrl: "http://localhost:3118", confirmReplaces: "acme" },
+      },
+    );
+    const refused: [string[], RegExp][] = [
+      [["--smoke"], /--smoke needs the app to register/],
+      [["app/acme", "--base-url", "http://localhost:3000"], /--base-url goes with --smoke/],
+      [["app/acme", "--database-is-disposable"], /--database-is-disposable goes with --smoke/],
+      [["app/acme", "--confirm-replaces", "acme"], /--confirm-replaces goes with --smoke/],
+      [["app/acme", "--smoke", "--discard"], /--smoke goes with registering an app, not with --discard/],
+      [["--recover", "--smoke"], /--smoke goes with registering an app/],
+      [["app/acme", "--smoke", "--smoke"], /Give --smoke once/],
+      [["app/acme", "--smoke", "--base-url"], /--base-url needs a value/],
+      [["app/acme", "--smoke", "--confirm-replaces", "--database-is-disposable"], /--confirm-replaces needs a value/],
+      [["app/acme", "--smoke", "--base-url", "ftp://example.com"], /--base-url must be http or https/],
+      [["app/acme", "--smoke=yes"], /Unknown option --smoke=yes/],
+      [["app/acme", "--discard=1"], /Unknown option --discard=1/],
+    ];
+    for (const [args, message] of refused) {
+      const parsed = parseArgs(args);
+      assert.ok("error" in parsed, args.join(" "));
+      assert.match(parsed.error, message, args.join(" "));
     }
   });
 
@@ -278,6 +314,258 @@ describe("running it", () => {
     assert.equal(await cli(["--recover"], t), 0);
     assert.deepEqual(t.asked, []);
     assert.match(t.out.join("\n"), /Nothing to recover/);
+  });
+});
+
+// ── --smoke ─────────────────────────────────────────────────────────────────
+
+describe("--smoke", () => {
+  const COOKIE = "authjs.session-token=s3ss10n-c00kie-value";
+  const BASE = "http://localhost:3118";
+
+  /** One JSON line, as scripts/smoke-activate.ts prints it. */
+  const answer = (value: unknown, code = 0): ChildRun => ({ code, stdout: `${JSON.stringify(value)}\n`, stderr: "" });
+
+  /** The verdict line, as scripts/smoke-test-app.ts prints it. */
+  const verdict = (ok: boolean, status = "tested"): ChildRun =>
+    answer(
+      {
+        ok,
+        baseUrl: BASE,
+        user: "admin@example.com",
+        counts: { pass: ok ? 2 : 0, fail: ok ? 0 : 2, blocked: 0, skipped: 0 },
+        apps: [{ slug: "acme", status, ok, routes: [] }],
+      },
+      ok ? 0 : 1,
+    );
+
+  /** Stand-ins for everything --smoke reaches, logging each call in order. */
+  function steps(over: Partial<SmokeSteps> = {}) {
+    const calls: string[] = [];
+    const s: SmokeSteps = {
+      database: () => (calls.push("database"), { hosts: ["localhost"], local: true }),
+      signIn: async (baseUrl) => (calls.push(`signIn ${baseUrl}`), { cookie: COOKIE, user: "admin@example.com" }),
+      userExists: async (email) => (calls.push(`userExists ${email}`), true),
+      appRow: async (slug) => (calls.push(`appRow ${slug}`), null),
+      migrate: async (onLine) => {
+        calls.push("migrate");
+        onLine("App migrations complete.");
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      activate: async (input) => {
+        calls.push(`activate ${JSON.stringify(input)}`);
+        return answer({ ok: true, activated: true, replaced: null, grant: "added" });
+      },
+      smoke: async (input, onLine) => {
+        calls.push(`smoke ${input.slug} ${input.baseUrl} ${input.cookie}`);
+        onLine("[smoke] acme: tested");
+        return verdict(true);
+      },
+      ...over,
+    };
+    return { steps: s, calls };
+  }
+
+  const smokeCli = (args: string[], s: SmokeSteps, t = terminal()) =>
+    runCli(args, { root, io: t.io, generator: STAND_IN, actor: { id: null, email: "cli:tester@test-host" }, smoke: s });
+
+  const registered = () => fs.existsSync(path.join(root, "apps", "acme", "app.json"));
+
+  test("registers, then migrates, activates and grants, and smoke-tests, in that order, after Register", async () => {
+    pend("app", "acme");
+    const { steps: s, calls } = steps();
+    const t = terminal();
+    assert.equal(await smokeCli(["app/acme", "--smoke", "--base-url", `${BASE}/`], s, t), 0, t.err.join("\n"));
+    assert.deepEqual(calls, [
+      "database",
+      `signIn ${BASE}`,
+      "userExists admin@example.com",
+      "appRow acme",
+      "migrate",
+      'activate {"slug":"acme","email":"admin@example.com","actor":"cli:tester@test-host"}',
+      `smoke acme ${BASE} ${COOKIE}`,
+    ]);
+    assert.deepEqual(audit.map((a) => a.action), ["app.register"]);
+    const out = t.out.join("\n");
+    assert.match(out, /Registered app\/acme 1\.2\.0[\s\S]*git push -u origin HEAD[\s\S]*Smoke test: migrating, activating and granting acme in this checkout's database \(localhost\), then calling its routes at http:\/\/localhost:3118 as admin@example\.com\./);
+    assert.match(out, /^ {4}App migrations complete\.$/m);
+    assert.match(out, /^Activated acme in this checkout's database \(localhost\)\.\nGranted acme to admin@example\.com\.\n\[smoke\] acme: tested\nThe smoke test passed\./m);
+    assert.doesNotMatch(out + t.err.join("\n"), /s3ss10n-c00kie-value/, "the session never reaches the output");
+  });
+
+  test("on a database that isn't on this machine, it refuses before anything is registered", async () => {
+    pend("app", "acme");
+    const { steps: s, calls } = steps({ database: () => ({ hosts: ["db.example.com"], local: false }) });
+    const t = terminal();
+    assert.equal(await smokeCli(["app/acme", "--smoke"], s, t), 1);
+    assert.deepEqual(calls, []);
+    assert.match(
+      t.err.join("\n"),
+      /^--smoke runs only against a database on this machine, and this checkout's is on db\.example\.com\. Other instances may use it too: --smoke would apply app\/acme's migrations there before anyone has reviewed them in a pull request[\s\S]*add --database-is-disposable\.\nNothing was registered\.$/,
+    );
+    assert.equal(registered(), false);
+    assert.deepEqual(audit, []);
+  });
+
+  test("--database-is-disposable lets it run there, and says so", async () => {
+    pend("app", "acme");
+    const { steps: s } = steps({ database: () => ({ hosts: ["db.example.com"], local: false }) });
+    const t = terminal();
+    assert.equal(await smokeCli(["app/acme", "--smoke", "--database-is-disposable", "--base-url", BASE], s, t), 0, t.err.join("\n"));
+    assert.match(t.out.join("\n"), /This checkout's database is on db\.example\.com, which you said is disposable/);
+  });
+
+  test("a connector has no routes to test: refused before anything is registered", async () => {
+    pend("connector", "probe");
+    const { steps: s, calls } = steps();
+    const t = terminal();
+    assert.equal(await smokeCli(["connector/probe", "--smoke"], s, t), 2);
+    assert.match(t.err.join("\n"), /--smoke tests an app's routes, and a connector has none of its own/);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(audit, []);
+  });
+
+  test("no server, or no sign-in: refused before anything is registered", async () => {
+    pend("app", "acme");
+    const { SmokeSetupError } = await import("./app-smoke");
+    const { steps: s } = steps({
+      signIn: async () => {
+        throw new SmokeSetupError("can't reach http://localhost:3118: ECONNREFUSED");
+      },
+    });
+    const t = terminal();
+    assert.equal(await smokeCli(["app/acme", "--smoke", "--base-url", BASE], s, t), 1);
+    assert.match(t.err.join("\n"), /couldn't: can't reach http:\/\/localhost:3118: ECONNREFUSED\.\nStart it with `npm run dev`[\s\S]*Nothing was registered\.$/);
+    assert.equal(registered(), false);
+  });
+
+  test("a server on another database, whose user this one doesn't have: refused", async () => {
+    pend("app", "acme");
+    const { steps: s } = steps({ userExists: async () => false });
+    const t = terminal();
+    assert.equal(await smokeCli(["app/acme", "--smoke", "--base-url", BASE], s, t), 1);
+    assert.match(t.err.join("\n"), /signed in admin@example\.com, who isn't in this checkout's database \(localhost\)\. So the server uses another database/);
+    assert.equal(registered(), false);
+  });
+
+  describe("an app that replaces a different extension under its slug", () => {
+    const local = { isActive: true, identity: "local", identityChangedAt: null, replacedIdentity: null };
+
+    test("is refused without its slug typed, with the command that types it", async () => {
+      pend("app", "acme");
+      const { steps: s, calls } = steps({ appRow: async () => local });
+      const t = terminal();
+      assert.equal(await smokeCli(["app/acme", "--smoke", "--base-url", BASE], s, t), 1);
+      const err = t.err.join("\n");
+      assert.match(
+        err,
+        /^app\/acme replaces a different extension under the same name: this checkout's database knows acme as local, with no install record, and this install is from mixos\.org, acme\/mixos-acme\./,
+      );
+      assert.match(err, /\nTo do that knowingly, type its slug:\n {2}npm run register -- app\/acme --smoke --base-url http:\/\/localhost:3118 --confirm-replaces acme\n/);
+      assert.match(err, /activate it in Admin > Apps, which asks for its slug too\.\nNothing was registered\.$/);
+      assert.ok(!calls.some((c) => c.startsWith("migrate")));
+      assert.equal(registered(), false);
+      assert.deepEqual(audit, []);
+    });
+
+    test("so is one a release step has already flagged, whatever it was", async () => {
+      pend("app", "acme");
+      const flagged = {
+        isActive: false,
+        identity: "https://mixos.org app/acme acme/mixos-acme",
+        identityChangedAt: new Date(),
+        replacedIdentity: "local",
+      };
+      const { steps: s } = steps({ appRow: async () => flagged });
+      const t = terminal();
+      assert.equal(await smokeCli(["app/acme", "--smoke"], s, t), 1);
+      assert.match(t.err.join("\n"), /knows acme as local, with no install record/);
+    });
+
+    test("with --confirm-replaces <slug>, it goes ahead, and activation gets the typed slug", async () => {
+      pend("app", "acme");
+      const { steps: s, calls } = steps({
+        appRow: async () => local,
+        activate: async (input) => {
+          calls.push(`activate ${JSON.stringify(input)}`);
+          return answer({ ok: true, activated: true, replaced: "local", grant: "existing" });
+        },
+      });
+      const t = terminal();
+      assert.equal(await smokeCli(["app/acme", "--smoke", "--base-url", BASE, "--confirm-replaces", "acme"], s, t), 0, t.err.join("\n"));
+      assert.ok(calls.includes('activate {"slug":"acme","email":"admin@example.com","typedSlug":"acme","actor":"cli:tester@test-host"}'));
+      assert.match(t.out.join("\n"), /Activated acme in this checkout's database \(localhost\), in place of a local extension\.\nadmin@example\.com already had acme\./);
+    });
+
+    test("--confirm-replaces naming another slug is a usage error", async () => {
+      pend("app", "acme");
+      const t = terminal();
+      assert.equal(await smokeCli(["app/acme", "--smoke", "--confirm-replaces", "other"], steps().steps, t), 2);
+      assert.match(t.err.join("\n"), /--confirm-replaces names other, and this registers acme/);
+    });
+
+    test("--confirm-replaces for an app that replaces nothing is said, and changes nothing", async () => {
+      pend("app", "acme");
+      const t = terminal();
+      assert.equal(await smokeCli(["app/acme", "--smoke", "--base-url", BASE, "--confirm-replaces", "acme"], steps().steps, t), 0);
+      assert.match(t.out.join("\n"), /--confirm-replaces acme: acme doesn't replace a different extension, so there is nothing to confirm\./);
+    });
+  });
+
+  test("a failed smoke test exits 1 and says what stays: nothing is rolled back", async () => {
+    pend("app", "acme");
+    const { steps: s } = steps({ smoke: async () => verdict(false, "inactive") });
+    const t = terminal();
+    assert.equal(await smokeCli(["app/acme", "--smoke", "--base-url", BASE], s, t), 1);
+    const out = t.out.join("\n");
+    assert.match(out, /The smoke test failed\. Nothing was rolled back: acme stays registered, migrated, active and granted here\./);
+    assert.match(out, /^ {2}SMOKE_EMAIL=admin@example\.com SMOKE_PASSWORD=<password> npx tsx scripts\/smoke-test-app\.ts acme --base-url http:\/\/localhost:3118$/m);
+    assert.match(out, /Every route answered 404, so the server isn't serving acme yet\. npm run dev can keep serving what it loaded before an app's folder was replaced: restart it\./);
+    assert.equal(registered(), true);
+  });
+
+  test("a smoke test that couldn't run says why", async () => {
+    pend("app", "acme");
+    const { steps: s } = steps({
+      smoke: async () => answer({ ok: false, baseUrl: BASE, user: null, counts: {}, apps: [], error: "no server" }, 2),
+    });
+    const t = terminal();
+    assert.equal(await smokeCli(["app/acme", "--smoke", "--base-url", BASE], s, t), 1);
+    assert.match(t.out.join("\n"), /The smoke test couldn't run: no server\. acme is registered, migrated, active and granted here\./);
+  });
+
+  test("a failed migration stops it before activation", async () => {
+    pend("app", "acme");
+    const { steps: s, calls } = steps({ migrate: async () => (calls.push("migrate"), { code: 1, stdout: "", stderr: "" }) });
+    const t = terminal();
+    assert.equal(await smokeCli(["app/acme", "--smoke", "--base-url", BASE], s, t), 1);
+    assert.match(t.out.join("\n"), /npm run migrate:apps failed \(exit 1\), so the smoke test stopped there\. acme is registered, and inactive\./);
+    assert.ok(!calls.some((c) => c.startsWith("activate") || c.startsWith("smoke")));
+  });
+
+  test("the migration and the activation get the database, and not the smoke user's credentials", () => {
+    const env = childEnv({
+      DATABASE_URL: "postgres://x",
+      PATH: "/bin",
+      SMOKE_EMAIL: "a@b.c",
+      SMOKE_PASSWORD: "pw",
+      SMOKE_COOKIE: "c",
+    } as unknown as NodeJS.ProcessEnv);
+    assert.deepEqual(env, { DATABASE_URL: "postgres://x", PATH: "/bin" });
+  });
+
+  test("activation's own refusal stops it before the smoke test, with what to do", async () => {
+    pend("app", "acme");
+    const { steps: s, calls } = steps({
+      activate: async () => answer({ ok: false, code: "connectors", message: "Configure Acme CRM before activating this app." }, 1),
+    });
+    const t = terminal();
+    assert.equal(await smokeCli(["app/acme", "--smoke", "--base-url", BASE], s, t), 1);
+    assert.match(
+      t.out.join("\n"),
+      /Configure Acme CRM before activating this app\. acme is registered and migrated, and wasn't activated\. Configure it in Admin > Connectors, activate acme in Admin > Apps, then run the smoke test:/,
+    );
+    assert.ok(!calls.some((c) => c.startsWith("smoke")));
   });
 });
 

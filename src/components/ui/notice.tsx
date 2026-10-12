@@ -10,19 +10,20 @@ import {
   Info,
   XCircle,
 } from "lucide-react";
-import type { NoticeTone } from "@/lib/repository/pending-outcomes";
 
 /**
- * A boxed message for the install, review and register screens.
+ * A boxed message: the install, review and register screens, and the notices
+ * under the Apps, Connectors and Themes pages' headers
+ * (../admin/registry-notices.tsx).
  *
  * Five tones, by what the reader has to do. `info` is how something works,
  * such as a built deployment not installing: nothing is wrong, so it is not
  * dressed as a warning. `neutral` is a wait, such as a lock someone else
- * holds. `warning` asks for something; `danger` is a fault; `success` is done.
- * There is no info colour among the theme tokens, so `info` is the neutral
- * ground with its own icon.
+ * holds, or news that asks nothing. `warning` asks for something; `danger` is
+ * a fault; `success` is done. There is no info colour among the theme tokens,
+ * so `info` is the neutral ground with its own icon.
  */
-export type Tone = NoticeTone | "success";
+export type Tone = "info" | "neutral" | "warning" | "danger" | "success";
 
 const TONES: Record<Tone, string> = {
   info: "border-border bg-muted",
