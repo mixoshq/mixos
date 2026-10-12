@@ -243,6 +243,18 @@ just pulled.
   installed from the Registry, before or after this change, is switched off
   once at the first release step that carries it, and an app's API keys are
   revoked.
+- **Remove an extension's code.** Admin > Apps, Connectors and Themes have
+  **Remove** on each tile, and `npm run remove -- <kind>/<slug>` does the same
+  in a checkout. It says first what goes and what stays, then moves the folder
+  to `.mixos/backup/`, regenerates the registry without it, and deletes it, or
+  puts it back if the generator fails. It is refused while an app requires the
+  connector or uses the app's services or hooks, and for the last theme, and it
+  warns about an app that uses the connector optionally and about the applied
+  theme. The data stays in each database. It hands back the commit that
+  deletes the folder, `.registry.json` included. The audit log records
+  `<kind>.remove`, and `npm run remove -- --recover` puts back one that stopped
+  midway. The registry generator now also deletes its copies in `public/` of
+  an extension that is gone.
 
 ## 2026-10-07
 
