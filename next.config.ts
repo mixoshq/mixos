@@ -69,6 +69,14 @@ const nextConfig: NextConfig = {
     },
   },
   devIndicators: false,
+  logging: {
+    incomingRequests: {
+      // GitHub sends the admin back here with the App's one-time code in the
+      // query string, which can be exchanged for its private key until it is
+      // used. Development only: production doesn't log requests.
+      ignore: [/\/api\/admin\/github\/created/],
+    },
+  },
   async rewrites() {
     // OAuth discovery documents must live at fixed `/.well-known/...` paths
     // (RFC 8414 / RFC 9728) — that's where every MCP client looks. A

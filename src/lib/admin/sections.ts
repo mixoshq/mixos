@@ -7,6 +7,7 @@ import {
   BarChart3,
   Bot,
   Clock,
+  GitPullRequest,
   LayoutGrid,
   Palette,
   Plug,
@@ -65,6 +66,7 @@ export const ADMIN_SECTIONS: NavSection[] = [
   },
   { label: "Scheduled Jobs", href: "/admin/scheduled-jobs", icon: Clock },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
+  { label: "GitHub", href: "/admin/github", icon: GitPullRequest },
 ];
 
 /**
