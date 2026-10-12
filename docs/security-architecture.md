@@ -2088,9 +2088,12 @@ install is refused, `app.install.rejected`, `connector.install.rejected` or
 `theme.install.rejected`; registering a pending app or connector as
 `app.register` or `connector.register`, or `app.register.rejected` and
 `connector.register.rejected` when it is refused; discarding one as
-`app.discard` or `connector.discard`; and recovery putting back or clearing
+`app.discard` or `connector.discard`; recovery putting back or clearing
 what a stopped one left as `app.register.recover` or
-`connector.register.recover` (§31). `connector.disable` and `connector.enable`
+`connector.register.recover`; removing an extension's code as `app.remove`,
+`connector.remove` or `theme.remove`, or `<kind>.remove.rejected` when it is
+refused; and recovery after a removal that stopped midway as
+`<kind>.remove.recover` (§31). `connector.disable` and `connector.enable`
 name the apps that declare the connector, in `details` as `requiredBy` and
 `optionalFor`. An `app.activate` or `connector.enable` that answered a
 different extension under the name, with the name typed, has the identity it
@@ -2124,12 +2127,14 @@ in the step's own transaction, so the change and its record commit together:
 rule 2 is about not failing an admin's action, and here a failed write fails
 the step before anything it would have recorded is committed.
 
-**Rows the Register and Discard buttons write.** The same actions from Admin >
-Apps and Admin > Connectors name the signed-in admin, with `via: "button"` in
-`details`. A Register the page refuses on a built deployment, before any lock,
-is `<kind>.register.rejected` with `reason: "unsupported-environment"`.
+**Rows the Register, Discard and Remove buttons write.** The same actions from
+Admin > Apps, Admin > Connectors and Admin > Themes name the signed-in admin,
+with `via: "button"` in `details`. A Register or a Remove the page refuses on a
+built deployment, before any lock, is `<kind>.register.rejected` or
+`<kind>.remove.rejected` with `reason: "unsupported-environment"`.
 
-**Rows `npm run register` writes.** Registering, discarding and recovering run
+**Rows `npm run register` and `npm run remove` write.** Registering,
+discarding, removing and recovering run
 in a shell in the checkout, where nobody has signed in, so their rows have a
 null `actor_id`, `actor_email` `cli:<os user>@<hostname>`, and `via: "cli"` in
 `details`. The colon keeps the name from reading as an address. Nothing vouches
@@ -2342,7 +2347,8 @@ and `npm run register` passes the generator none of what it loaded to reach the
 database. Once registered, an app runs in the dev server with the server's
 environment, as every app does.
 
-**Staged and pending copies are never scanned.** Both are under `.mixos/`,
+**Staged and pending copies are never scanned,** and nor is the backup a
+removal makes. All are under `.mixos/`,
 outside every folder the generator reads, and the generator also skips every
 dot-prefixed folder in `apps/`, `connectors/` and `themes/`, as it skips
 `_template`. `.mixos/` is git-ignored, Docker-ignored and ESLint-ignored, `tsc`'s
@@ -2741,20 +2747,83 @@ deploying it.
 **Turning it off.** `MIXOS_UPDATE_CHECK=false`, the update check's switch,
 sends nothing for this check either, and the admin pages say the checks are off.
 
+### Removing an extension's code
+
+Removing an extension has two halves. Its code is a change to the repository,
+made in a checkout and shipped by a commit and a deploy, as installing it is.
+Its data is in each database, and stays: the release step marks an app that
+left the build and keeps everything it had (§3.1), and a connector keeps its
+credentials. No code the extension ships runs to remove it.
+
+The code half is **Remove** on each tile of Admin > Apps, Connectors and
+Themes, or `npm run remove -- <kind>/<slug>`
+([`src/lib/repository/remove.ts`](../src/lib/repository/remove.ts)). Each says
+first what goes, what stays and what stands in the way, then asks. In the
+checkout, under both locks (below):
+
+1. It is refused while something depends on it, by the manifests in this
+   checkout: an app that requires the connector (`connectors`), or an app that
+   uses the app's services (`consumes`) or listens to its hooks (`listensTo`),
+   which the build refuses without it; and the last theme, which the build
+   needs. An app the build skips still counts, since the next build reads the
+   same manifest. It warns, without refusing, about an app that uses a
+   connector optionally, and about the theme this checkout's database applies.
+2. A record goes to `.mixos/backup/<kind dir>/<slug>.json`, with the checkout
+   lock's token, and the folder is renamed to `.mixos/backup/<kind dir>/<slug>/`,
+   out of the build.
+3. The registry generator runs, with `PATH` and `TMPDIR` only.
+4. If it fails, stops or still lists the extension, the folder is renamed back
+   and the registry regenerated. Otherwise the record says the generator
+   accepted it, and the backup and its record are deleted. A pending install
+   of the same name is discarded with it.
+5. It is audited as `<kind>.remove`, or `<kind>.remove.rejected` with the
+   reason (§28).
+
+The result hands back the commit that deletes the folder
+(`removalHandBackFor()` in `src/lib/repository/hand-back.ts`), its message
+built from the kind, the slug and, for an extension installed from a Registry,
+its record's version and source: `feat(<slug>): remove <kind> <slug>`, with
+`<version> from <host>` and the `Registry-Source` and `Registry-Version`
+trailers for an install. The install record goes with the folder, so one
+commit removes both. The server never runs git. `npm run remove` asks git,
+read-only, whether the folder holds work that isn't committed, which removing
+deletes, and whether git tracks the folder at all.
+
+**A removal that stops midway** leaves its record, and removal, Register and
+install refuse that slug until recovery has dealt with it:
+`npm run remove -- --recover`, which is `npm run register -- --recover`.
+Recovery leaves a record alone while the checkout lock holds its token and that
+holder may still be running: that removal is still under way. Otherwise it puts
+back a folder the generator never accepted the checkout without, and finishes
+deleting one it did. A
+backup it can't place, with no readable record or with the folder back in
+place too, is left for a person. Each one it acts on is audited as
+`<kind>.remove.recover`.
+
+**The generator's copies in `public/`.** A full run records each copy it makes
+in `public/` for pages read without a session (a theme's assets, an app's or a
+theme's screenshots, an app's brand marks, a connector's assets) in
+`src/generated/public-copies.json`, before it makes it. At its end it deletes
+the copies an earlier run recorded and this one didn't make, so a removed
+extension's files stop being served. It deletes only folders in that record,
+and nothing else in `public/` (`scripts/public-copies.ts`).
+
 ### Two locks: the register lease and the checkout lock
 
 Two installs or registrations at once would run two generators over the same
 `src/generated/*.ts` files, and one's rollback could land on top of the other's
-success. So install, Register, Discard and recovery each run under two locks.
+success. So install, Register, Discard, removal and recovery each run under two
+locks.
 
 **The register lock**, `repository.register`
 ([`src/lib/platform/lock.ts`](../src/lib/platform/lock.ts)), is a row in
 `_platform_locks`, which every instance using the database shares, rather than a
 Postgres advisory lock, because a session advisory lock does not survive a
-transaction pooler. An admin who installs, registers or discards while it is
-held is told "Another administrator is installing or registering. Try again in a
-moment." and offered **Try again**, and an install or a registration is audited
-as `<kind>.install.rejected` or `<kind>.register.rejected` with
+transaction pooler. An admin who installs, registers, discards or removes while
+it is held is told "Another administrator is installing, registering or removing
+an extension. Try again in a moment." and offered **Try again**, and an install,
+a registration or a removal is audited as `<kind>.install.rejected`,
+`<kind>.register.rejected` or `<kind>.remove.rejected` with
 `reason: "locked"`. When it is the checkout lock that is held, the message names
 its holder instead, such as the registry generator `npm run dev` started.
 
@@ -2792,7 +2861,8 @@ that:
   started included.
 - **Both locks are checked before the disk changes.** Every change (staging,
   deleting a staged copy the check refused, moving into pending or into place,
-  a rollback, deleting a pending install, each step of a recovery) begins with
+  a rollback, deleting a pending install, moving a folder into or out of
+  `.mixos/backup/`, each step of a recovery) begins with
   `assertHeld()`, `update _platform_locks set acquired_at = now() where name =
   $1 and holder = $2 returning 1`, which renews the lease only while the row
   still holds this acquisition's random token, and then reads the lock file back
@@ -2857,8 +2927,9 @@ one; adding a second should be a deliberate code change with a floor.
 
 Every entry point in the admin pages is a server action that calls
 `requireAdmin()` itself, before it reads anything else (§9): install, the
-review, Register, Discard and Activate in this checkout
-(`src/lib/repository/actions.ts`, `src/lib/repository/pending-actions.ts`). The
+review, Register, Discard, Activate in this checkout, and Remove and what it
+shows first (`src/lib/repository/actions.ts`,
+`src/lib/repository/pending-actions.ts`, `src/lib/repository/remove-actions.ts`). The
 pages' own gates guard the render only, and the actions are reachable without
 ever loading them. Both outcomes are audited (§28): `app.install` records the
 version, commit, verified hash, files hash, where it went, the check's verdict
@@ -2918,12 +2989,12 @@ below), so on those the flags decide only whether the catalogue can be browsed.
 - **Run from a built artifact.** `checkInstallable()` refuses up front when
   `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
   `output: "standalone"` tree, which its server `chdir`s to before listening
-  (`isBuiltDeployment()`, `src/lib/platform/build.ts`). Register, Discard and
-  the review refuse on the same marker, before any lock. Each says it as
-  information, not as a fault: "This deployment runs a build. Install and
-  register in a checkout of your repository, commit, and deploy." Browse still
-  shows the catalogue and each release there, with that sentence in place of the
-  install button.
+  (`isBuiltDeployment()`, `src/lib/platform/build.ts`). Register, Discard,
+  Remove and the review refuse on the same marker, before any lock. Each says it
+  as information, not as a fault: "This deployment runs a build. Install and
+  register in a checkout of your repository, commit, and deploy.", and Remove
+  says the same of removing. Browse still shows the catalogue and each release
+  there, with that sentence in place of the install button.
 
   This check has to be a marker rather than a capability probe, because the
   capability probe can pass while the capability is absent.

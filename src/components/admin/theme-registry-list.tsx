@@ -6,14 +6,15 @@
 
 import { useState, useTransition } from "react";
 import Image from "next/image";
-import { Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Check, Trash2 } from "lucide-react";
+import { Button, IconButton } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { renderAuthors, formatLastUpdated } from "@/lib/apps/display";
 import type { ThemeManifest } from "@/lib/themes/types";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
 
 /**
  * The theme picker. There is deliberately no light/dark control beside it.
@@ -47,6 +48,8 @@ export default function ThemeRegistryList({
   const [pending, startTransition] = useTransition();
   /** The theme awaiting confirmation, or null when the dialog is closed. */
   const [confirming, setConfirming] = useState<ThemeManifest | null>(null);
+  /** The theme whose Remove dialog is open, or null. */
+  const [removing, setRemoving] = useState<RemoveTarget | null>(null);
   const toast = useToast();
 
   function confirmApply() {
@@ -63,7 +66,7 @@ export default function ThemeRegistryList({
 
   return (
     <>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {themes.map((theme) => {
           const active = theme.slug === activeSlug;
           return (
@@ -145,33 +148,48 @@ export default function ThemeRegistryList({
                     footer, in the same mono treatment: the row below says
                     when it changed and who changed it, this says where to go
                     to change it yourself. */}
-                <code className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+                <code
+                  className="min-w-0 truncate font-mono text-xs text-muted-foreground"
+                  title={`/themes/${theme.slug}/`}
+                >
                   /themes/{theme.slug}/
                 </code>
-                {active ? (
-                  // Not a disabled Apply button: there is no action here to be
-                  // temporarily unavailable, so this is a status, and rendering
-                  // it as a greyed control would invite clicks that can never
-                  // do anything. It is also the ONLY place the tile says it is
-                  // live — the badge this replaced said the same thing twice.
-                  <p className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-success">
-                    <Check className="h-4 w-4" aria-hidden /> Activated
-                  </p>
-                ) : (
-                  // The connector tile's Configure button, exactly: size="sm"
-                  // and the variant carrying the state — primary while there
-                  // is still something to do, secondary once there isn't. A
-                  // theme that is not live is the "still to do" case.
-                  <Button
+                <div className="flex shrink-0 items-center gap-2">
+                  {active ? (
+                    // Not a disabled Apply button: there is no action here to be
+                    // temporarily unavailable, so this is a status, and rendering
+                    // it as a greyed control would invite clicks that can never
+                    // do anything. It is also the ONLY place the tile says it is
+                    // live — the badge this replaced said the same thing twice.
+                    <p className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-success">
+                      <Check className="h-4 w-4" aria-hidden /> Activated
+                    </p>
+                  ) : (
+                    // The connector tile's Configure button, exactly: size="sm"
+                    // and the variant carrying the state — primary while there
+                    // is still something to do, secondary once there isn't. A
+                    // theme that is not live is the "still to do" case.
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      className="shrink-0"
+                      onClick={() => setConfirming(theme)}
+                      disabled={pending}
+                    >
+                      Apply
+                    </Button>
+                  )}
+                  {/* The app and connector tiles' Remove, in the same place
+                      and weight. Removing the applied theme is allowed, with a
+                      warning; removing the last one is refused. */}
+                  <IconButton
+                    variant="ghost"
                     size="sm"
-                    variant="primary"
-                    className="shrink-0"
-                    onClick={() => setConfirming(theme)}
-                    disabled={pending}
-                  >
-                    Apply
-                  </Button>
-                )}
+                    label={`Remove ${theme.name}`}
+                    icon={<Trash2 className="h-4 w-4" aria-hidden />}
+                    onClick={() => setRemoving({ kind: "theme", slug: theme.slug, name: theme.name })}
+                  />
+                </div>
               </div>
 
               <div className="mt-3 flex items-baseline justify-between gap-3 border-t border-border pt-3 text-[10px] leading-none text-muted-foreground">
@@ -226,6 +244,8 @@ export default function ThemeRegistryList({
           fall back on.
         </p>
       </Dialog>
+
+      {removing && <RemoveDialog target={removing} onClose={() => setRemoving(null)} />}
     </>
   );
 }
