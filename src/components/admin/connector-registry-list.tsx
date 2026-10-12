@@ -21,6 +21,7 @@ import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import { describeIdentity } from "@/lib/repository/identity";
 import ConnectorTile from "./connector-tile";
 import ConnectorConfigureDialog from "./connector-configure-dialog";
+import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
 import TypedConfirmDialog from "./typed-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { CARD_SHELL } from "@/components/ui/card";
@@ -138,6 +139,8 @@ export default function ConnectorRegistryList({
   const [confirmingEnable, setConfirmingEnable] =
     useState<ConnectorWithStatus | null>(null);
   const [enableError, setEnableError] = useState<string | null>(null);
+  /** The connector whose Remove dialog is open, or null. */
+  const [removing, setRemoving] = useState<RemoveTarget | null>(null);
 
   function enable(connector: ConnectorWithStatus) {
     if (connector.replacement) {
@@ -279,7 +282,7 @@ export default function ConnectorRegistryList({
       </div>
 
       {filtered.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((connector) => (
             <ConnectorTile
               key={connector.name}
@@ -287,6 +290,9 @@ export default function ConnectorRegistryList({
               onConfigure={() => openTile(connector.name)}
               onDisable={() => setConfirmingDisable(connector)}
               onEnable={() => enable(connector)}
+              onRemove={() =>
+                setRemoving({ kind: "connector", slug: connector.name, name: connector.displayName })
+              }
               switching={switching}
             />
           ))}
@@ -430,6 +436,8 @@ export default function ConnectorRegistryList({
           </p>
         </TypedConfirmDialog>
       )}
+
+      {removing && <RemoveDialog target={removing} onClose={() => setRemoving(null)} />}
     </>
   );
 }

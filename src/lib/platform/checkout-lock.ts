@@ -6,10 +6,10 @@
  * The checkout lock: `.mixos/lock`, one file that every operation changing what
  * this checkout builds holds while it works.
  *
- * Installing, registering, discarding, recovering and the registry generator
- * all change the same things: `.mixos/`, `apps/`, `connectors/`, `themes/` and
- * the `src/generated/` modules the build compiles. Two of them at once would
- * interleave, and the registry would describe neither.
+ * Installing, registering, discarding, removing, recovering and the registry
+ * generator all change the same things: `.mixos/`, `apps/`, `connectors/`,
+ * `themes/` and the `src/generated/` modules the build compiles. Two of them at
+ * once would interleave, and the registry would describe neither.
  *
  * ── WHY A FILE, AS WELL AS THE ROW LOCK ─────────────────────────────────────
  *
@@ -183,7 +183,7 @@ function heldMessage(holder: CheckoutLockHolder | null): string {
   if (!holder) {
     return (
       "This checkout is locked (.mixos/lock), and the lock file can't be read. If no " +
-      "install, registration or registry generator is running in this checkout, run " +
+      "install, registration, removal or registry generator is running in this checkout, run " +
       "`npm run register -- --break-lock`."
     );
   }

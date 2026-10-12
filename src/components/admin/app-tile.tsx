@@ -5,11 +5,11 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Trash2 } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import type { AppReplacement } from "@/lib/apps/access";
 import LucideIcon from "@/components/lucide-icon";
-import { Button } from "@/components/ui/button";
+import { Button, IconButton } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status";
 import { setAppActiveAction } from "@/lib/apps/admin-actions";
 import { describeIdentity } from "@/lib/repository/identity";
@@ -52,6 +52,8 @@ interface AppTileProps {
    * the slug typed, and clears it.
    */
   replacement: AppReplacement | null;
+  /** Opens the Remove dialog, which says what goes and what stays before it removes anything. */
+  onRemove: () => void;
 }
 
 /**
@@ -80,6 +82,7 @@ export default function AppTile({
   isActive,
   returnedChangedAt,
   replacement,
+  onRemove,
 }: AppTileProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -271,7 +274,10 @@ export default function AppTile({
             details dialog puts beside its footer, in the same mono treatment:
             the row below says when it changed and who changed it, this says
             where to go to change it yourself. */}
-        <code className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+        <code
+          className="min-w-0 truncate font-mono text-xs text-muted-foreground"
+          title={`/apps/${app.slug}/`}
+        >
           /apps/{app.slug}/
         </code>
         {/* The theme tile's Apply and the connector tile's Configure, exactly:
@@ -312,6 +318,16 @@ export default function AppTile({
           >
             Details
           </Button>
+          {/* The quietest control on the tile, and an icon, so the path
+              beside it keeps its room: removing an app's code is rare, and
+              the dialog it opens says what goes and what stays first. */}
+          <IconButton
+            variant="ghost"
+            size="sm"
+            label={`Remove ${app.name}`}
+            icon={<Trash2 className="h-4 w-4" aria-hidden />}
+            onClick={onRemove}
+          />
         </div>
       </div>
 
