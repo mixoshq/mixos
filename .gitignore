@@ -79,6 +79,7 @@ supabase/.branches/
 
 # This checkout's installs from the Registry: extensions waiting to be
 # registered, the copies installs check, and the checkout lock
-# (src/lib/repository/pending.ts). What a registration produces is in apps/ or
-# connectors/, and that is what gets committed.
+# (src/lib/repository/pending.ts); and an extension's folder while it is being
+# removed (src/lib/repository/backup.ts). What a registration produces is in
+# apps/ or connectors/, and that is what gets committed.
 /.mixos/

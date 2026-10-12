@@ -31,11 +31,13 @@ import {
   formatApp,
   formatSummary,
   isEmptyBody,
+  normalizeBaseUrl,
   routeUrl,
   runSmoke,
   sessionUser,
   setupFailure,
   signIn,
+  signInFromEnv,
   type AppResult,
   type Observation,
   type SmokeApp,
@@ -146,7 +148,7 @@ function route(routePath: string, ...methods: RouteMethodContract[]): RouteContr
 }
 
 /** Run the smoke test against `fake`, logging each wait to `sleeps` instead of waiting. */
-function smoke(apps: SmokeApp[], fake: ReturnType<typeof server>, sleeps: number[] = []) {
+function smoke(apps: SmokeApp[], fake: ReturnType<typeof server>, sleeps: number[] = [], skipUnavailable = false) {
   return runSmoke({
     baseUrl: BASE,
     cookie: COOKIE,
@@ -155,6 +157,7 @@ function smoke(apps: SmokeApp[], fake: ReturnType<typeof server>, sleeps: number
     sleep: async (ms) => {
       sleeps.push(ms);
     },
+    skipUnavailable,
   });
 }
 
@@ -360,6 +363,31 @@ describe("each answer, on its own", () => {
     assert.match(note ?? "", /^405: the server has no GET here/);
   });
 
+  test("with skipUnavailable, a 503 UNAVAILABLE is skipped: the route needs what this server hasn't configured", () => {
+    const skip = { skipUnavailable: true };
+    const connector =
+      '{"error":{"category":"unconfigured","message":"Acme isn\'t set up yet.","connector":"Acme","retryAfterMs":null},"code":"UNAVAILABLE"}';
+    assert.deepEqual(classify(get, at(503, connector), skip), {
+      result: "skipped",
+      note: "not tested: 503 Acme unconfigured: Acme isn't set up yet.",
+    });
+    assert.deepEqual(classify(get, at(503, '{"error":"That is temporarily unavailable","code":"UNAVAILABLE"}'), skip), {
+      result: "skipped",
+      note: "not tested: 503 UNAVAILABLE: That is temporarily unavailable",
+    });
+    // Anything else that is a server error still fails.
+    for (const [status, body] of [
+      [503, ""],
+      [503, '{"error":"down","code":"HANDLER_ERROR"}'],
+      [502, '{"error":{"category":"upstream_error","message":"Acme failed.","connector":"Acme","retryAfterMs":null},"code":"UNAVAILABLE"}'],
+      [500, '{"error":"a GET /items failed.","code":"HANDLER_ERROR"}'],
+    ] as const) {
+      assert.equal(classify(get, at(status, body), skip).result, "fail", `${status} ${body}`);
+    }
+    // And without it, as in a checkout, a 503 fails like any 5xx.
+    assert.equal(classify(get, at(503, connector)).result, "fail");
+  });
+
   test("what counts as an empty body", () => {
     for (const body of ["", "  ", "null", '""', "{}", "[]"]) assert.equal(isEmptyBody(body), true, body);
     for (const body of ["0", "false", '{"a":null}', "[0]", "<html></html>"]) assert.equal(isEmptyBody(body), false, body);
@@ -458,6 +486,33 @@ describe("the app as a whole", () => {
     assert.equal(app.status, "tested");
     assert.equal(app.ok, false);
     assert.deepEqual(rows(app), ["fail GET /boom 500", "fail HEAD /boom 500", "pass GET /fine 200", "pass HEAD /fine 200"]);
+  });
+
+  test("with skipUnavailable, a route that answers 503 UNAVAILABLE is skipped, HEAD with its GET, and the app passes", async () => {
+    const unavailable = json(503, { error: "Acme isn't configured", code: "UNAVAILABLE" });
+    const routes = [route("live", method("GET")), route("fine", method("GET"))];
+    const fake = () => server({ "GET /api/apps/a/live": unavailable, "GET /api/apps/a/fine": json(200, { ok: true }) });
+
+    const [skipped] = await smoke([{ slug: "a", routes }], fake(), [], true);
+    assert.equal(skipped.status, "tested");
+    assert.equal(skipped.ok, true);
+    assert.deepEqual(rows(skipped), ["skipped GET /live 503", "skipped HEAD /live 503", "pass GET /fine 200", "pass HEAD /fine 200"]);
+    assert.equal(skipped.routes[1].note, "not tested: 503, as GET");
+
+    const [failed] = await smoke([{ slug: "a", routes }], fake());
+    assert.equal(failed.ok, false);
+    assert.deepEqual(rows(failed).slice(0, 2), ["fail GET /live 503", "fail HEAD /live 503"]);
+  });
+
+  test("with skipUnavailable, a HEAD that fails after its GET passed still fails", async () => {
+    let n = 0;
+    const [app] = await smoke(
+      [{ slug: "a", routes: [route("x", method("GET"))] }],
+      server({ "GET /api/apps/a/x": () => (n++ === 0 ? json(200, { x: 1 })() : bare(503)()) }),
+      [],
+      true,
+    );
+    assert.deepEqual(rows(app), ["pass GET /x 200", "fail HEAD /x 503"]);
   });
 
   test("HEAD answering differently from GET is noted", async () => {
@@ -685,6 +740,42 @@ describe("signing in", () => {
         return true;
       },
     );
+  });
+
+  test("from the environment: SMOKE_COOKIE wins, the password is the other way, and neither is a refusal", async () => {
+    const seen: string[] = [];
+    const session = (async (input: string | URL | Request, init?: RequestInit) => {
+      seen.push(`${new URL(String(input)).pathname} ${new Headers(init?.headers).get("cookie") ?? ""}`);
+      return new Response(JSON.stringify({ user: { email: "a@b.c" } }), { status: 200 });
+    }) as typeof fetch;
+    const hidden: string[] = [];
+    const fromCookie = await signInFromEnv({
+      baseUrl: BASE,
+      env: { SMOKE_COOKIE: "abc.def.ghi", SMOKE_EMAIL: "x@y.z", SMOKE_PASSWORD: PASSWORD },
+      fetch: session,
+      onCookie: (cookie) => hidden.push(cookie),
+    });
+    assert.deepEqual(fromCookie, { cookie: "authjs.session-token=abc.def.ghi", user: "a@b.c" });
+    assert.deepEqual(hidden, ["authjs.session-token=abc.def.ghi"], "told before the session was asked about");
+    assert.deepEqual(seen, ["/api/auth/session authjs.session-token=abc.def.ghi"]);
+
+    await assert.rejects(signInFromEnv({ baseUrl: BASE, env: {}, fetch: session }), /no sign-in\. Set SMOKE_EMAIL/);
+    await assert.rejects(
+      signInFromEnv({ baseUrl: BASE, env: { SMOKE_COOKIE: "a\nb" }, fetch: session }),
+      /SMOKE_COOKIE holds a line break/,
+    );
+    const nobody = (async () => new Response("{}", { status: 200 })) as typeof fetch;
+    await assert.rejects(
+      signInFromEnv({ baseUrl: BASE, env: { SMOKE_COOKIE: "expired" }, fetch: nobody }),
+      /SMOKE_COOKIE wasn't accepted/,
+    );
+  });
+
+  test("a base URL is an http or https origin and path, without a trailing slash", () => {
+    assert.equal(normalizeBaseUrl("http://localhost:3118/"), "http://localhost:3118");
+    assert.equal(normalizeBaseUrl("https://mixos.example.com/os//"), "https://mixos.example.com/os");
+    assert.throws(() => normalizeBaseUrl("localhost:3000"), /is not a URL|must be http or https/);
+    assert.throws(() => normalizeBaseUrl("ftp://example.com"), /must be http or https, not ftp:/);
   });
 
   test("SMOKE_COOKIE: a bare token gets the session cookie's name, `__Secure-` over HTTPS", () => {

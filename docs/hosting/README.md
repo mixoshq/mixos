@@ -11,8 +11,9 @@ A MixOS deployment is three things:
    with one `DATABASE_URL` and uses nothing but Postgres itself. There is no
    PostgREST, no Supabase API and no service-role key involved.
 3. **A tick.** `GET /api/cron` with `Authorization: Bearer $CRON_SECRET` every
-   five minutes, which drives scheduled jobs and the daily
-   [update check](#what-mixos-sends-to-mixosorg). Vercel Cron, a cron job on
+   five minutes, which drives scheduled jobs, the daily
+   [update check](#what-mixos-sends-to-mixosorg) and the daily check for
+   [new releases of MixOS](#new-releases-of-mixos). Vercel Cron, a cron job on
    the host platform, or a `curl` loop all work.
 
 Each deploy also runs **the release step** before new code takes traffic. It
@@ -57,7 +58,8 @@ on its own.
 | `CRON_SECRET` | Yes | The bearer token the tick sends. Without it `/api/cron` refuses every call, and jobs never run. |
 | `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | For the first deploy | The release step creates this account if no account has the email. It never changes an existing one, so the variables are safe to leave set. |
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind and install from it. See [Fixing what an instance runs](#fixing-what-an-instance-runs). |
-| `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance asks mixos.org once a day about the extensions it installed from there, so admins see a release its publisher withdrew. `false` sends nothing. See [What MixOS sends to mixos.org](#what-mixos-sends-to-mixosorg). |
+| `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance asks mixos.org once a day about the extensions it installed from there, so admins see a release its publisher withdrew, and about new releases of MixOS. `false` sends nothing. See [What MixOS sends to mixos.org](#what-mixos-sends-to-mixosorg). |
+| `MIXOS_RELEASE_CHANNEL` | No, default `stable` | Which releases of MixOS the admin pages tell you about: `stable`, or `prerelease` to include prereleases. See [New releases of MixOS](#new-releases-of-mixos). |
 | `GITHUB_APP_ENCRYPTION_KEY` | No | Turns on Admin > GitHub, which links the instance to its repository through a GitHub App you own. 32 random bytes; `npm run keys:generate -- --github-app` prints one. The App's private key is stored encrypted under it, so **back it up**. See [Linking your GitHub repository](#linking-your-github-repository). |
 | `MIXOS_COMMIT` | No | The commit the admin pages show beside the MixOS version. For the Docker image it's a build argument. See [Which build is running](#which-build-is-running). |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated domains allowed to sign in. Blank: any. |
@@ -146,6 +148,40 @@ only when its own database is on the same machine: loopback, a Unix socket or
 database other instances share doesn't offer it, because activating there would
 turn the app on for every instance on that database.
 
+`npm run register -- app/<slug> --smoke` follows the same rule. After Register
+it runs the app's migrations, activates it, grants it to the user you sign in
+as (`SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`) and runs the smoke
+test against your dev server. It reports and never rolls back. On a database
+that isn't on your machine it refuses, before registering anything, unless you
+pass `--database-is-disposable`.
+
+### The pull-request check
+
+[`.github/workflows/extensions.yml`](../../.github/workflows/extensions.yml)
+runs on pull requests that change `apps/`, `connectors/` or `themes/`. It fails
+the pull request when:
+
+- **An installed folder doesn't match its `.registry.json`.** It hashes each
+  folder as committed, so an edit after install fails it, and so does a file the
+  commit left out. Your `.gitignore` can leave one out (`*.pem`, `.npmrc`);
+  `npm run register` names any it would. Commit the file with `git add -f`,
+  install the release again, or delete the `.registry.json` to keep the folder
+  as your own local extension. To run this check yourself:
+  `npx tsx scripts/check-install-records.ts`.
+- **A changed app fails its smoke test.** The job starts a fresh MixOS: a
+  Postgres that lives as long as the job, keys made for the run, the release
+  step, `npm run build` and `npm run start`. It activates and grants each app
+  the pull request changes, then runs `scripts/smoke-test-app.ts` as the first
+  admin. A 5xx, a timeout or a refused request fails it. The job has no
+  connector credentials, so a route that answers 503 UNAVAILABLE is skipped,
+  not failed. A pull request that changes only a connector or a theme gets the
+  folder check and no smoke test.
+
+The job can read the repository and nothing else: no secrets, and a read-only
+token it doesn't keep. It runs only when those paths change, so GitHub would
+wait for it forever on other pull requests if you made it a required check.
+Read its result on the pull request instead.
+
 ### When an extension needs a newer MixOS
 
 A release of an extension can name the oldest MixOS it runs on, and its
@@ -213,9 +249,47 @@ check tries again an hour later, or after the wait mixos.org asks for, but
 never more than a day later.
 
 To turn it off, set `MIXOS_UPDATE_CHECK=false`: nothing is sent and no ID is
-created, and admins aren't told about withdrawn releases. Any value other than
-`true` or `false` is read as `false`, and the release step reports it. To stop
+created, and admins aren't told about withdrawn releases. The same switch stops
+the check for [new releases of MixOS](#new-releases-of-mixos), so with it off
+the instance sends nothing to mixos.org on its own. Any value other than `true`
+or `false` is read as `false`, and the release step reports it. To stop
 checking one extension, delete its `.registry.json`.
+
+### New releases of MixOS
+
+Once a day, each instance also asks mixos.org which releases of MixOS exist, so
+admins hear when a newer one is out. The tick sends one request, from the
+server:
+
+```
+GET https://mixos.org/api/v1/mixos/releases
+User-Agent: MixOS
+```
+
+- **Sent:** nothing about the instance. No ID, no version, no query and no
+  body. mixos.org records nothing for a `GET`, so all it learns is that a MixOS
+  somewhere asked, from the request's IP address.
+- **Shown:** when a newer release is out, a notice at the top of every admin
+  page, such as "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor
+  release: it may need changes." Its notes are collapsed, and their links are
+  shown as text, never as links. The notice links to the release's page on
+  mixos.org and to [Upgrading](#upgrading). Under the version at the foot of
+  the admin pages, a line says when mixos.org last answered.
+- **Never applied.** Nothing is merged, downloaded or deployed. Taking a release
+  is up to you: merge its tag into your copy, as [Upgrading](#upgrading) says.
+
+The check keeps the update check's schedule: about once a day, and an hour
+after a failure, or later if mixos.org asks, but never more than a day later.
+Its last answer is kept in the database as
+`platform_settings.mixos_release_check`.
+
+**The channel.** `MIXOS_RELEASE_CHANNEL=stable`, the default, tells you about
+releases only. `prerelease` adds prereleases, tags with a suffix such as
+`v0.3.0-rc.1`, which are for trying a version before it's final. Any other
+value is read as `stable`, and the release step reports it.
+
+**Turning it off.** `MIXOS_UPDATE_CHECK=false` turns this check off along with
+the update check. Nothing is sent, and the admin pages say the checks are off.
 
 ### Linking your GitHub repository
 
@@ -302,8 +376,13 @@ With Docker Compose, put both in the shell's environment and run
 3. **Where each connector and theme came from**, by
    [`scripts/sync-identities.ts`](../../scripts/sync-identities.ts), which
    `npm run migrate:apps` also runs. A connector that is a different one than
-   the one recorded under its name is disabled.
-4. **The first admin**, from `INITIAL_ADMIN_*`, only if that account does not
+   the one recorded under its name is disabled. A connector the build no
+   longer has, whose credentials the database keeps, is marked missing, and
+   keeps them.
+4. **What this build carries**: its apps and connectors, which Delete data on
+   every instance sharing the database counts; see
+   [Deleting an extension's data](#deleting-an-extensions-data).
+5. **The first admin**, from `INITIAL_ADMIN_*`, only if that account does not
    exist yet.
 
 It is safe to run on every deploy, and safe to run twice at once: each
@@ -369,6 +448,14 @@ recorded:
 The audit log records both, as `app.missing` and `app.returned`, with
 `release-step` as the actor.
 
+A connector the build no longer has keeps its credentials and its users'
+connections the same way. The release step marks it missing, as
+`connector.missing`, and clears the mark when it comes back, as
+`connector.returned`. Admin > Connectors lists it under **Not in this build**.
+
+What an app or a connector kept stays until an admin deletes it; see
+[Deleting an extension's data](#deleting-an-extensions-data).
+
 ### When a different extension takes a name
 
 The release step also records where each app, connector and theme came from:
@@ -394,11 +481,83 @@ release step after you reinstall one of those from the Registry switches it
 off once. Deleting an installed extension's `.registry.json` makes it local,
 which counts as a different extension too.
 
+### Removing an extension
+
+Removing an extension is a change to your repository, as installing one is:
+
+1. In a checkout of your repository, running `npm run dev`, press **Remove** on
+   its tile in Admin > Apps, Connectors or Themes, or run
+   `npm run remove -- <kind>/<slug>`. Either says first what goes and what
+   stays. It is refused while an app depends on it (an app that requires the
+   connector, or uses the app's services or hooks), and for the last theme.
+2. Commit the deletion and open a pull request. Removing hands back the
+   commands and a commit message; `/mixos deploy` does the same. An extension
+   installed from the Registry takes its `.registry.json` with it.
+3. Merge it into the branch your host deploys.
+
+Its data stays in each database: an app's tables, settings, API keys, grants
+and scheduled jobs, and a connector's credentials. The release step marks a
+removed app or connector missing and keeps all of it; see
+[When an app leaves the build](#when-an-app-leaves-the-build). An admin deletes
+it on each instance once the removal is deployed there; see
+[Deleting an extension's data](#deleting-an-extensions-data). A theme holds no
+data. An instance that applies a removed theme shows the first theme by name
+until an admin applies another.
+
+A removal that stops midway leaves the folder in `.mixos/backup/`, and
+`npm run remove -- --recover` puts it back.
+
+### Deleting an extension's data
+
+Admin > Apps and Admin > Connectors list under **Not in this build** each app
+or connector whose data the database keeps and the build doesn't have. Keeping
+it costs nothing and needs nothing. To delete it, press **Delete data…** on its
+entry, read what goes, and type its name.
+
+- **An app** loses its schema, `app_<slug>`, with its tables, and its database
+  role, `mixos_app_<slug>`; its settings, API keys, scheduled jobs and their
+  runs, the record of which of its migrations ran, its telemetry and recorded
+  opens; its place in each MCP authorization; and its row, with its grants,
+  user installs, password and widgets.
+- **A connector** loses its saved credentials, every user's own connection,
+  its granted scopes, webhook replay markers and telemetry, and its switch and
+  marks.
+
+The audit log is never touched, and gains a row for the deletion,
+`app.data.delete` or `connector.data.delete`, with how much went. Nothing else
+is touched either: another extension whose name starts with the same letters
+keeps all of its data. Afterwards nothing under the name is left, so a later
+extension with the same name starts with nothing. Deleting can't be undone, so
+back up the database first if you might want the data back.
+
+It is refused:
+
+- while the build serving this instance has it;
+- until a release step has run on this database without it. Deploy the
+  removal, or run `npm run migrate:apps` in a checkout. A host's rollback
+  serves an older build without a release step, so a build that lacks an
+  extension doesn't show on its own that it has gone;
+- while any other build that used this database in the last 24 hours has it.
+
+Each build records which apps and connectors it carries at its release step,
+when its server starts, and on the cron tick, at most every ten minutes. A
+deployment is known by its commit and what it carries, and a checkout by the
+random id in `.mixos/checkout-id`. The instance asking doesn't count against
+itself.
+
+In a checkout, the Remove dialog also has **Remove code and delete this
+checkout's data**, which asks for the name typed and deletes the data right
+after the code, with the same checks. On a database only this machine reaches,
+the removal counts as the release step having run. On a shared one it doesn't:
+run `npm run migrate:apps` or deploy first, then use Delete data. If the data
+can't be deleted, the code still goes and the data stays.
+
 ### Which build is running
 
 The admin pages show the MixOS version and the commit the deployment was built
 from, for example `MixOS 0.4.2 · commit 3e1f0a2`, so you can check that a deploy
-landed. Only admins see them.
+landed, and when a newer release is out (see
+[New releases of MixOS](#new-releases-of-mixos)). Only admins see them.
 
 The version is `package.json`'s, stamped into every build. The commit comes from
 the host:
@@ -457,9 +616,10 @@ database as `DATABASE_URL`.
 
 Each version of MixOS is a release: a tag on this repository's `main`, such
 as `v0.2.0`, listed on the [releases page](https://github.com/mixoshq/mixos/releases)
-with notes that put breaking changes first. Upgrade by merging the newest
-release tag into your fork. Don't merge `upstream/main`: between releases it
-holds work that hasn't been released yet.
+with notes that put breaking changes first. When a newer one is out, the admin
+pages say so ([New releases of MixOS](#new-releases-of-mixos)). Upgrade by
+merging the newest release tag into your fork. Don't merge `upstream/main`:
+between releases it holds work that hasn't been released yet.
 
 1. **Back up the database.** Migrations only go forward, so a backup is the
    way back. `pg_dump` works on every path; for the database in the Compose

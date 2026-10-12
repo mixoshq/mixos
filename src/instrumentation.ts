@@ -20,10 +20,14 @@
 // API route) runs before any of that app's client code has ever been imported,
 // so without a registration here nothing would be listening.
 //
-// No app registers server-side listeners today, so this is deliberately empty
-// rather than deleted — the file is the documented extension point, and without
-// it the next app to need a server-fired listener has to rediscover why its
-// hook never fires.
+// No app registers server-side listeners today. The file stays as the
+// documented extension point: without it the next app to need a server-fired
+// listener has to rediscover why its hook never fires.
+//
+// What it does do: record which apps and connectors this build carries, in
+// platform_builds_seen (src/lib/platform/this-build.ts), so Delete data on any
+// instance sharing the database knows this build uses them. Not awaited, and it
+// never throws: a server whose database is unreachable or behind still starts.
 //
 // This is NOT the scheduler's home. The 5-minute tick lives behind
 // GET /api/cron (src/app/api/cron/route.ts): a serverless instance is frozen
@@ -34,11 +38,13 @@
 // wastes a connection every 5 minutes and makes job timing impossible to reason
 // about. Do not "restore" startScheduler(); it no longer exists, on purpose.
 export async function register() {
-  // When an app needs this, gate the import on the Node runtime — `register()`
-  // also runs in the Edge runtime, where a listener module that touches the DB
-  // or a connector cannot load:
+  // Every import is gated on the Node runtime — `register()` also runs in the
+  // Edge runtime, where a module that touches the DB or a connector cannot
+  // load. An app's listeners would join this block the same way:
   //
-  //   if (process.env.NEXT_RUNTIME === "nodejs") {
-  //     await import("@apps/<slug>/server-hooks");
-  //   }
+  //   await import("@apps/<slug>/server-hooks");
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { recordThisBuild } = await import("@/lib/platform/this-build");
+    void recordThisBuild();
+  }
 }

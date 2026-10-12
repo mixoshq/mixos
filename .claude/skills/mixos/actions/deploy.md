@@ -231,6 +231,31 @@ Nothing under `.mixos/` is ever committed (git ignores it). Something still
 waiting there hasn't been registered and isn't in the build: ask whether to run
 `npm run register -- <kind>/<slug>` first, or leave it.
 
+**A removed extension.** A folder removed with **Remove** in Admin or
+`npm run remove` is gone from `apps/`, `connectors/` or `themes/`, with its
+`.registry.json` if it had one. Commit the deletion as a commit of its own,
+with the message the removal printed (`git rm -r <folder>`, then
+`git commit -F - -- <folder>`). To write it yourself, build it from the kind,
+the slug and, for an installed one, its record's version and source, never from
+the manifest's `name`:
+
+```
+feat(<slug>): remove <kind> <slug> <version> from <host>
+
+Removed in a checkout. Each instance keeps the app's data until an
+admin deletes it there.
+
+Its install record, <folder>/.registry.json, goes with it.
+
+Registry-Source: <source>
+Registry-Version: <version>
+```
+
+For a local one, the subject ends at `<slug>`, and there is no record line
+and no trailers. A theme's body says "A theme holds no data."; a connector's
+says it keeps the connector's credentials. There is no manifest left to
+review.
+
 **A version bump.** Only a release PR changes `package.json`'s version
 (**Release**, at the end of this file). A developer may bump it locally to
 try an extension whose `requiresMixOS` is newer than this checkout.
