@@ -356,12 +356,19 @@ commands. `/mixos deploy` does the same and opens the pull request. Check that
 `git status` lists every file: a rule in your `.gitignore` can leave one out,
 and `npm run register` warns when one does.
 
+**Removing one.** **Remove** on its tile, or `npm run remove -- <kind>/<slug>`,
+deletes its folder from the checkout and regenerates the registry, once it has
+said what goes and what stays. It is refused while an app depends on it, and
+for the last theme. Its data stays in each database. Commit the deletion and
+deploy: removing hands back the commands and a commit message, as Register
+does. `npm run remove -- --recover` puts back one that stopped midway.
+
 Don't edit an installed folder. The registry generator compares it with its
 record, and Browse then says "modified locally". On Windows,
 work in WSL, or set `git config core.autocrlf false` in the repository:
 converting line endings changes the files, so every installed folder would
 count as modified. Extensions added before installs kept a record count as
-local. To give one a record, remove its folder and install it again from the
+local. To give one a record, remove it and install it again from the
 Registry. The release step then counts it as a different extension under the
 same name, once: it switches the app off and revokes its API keys, or
 disables the connector, until an admin types its name to turn it back on. See
