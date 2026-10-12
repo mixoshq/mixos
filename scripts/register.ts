@@ -9,7 +9,8 @@
 //   npm run register -- <kind>/<slug>             register it
 //   npm run register -- <slug>                    the same, when only one kind has it pending
 //   npm run register -- <kind>/<slug> --discard   delete it from pending
-//   npm run register -- --recover                 tidy up after one that stopped midway
+//   npm run register -- --recover                 tidy up after one that stopped midway,
+//                                                 or after a removal that did
 //   npm run register -- --break-lock              show who holds the checkout lock, and ask
 //
 // Registering moves the extension into apps/ or connectors/ and runs the
@@ -21,11 +22,11 @@
 // runs the generator with PATH and TMPDIR only. With `npm run dev:docker`, run
 // it from your terminal: it reaches the stack's database as the dev server does.
 //
-// The work is in scripts/register-cli.ts and src/lib/repository/register.ts.
+// The work is in scripts/register-cli.ts and src/lib/repository/register.ts;
+// what it shares with `npm run remove` as a program is scripts/checkout-cli.ts.
 
 import path from "path";
-import readline from "readline";
-import type { Sql } from "postgres";
+import { runCheckoutCli } from "./checkout-cli";
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -33,71 +34,4 @@ const ROOT = path.resolve(__dirname, "..");
 // src/lib/platform/build.ts read the checkout from the working directory.
 process.chdir(ROOT);
 
-/** Ask on the terminal. No answer, a closed input or Ctrl-C is no. */
-function ask(question: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    let answered = false;
-    rl.on("SIGINT", () => rl.close());
-    rl.on("close", () => {
-      if (!answered) {
-        process.stdout.write("\n");
-        resolve(false);
-      }
-    });
-    rl.question(`${question} [y/N] `, (answer) => {
-      answered = true;
-      rl.close();
-      resolve(/^\s*y(es)?\s*$/i.test(answer));
-    });
-  });
-}
-
-async function main(): Promise<number> {
-  const { loadEnv } = await import("./load-env");
-  loadEnv();
-  const { runCli } = await import("./register-cli");
-
-  // The first Ctrl-C stops at the next safe point, ending a generator run in
-  // progress, so the locks are released and what was left is said. A second
-  // one quits at once.
-  const controller = new AbortController();
-  let interrupts = 0;
-  const interrupt = () => {
-    interrupts += 1;
-    if (interrupts > 1) process.exit(130);
-    controller.abort();
-    process.stderr.write("\nStopping at the next safe point. Press Ctrl-C again to quit now.\n");
-  };
-  process.on("SIGINT", interrupt);
-  process.on("SIGTERM", interrupt);
-  process.on("SIGHUP", interrupt);
-
-  try {
-    return await runCli(process.argv.slice(2), {
-      root: ROOT,
-      signal: controller.signal,
-      io: {
-        out: (line) => console.log(line),
-        err: (line) => console.error(line),
-        ask,
-      },
-    });
-  } finally {
-    // The pool the register lock and the audit used, if they used one.
-    const pool = (globalThis as { __pg?: Sql }).__pg;
-    await pool?.end({ timeout: 5 }).catch(() => {});
-  }
-}
-
-// Ended by running out of work rather than by process.exit(), which can cut
-// off what is still being written to a pipe (`npm run register | tee`). If
-// anything were left holding the process open, it ends a few seconds later.
-const finish = (code: number) => {
-  process.exitCode = code;
-  setTimeout(() => process.exit(code), 5000).unref();
-};
-main().then(finish, (err) => {
-  console.error(err instanceof Error ? err.message : err);
-  finish(1);
-});
+runCheckoutCli(ROOT, () => import("./register-cli"));

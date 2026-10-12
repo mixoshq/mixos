@@ -55,7 +55,8 @@ import {
 import { CONTENT_HASH_PATTERN, KIND_SEGMENT, SlugSchema } from "./types";
 
 /** What a lock held by someone else reads as, from the database's register lock. */
-export const LOCKED_MESSAGE = "Another administrator is installing or registering. Try again in a moment.";
+export const LOCKED_MESSAGE =
+  "Another administrator is installing, registering or removing an extension. Try again in a moment.";
 
 /* -------------------------------------------------------------------------- */
 /*  What each action is given                                                   */

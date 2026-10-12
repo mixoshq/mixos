@@ -83,6 +83,7 @@ import {
   parseCheckVerdict,
   type CheckVerdict,
 } from "./check-verdict";
+import { leftoverBackup } from "./backup";
 import { fetchInstallManifest, repositoryBaseUrl } from "./client";
 import { fetchExtensionTree } from "./fetch-source";
 import { filesHash, verifyContentHash } from "./content-hash";
@@ -1128,8 +1129,7 @@ export async function regenerateRegistry(
     return { ran: true, ok: false, stopped: true, output: run.output };
   }
 
-  const generated = await readRegistryModule(kind, root);
-  const present = generated.includes(`"${REGISTRY_KEY[kind]}": ${JSON.stringify(slug)}`);
+  const present = await listedInRegistry(kind, slug, root);
   return {
     ran: true,
     ok: present,
@@ -1138,6 +1138,16 @@ export async function regenerateRegistry(
       ? run.output
       : `${run.output}\n\nThe generator ran without error but ${slug} is not in ${REGISTRY_FILE_LABEL[kind]}.`,
   };
+}
+
+/**
+ * Whether the generated module for `kind`, this checkout's or the one under
+ * `root`, lists `slug`: a file this process reads, never the generator's output.
+ * Removal (./remove.ts) asks it after the generator ran without the folder.
+ */
+export async function listedInRegistry(kind: ExtensionKind, slug: string, root?: string): Promise<boolean> {
+  const generated = await readRegistryModule(kind, root);
+  return generated.includes(`"${REGISTRY_KEY[kind]}": ${JSON.stringify(slug)}`);
 }
 
 /**
@@ -1432,6 +1442,16 @@ async function runInstall(
   if (pathExists(dir)) {
     throw new InstallError(
       `${rel} already exists in this checkout. Remove it first, or update it in its own source repo.`,
+      "already-installed",
+    );
+  }
+  // Nor over a removal that stopped midway, whose folder may be waiting in
+  // `.mixos/backup/` for recovery to put it back.
+  const leftover = leftoverBackup(PROJECT_ROOT, kind, slug);
+  if (leftover) {
+    throw new InstallError(
+      `A removal of ${slug} stopped before it finished, and left ${leftover.rel}. Run ` +
+        "`npm run remove -- --recover` in this checkout to put things back, then try again.",
       "already-installed",
     );
   }
