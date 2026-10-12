@@ -11,7 +11,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { describeBuild, floorVerdict, mixosCommit, mixosVersion, satisfiesMinimum } from "./version";
+import {
+  compareWithThisBuild,
+  describeBuild,
+  floorVerdict,
+  mixosCommit,
+  mixosVersion,
+  satisfiesMinimum,
+} from "./version";
 
 const PACKAGE_VERSION = (
   JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../../package.json"), "utf-8")) as {
@@ -179,4 +186,14 @@ test("on a built deployment the verdict says so", () => {
   withEnv({ VERCEL: "1" }, () => {
     assert.equal(floorVerdict("0.0.1").where, "deployment");
   });
+});
+
+// ── a release of MixOS against this build ───────────────────────────────────
+
+test("a release tag compares with this build's stamped version, in full", () => {
+  assert.deepEqual(compareWithThisBuild(`v${PACKAGE_VERSION}`), { order: "same" });
+  assert.deepEqual(compareWithThisBuild("v999.0.0"), { order: "newer", step: "major" });
+  assert.deepEqual(compareWithThisBuild(`v${PACKAGE_VERSION}-rc.1`), { order: "older" });
+  assert.deepEqual(compareWithThisBuild("v0.5.0", "0.4.2"), { order: "newer", step: "minor" });
+  assert.equal(compareWithThisBuild("v0.5"), null);
 });
