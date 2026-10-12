@@ -11,8 +11,10 @@ A MixOS deployment is three things:
    with one `DATABASE_URL` and uses nothing but Postgres itself. There is no
    PostgREST, no Supabase API and no service-role key involved.
 3. **A tick.** `GET /api/cron` with `Authorization: Bearer $CRON_SECRET` every
-   five minutes, which drives scheduled jobs. Vercel Cron, a cron job on the
-   host platform, or a `curl` loop all work.
+   five minutes, which drives scheduled jobs, the daily
+   [update check](#what-mixos-sends-to-mixosorg) and the daily check for
+   [new releases of MixOS](#new-releases-of-mixos). Vercel Cron, a cron job on
+   the host platform, or a `curl` loop all work.
 
 Each deploy also runs **the release step** before new code takes traffic. It
 applies the database migrations and creates the first admin. Inside the image
@@ -56,6 +58,8 @@ on its own.
 | `CRON_SECRET` | Yes | The bearer token the tick sends. Without it `/api/cron` refuses every call, and jobs never run. |
 | `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | For the first deploy | The release step creates this account if no account has the email. It never changes an existing one, so the variables are safe to leave set. |
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind and install from it. See [Fixing what an instance runs](#fixing-what-an-instance-runs). |
+| `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance asks mixos.org once a day about the extensions it installed from there, so admins see a release its publisher withdrew, and about new releases of MixOS. `false` sends nothing. See [What MixOS sends to mixos.org](#what-mixos-sends-to-mixosorg). |
+| `MIXOS_RELEASE_CHANNEL` | No, default `stable` | Which releases of MixOS the admin pages tell you about: `stable`, or `prerelease` to include prereleases. See [New releases of MixOS](#new-releases-of-mixos). |
 | `MIXOS_COMMIT` | No | The commit the admin pages show beside the MixOS version. For the Docker image it's a build argument. See [Which build is running](#which-build-is-running). |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated domains allowed to sign in. Blank: any. |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | No | Web Push, for apps that send notifications. |
@@ -142,6 +146,149 @@ only when its own database is on the same machine: loopback, a Unix socket or
 `host.docker.internal`, as with the local Docker stack. A checkout that uses a
 database other instances share doesn't offer it, because activating there would
 turn the app on for every instance on that database.
+
+`npm run register -- app/<slug> --smoke` follows the same rule. After Register
+it runs the app's migrations, activates it, grants it to the user you sign in
+as (`SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`) and runs the smoke
+test against your dev server. It reports and never rolls back. On a database
+that isn't on your machine it refuses, before registering anything, unless you
+pass `--database-is-disposable`.
+
+### The pull-request check
+
+[`.github/workflows/extensions.yml`](../../.github/workflows/extensions.yml)
+runs on pull requests that change `apps/`, `connectors/` or `themes/`. It fails
+the pull request when:
+
+- **An installed folder doesn't match its `.registry.json`.** It hashes each
+  folder as committed, so an edit after install fails it, and so does a file the
+  commit left out. Your `.gitignore` can leave one out (`*.pem`, `.npmrc`);
+  `npm run register` names any it would. Commit the file with `git add -f`,
+  install the release again, or delete the `.registry.json` to keep the folder
+  as your own local extension. To run this check yourself:
+  `npx tsx scripts/check-install-records.ts`.
+- **A changed app fails its smoke test.** The job starts a fresh MixOS: a
+  Postgres that lives as long as the job, keys made for the run, the release
+  step, `npm run build` and `npm run start`. It activates and grants each app
+  the pull request changes, then runs `scripts/smoke-test-app.ts` as the first
+  admin. A 5xx, a timeout or a refused request fails it. The job has no
+  connector credentials, so a route that answers 503 UNAVAILABLE is skipped,
+  not failed. A pull request that changes only a connector or a theme gets the
+  folder check and no smoke test.
+
+The job can read the repository and nothing else: no secrets, and a read-only
+token it doesn't keep. It runs only when those paths change, so GitHub would
+wait for it forever on other pull requests if you made it a required check.
+Read its result on the pull request instead.
+
+### When an extension needs a newer MixOS
+
+A release of an extension can name the oldest MixOS it runs on, and its
+`.registry.json` keeps it. Install and Register refuse a release that needs a
+newer MixOS than the checkout's, the version in `package.json`, and the build
+checks again. When an extension in the build needs a newer MixOS than the one
+being built, the build stops:
+
+```
+This build is MixOS 0.1.0, and an extension installed from a Registry needs a newer one:
+  apps/acme-board/.registry.json: release 1.2.0 requires MixOS 0.2.0 or newer.
+Upgrade MixOS, or install an older release of it that runs on 0.1.0. The build stops rather than leave it out of this deploy.
+```
+
+It stops because skipping the extension would drop it from the deploy without
+a word. Nothing is deployed, so what was serving keeps serving, and a pull
+request that carries the extension fails CI the same way. It happens when the
+extension was installed on a newer MixOS than the one being built: in a
+checkout with `package.json` bumped locally, say, or on a branch with an
+upgrade yours doesn't have.
+
+To fix it, [upgrade MixOS](#upgrading) to a release that meets the floor, or go
+back to a release of the extension that runs on your version. Browse installs
+only an extension's current release, so going back means reverting the commit
+that brought the newer one in. A local extension, with no `.registry.json`, is
+never checked, and a floor that isn't a version is a warning, not a stop.
+
+### What MixOS sends to mixos.org
+
+Once a day, each instance asks mixos.org about the extensions it installed from
+there, so that when a publisher withdraws a release, for a security problem say,
+the admins of every instance running it see why. The tick sends one request,
+from the server:
+
+```
+POST https://mixos.org/api/v1/updates
+{ "instanceId": "<random UUID>",
+  "items": [{ "kind": "app", "slug": "files", "version": "1.2.0" }] }
+```
+
+- **Sent:** a random ID for the instance, and the kind, slug and version of
+  each extension installed from mixos.org, from its `.registry.json`.
+- **Not sent:** extensions you wrote or installed from anywhere else, users,
+  data, settings, the instance's URL, and the MixOS version.
+- **The ID** is made at the first check and kept in the instance's database, as
+  `platform_settings.registry_instance_id`. It comes from nothing about the
+  instance. Each database is one instance, so a checkout and production are
+  two.
+- **What mixos.org keeps:** for each instance and extension, the version it last
+  listed, a two-letter country, and when it was first and last seen, until 30
+  days after the last check that listed it; and, for each release an instance
+  lists for the first time, a row that counts the install, for 30 days and then
+  only as daily totals. Its database doesn't store IP addresses. Its
+  [API docs](https://mixos.org/docs/api#what-we-record-and-what-we-do-not)
+  have the detail.
+
+The answer only shows notices, under the header of Admin > Apps, Connectors and
+Themes: a release its publisher withdrew, with their reason and, for an app, a
+**Deactivate** button; a newer release; a listing that's no longer published;
+and when mixos.org last answered. Nothing is updated or switched off for you.
+
+A check runs about once a day, and at the next tick after a deploy changes what
+is installed. If mixos.org can't be reached, the last answer stays, and the
+check tries again an hour later, or after the wait mixos.org asks for, but
+never more than a day later.
+
+To turn it off, set `MIXOS_UPDATE_CHECK=false`: nothing is sent and no ID is
+created, and admins aren't told about withdrawn releases. The same switch stops
+the check for [new releases of MixOS](#new-releases-of-mixos), so with it off
+the instance sends nothing to mixos.org on its own. Any value other than `true`
+or `false` is read as `false`, and the release step reports it. To stop
+checking one extension, delete its `.registry.json`.
+
+### New releases of MixOS
+
+Once a day, each instance also asks mixos.org which releases of MixOS exist, so
+admins hear when a newer one is out. The tick sends one request, from the
+server:
+
+```
+GET https://mixos.org/api/v1/mixos/releases
+User-Agent: MixOS
+```
+
+- **Sent:** nothing about the instance. No ID, no version, no query and no
+  body. mixos.org records nothing for a `GET`, so all it learns is that a MixOS
+  somewhere asked, from the request's IP address.
+- **Shown:** when a newer release is out, a notice at the top of every admin
+  page, such as "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor
+  release: it may need changes." Its notes are collapsed, and their links are
+  shown as text, never as links. The notice links to the release's page on
+  mixos.org and to [Upgrading](#upgrading). Under the version at the foot of
+  the admin pages, a line says when mixos.org last answered.
+- **Never applied.** Nothing is merged, downloaded or deployed. Taking a release
+  is up to you: merge its tag into your copy, as [Upgrading](#upgrading) says.
+
+The check keeps the update check's schedule: about once a day, and an hour
+after a failure, or later if mixos.org asks, but never more than a day later.
+Its last answer is kept in the database as
+`platform_settings.mixos_release_check`.
+
+**The channel.** `MIXOS_RELEASE_CHANNEL=stable`, the default, tells you about
+releases only. `prerelease` adds prereleases, tags with a suffix such as
+`v0.3.0-rc.1`, which are for trying a version before it's final. Any other
+value is read as `stable`, and the release step reports it.
+
+**Turning it off.** `MIXOS_UPDATE_CHECK=false` turns this check off along with
+the update check. Nothing is sent, and the admin pages say the checks are off.
 
 ### The release step
 
@@ -288,7 +435,8 @@ A removal that stops midway leaves the folder in `.mixos/backup/`, and
 
 The admin pages show the MixOS version and the commit the deployment was built
 from, for example `MixOS 0.4.2 · commit 3e1f0a2`, so you can check that a deploy
-landed. Only admins see them.
+landed, and when a newer release is out (see
+[New releases of MixOS](#new-releases-of-mixos)). Only admins see them.
 
 The version is `package.json`'s, stamped into every build. The commit comes from
 the host:
@@ -347,9 +495,10 @@ database as `DATABASE_URL`.
 
 Each version of MixOS is a release: a tag on this repository's `main`, such
 as `v0.2.0`, listed on the [releases page](https://github.com/mixoshq/mixos/releases)
-with notes that put breaking changes first. Upgrade by merging the newest
-release tag into your fork. Don't merge `upstream/main`: between releases it
-holds work that hasn't been released yet.
+with notes that put breaking changes first. When a newer one is out, the admin
+pages say so ([New releases of MixOS](#new-releases-of-mixos)). Upgrade by
+merging the newest release tag into your fork. Don't merge `upstream/main`:
+between releases it holds work that hasn't been released yet.
 
 1. **Back up the database.** Migrations only go forward, so a backup is the
    way back. `pg_dump` works on every path; for the database in the Compose
@@ -380,6 +529,13 @@ Skipping releases is fine. Merge the newest tag, and the release step applies
 every migration in between; read the notes of each release you skipped.
 Prereleases, tags with a suffix such as `v0.3.0-rc.1`, are for trying a
 version before it's final, and `--exclude '*-*'` leaves them out.
+
+Extensions installed from the Registry move with your copy. A release of one
+can name the oldest MixOS it runs on: install and Register refuse it on an
+older version, and a build that carries it stops (see
+[When an extension needs a newer MixOS](#when-an-extension-needs-a-newer-mixos)).
+Upgrading never trips that check, since every floor an older MixOS meets, a
+newer one meets too.
 
 ## Before going public
 

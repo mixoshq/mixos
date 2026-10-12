@@ -5,10 +5,11 @@
 /**
  * The catalogue client's requests, against a catalogue on this machine.
  *
- * Every one of them is made by `getJson`, which is private, so these drive it
- * through the three calls that use it: search, listing and install manifest.
- * Each is shown to read a direct answer as it always has, and to follow a
- * redirect only within the catalogue's own origin.
+ * Every one of them is made by `requestJson`, so these drive it through the
+ * three GETs that use it: search, listing and install manifest. Each is shown
+ * to read a direct answer as it always has, and to follow a redirect only
+ * within the catalogue's own origin. Its one POST, the update check, follows
+ * none: see client-updates.test.ts.
  */
 
 import { test, type TestContext } from "node:test";
@@ -57,7 +58,7 @@ const ANSWERS: Record<string, unknown> = {
   },
 };
 
-/** The three calls `getJson` serves, and the request each one sends. */
+/** The three GETs `requestJson` serves, and the request each one sends. */
 const CALLS = [
   {
     name: "search",

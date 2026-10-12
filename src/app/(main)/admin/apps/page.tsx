@@ -16,6 +16,7 @@ import AppRegistryList from "@/components/admin/app-registry-list";
 import AppsNotInBuild from "@/components/admin/apps-not-in-build";
 import BrandConflicts from "@/components/admin/brand-conflicts";
 import PendingInstalls from "@/components/admin/pending/pending-installs";
+import RegistryNotices from "@/components/admin/registry-notices";
 import { getActiveTheme } from "@/lib/themes/active";
 
 export default async function AppsAdminPage() {
@@ -95,6 +96,7 @@ export default async function AppsAdminPage() {
           </a>
         </div>
       </div>
+      <RegistryNotices kind="app" />
       <PendingInstalls kind="app" />
       <BrandConflicts
         apps={appRegistry}

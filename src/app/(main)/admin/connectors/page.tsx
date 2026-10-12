@@ -28,6 +28,7 @@ import { runConnectorTest } from "@/lib/connectors/test-connection";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import ConnectorRegistryList from "@/components/admin/connector-registry-list";
 import PendingInstalls from "@/components/admin/pending/pending-installs";
+import RegistryNotices from "@/components/admin/registry-notices";
 import { recordAdminAction, redactedKeys } from "@/lib/apps/admin-audit";
 
 /**
@@ -336,6 +337,7 @@ export default async function ConnectorsAdminPage({
           </a>
         </div>
       </div>
+      <RegistryNotices kind="connector" />
       {notice && (
         <div
           className={`mb-4 rounded-lg border px-4 py-3 text-sm ${

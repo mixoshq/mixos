@@ -20,7 +20,7 @@ import {
   type Removed,
 } from "@/lib/repository/remove-outcomes";
 import { KIND_LABEL, type ExtensionKind } from "@/lib/repository/types";
-import Notice from "../pending/notice";
+import Notice from "@/components/ui/notice";
 import WithCode from "../pending/with-code";
 import RemovalHandBackPanel from "./removal-hand-back";
 
