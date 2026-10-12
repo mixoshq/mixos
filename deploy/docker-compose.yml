@@ -67,8 +67,11 @@ x-app-env: &app-env
   INSTALL_APPS: ${INSTALL_APPS:-true}
   INSTALL_CONNECTORS: ${INSTALL_CONNECTORS:-true}
   INSTALL_THEMES: ${INSTALL_THEMES:-true}
-  # The daily update check with mixos.org (docs/hosting/README.md). false sends nothing.
+  # The daily checks with mixos.org, for extensions and for MixOS releases
+  # (docs/hosting/README.md). false sends nothing.
   MIXOS_UPDATE_CHECK: ${MIXOS_UPDATE_CHECK:-true}
+  # Which MixOS releases the admin pages announce: stable or prerelease.
+  MIXOS_RELEASE_CHANNEL: ${MIXOS_RELEASE_CHANNEL:-stable}
   VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
   VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
   VAPID_SUBJECT: ${VAPID_SUBJECT:-}

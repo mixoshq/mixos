@@ -275,6 +275,16 @@ just pulled.
   its `.registry.json`, or when a changed app fails the smoke test on a fresh
   instance. It has read-only access and no secrets. See
   `docs/hosting/README.md`.
+- **The admin pages say when a newer MixOS is out.** Once a day the tick reads
+  mixos.org's list of MixOS releases, an anonymous `GET` that sends nothing
+  about the instance and that mixos.org doesn't record. When a newer release
+  is out, the top of every admin page says so: "MixOS 0.5.0 is available (this
+  instance runs 0.4.2). A minor release: it may need changes." Its notes are
+  collapsed, with links shown as text, and the notice links to the release's
+  page on mixos.org and to the upgrade guide. Nothing is applied for you.
+  `MIXOS_RELEASE_CHANNEL=prerelease` adds prereleases, and
+  `MIXOS_UPDATE_CHECK=false` turns this check off too. See
+  `docs/hosting/README.md#new-releases-of-mixos`.
 
 ## 2026-10-07
 

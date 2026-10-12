@@ -17,7 +17,8 @@ export default function AdminLayout({
     // an inline notice on the tile you just left.
     //
     // `showBuild`: the admin pages are where the MixOS version and commit are
-    // shown, and the only place they are.
+    // shown, and the only place they are. So they are also where a newer
+    // release of MixOS is announced, above every admin page.
     <ToastProvider>
       <SettingsShell showBuild>{children}</SettingsShell>
     </ToastProvider>

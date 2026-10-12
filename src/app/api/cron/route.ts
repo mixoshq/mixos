@@ -10,6 +10,7 @@ import { pruneRateBuckets } from "@/lib/rate-limit";
 import { pruneUnlockFailures } from "@/lib/apps/unlock-rate-limit";
 import { pruneRouteTelemetry } from "@/lib/apps/telemetry";
 import { pruneWebhookEvents } from "@/lib/connectors/webhook";
+import { runReleaseCheck, type ReleaseCheckOutcome } from "@/lib/platform/release-check";
 import { runUpdateCheck, type UpdateCheckOutcome } from "@/lib/repository/update-check";
 
 /**
@@ -20,7 +21,8 @@ import { runUpdateCheck, type UpdateCheckOutcome } from "@/lib/repository/update
  * tick has to come from outside; `runDueJobs()` itself is unchanged and still
  * claims each job with an atomic Postgres UPDATE, which is what makes an
  * overlapping or duplicated invocation harmless. After the jobs it prunes, and
- * then runs the update check when one is due (src/lib/repository/update-check.ts).
+ * then runs the update check (src/lib/repository/update-check.ts) and the
+ * release check (src/lib/platform/release-check.ts), each when one is due.
  *
  * AUTH: Vercel signs cron invocations with the CRON_SECRET environment variable
  * as `Authorization: Bearer <secret>`. Without that check this route would be a
@@ -95,6 +97,16 @@ export async function GET(request: NextRequest) {
     updateCheck = "error";
   }
 
+  // The release check, the same way: it asks mixos.org which releases of
+  // MixOS exist, about once a day, and a failure stays out of the tick's answer.
+  let releaseCheck: ReleaseCheckOutcome | "error";
+  try {
+    releaseCheck = await runReleaseCheck();
+  } catch (err) {
+    console.error("[cron] release check failed:", err);
+    releaseCheck = "error";
+  }
+
   return NextResponse.json({
     ok: true,
     durationMs: Date.now() - startedAt,
@@ -103,5 +115,6 @@ export async function GET(request: NextRequest) {
     prunedUnlockFailures,
     prunedWebhookEvents,
     updateCheck,
+    releaseCheck,
   });
 }

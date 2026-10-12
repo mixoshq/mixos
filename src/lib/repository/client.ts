@@ -6,12 +6,13 @@
  * The HTTP client for the mixos.org repository — the only module that knows
  * mixos.org has URLs.
  *
- * Four calls, all through `requestJson`:
+ * Five calls, all through `requestJson`:
  *
  *   GET  /api/v1/search                → a page of SUMMARIES
  *   GET  /api/v1/<kind>/<slug>         → one full listing
  *   GET  /api/v1/<kind>/<slug>/install → an InstallManifest
  *   POST /api/v1/updates               → the update check's answer
+ *   GET  /api/v1/mixos/releases        → the releases of MixOS itself
  *
  * ── WHY SEARCH AND DETAIL ARE SEPARATE CALLS ────────────────────────────────
  *
@@ -43,12 +44,15 @@
 import { isBuiltDeployment } from "../platform/build";
 import { MAX_REDIRECTS, fetchCheckingRedirects } from "./redirects";
 import {
+  CoreReleaseListSchema,
+  CoreReleaseSchema,
   ExtensionSchema,
   InstallManifestSchema,
   KIND_SEGMENT,
   PageSchema,
   UpdateCheckResponseSchema,
   UpdateResultSchema,
+  type CoreRelease,
   type Extension,
   type ExtensionKind,
   type ExtensionPage,
@@ -274,16 +278,22 @@ export interface CatalogueRequest {
   params?: URLSearchParams;
   /** A POST's body, sent as JSON. */
   body?: unknown;
+  /**
+   * A lower cap on the answer, in bytes. Never more than the 4 MB every
+   * request has: a larger value is cut to it.
+   */
+  maxBytes?: number;
+  /** The `User-Agent` to send. Unset, it is the one `fetch` sends by itself. */
+  userAgent?: string;
 }
 
 /**
  * Ask the catalogue one thing and parse its JSON answer.
  *
- * Every call in this module goes through here, and so should any added later,
- * such as the list of MixOS releases (`GET /api/v1/mixos/releases`): this is
- * where the https rule (`repositoryBaseUrl`), the 8-second timeout, the 4 MB
- * cap and the redirect rules live. `path` is absolute, `/api/v1/…`, and must
- * stay on the catalogue's origin: one that resolves elsewhere, such as
+ * Every call in this module goes through here, and so should any added later:
+ * this is where the https rule (`repositoryBaseUrl`), the 8-second timeout, the
+ * 4 MB cap and the redirect rules live. `path` is absolute, `/api/v1/…`, and
+ * must stay on the catalogue's origin: one that resolves elsewhere, such as
  * `//elsewhere.example/…`, is refused before anything is sent.
  *
  * REDIRECTS. A GET follows at most three, each only within the catalogue's own
@@ -309,6 +319,11 @@ export async function requestJson(path: string, request: CatalogueRequest = {}):
 
   const headers: Record<string, string> = { accept: "application/json" };
   if (method === "POST") headers["content-type"] = "application/json";
+  if (request.userAgent) headers["user-agent"] = request.userAgent;
+  const limit =
+    request.maxBytes !== undefined && Number.isFinite(request.maxBytes)
+      ? Math.min(Math.max(request.maxBytes, 0), MAX_RESPONSE_BYTES)
+      : MAX_RESPONSE_BYTES;
 
   // One timeout for the whole exchange: every redirect, and the body read below.
   const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
@@ -370,7 +385,7 @@ export async function requestJson(path: string, request: CatalogueRequest = {}):
   // Read as text with a length check rather than calling res.json() directly:
   // the point is to stop before parsing something enormous, and json() has
   // already buffered the whole body by the time it could be measured.
-  const body = await readBounded(res, MAX_RESPONSE_BYTES, path);
+  const body = await readBounded(res, limit, path);
   try {
     return JSON.parse(body) as unknown;
   } catch {
@@ -600,4 +615,56 @@ export async function checkUpdates(
     if (result.success) answered.push(result.data);
   }
   return { checkedAt: parsed.data.checkedAt ?? null, items: answered };
+}
+
+/**
+ * The most the release list is read to: mixos.org keeps the whole list under
+ * 512 KB, so this never cuts a sound one short.
+ */
+export const CORE_RELEASES_MAX_BYTES = 512 * 1024;
+
+/** The `User-Agent` the release list is asked with. No version: it says nothing about this instance. */
+export const RELEASE_CHECK_USER_AGENT = "MixOS";
+
+/** mixos.org's list of MixOS releases, with the entries that parsed. */
+export interface CoreReleaseList {
+  releases: CoreRelease[];
+  /** How many entries didn't parse, and were left out. */
+  ignored: number;
+}
+
+/**
+ * The releases of MixOS itself (`GET /api/v1/mixos/releases`, run by
+ * src/lib/platform/release-check.ts).
+ *
+ * An anonymous read, which mixos.org records nothing about: no query, no
+ * body, no cookie and no instance ID, and `User-Agent: MixOS` with no version.
+ * So all it learns is that some MixOS asked, from the IP address the request
+ * comes from.
+ *
+ * Each entry is parsed on its own (`CoreReleaseSchema`), and one that doesn't
+ * parse is left out rather than costing the list. Nothing in an entry is
+ * fetched or followed: the notice builds its own links from the tag.
+ */
+export async function fetchCoreReleases(): Promise<CoreReleaseList> {
+  const raw = await requestJson("/api/v1/mixos/releases", {
+    maxBytes: CORE_RELEASES_MAX_BYTES,
+    userAgent: RELEASE_CHECK_USER_AGENT,
+  });
+  const parsed = CoreReleaseListSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new RepositoryError(
+      `The repository's list of MixOS releases did not match the expected shape: ${parsed.error.issues
+        .slice(0, 3)
+        .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+        .join("; ")}`,
+      "malformed",
+    );
+  }
+  const releases: CoreRelease[] = [];
+  for (const entry of parsed.data.releases) {
+    const release = CoreReleaseSchema.safeParse(entry);
+    if (release.success) releases.push(release.data);
+  }
+  return { releases, ignored: parsed.data.releases.length - releases.length };
 }
