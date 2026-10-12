@@ -40,6 +40,9 @@
  * client code reaches its own routes through the SDK and has no business opening
  * a socket to anywhere else. Raw `fetch` is already lint-banned in `apps/**`.
  *
+ * `form-action 'self'` everywhere but the one page `formActionsFor()` names,
+ * which posts GitHub's App manifest to github.com.
+ *
  * DEV. React uses `eval` in development to reconstruct server error stacks, so
  * `'unsafe-eval'` is required there and only there.
  *
@@ -49,8 +52,9 @@
  * every page this changes almost nothing; the one surface that could have been
  * cached is the public `/p/<slug>` view.
  */
-export function buildCsp(nonce: string): string {
+export function buildCsp(nonce: string, options: { formActions?: readonly string[] } = {}): string {
   const isDev = process.env.NODE_ENV === "development";
+  const formActions = ["'self'", ...(options.formActions ?? [])].join(" ");
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
@@ -62,10 +66,25 @@ export function buildCsp(nonce: string): string {
     "manifest-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
-    "form-action 'self'",
+    `form-action ${formActions}`,
     "frame-ancestors 'self'",
     ...(isDev ? [] : ["upgrade-insecure-requests"]),
   ].join("; ");
+}
+
+/**
+ * The one page whose form may post somewhere else: Admin > GitHub posts the App
+ * manifest to github.com, which is how GitHub's manifest flow works
+ * (src/components/admin/github/create-app.tsx). Every other page keeps
+ * `form-action 'self'`. Exact path match: nothing under it, and no other page.
+ */
+const FORM_ACTIONS_BY_PATH: ReadonlyMap<string, readonly string[]> = new Map([
+  ["/admin/github", ["https://github.com"]],
+]);
+
+/** Where forms on the page at `pathname` may post, besides this origin. */
+export function formActionsFor(pathname: string): readonly string[] {
+  return FORM_ACTIONS_BY_PATH.get(pathname) ?? [];
 }
 
 /** A fresh nonce for one request. */

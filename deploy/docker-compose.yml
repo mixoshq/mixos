@@ -72,6 +72,8 @@ x-app-env: &app-env
   MIXOS_UPDATE_CHECK: ${MIXOS_UPDATE_CHECK:-true}
   # Which MixOS releases the admin pages announce: stable or prerelease.
   MIXOS_RELEASE_CHANNEL: ${MIXOS_RELEASE_CHANNEL:-stable}
+  # Optional. Set, it turns on Admin > GitHub (docs/hosting/README.md). Blank: off.
+  GITHUB_APP_ENCRYPTION_KEY: ${GITHUB_APP_ENCRYPTION_KEY:-}
   VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
   VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
   VAPID_SUBJECT: ${VAPID_SUBJECT:-}
