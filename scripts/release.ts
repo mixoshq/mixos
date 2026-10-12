@@ -56,7 +56,11 @@
 
 import path from "path";
 import { createPgClient, databaseNamed } from "../src/lib/db/pg-options";
-import { missingDeploymentSecrets, missingPlatformKeys } from "../src/lib/env/keys";
+import {
+  malformedOptionalKeys,
+  missingDeploymentSecrets,
+  missingPlatformKeys,
+} from "../src/lib/env/keys";
 import { flagProblems } from "../src/lib/repository/policy";
 import { seedAdmin } from "./admin-seed";
 import { migrateAppSchemas } from "./app-migrations";
@@ -81,6 +85,15 @@ function reportMissingConfiguration(): void {
     console.warn("\nNot set here. The app needs each one wherever it runs:");
     for (const line of missing) console.warn(`  - ${line}`);
     console.warn("Generate the keys with: npm run keys:generate");
+  }
+
+  // An optional key turns its feature off while unset, which needs no word.
+  // Set but not 32 bytes, the feature stays off too, which someone setting it
+  // didn't mean, so say so now.
+  const malformed = malformedOptionalKeys();
+  if (malformed.length > 0) {
+    console.warn("\nSet, but not a key:");
+    for (const m of malformed) console.warn(`  - ${m.env}: ${m.reason}`);
   }
 
   // Read as false, so the instance is more locked down than whoever typed the
