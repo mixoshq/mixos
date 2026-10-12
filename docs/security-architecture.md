@@ -2138,6 +2138,8 @@ dialog's History marks them "(unverified)". A row whose `actor_id` became null
 because its admin was deleted still names their address and stays verified, so
 the label keys on the name, not on the null. They follow rule 2, as an admin's
 rows do: the registration has already happened when its row is written.
+`npm run register -- app/<slug> --smoke` writes `app.activate` and
+`user.grant.add` the same way, with `smoke: true` beside `via: "cli"` (§31).
 
 **The review checklist item for any new admin action**: call `recordAdminAction`
 alongside `requireAdmin`. Nothing upstream does either for you.
@@ -2459,6 +2461,37 @@ result points to Admin > Apps on the instance that serves the app. The action
 checks the database again before it acts, and then applies Activate's own checks
 and audit row (`app.activate`).
 
+### A smoke test after Register
+
+`npm run register -- app/<slug> --smoke` (`scripts/register-smoke.ts`) adds a
+smoke test to Register, in the checkout. Before Register, and so before anything
+changes, it refuses:
+
+- a database that isn't on this machine, by the rule "Activate in this
+  checkout" follows (`src/lib/db/locality.ts`). Other instances may use any
+  other database, and the smoke test would apply the app's migrations there
+  before anyone reviewed them in a pull request, then turn the app on and grant
+  it for all of them. `--database-is-disposable` is the caller saying the
+  database is theirs alone to throw away;
+- a server at the base URL that won't sign in the smoke user, or one whose user
+  isn't in the checkout's database, since it would then be testing another
+  database;
+- an app that replaces a different extension under its slug (§3.1), unless the
+  slug is typed with `--confirm-replaces <slug>`. The typed slug goes to
+  `setAppActive()`, which checks it again, as Activate on Admin > Apps does.
+
+After Register has released both locks, it runs `scripts/migrate.ts`, the app
+migrations `npm run migrate:apps` runs, without the generator run npm adds
+first: Register has just run the generator with `PATH` and `TMPDIR` only, and a
+second run would load the app's code with the shell's database URL and keys.
+Then, in a child process that reads the registry the generator just wrote,
+Activate's checks (a required connector must be configured) and a grant to the
+smoke user, each audited as the CLI (§28). Then `scripts/smoke-test-app.ts`,
+given only `PATH`, `TMPDIR` and the session; the password stays in the parent.
+The smoke test calls the app as that user, through the activation gate like any
+request. Nothing is rolled back: a migration can't be undone, and the app's code
+has already run.
+
 ### The install record
 
 Every install writes `.registry.json` at the root of the extension's folder
@@ -2523,6 +2556,38 @@ extension local.
 Extensions installed before installs kept a record are local. Reinstalling one
 from the Registry gives it a record, and the next release step on each
 instance treats it as a different extension, once.
+
+### The pull-request check
+
+`.github/workflows/extensions.yml` runs on pull requests that change `apps/`,
+`connectors/` or `themes/`, or the check's own files. It fails one in which an
+installed folder doesn't match its record (`scripts/check-install-records.ts`,
+hashing the folders as committed, before any extension's code runs), or a
+changed app fails the smoke test on a fresh instance in the job.
+
+The pull request's code runs in that job: npm's install scripts, the registry
+generator, the build and the server. So the job holds nothing worth taking:
+
+- `permissions: contents: read`, and nothing else;
+- the checkout uses `persist-credentials: false`, so the token isn't left in
+  `.git/config` for that code to read;
+- it is triggered by `pull_request`, never `pull_request_target`, which runs
+  with the repository's secrets and a write token;
+- no step reads a repository secret. The keys and the admin's password are made
+  in the job, and the database is a service container that goes with it;
+- it activates and grants by SQL (`scripts/ci-extensions.ts`), skipping
+  Activate's checks and audit row, which is right only for that database, so
+  the helper refuses any database that isn't on the runner;
+- the server log is printed with workflow commands stopped, so a line an app
+  logs can't act as one.
+
+A pull request from a fork gets a read-only token and no secrets whatever the
+workflow says. The job runs the pull request's own copy of the workflow and its
+scripts, so a pull request that changes them changes the check: Danger labels
+those changes `os-change` for review. The check finds broken code; it is no
+defence against hostile code, which runs in the same job and could change what
+the later steps run. The folder check comes first for that reason. What keeps
+hostile code harmless is that the job has nothing to give it.
 
 ### Two locks: the register lease and the checkout lock
 

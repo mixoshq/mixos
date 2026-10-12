@@ -243,6 +243,19 @@ just pulled.
   installed from the Registry, before or after this change, is switched off
   once at the first release step that carries it, and an app's API keys are
   revoked.
+- **Smoke-test an app as you register it, and in every pull request that
+  changes one.** `npm run register -- app/<slug> --smoke` registers the app,
+  then runs its migrations, activates it, grants it to the user you sign in as
+  (`SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`) and runs
+  `scripts/smoke-test-app.ts` against your dev server. It reports and never
+  rolls back. It refuses a database that isn't on your machine unless you pass
+  `--database-is-disposable`, and an app that replaces a different extension
+  unless you pass `--confirm-replaces <slug>`. A new workflow,
+  `.github/workflows/extensions.yml`, fails a pull request that changes
+  `apps/`, `connectors/` or `themes/` when an installed folder no longer matches
+  its `.registry.json`, or when a changed app fails the smoke test on a fresh
+  instance. It has read-only access and no secrets. See
+  `docs/hosting/README.md`.
 
 ## 2026-10-07
 
