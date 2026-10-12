@@ -20,6 +20,7 @@ import os from "node:os";
 import path from "node:path";
 import type { AdminActor } from "../apps/admin-audit";
 import { BUILT_DEPLOYMENT_REMOVE_NOTICE } from "../platform/build";
+import type { DataDeleteOutcome } from "./delete-data-outcomes";
 import { tryAcquireCheckoutLock } from "../platform/checkout-lock";
 import { LOCKED_MESSAGE } from "./pending-admin";
 import { previewForButton, removeFromButton, type RemoveContext } from "./remove-admin";
@@ -295,5 +296,152 @@ describe("removing", () => {
       held.release();
     }
     assert.ok(exists("apps/acme/app.json"));
+  });
+});
+
+// ── removing code and this checkout's data ──────────────────────────────────
+
+describe("Remove code and delete this checkout's data", () => {
+  const DELETED: DataDeleteOutcome = {
+    ok: true,
+    result: {
+      kind: "app",
+      slug: "acme",
+      counts: {
+        tables: 1,
+        grants: 0,
+        installs: 0,
+        passwords: 0,
+        widgets: 0,
+        settings: 2,
+        apiKeys: 0,
+        scheduledJobs: 0,
+        jobRuns: 0,
+        migrations: 1,
+        telemetryEvents: 0,
+        appOpens: 0,
+        mcpAccess: 0,
+      },
+      schema: "app_acme",
+      role: "mixos_app_acme",
+    },
+  };
+
+  /** A deleteData stand-in that records when it was called, and what the checkout held then. */
+  function deleting(outcome: DataDeleteOutcome = DELETED) {
+    const calls: { kind: string; slug: string; actor: AdminActor; folderThere: boolean }[] = [];
+    return {
+      calls,
+      deleteData: async (kind: "app" | "connector", slug: string, actor: AdminActor) => {
+        calls.push({ kind, slug, actor, folderThere: exists(`${kind === "app" ? "apps" : "connectors"}/${slug}`) });
+        return outcome;
+      },
+    };
+  }
+
+  test("deletes the data once the code is removed, naming the admin, and says what went", async () => {
+    write("apps/acme/app.json", '{"name":"Acme"}');
+    const data = deleting();
+    const outcome = await removeFromButton(
+      { kind: "app", slug: "acme", deleteData: true, typedSlug: " acme " },
+      context({ deleteData: data.deleteData }),
+    );
+    assert.equal(outcome.ok, true);
+    if (!outcome.ok) return;
+    assert.deepEqual(data.calls, [{ kind: "app", slug: "acme", actor: ADMIN, folderThere: false }]);
+    assert.deepEqual(outcome.result.data, DELETED);
+    assert.ok(!exists("apps/acme"));
+    assert.deepEqual(audit.map((r) => r.action), ["app.remove"]);
+  });
+
+  test("a refusal keeps the data, and the removal stands", async () => {
+    write("connectors/probe/connector.json", '{"name":"probe","displayName":"Probe"}');
+    const refused: DataDeleteOutcome = {
+      ok: false,
+      code: "carried-elsewhere",
+      message: "Another build that uses this database still has probe.",
+      tone: "info",
+    };
+    const data = deleting(refused);
+    const outcome = await removeFromButton(
+      { kind: "connector", slug: "probe", deleteData: true, typedSlug: "probe" },
+      context({ deleteData: data.deleteData }),
+    );
+    assert.equal(outcome.ok, true);
+    if (!outcome.ok) return;
+    assert.deepEqual(outcome.result.data, refused);
+    assert.ok(!exists("connectors/probe"));
+    assert.equal(data.calls.length, 1);
+  });
+
+  test("a deletion that throws is a kept-data result, never a failed removal", async () => {
+    write("apps/acme/app.json", '{"name":"Acme"}');
+    const error = console.error;
+    console.error = () => {};
+    try {
+      const outcome = await removeFromButton(
+        { kind: "app", slug: "acme", deleteData: true, typedSlug: "acme" },
+        context({
+          deleteData: async () => {
+            throw new Error("connection reset");
+          },
+        }),
+      );
+      assert.equal(outcome.ok, true);
+      if (!outcome.ok) return;
+      assert.equal(outcome.result.data?.ok, false);
+      assert.equal(!outcome.result.data?.ok && outcome.result.data?.code, "unknown");
+      assert.ok(!exists("apps/acme"));
+    } finally {
+      console.error = error;
+    }
+  });
+
+  test("without the name typed, or for a theme, nothing is removed and nothing deleted", async () => {
+    write("apps/acme/app.json", '{"name":"Acme"}');
+    write("themes/aurora/theme.json", '{"name":"Aurora"}');
+    write("themes/dusk/theme.json", '{"name":"Dusk"}');
+    const data = deleting();
+    for (const [input, code] of [
+      [{ kind: "app", slug: "acme", deleteData: true }, "not-confirmed"],
+      [{ kind: "app", slug: "acme", deleteData: true, typedSlug: "acm" }, "not-confirmed"],
+      [{ kind: "app", slug: "acme", deleteData: true, typedSlug: "ACME" }, "not-confirmed"],
+      [{ kind: "theme", slug: "dusk", deleteData: true, typedSlug: "dusk" }, "no-data"],
+    ] as const) {
+      const outcome = await removeFromButton(input, context({ deleteData: data.deleteData }));
+      assert.equal(!outcome.ok && outcome.code, code, JSON.stringify(input));
+    }
+    const unavailable = await removeFromButton({ kind: "app", slug: "acme", deleteData: true, typedSlug: "acme" }, context());
+    assert.equal(!unavailable.ok && unavailable.code, "unavailable");
+    assert.ok(exists("apps/acme/app.json") && exists("themes/dusk/theme.json"));
+    assert.equal(lockStatements, 0);
+    assert.deepEqual(audit, []);
+    assert.deepEqual(data.calls, []);
+  });
+
+  test("keeping the data never asks to delete it", async () => {
+    write("apps/acme/app.json", '{"name":"Acme"}');
+    const data = deleting();
+    const outcome = await removeFromButton({ kind: "app", slug: "acme", typedSlug: "acme" }, context({ deleteData: data.deleteData }));
+    assert.equal(outcome.ok && outcome.result.data, null);
+    assert.deepEqual(data.calls, []);
+  });
+
+  test("the preview asks what the database keeps only for an app or a connector that can be removed", async () => {
+    write("apps/acme/app.json", '{"name":"Acme"}');
+    write("connectors/probe/connector.json", '{"name":"probe","displayName":"Probe"}');
+    write("apps/mailer/app.json", '{"name":"Mailer","connectors":["probe"]}');
+    write("themes/aurora/theme.json", '{"name":"Aurora"}');
+    write("themes/dusk/theme.json", '{"name":"Dusk"}');
+    const asked: string[] = [];
+    const previewData = async (kind: "app" | "connector", slug: string) => {
+      asked.push(`${kind}/${slug}`);
+      return null;
+    };
+    for (const [kind, slug] of [["app", "acme"], ["connector", "probe"], ["theme", "dusk"]] as const) {
+      const outcome = await previewForButton({ kind, slug }, context({ previewData }));
+      assert.equal(outcome.ok && outcome.preview.data, null);
+    }
+    assert.deepEqual(asked, ["app/acme"], "it asked for a connector an app requires, or for a theme");
   });
 });
