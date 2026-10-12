@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { ExternalLink, Store } from "lucide-react";
 import { revalidatePath } from "next/cache";
@@ -28,6 +29,7 @@ import { runConnectorTest } from "@/lib/connectors/test-connection";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import ConnectorRegistryList from "@/components/admin/connector-registry-list";
 import PendingInstalls from "@/components/admin/pending/pending-installs";
+import ProposedPullRequests from "@/components/admin/github/proposed-pull-requests";
 import RegistryNotices from "@/components/admin/registry-notices";
 import { recordAdminAction, redactedKeys } from "@/lib/apps/admin-audit";
 
@@ -350,6 +352,10 @@ export default async function ConnectorsAdminPage({
         </div>
       )}
       <PendingInstalls kind="connector" />
+      {/* Read from GitHub: the rest of the page doesn't wait for it. */}
+      <Suspense fallback={null}>
+        <ProposedPullRequests kind="connector" />
+      </Suspense>
       <ConnectorRegistryList
         connectors={statuses}
         initialOpen={openConnector}

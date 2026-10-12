@@ -14,12 +14,14 @@ import { StatusPill } from "@/components/ui/status";
 import { checkLinkAction, finishLinkingAction } from "@/lib/github/actions";
 import type { GitHubOutcome, GitHubPageState } from "@/lib/github/outcomes";
 import CreateApp from "./create-app";
-import { Fact, GitHubLink, OVERRIDE_TEXT, OutcomeNotice, when } from "./github-parts";
+import { Fact, GitHubLink, OVERRIDE_TEXT, OutcomeNotice, PREVIEW_ITEMS, when } from "./github-parts";
 import {
+  ChecklistDialog,
   ForgetDialog,
   OverrideDialog,
   ReplaceKeyDialog,
   UnlinkDialog,
+  WithdrawChecklistButton,
   WithdrawOverrideButton,
 } from "./github-dialogs";
 
@@ -47,7 +49,7 @@ export default function GitHubPanel({
 }) {
   const [outcome, setOutcome] = useState<GitHubOutcome | null>(null);
   const [busy, setBusy] = useState<"finish" | "check" | null>(null);
-  const [dialog, setDialog] = useState<"replace" | "unlink" | "forget" | "override" | null>(null);
+  const [dialog, setDialog] = useState<"replace" | "unlink" | "forget" | "override" | "checklist" | null>(null);
   const router = useRouter();
 
   const run = async (which: "finish" | "check", action: () => Promise<GitHubOutcome>) => {
@@ -331,6 +333,51 @@ export default function GitHubPanel({
               )}
             </CardBody>
           </Card>
+
+          <Card as="section">
+            <CardHeader
+              title="Previews elsewhere"
+              right={
+                state.previewChecklist ? (
+                  <StatusPill tone="success">Confirmed</StatusPill>
+                ) : (
+                  <StatusPill tone="warning">Not confirmed</StatusPill>
+                )
+              }
+            />
+            <CardBody>
+              <p className="text-sm text-foreground">
+                On a deployment, Browse proposes an extension as a pull request from a branch under{" "}
+                <code className="font-mono text-xs">mixos/</code>. Before each one, the instance reads your
+                workflows, <code className="font-mono text-xs">render.yaml</code> and, on Vercel,{" "}
+                <code className="font-mono text-xs">vercel.json</code>, and refuses if any would build that branch
+                with secrets. It can&apos;t read hosts&apos; own settings, so proposals also need you to confirm:
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-foreground">
+                {PREVIEW_ITEMS.map((item) => (
+                  <li key={item.id}>{item.text}</li>
+                ))}
+              </ul>
+              {state.previewChecklist ? (
+                <div className="mt-4 rounded-md border border-border bg-muted px-3 py-2 text-sm">
+                  <p className="text-muted-foreground">
+                    Confirmed by {state.previewChecklist.by}, {when(state.previewChecklist.at)}.
+                  </p>
+                  <div className="mt-2">
+                    <WithdrawChecklistButton onDone={(r) => setOutcome(r)} />
+                  </div>
+                </div>
+              ) : (
+                !link.disabled && (
+                  <div className="mt-4">
+                    <Button variant="secondary" size="sm" onClick={() => setDialog("checklist")}>
+                      Confirm
+                    </Button>
+                  </div>
+                )
+              )}
+            </CardBody>
+          </Card>
         </>
       )}
 
@@ -341,6 +388,9 @@ export default function GitHubPanel({
         <UnlinkDialog appName={app.name} repository={link?.repository.fullName ?? null} onClose={closeWith} />
       )}
       {app && dialog === "forget" && <ForgetDialog appName={app.name} slug={app.slug} onClose={closeWith} />}
+      {link && dialog === "checklist" && (
+        <ChecklistDialog repository={link.repository.fullName} onClose={closeWith} />
+      )}
       {link && dialog === "override" && (
         <OverrideDialog
           repository={link.repository.fullName}

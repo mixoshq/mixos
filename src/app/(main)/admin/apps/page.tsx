@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { ExternalLink, Store } from "lucide-react";
 import { appRegistry } from "@/generated/app-registry";
@@ -15,6 +16,7 @@ import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
 import AppRegistryList from "@/components/admin/app-registry-list";
 import AppsNotInBuild from "@/components/admin/apps-not-in-build";
 import BrandConflicts from "@/components/admin/brand-conflicts";
+import ProposedPullRequests from "@/components/admin/github/proposed-pull-requests";
 import PendingInstalls from "@/components/admin/pending/pending-installs";
 import RegistryNotices from "@/components/admin/registry-notices";
 import { getActiveTheme } from "@/lib/themes/active";
@@ -98,6 +100,10 @@ export default async function AppsAdminPage() {
       </div>
       <RegistryNotices kind="app" />
       <PendingInstalls kind="app" />
+      {/* Read from GitHub: the rest of the page doesn't wait for it. */}
+      <Suspense fallback={null}>
+        <ProposedPullRequests kind="app" />
+      </Suspense>
       <BrandConflicts
         apps={appRegistry}
         activeBySlug={activeBySlug}
