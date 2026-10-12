@@ -6,11 +6,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   INSTALL_FLAG,
+  RELEASE_CHANNEL_SETTING,
   UPDATE_CHECK_FLAG,
   flagProblems,
   installDisabledMessage,
   installEnabled,
   parseInstallFlag,
+  parseReleaseChannel,
+  releaseChannel,
+  releaseChannelProblem,
   updateCheckEnabled,
 } from "./policy";
 import type { ExtensionKind } from "./types";
@@ -122,6 +126,49 @@ test("MIXOS_UPDATE_CHECK: a typo is off, and reported as update checks being off
   }
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /MIXOS_UPDATE_CHECK=/);
+});
+
+test("MIXOS_RELEASE_CHANNEL: stable by default, prerelease when asked, in any case", () => {
+  assert.equal(RELEASE_CHANNEL_SETTING, "MIXOS_RELEASE_CHANNEL");
+  for (const value of [undefined, "", "  ", "stable", " Stable "]) {
+    assert.deepEqual(parseReleaseChannel(value), { channel: "stable", problem: null }, String(value));
+  }
+  for (const value of ["prerelease", "PRERELEASE", " prerelease\n"]) {
+    assert.deepEqual(parseReleaseChannel(value), { channel: "prerelease", problem: null }, value);
+  }
+  withEnv({ MIXOS_RELEASE_CHANNEL: "prerelease" }, () => {
+    assert.equal(releaseChannel(), "prerelease");
+    assert.equal(releaseChannelProblem(), null);
+  });
+  withEnv({ MIXOS_RELEASE_CHANNEL: undefined }, () => assert.equal(releaseChannel(), "stable"));
+});
+
+test("MIXOS_RELEASE_CHANNEL: anything else is stable, warned once, and reported for the release step", () => {
+  // Not a channel, however close: a typo shows fewer releases, never more.
+  for (const value of ["beta", "prereleases", "pre-release", "rc", "true", "all"]) {
+    const { channel, problem } = parseReleaseChannel(value);
+    assert.equal(channel, "stable", value);
+    assert.equal(
+      problem,
+      `MIXOS_RELEASE_CHANNEL=${JSON.stringify(value)} is not stable or prerelease, so it is treated as stable and prereleases aren't shown. Use stable or prerelease.`,
+    );
+  }
+  const warnings: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+  try {
+    withEnv({ MIXOS_RELEASE_CHANNEL: "beta", INSTALL_APPS: undefined, INSTALL_CONNECTORS: undefined, INSTALL_THEMES: undefined, MIXOS_UPDATE_CHECK: undefined }, () => {
+      assert.equal(releaseChannel(), "stable");
+      assert.equal(releaseChannel(), "stable");
+      assert.match(releaseChannelProblem() ?? "", /^MIXOS_RELEASE_CHANNEL="beta" is not stable or prerelease/);
+      // A channel isn't a switch, so the switches' list leaves it out.
+      assert.deepEqual(flagProblems(), []);
+    });
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^\[release-check\] MIXOS_RELEASE_CHANNEL="beta"/);
 });
 
 test("the install pipeline refuses a disabled kind before it locks or downloads anything", async () => {
