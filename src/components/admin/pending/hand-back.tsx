@@ -88,8 +88,11 @@ export default function HandBackPanel({ handBack, isApp }: { handBack: HandBack;
   );
 }
 
-/** Copies `text`, and says so for two seconds. Selecting the text by hand still works when it can't. */
-function CopyButton({ text, label }: { text: string; label: string }) {
+/**
+ * Copies `text`, and says so for two seconds. Selecting the text by hand still
+ * works when it can't. The removal result uses it too.
+ */
+export function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <Button

@@ -433,6 +433,38 @@ export function recordSourceUrl(record: InstallRecord): string | null {
   return githubSourceUrl(record.repository, record.commitSha, record.repository.subpath);
 }
 
+/** An owner and a name GitHub would accept, and a full commit: the parts every link here is built from. */
+function linkable(repo: { owner: string; name: string }, ...commits: string[]): boolean {
+  return (
+    GITHUB_OWNER.test(repo.owner) &&
+    GITHUB_REPO.test(repo.name) &&
+    !/^\.+$/.test(repo.name) &&
+    commits.every((c) => /^[0-9a-f]{40}$/.test(c))
+  );
+}
+
+/**
+ * `https://github.com/<owner>/<repo>/compare/<base>...<head>`: what changed in
+ * the repository from one commit to the other, for an update's dialog. Built
+ * only from values a record and the catalogue's answer validated, or null.
+ */
+export function githubCompareUrl(repo: { owner: string; name: string }, base: string, head: string): string | null {
+  if (!linkable(repo, base, head)) return null;
+  return `https://github.com/${repo.owner}/${repo.name}/compare/${base}...${head}`;
+}
+
+/**
+ * GitHub's archive of the record's repository at the record's commit, in the
+ * form mixos.org gives install: `https://codeload.github.com/<owner>/<repo>/tar.gz/<commit>`.
+ * An update downloads the installed release from it, pinned and checked
+ * against the record's content hash, to say which files changed in the folder
+ * since. Null when the record's values don't make one.
+ */
+export function recordTarballUrl(record: Pick<InstallRecord, "repository" | "commitSha">): string | null {
+  if (!linkable(record.repository, record.commitSha)) return null;
+  return `https://codeload.github.com/${record.repository.owner}/${record.repository.name}/tar.gz/${record.commitSha}`;
+}
+
 /** The listing on the catalogue the record names: `<source>/extend/<kind segment>/<slug>`. */
 export function recordListingUrl(record: Pick<InstallRecord, "source" | "kind" | "slug">): string {
   return `${record.source}/extend/${KIND_SEGMENT[record.kind]}/${record.slug}`;

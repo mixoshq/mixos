@@ -29,7 +29,9 @@
  * so a deploy that replaces a withdrawn release clears its notice at the next
  * tick. A failure keeps the last answer and tries again in an hour, or when the
  * catalogue's `Retry-After` says, but never more than a day later; while it
- * waits, a changed set waits too.
+ * waits, a changed set waits too. MixOS's own release check
+ * (src/lib/platform/release-check.ts) keeps the same schedule, through
+ * `scheduleIsDue()`, `scheduleAfterSuccess()` and `scheduleAfterFailure()`.
  *
  * ── WHAT IS KEPT AND SHOWN ──────────────────────────────────────────────────
  *
@@ -219,25 +221,77 @@ export function keepAnswersFor(
 /* -------------------------------------------------------------------------- */
 
 /**
- * Whether a check is due now, for this installed set.
- *
- * Due with no state, and when the stored schedule is further away than any
- * this code writes (a clock that moved, or a value written by hand), so a
- * stored date can never stop checks for good. After a failure, the wait it set
- * holds whatever else changed.
+ * When a check runs: the part of its stored state that both daily checks with
+ * the catalogue keep, this one and MixOS's release check.
  */
+export interface CheckSchedule {
+  lastSuccessAt: string | null;
+  lastAttemptAt: string | null;
+  /** Why the last attempt failed, or null when it succeeded. */
+  lastError: string | null;
+  nextCheckAt: string | null;
+}
+
+/**
+ * Whether a check is due now. `changed` means what it asks about has changed
+ * since the last check, which makes it due at once.
+ *
+ * Due with no schedule, and when the stored one is further away than any this
+ * code writes (a clock that moved, or a value written by hand), so a stored
+ * date can never stop checks for good. After a failure, the wait it set holds
+ * whatever else changed.
+ */
+export function scheduleIsDue(schedule: CheckSchedule | null, now: Date, changed = false): boolean {
+  if (!schedule?.lastAttemptAt || !schedule.nextCheckAt) return true;
+  const next = Date.parse(schedule.nextCheckAt);
+  if (Number.isNaN(next) || next - now.getTime() > LONGEST_WAIT_MS) return true;
+  const waiting = now.getTime() < next;
+  if (schedule.lastError) return !waiting;
+  if (changed) return true;
+  return !waiting;
+}
+
+/** The schedule after a check the catalogue answered. `random` is in [0, 1). */
+export function scheduleAfterSuccess(now: Date, random: () => number = Math.random): CheckSchedule {
+  const delay = CHECK_EVERY_MS + Math.floor(Math.min(Math.max(random(), 0), 1) * CHECK_JITTER_MS);
+  return {
+    lastSuccessAt: now.toISOString(),
+    lastAttemptAt: now.toISOString(),
+    lastError: null,
+    nextCheckAt: new Date(now.getTime() + delay).toISOString(),
+  };
+}
+
+/**
+ * The schedule after a check that failed: the next try in an hour, or after
+ * `retryAfterSeconds` when the catalogue sent one, but never more than a day
+ * away. The error is kept as plain text, cleaned as a reason is.
+ */
+export function scheduleAfterFailure(
+  previous: CheckSchedule | null,
+  error: string,
+  retryAfterSeconds: number | undefined,
+  now: Date,
+): CheckSchedule {
+  const wait =
+    retryAfterSeconds === undefined || !Number.isFinite(retryAfterSeconds)
+      ? RETRY_AFTER_FAILURE_MS
+      : Math.min(Math.max(retryAfterSeconds, 0) * 1000, LONGEST_WAIT_MS);
+  return {
+    lastSuccessAt: previous?.lastSuccessAt ?? null,
+    lastAttemptAt: now.toISOString(),
+    lastError: cleanReason(error) ?? "The check failed.",
+    nextCheckAt: new Date(now.getTime() + wait).toISOString(),
+  };
+}
+
+/** Whether the update check is due now, for this installed set. A changed set is due at once. */
 export function checkIsDue(
   state: UpdateCheckState | null,
   items: readonly UpdateItem[],
   now: Date,
 ): boolean {
-  if (!state?.lastAttemptAt || !state.nextCheckAt) return true;
-  const next = Date.parse(state.nextCheckAt);
-  if (Number.isNaN(next) || next - now.getTime() > LONGEST_WAIT_MS) return true;
-  const waiting = now.getTime() < next;
-  if (state.lastError) return !waiting;
-  if (!sameItems(state.sent, items)) return true;
-  return !waiting;
+  return scheduleIsDue(state, now, !sameItems(state?.sent ?? null, items));
 }
 
 /** The state after a check the catalogue answered. `random` is in [0, 1). */
@@ -247,39 +301,24 @@ export function afterSuccess(
   now: Date,
   random: () => number = Math.random,
 ): UpdateCheckState {
-  const delay = CHECK_EVERY_MS + Math.floor(Math.min(Math.max(random(), 0), 1) * CHECK_JITTER_MS);
   return {
     sent: sent.map(({ kind, slug, version }) => ({ kind, slug, version })),
     results: keepAnswersFor(sent, answered),
-    lastSuccessAt: now.toISOString(),
-    lastAttemptAt: now.toISOString(),
-    lastError: null,
-    nextCheckAt: new Date(now.getTime() + delay).toISOString(),
+    ...scheduleAfterSuccess(now, random),
   };
 }
 
-/**
- * The state after a check that failed: the last answer kept, and the next try
- * in an hour, or after `retryAfterSeconds` when the catalogue sent one, but
- * never more than a day away.
- */
+/** The state after a check that failed: the last answer kept, and the next try as `scheduleAfterFailure()` sets it. */
 export function afterFailure(
   previous: UpdateCheckState | null,
   error: string,
   retryAfterSeconds: number | undefined,
   now: Date,
 ): UpdateCheckState {
-  const wait =
-    retryAfterSeconds === undefined || !Number.isFinite(retryAfterSeconds)
-      ? RETRY_AFTER_FAILURE_MS
-      : Math.min(Math.max(retryAfterSeconds, 0) * 1000, LONGEST_WAIT_MS);
   return {
     sent: previous?.sent ?? null,
     results: previous?.results ?? [],
-    lastSuccessAt: previous?.lastSuccessAt ?? null,
-    lastAttemptAt: now.toISOString(),
-    lastError: cleanReason(error) ?? "The check failed.",
-    nextCheckAt: new Date(now.getTime() + wait).toISOString(),
+    ...scheduleAfterFailure(previous, error, retryAfterSeconds, now),
   };
 }
 
@@ -334,8 +373,8 @@ function compareDotted(a: string, b: string): number {
   return 0;
 }
 
-/** "5 Oct", with the year when it isn't `now`'s. */
-function day(iso: string, now: Date): string {
+/** "5 Oct", with the year when it isn't `now`'s. The release check's line says a date the same way. */
+export function day(iso: string, now: Date): string {
   const at = new Date(iso);
   return at.toLocaleDateString("en-GB", {
     day: "numeric",
@@ -345,7 +384,7 @@ function day(iso: string, now: Date): string {
 }
 
 /** "just now", "5 mins ago", "3 hours ago", "2 days ago", as the admin pages say an age. */
-function ago(iso: string, now: Date): string {
+export function ago(iso: string, now: Date): string {
   const diff = now.getTime() - Date.parse(iso);
   if (Number.isNaN(diff) || diff < MINUTE) return "just now";
   if (diff < HOUR) {
@@ -398,7 +437,8 @@ export function describeUpdate(
   const floor = latest ? floorLine(result.latestRequiresMixOS, current) : "";
 
   if (result.withdrawn) {
-    const why = result.reason ? `: “${result.reason}”.` : ".";
+    // A reason that ends its own sentence keeps its mark, and gets no second one.
+    const why = result.reason ? `: “${result.reason}”${/[.!?]$/.test(result.reason) ? "" : "."}` : ".";
     const next = latest ? ` The current release is ${latest}.${floor}` : " There is no release to move to.";
     return { ...of, type: "withdrawn", text: `${name} ${result.version} was withdrawn by its publisher${why}${next}` };
   }

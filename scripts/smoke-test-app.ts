@@ -6,12 +6,18 @@
  * Smoke-test apps' API routes on a running MixOS, as a signed-in user.
  *
  *   SMOKE_EMAIL=you@example.com SMOKE_PASSWORD='…' \
- *     npx tsx scripts/smoke-test-app.ts [<slug> …] [--base-url <url>]
+ *     npx tsx scripts/smoke-test-app.ts [<slug> …] [--base-url <url>] [--skip-unavailable]
  *
  * With no slug it tests every app in this build. `--base-url` defaults to
  * http://localhost:3000 (or $PORT). Run it from the checkout the server was
  * built from: the routes come from src/generated/app-registry.ts, which
  * `npm run dev`, `npm run build` and `npm run registry` write.
+ *
+ * `--skip-unavailable` lists a route that answers 503 UNAVAILABLE as skipped
+ * rather than failed: it needs a connector's credentials, or something else
+ * this server hasn't configured. The pull-request check
+ * (.github/workflows/extensions.yml) uses it, because CI has no credentials. In
+ * a checkout, configure what the route needs instead, and test it for real.
  *
  * SIGNING IN. Either of:
  *
@@ -48,14 +54,13 @@ import path from "path";
 import {
   SmokeSetupError,
   buildVerdict,
-  cookieHeaderFrom,
   exitCodeFor,
   formatApp,
   formatSummary,
+  normalizeBaseUrl,
   runSmoke,
-  sessionUser,
   setupFailure,
-  signIn,
+  signInFromEnv,
   type SmokeApp,
   type Verdict,
 } from "./app-smoke";
@@ -63,7 +68,7 @@ import {
 const REGISTRY = path.resolve(__dirname, "../src/generated/app-registry.ts");
 
 const USAGE = [
-  "Usage: npx tsx scripts/smoke-test-app.ts [<slug> ...] [--base-url <url>]",
+  "Usage: npx tsx scripts/smoke-test-app.ts [<slug> ...] [--base-url <url>] [--skip-unavailable]",
   "Sign in with SMOKE_EMAIL and SMOKE_PASSWORD, or pass a session as SMOKE_COOKIE.",
 ].join("\n");
 
@@ -86,45 +91,35 @@ function say(line: string): void {
   console.error(redact(line));
 }
 
-function baseUrlFrom(raw: string): string {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    throw new SmokeSetupError(`--base-url ${raw} is not a URL`);
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new SmokeSetupError(`--base-url must be http or https, not ${url.protocol}`);
-  }
-  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
-}
-
 interface Args {
   slugs: string[];
   baseUrl: string;
+  skipUnavailable: boolean;
   help: boolean;
 }
 
 function parseArgs(argv: string[], fallbackBaseUrl: string): Args {
   const slugs: string[] = [];
   let baseUrl = fallbackBaseUrl;
+  let skipUnavailable = false;
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "-h" || arg === "--help") help = true;
+    else if (arg === "--skip-unavailable") skipUnavailable = true;
     else if (arg === "--base-url") {
       const value = argv[++i];
       if (!value) throw new SmokeSetupError("--base-url needs a URL (see --help)");
-      baseUrl = baseUrlFrom(value);
+      baseUrl = normalizeBaseUrl(value);
     } else if (arg.startsWith("--base-url=")) {
-      baseUrl = baseUrlFrom(arg.slice("--base-url=".length));
+      baseUrl = normalizeBaseUrl(arg.slice("--base-url=".length));
     } else if (arg.startsWith("-")) {
       throw new SmokeSetupError(`unknown option ${arg} (see --help)`);
     } else if (!slugs.includes(arg)) {
       slugs.push(arg);
     }
   }
-  return { slugs, baseUrl, help };
+  return { slugs, baseUrl, skipUnavailable, help };
 }
 
 async function loadApps(slugs: string[]): Promise<SmokeApp[]> {
@@ -149,34 +144,14 @@ async function loadApps(slugs: string[]): Promise<SmokeApp[]> {
   return slugs.map((s) => appRegistry.find((a) => a.slug === s)!);
 }
 
-/** The session to test with, and whose it is. */
-async function signedIn(baseUrl: string): Promise<{ cookie: string; user: string }> {
-  const { SMOKE_COOKIE, SMOKE_EMAIL, SMOKE_PASSWORD } = process.env;
-  let cookie: string;
-  if (SMOKE_COOKIE) {
-    // A line break would make fetch throw an error that quotes the value.
-    if (/[\r\n\0]/.test(SMOKE_COOKIE)) {
-      throw new SmokeSetupError("SMOKE_COOKIE holds a line break or a NUL. Copy the value again.");
-    }
-    cookie = cookieHeaderFrom(SMOKE_COOKIE, baseUrl);
-  } else if (SMOKE_EMAIL && SMOKE_PASSWORD) {
-    cookie = await signIn({ baseUrl, email: SMOKE_EMAIL, password: SMOKE_PASSWORD });
-  } else {
-    throw new SmokeSetupError(
-      "no sign-in. Set SMOKE_EMAIL and SMOKE_PASSWORD, or SMOKE_COOKIE, for a user the apps are granted to.",
-    );
-  }
-  for (const pair of cookie.split(";")) keepSecret(pair.slice(pair.indexOf("=") + 1).trim());
-
-  const user = await sessionUser({ baseUrl, cookie });
-  if (!user) {
-    throw new SmokeSetupError(
-      SMOKE_COOKIE
-        ? "SMOKE_COOKIE wasn't accepted: it may have expired, or come from another server."
-        : "the server didn't accept the session it just issued.",
-    );
-  }
-  return { cookie, user };
+/** The session to test with, and whose it is. Its values are kept out of the output. */
+function signedIn(baseUrl: string): Promise<{ cookie: string; user: string }> {
+  return signInFromEnv({
+    baseUrl,
+    onCookie: (cookie) => {
+      for (const pair of cookie.split(";")) keepSecret(pair.slice(pair.indexOf("=") + 1).trim());
+    },
+  });
 }
 
 async function run(): Promise<Verdict> {
@@ -197,6 +172,7 @@ async function run(): Promise<Verdict> {
       baseUrl,
       cookie,
       apps,
+      skipUnavailable: args.skipUnavailable,
       onApp: (app) => formatApp(app).forEach(say),
     });
     return buildVerdict(baseUrl, user, results);

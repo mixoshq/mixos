@@ -8,6 +8,7 @@ import { StatusPill } from "@/components/ui/status";
 import { CARD_SHELL } from "@/components/ui/card";
 import { formatCount, formatLastUpdated } from "@/lib/apps/display";
 import { cn } from "@/lib/utils";
+import DeleteDataButton from "./data/delete-data-button";
 
 /**
  * Apps this database keeps that this build doesn't carry.
@@ -18,8 +19,10 @@ import { cn } from "@/lib/utils";
  * this list that data would be invisible: the grid above is the build's
  * registry, and these apps are exactly the ones missing from it.
  *
- * Read-only on purpose. Bringing an app back is a deploy, not a click, and
- * there is nothing to switch on an app with no code here.
+ * Keeping is the default and needs nothing. Bringing an app back is a deploy,
+ * not a click. The one action is **Delete data…**, destructive, whose dialog
+ * asks for the slug typed and which the server refuses until the app has gone
+ * from every build that uses this database (src/lib/repository/delete-data.ts).
  */
 export default function AppsNotInBuild({
   apps,
@@ -44,7 +47,8 @@ export default function AppsNotInBuild({
         can open these, and everything they had is kept: activation, grants,
         installs, widgets, settings and tables. Restore an app&apos;s folder
         and deploy to bring it back. With the same files it returns as it was;
-        with different files it returns switched off.
+        with different files it returns switched off. Once no build that uses
+        this database has an app, Delete data removes what it kept here.
       </p>
       <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {apps.map((app) => {
@@ -89,6 +93,9 @@ export default function AppsNotInBuild({
                     </span>
                   )}
                 </p>
+                <div className="mt-3 flex justify-end">
+                  <DeleteDataButton kind="app" slug={app.slug} name={app.name} />
+                </div>
               </div>
             </li>
           );
