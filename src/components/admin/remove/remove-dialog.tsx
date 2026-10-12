@@ -9,6 +9,9 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { describeData, type DataDeleteOutcome } from "@/lib/repository/delete-data-outcomes";
 import type { RemovalNote } from "@/lib/repository/remove";
 import { previewRemovalAction, removeExtensionAction } from "@/lib/repository/remove-actions";
 import {
@@ -21,6 +24,7 @@ import {
 } from "@/lib/repository/remove-outcomes";
 import { KIND_LABEL, type ExtensionKind } from "@/lib/repository/types";
 import Notice from "@/components/ui/notice";
+import { Lines } from "../data/delete-data-dialog";
 import WithCode from "../pending/with-code";
 import RemovalHandBackPanel from "./removal-hand-back";
 
@@ -45,9 +49,12 @@ export interface RemoveTarget {
  * Removing checks everything again under its locks, and hands back the commit
  * that deletes the folder.
  *
- * Keeping the data is the default, and the one button here does that. Deleting
- * this checkout's data as well would be a second, visibly different button
- * beside it, destructive and asking for the slug to be typed.
+ * Keeping the data is the default, and the primary button does that. Beside
+ * it, for an app or a connector, is a second, visibly different button:
+ * "Remove code and delete this checkout's data", destructive. It opens a last
+ * step that says what goes from the database and asks for the slug typed. The
+ * server checks the name before removing anything, then deletes the data with
+ * Delete data's checks, which can keep the data while the code still goes.
  */
 export default function RemoveDialog({
   target,
@@ -60,6 +67,9 @@ export default function RemoveDialog({
   const [preview, setPreview] = useState<PreviewOutcome | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<RemoveOutcome | null>(null);
+  /** On the last step of "Remove code and delete this checkout's data". */
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
   const lockedNotice = useRef<HTMLDivElement>(null);
 
   const { kind, slug } = target;
@@ -79,14 +89,24 @@ export default function RemoveDialog({
     };
   }, [kind, slug]);
 
-  const remove = useCallback(async () => {
-    setBusy(true);
-    try {
-      setOutcome(await removeExtensionAction({ kind, slug }));
-    } finally {
-      setBusy(false);
-    }
-  }, [kind, slug]);
+  const confirmed = typed.trim() === slug;
+
+  const remove = useCallback(
+    async (deleteData: boolean) => {
+      if (busy || (deleteData && !confirmed)) return;
+      setBusy(true);
+      try {
+        setOutcome(
+          await removeExtensionAction(
+            deleteData ? { kind, slug, deleteData: true, typedSlug: typed.trim() } : { kind, slug },
+          ),
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, confirmed, kind, slug, typed],
+  );
 
   const close = useCallback(() => {
     // The registry changed: the dev server compiles it on the next request,
@@ -98,6 +118,10 @@ export default function RemoveDialog({
   const removed = outcome?.ok === true;
   const refused = outcome?.ok === false && !locked;
   const ready = preview?.ok === true && preview.preview.blockers.length === 0;
+  // The second button: for a kind that keeps data, when this checkout's
+  // database can be read. Disabled, with the reason in the body, when it would
+  // be refused.
+  const data = preview?.ok === true ? preview.preview.data : null;
 
   return (
     <Dialog
@@ -111,14 +135,38 @@ export default function RemoveDialog({
           <Button variant="primary" onClick={close}>
             {removed ? "Done" : "Close"}
           </Button>
+        ) : confirming ? (
+          <>
+            <Button variant="ghost" onClick={() => setConfirming(false)} disabled={busy}>
+              Back
+            </Button>
+            <Button
+              variant="destructive"
+              busy={busy}
+              busyLabel="Removing…"
+              disabled={!confirmed}
+              onClick={() => void remove(true)}
+            >
+              {locked ? "Try again" : "Remove code and delete data"}
+            </Button>
+          </>
         ) : (
           <>
             <Button variant="ghost" onClick={close} disabled={busy}>
               Cancel
             </Button>
-            {/* Deleting this checkout's data as well goes beside this, as a
-                second, destructive button that asks for the slug typed. */}
-            <Button variant="primary" busy={busy} busyLabel="Removing…" disabled={!ready} onClick={remove}>
+            {data && (
+              // Its label is long: on a phone it wraps, and the button grows with it.
+              <Button
+                variant="destructive"
+                disabled={busy || data.refusal !== null}
+                onClick={() => setConfirming(true)}
+                className="h-auto min-h-10 py-2 text-center"
+              >
+                Remove code and delete this checkout&apos;s data…
+              </Button>
+            )}
+            <Button variant="primary" busy={busy} busyLabel="Removing…" disabled={!ready} onClick={() => void remove(false)}>
               {locked ? "Try again" : "Remove code, keep data"}
             </Button>
           </>
@@ -149,7 +197,16 @@ export default function RemoveDialog({
         </Notice>
       ) : (
         <div className="space-y-6">
-          <Plan preview={preview.preview} />
+          {confirming && preview.preview.data ? (
+            <ConfirmDelete
+              preview={preview.preview}
+              typed={typed}
+              onType={setTyped}
+              onSubmit={() => void remove(true)}
+            />
+          ) : (
+            <Plan preview={preview.preview} />
+          )}
           {/* Beside the button that was pressed, where the admin is looking. */}
           {locked && outcome && !outcome.ok && (
             <div ref={lockedNotice}>
@@ -206,6 +263,12 @@ function Plan({ preview }: { preview: RemovalPreview }) {
           {KEPT_BEFORE[kind]}
           {kind === "app" && " Admin > Apps lists it under Not in this build."}
         </p>
+        {preview.data?.refusal && (
+          <p className="mt-2 text-sm text-muted-foreground">
+            It can&apos;t be deleted from this checkout&apos;s database along with its code:{" "}
+            <WithCode text={preview.data.refusal.message} />
+          </p>
+        )}
       </Section>
 
       {preview.blockers.length === 0 && preview.warnings.length > 0 && (
@@ -229,8 +292,66 @@ function Plan({ preview }: { preview: RemovalPreview }) {
   );
 }
 
+/** The last step of "Remove code and delete this checkout's data": what goes from where, and the name typed. */
+function ConfirmDelete({
+  preview,
+  typed,
+  onType,
+  onSubmit,
+}: {
+  preview: RemovalPreview;
+  typed: string;
+  onType: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  const data = preview.data!;
+  return (
+    <div className="space-y-5">
+      <Notice tone="danger" title="This can't be undone">
+        Its code goes from this checkout, and its data from this checkout&apos;s database. Each other
+        database keeps its own copy until an admin deletes it there.
+      </Notice>
+
+      <Section title="From this checkout">
+        <ul className="list-disc space-y-1 pl-5 text-sm text-foreground">
+          <li>
+            <code className="font-mono text-xs">{`${preview.path}/`}</code>, and anything in it that isn&apos;t
+            committed
+          </li>
+        </ul>
+      </Section>
+
+      <Section title="From this checkout's database">
+        <Lines lines={describeData(data.kind, data.counts, data)} />
+      </Section>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit();
+        }}
+      >
+        <Field label={`Type ${preview.slug} to confirm`}>
+          {(field) => (
+            <Input
+              {...field}
+              value={typed}
+              onChange={(e) => onType(e.target.value)}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              className="font-mono"
+            />
+          )}
+        </Field>
+      </form>
+    </div>
+  );
+}
+
 /** What removing it did, and what comes next: committing the deletion. */
 function RemovedResult({ result }: { result: Removed }) {
+  const dataDeleted = result.data?.ok === true;
   return (
     <div className="space-y-5">
       <Notice tone="success" title={`Removed ${result.path}`}>
@@ -255,6 +376,8 @@ function RemovedResult({ result }: { result: Removed }) {
         </p>
       </Notice>
 
+      {result.data && <DataResult data={result.data} kind={result.kind} />}
+
       {result.warnings.length > 0 && (
         <Notice tone="warning">
           <Notes notes={result.warnings} />
@@ -263,11 +386,13 @@ function RemovedResult({ result }: { result: Removed }) {
 
       <Section title="What stayed">
         <p className="text-sm text-foreground">
-          {result.kind === "app"
-            ? "Its data is still in this checkout's database, and Admin > Apps lists it under Not in this build."
-            : result.kind === "connector"
-              ? "Its credentials, and its users' connections, are still in this checkout's database."
-              : "A theme holds no data."}
+          {dataDeleted
+            ? "The audit log, which records the deletion. Each other database keeps its own copy until an admin deletes it there."
+            : result.kind === "app"
+              ? "Its data is still in this checkout's database, and Admin > Apps lists it under Not in this build."
+              : result.kind === "connector"
+                ? "Its credentials, and its users' connections, are still in this checkout's database."
+                : "A theme holds no data."}
         </p>
       </Section>
 
@@ -275,6 +400,32 @@ function RemovedResult({ result }: { result: Removed }) {
         <RemovalHandBackPanel handBack={result.handBack} kind={result.kind} />
       </Section>
     </div>
+  );
+}
+
+/** What deleting its data, after its code, did: what went, or why it was kept. */
+function DataResult({ data, kind }: { data: DataDeleteOutcome; kind: ExtensionKind }) {
+  if (data.ok) {
+    return (
+      <Notice tone="success" title="Its data is deleted from this checkout's database">
+        <Lines lines={describeData(data.result.kind, data.result.counts, data.result)} />
+      </Notice>
+    );
+  }
+  // These two already say what to do next.
+  const saysWhatNext = data.code === "shared-database" || data.code === "still-served";
+  return (
+    <Notice tone={data.tone === "danger" ? "danger" : "warning"} title="Its data was kept">
+      <p>
+        <WithCode text={data.message} />
+      </p>
+      {!saysWhatNext && (
+        <p className="mt-2">
+          Delete it later with Delete data, under Not in this build on{" "}
+          {kind === "app" ? "Admin > Apps" : "Admin > Connectors"}.
+        </p>
+      )}
+    </Notice>
   );
 }
 

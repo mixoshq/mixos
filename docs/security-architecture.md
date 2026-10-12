@@ -30,6 +30,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Connector switch     | `src/lib/connectors/switch.ts`                |
 | Registry update check | `src/lib/repository/update-check.ts`, `src/lib/repository/updates.ts` |
 | MixOS release check  | `src/lib/platform/release-check.ts`, `src/lib/platform/releases.ts`, `src/components/admin/release-notes.tsx` |
+| GitHub App link      | `src/lib/github/` (§32)                        |
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
 | Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
@@ -298,7 +299,9 @@ old activation, and with it the old grants, to different code that comes back
 under the same slug, so the release step records a hash of each app's files.
 An app that returns with different files comes back inactive and flagged on
 Admin > Apps until an admin activates it; one that returns with the same files
-comes back as it left. Both are audited (§28).
+comes back as it left. Both are audited (§28). The row and everything that
+hangs off it stay until an admin deletes them with Delete data (§31), after
+which an app that arrives under the slug starts with nothing.
 
 **A different extension under the same slug starts off, and without the old
 one's API keys.** Every release step also records each app's identity
@@ -646,6 +649,7 @@ What the platform does between those two boxes, in order:
 | `APP_API_KEY_SECRET`        | HMAC digests for app API keys (the `key` tier) | Lets an attacker mint app API keys |
 | `APP_SETTINGS_ENCRYPTION_KEY` | AES-256-GCM for `password`-typed app settings (`context.env`) | Exposes every app-scoped secret an admin entered |
 | `APP_UNLOCK_SECRET`         | Signs app password-unlock cookies    | Bypass of every app password |
+| `GITHUB_APP_ENCRYPTION_KEY` | AES-256-GCM for the GitHub App's private key (§32). Optional: unset, the App is off | With the database, lets an attacker sign as the App, which writes to the linked repository's contents and pull requests |
 | `CRON_SECRET`               | Authenticates the scheduler tick -> /api/cron | Attacker can trigger every app background job  |
 | `VAPID_PRIVATE_KEY`         | Signs Web Push messages              | Attacker could send push to existing subscribers; no data read access |
 | `VAPID_PUBLIC_KEY` / `VAPID_SUBJECT` | Client subscribe key / contact URL | Not secret; public key is handed to the browser to subscribe |
@@ -684,6 +688,14 @@ npm run keys:check        # exits non-zero naming anything missing or malformed
 The generator enumerates the inventory rather than listing names, so a key added
 there is generated without anyone remembering to update it — that drift is
 exactly what produced the RLS gap in §8.
+
+One more key is optional. `GITHUB_APP_ENCRYPTION_KEY` turns on the GitHub App
+(§32), and follows the same rules: 32 random bytes, independent, and a
+malformed value is an error, never a quiet "off". `npm run keys:generate`
+leaves it out unless asked (`-- --github-app`), and `npm run keys:check`
+checks it when it is set. Rotating it doesn't lose the App:
+`npm run keys:rotate-github-app` takes the old and the new key and
+re-encrypts the stored App key.
 
 **Do not point two keys at the same value, and do not derive one from another.**
 
@@ -990,6 +1002,20 @@ Entirely at the application layer:
 - The same list stops app code importing the raw client at all, by any
   spelling, so an app cannot hand-write SQL at runtime that would sidestep its
   schema. The registry generator enforces it on every build and every install.
+
+### Deleting an app's schema and role
+
+The release step creates an app's schema and role and never drops them: an app
+that leaves the build keeps both (§3.1). Only **Delete data**, by an admin,
+drops them ([`src/lib/repository/delete-data.ts`](../src/lib/repository/delete-data.ts),
+§31), and only by name, `app_<slug>` and `mixos_app_<slug>`, never by a prefix,
+so `notes_archive` is not part of `notes`. The schema has to belong to the role,
+and the role has to be one the release step could have made: no powers, no
+memberships, no use in another database. Dropping the schema must take nothing
+outside it, and the role must hold nothing else afterwards; otherwise the
+transaction rolls back and nothing is deleted. The app's row goes too, with its
+activation, grants, API keys and identity, so a later app under the slug
+arrives inactive with nothing (§3.1).
 
 ### Reachability of the database credential
 
@@ -1341,6 +1367,9 @@ Consent is a **ceiling**, the live grant is a **floor**. A refresh copies
 `granted_apps` forward verbatim, so consent can never silently widen. `hasAppGrant`
 (not `hasAppAccess`) is used deliberately — it is the authorization fact, and it
 matches what the App Services broker already enforces for the same question.
+Deleting an app's data (§31) takes its slug out of every token's and code's
+`granted_apps`, so consent given to it never covers a later app with the same
+slug.
 
 The app gate (§3.1) is asked last, before a tool's module is imported. While
 the app's own migrations are behind this build, `tools/list` leaves its tools
@@ -2078,13 +2107,14 @@ Currently recorded: `connector.configure`, `connector.connect`,
 `connector.test`, `connector.disable`, `connector.enable`, `app.password.set`,
 `app.password.clear`, `app.setting.set`, `app.setting.clear`, `app.activate`,
 `app.deactivate`, `app.missing`, `app.returned`, `app.identity.changed`,
-`connector.identity.changed`, `theme.identity.changed`, `app.job.run`,
-`app.job.enable`, `app.job.disable`, `scheduler.start`, `scheduler.stop`,
-`theme.apply`, `user.create`, `user.profile.update`, `user.password.set`,
-`user.admin.grant`, `user.admin.revoke`, `user.grant.add`,
-`user.grant.revoke`, `user.role.set`, `user.sessions.revoke`; a Registry
-install as `app.install`, `connector.install` or `theme.install`, or, when the
-install is refused, `app.install.rejected`, `connector.install.rejected` or
+`connector.missing`, `connector.returned`, `connector.identity.changed`,
+`theme.identity.changed`, `app.job.run`, `app.job.enable`, `app.job.disable`,
+`scheduler.start`, `scheduler.stop`, `theme.apply`, `user.create`,
+`user.profile.update`, `user.password.set`, `user.admin.grant`,
+`user.admin.revoke`, `user.grant.add`, `user.grant.revoke`, `user.role.set`,
+`user.sessions.revoke`; a Registry install as `app.install`,
+`connector.install` or `theme.install`, or, when the install is refused,
+`app.install.rejected`, `connector.install.rejected` or
 `theme.install.rejected`; registering a pending app or connector as
 `app.register` or `connector.register`, or `app.register.rejected` and
 `connector.register.rejected` when it is refused; discarding one as
@@ -2093,16 +2123,24 @@ what a stopped one left as `app.register.recover` or
 `connector.register.recover`; removing an extension's code as `app.remove`,
 `connector.remove` or `theme.remove`, or `<kind>.remove.rejected` when it is
 refused; recovery after a removal that stopped midway as
-`<kind>.remove.recover`; and an update of an app or a connector to another
-release, which waits in pending, as `app.update` or `connector.update`, with
-the release it replaces (`from`), the one it goes to (`to`), which way
-(`direction`: `newer`, `older`, `same` or `unknown`) and whether local changes
-are to be discarded (`localChangesDiscarded`), or `<kind>.update.rejected`
-with the reason (§31). `connector.disable` and `connector.enable`
-name the apps that declare the connector, in `details` as `requiredBy` and
-`optionalFor`. An `app.activate` or `connector.enable` that answered a
-different extension under the name, with the name typed, has the identity it
-replaced in `details` as `replaced`.
+`<kind>.remove.recover`; deleting what the database kept for an app or a
+connector as `app.data.delete` or `connector.data.delete`, with how much went,
+or `<kind>.data.delete.rejected` with the reason when it is refused; and an
+update of an app or a connector to another release, which waits in pending, as
+`app.update` or `connector.update`, with the release it replaces (`from`), the
+one it goes to (`to`), which way (`direction`: `newer`, `older`, `same` or
+`unknown`) and whether local changes are to be discarded
+(`localChangesDiscarded`), or `<kind>.update.rejected` with the reason (§31).
+The GitHub link's rows (§32) are `github.app.create`, `github.link`,
+`github.link.disable`, `github.link.enable`, `github.link.refresh`,
+`github.app.key.replace`, `github.app.key.reencrypt`, `github.unlink`,
+`github.app.forget`, `github.branch-rule.override` and
+`github.branch-rule.override.clear`, with `.rejected` rows for a refused
+creation, link, key replacement or unlink.
+`connector.disable` and `connector.enable` name the apps that declare the
+connector, in `details` as `requiredBy` and `optionalFor`. An `app.activate`
+or `connector.enable` that answered a different extension under the name, with
+the name typed, has the identity it replaced in `details` as `replaced`.
 
 **Connecting a connector.** An admin finishing the OAuth round trip for a
 tenant connector (§27), with Connect or Reconnect, is `connector.connect`
@@ -2122,7 +2160,9 @@ leaves its row even if the request is cut short, and a refused one leaves none.
 
 **Rows the release step writes.** `app.missing` (an app left the build),
 `app.returned` (it came back, with whether its files changed, both hashes, and
-whether it came back as a different extension) and `<kind>.identity.changed`
+whether it came back as a different extension), `connector.missing` and
+`connector.returned` (a connector with saved credentials or connections left
+the build, or came back) and `<kind>.identity.changed`
 (a different extension under the name, with both identities: for an app,
 whether it was switched off and how many API keys were revoked; for a
 connector, whether it was turned off; for a theme, whether it is the applied
@@ -2138,6 +2178,13 @@ with `via: "button"` in `details`, as the update dialog's rows do. A Register,
 a Remove or an update the page refuses on a built deployment, before any lock,
 is `<kind>.register.rejected`, `<kind>.remove.rejected` or
 `<kind>.update.rejected` with `reason: "unsupported-environment"`.
+
+**Rows Delete data writes.** `<kind>.data.delete` names the admin and records
+what went, by count, never a value. It is written in the deletion's own
+transaction, so the deletion and its record commit together: like the release
+step's rows, and unlike rule 2, a deletion that can't be recorded doesn't
+happen. One that follows **Remove code and delete this checkout's data** has
+`afterRemoval: true`. The deletion never touches this table.
 
 **Rows `npm run register` and `npm run remove` write.** Registering,
 discarding, removing and recovering run
@@ -2758,9 +2805,10 @@ sends nothing for this check either, and the admin pages say the checks are off.
 
 Removing an extension has two halves. Its code is a change to the repository,
 made in a checkout and shipped by a commit and a deploy, as installing it is.
-Its data is in each database, and stays: the release step marks an app that
-left the build and keeps everything it had (§3.1), and a connector keeps its
-credentials. No code the extension ships runs to remove it.
+Its data is in each database, and stays: the release step marks an app or a
+connector that left the build and keeps everything it had (§3.1), until an
+admin deletes it there (below). No code the extension ships runs in either
+half.
 
 The code half is **Remove** on each tile of Admin > Apps, Connectors and
 Themes, or `npm run remove -- <kind>/<slug>`
@@ -2814,6 +2862,73 @@ theme's screenshots, an app's brand marks, a connector's assets) in
 the copies an earlier run recorded and this one didn't make, so a removed
 extension's files stop being served. It deletes only folders in that record,
 and nothing else in `public/` (`scripts/public-copies.ts`).
+
+### Deleting an extension's data
+
+The data half is **Delete data…** under Not in this build on Admin > Apps and
+Admin > Connectors, on each instance, by an admin who has read what goes and
+typed the name ([`src/lib/repository/delete-data.ts`](../src/lib/repository/delete-data.ts)).
+Both server actions require an admin first (§9), and the server checks the
+typed name. A theme holds no data, so it has none.
+
+**What decides is the database.** The build serving the request can't speak
+for the others: a host's rollback serves an older build without running a
+release step, a preview can share production's database, and checkouts can
+share a development database. So it is refused:
+
+- while the build serving this instance has the extension;
+- until a release step has marked it missing: `apps.missing_since` for an app
+  (§3.1), or `connector.missing.<name>` in `platform_settings` for a connector
+  with saved credentials or connections, which the release step sets when its
+  build lacks the connector and clears when it returns
+  (`scripts/sync-identities.ts`);
+- while any other build seen in the last 24 hours has it. Each build records
+  the apps and connectors it carries in `platform_builds_seen`
+  ([`src/lib/platform/builds-seen.ts`](../src/lib/platform/builds-seen.ts))
+  at its release step, which fails if it can't, and at server start and on the
+  cron tick, at most every ten minutes. A deployment is keyed by its commit and
+  a hash of what it carries, and a checkout by the random id in
+  `.mixos/checkout-id`. The caller's own build doesn't count, so a checkout can
+  delete its own data right after removing the code. Builds unseen for 30 days
+  are pruned.
+
+**What goes.** For an app: its schema and role (§8); its rows in
+`_migrations`, `app_settings`, `app_api_keys`, `app_scheduled_jobs`,
+`app_job_runs` and `app_open_events`, and the `telemetry_events` it was the
+source of; its slug in each MCP authorization's `granted_apps` (§17), which
+keeps every other app it lists; and its `apps` row, which takes its grants,
+installs, password and widgets with it by foreign key, along with its
+activation and identity. Calls it made to a connector or to another app's
+services are their telemetry, and stay. For a connector: `connector_configs`,
+every `user_connector_oauth` and `connector_scope_status` row, its webhook
+replay markers, its telemetry, and its keys in `platform_settings` (the switch,
+the identity and both marks). Every row is matched by its own column, equal to
+the name; no table or row is chosen by a prefix. `admin_audit_log` is always
+kept. With all of it gone, a later extension under the same name inherits
+nothing: it arrives as a new one.
+
+**One transaction, under the release step's lock** (`scripts/migration-lock.ts`),
+so it can't race a release step that marks or brings back the same extension.
+The checks run again under the lock, and while it decides, no build can record
+itself (`platform_builds_seen` is locked in share mode). Before dropping an app's
+schema it checks that the schema belongs to the app's role, and that the role
+has no powers, no memberships and no use in another database. After, it checks
+that nothing outside the schema went with it (a view, a key, a default or a
+column of another table, compared catalog row by catalog row), and that the
+role holds nothing more. Any of these, a lock it can't get within 15 seconds,
+or any error, rolls everything back, and nothing is deleted. The audit row is
+written in the same transaction (§28).
+
+**Right after Remove, in a checkout.** The Remove dialog's second button,
+"Remove code and delete this checkout's data", is destructive and asks for the
+name typed, which the server checks before removing anything. Once the code is
+removed it runs Delete data with the same checks, against the registry the
+generator just wrote. On a database only this machine reaches (a Unix socket,
+loopback or `host.docker.internal`, the test "Activate in this checkout" uses),
+the removal counts as the release step's mark; on a shared database it
+doesn't, and a release step has to run first. A production build of the
+checkout still serves the extension until it is rebuilt, so it is refused
+there. A refusal keeps the data, and the removal stands.
 
 ### Updating an extension
 
@@ -2995,10 +3110,11 @@ one; adding a second should be a deliberate code change with a floor.
 
 Every entry point in the admin pages is a server action that calls
 `requireAdmin()` itself, before it reads anything else (§9): install, the
-review, Register, Discard, Activate in this checkout, Remove and what it
-shows first, and the update dialog's overview, comparison and update
-(`src/lib/repository/actions.ts`, `src/lib/repository/pending-actions.ts`,
-`src/lib/repository/remove-actions.ts`, `src/lib/repository/update-actions.ts`). The
+review, Register, Discard, Activate in this checkout, Remove and Delete data,
+and what each shows first, and the update dialog's overview, comparison and
+update (`src/lib/repository/actions.ts`, `src/lib/repository/pending-actions.ts`,
+`src/lib/repository/remove-actions.ts`, `src/lib/repository/delete-data-actions.ts`,
+`src/lib/repository/update-actions.ts`). The
 pages' own gates guard the render only, and the actions are reachable without
 ever loading them. Both outcomes are audited (§28): `app.install` records the
 version, commit, verified hash, files hash, where it went, the check's verdict
@@ -3218,3 +3334,142 @@ an unverifiable download is not something anyone is in a position to weigh.
 **The mixos.org side has landed.** Publishing a release reads its tagged
 archive and stores the `contentHash` computed with the serialisation above, so
 a release published that way can be verified and installed.
+
+---
+
+## 32. The GitHub App
+
+Admin > GitHub links the instance to the one repository it is built from,
+through a private GitHub App the operator owns
+([`src/lib/github/`](../src/lib/github/)). It is off while
+`GITHUB_APP_ENCRYPTION_KEY` is unset (§5). It links and checks; nothing in this
+release writes to the repository. The App's write permissions are for
+proposing changes as pull requests, which builds on this.
+
+### What the App may do
+
+Exactly `contents: write`, `pull_requests: write`, `checks: read`,
+`statuses: read` and `metadata: read` (`APP_PERMISSIONS`,
+`src/lib/github/manifest.ts`). Not `workflows`, so nothing it writes can change
+a workflow, and not `administration`, so it can't change branch rules. It
+subscribes to no events, and its webhook is inactive. It is private, so it can
+be installed only on the account that owns it.
+
+### Creating it
+
+Admin > GitHub posts the App's manifest to GitHub. That page is the only one
+whose `form-action` allows another origin, `https://github.com`
+(`formActionsFor()`, `src/lib/csp.ts`).
+
+The round trip carries a `state`: 32 random bytes in an HttpOnly cookie in the
+admin's browser, kept in `platform_settings` only as a SHA-256 hash with the
+admin's user id. It lasts 15 minutes and works once. The route GitHub returns to
+(`/api/admin/github/created`) requires an admin, the same state in the query
+and the cookie, and the admin who started it, and deletes it. Only then is the
+code exchanged (`POST /app-manifests/{code}/conversions`). The App's id, slug,
+owner and private key are kept; the webhook and OAuth secrets in the same answer
+are never stored. An App whose permissions or events differ from the manifest's
+isn't recorded. While an App is recorded, another can't be created.
+
+### Linking
+
+The admin installs the App on GitHub, choosing one repository. The setup URL
+(`/api/admin/github/installed`) changes nothing: it takes the admin back to the
+page, where Finish linking, a server action, does the work. With the App's JWT
+and a metadata-only token it requires one installation, on the App owner's
+account, with selected repositories, exactly one, that isn't upstream MixOS
+(compared by repository id, `UPSTREAM_REPOSITORY_ID`), and no permission beyond
+the App's. A read token narrowed to that repository then reads it and its
+default branch's rules, and the repository's id, owner, name, default branch,
+fork and parent are recorded.
+
+### Every operation
+
+Each operation reads the installation again first (`judgeInstallation()`,
+`src/lib/github/installation.ts`). If it now covers every repository, more than
+one, a different one, upstream, a permission beyond the App's, or another
+account, the link is switched off, audited, and nothing uses it. Check again
+switches it back on once every check passes. A repository renamed on GitHub
+keeps its id, and is refused until Check again records the new name. An
+uninstalled or suspended installation is refused without switching anything
+off.
+
+### Tokens
+
+Minted per operation from a JWT (RS256 with `node:crypto`, nine minutes):
+
+- **Listing:** `metadata: read` over the whole installation, only to count its
+  repositories. Narrowed, it would see one however many there are.
+- **Read:** `contents`, `checks`, `statuses` and `pull_requests`, read.
+- **Write:** `contents` and `pull_requests`, write. Unused in this release.
+
+Read and write are narrowed with `repository_ids` to the linked repository.
+GitHub's answer must name that repository and those permissions, or the token
+is revoked unused. Each token is revoked when its operation ends. No token or
+JWT is stored, logged, audited or sent to a browser;
+`src/lib/github/link.integration.test.ts` looks for every one the fake GitHub
+issues in all four places.
+
+### The HTTP client
+
+`src/lib/github/api.ts` is the only code that sends requests to GitHub, and only
+to `https://api.github.com`. A path must be absolute, made of percent-encoded
+segments, and parse back to itself. Repository paths are built from the stored
+record only (`src/lib/github/repository.ts`). Redirects are never followed. A
+request has 10 seconds, body included, and an answer 4 MB. Nothing is logged:
+errors name the method, the path, the status and at most 200 characters of
+GitHub's message, and never the manifest code, which can be exchanged for the
+App's key within the hour. Every answer is Zod-parsed.
+
+### What is stored
+
+`platform_settings`, no migration: `github_app`, `github_app_key` (the private
+key, AES-256-GCM under `GITHUB_APP_ENCRYPTION_KEY`), `github_link`,
+`github_branch_rule`, `github_branch_rule_override` and
+`github_manifest_state`. A row that doesn't fit its schema reads as corrupt, so
+a damaged record can't pass for "no App".
+
+### The private key
+
+GitHub has no API to create or revoke an App's keys. To replace one, the admin
+generates a key in the App's settings and pastes it: a JWT signed with it has
+to get this App's id from `GET /app`, or nothing changes. The page shows the
+fingerprint GitHub shows, and reminds the admin to delete the old key there.
+The pasted key is posted to `/api/admin/github/key`, which requires an admin,
+this origin and the CSRF token (§7), rather than to a server action, whose
+arguments `next dev` prints.
+
+`npm run keys:rotate-github-app` re-encrypts the stored key from the old
+`GITHUB_APP_ENCRYPTION_KEY` to a new one, in one transaction under the
+`github.app` lock. It reads both keys and the database from its own environment
+only, and is audited as the CLI.
+
+### Unlinking
+
+Unlink uninstalls the App (`DELETE /app/installations/{id}` with its JWT), asks
+GitHub again, and forgets the key and the ids only once GitHub lists no
+installation. If GitHub refuses, nothing is forgotten: an App still installed
+would keep a key on GitHub's side that can write to the repository, with
+nothing here to say so. Forget skips the uninstall. It is offered only when the
+stored key can't be read or GitHub refuses it, and needs the App's slug typed.
+
+### The default branch
+
+The App can write to any branch, and every supported host deploys the default
+branch. So proposals will need a `pull_request` rule on it, read with
+`GET /repos/{owner}/{repo}/rules/branches/{branch}` at link time and on Check
+again (`branchRuleSatisfied()`). That lists ruleset rules only. Classic branch
+protection doesn't show there, and private repositories on GitHub Free can't
+have rulesets, so an admin can confirm either, with the repository's name
+typed, audited. If GitHub won't show the rules at all (a 403 or 404), linking
+goes ahead and records that, since linking doesn't need the rule. [The hosting guide](hosting/README.md#linking-your-github-repository)
+gives the ruleset.
+
+### Authorization and audit
+
+The page, its server actions (`src/lib/github/actions.ts`) and its three
+routes, under `/api/admin/github/`, require an admin before anything else (§9). Creating, linking, switching the
+link off or on, recording a rename, replacing or re-encrypting the key,
+unlinking, forgetting and confirming a branch protection are audited (§28),
+against target type `github-app` and the App's id. Refusals of a creation, a
+link, a key or an unlink are audited as `.rejected`, with the reason.

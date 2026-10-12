@@ -66,9 +66,15 @@ import { sql } from "@/lib/db/client";
  * overlapping ticks, from checking with the catalogue at once
  * (src/lib/repository/update-check.ts), and `platform.release-check` does the
  * same for the check for new releases of MixOS
- * (src/lib/platform/release-check.ts).
+ * (src/lib/platform/release-check.ts). `github.app` keeps two admins, or an
+ * admin and `npm run keys:rotate-github-app`, from changing the GitHub link at
+ * once (src/lib/github/link.ts).
  */
-export type LockName = "repository.register" | "repository.update-check" | "platform.release-check";
+export type LockName =
+  | "repository.register"
+  | "repository.update-check"
+  | "platform.release-check"
+  | "github.app";
 
 /**
  * Many renewals long, so a database that drops a few cannot cost a live holder

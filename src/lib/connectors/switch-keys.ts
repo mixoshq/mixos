@@ -3,9 +3,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * The `platform_settings` keys behind a connector's switch, shared by the
- * server (./switch.ts) and the release step (scripts/sync-identities.ts),
- * which turns a connector off when a different one takes its name.
+ * The `platform_settings` keys the server (./switch.ts) and the release step
+ * (scripts/sync-identities.ts) share for a connector: its switch, the mark the
+ * release step sets when a different connector takes its name, and the mark it
+ * sets when a build lacks a connector this database holds credentials for.
+ * Delete data (src/lib/repository/delete-data.ts) deletes all of them.
  *
  * No imports: the release step is bundled without the server's modules.
  */
@@ -20,6 +22,13 @@ export const SWITCH_KEY_PREFIX = "connector.disabled.";
  */
 export const REPLACED_KEY_PREFIX = "connector.replaced.";
 
+/**
+ * `connector.missing.<name>`: set by a release step whose build lacks a
+ * connector this database holds credentials or connections for, with when as
+ * its value. Cleared when a build carries it again. Delete data needs it.
+ */
+export const MISSING_KEY_PREFIX = "connector.missing.";
+
 /** The key that holds one connector's switch. */
 export function connectorSwitchKey(connectorName: string): string {
   return `${SWITCH_KEY_PREFIX}${connectorName}`;
@@ -28,4 +37,9 @@ export function connectorSwitchKey(connectorName: string): string {
 /** The key that says a different connector took this one's name. */
 export function connectorReplacedKey(connectorName: string): string {
   return `${REPLACED_KEY_PREFIX}${connectorName}`;
+}
+
+/** The key that says a release step ran without this connector. */
+export function connectorMissingKey(connectorName: string): string {
+  return `${MISSING_KEY_PREFIX}${connectorName}`;
 }

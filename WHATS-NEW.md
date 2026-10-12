@@ -297,6 +297,32 @@ just pulled.
   `<kind>.remove`, and `npm run remove -- --recover` puts back one that stopped
   midway. The registry generator now also deletes its copies in `public/` of
   an extension that is gone.
+- **Delete an extension's data.** Admin > Apps and Admin > Connectors list
+  under **Not in this build** what the database keeps for an app or a
+  connector the build no longer has, each with **Delete data…**: destructive,
+  with its name typed. Keeping is the default. For an app it drops the schema
+  and database role and deletes its rows, grants and settings; for a connector,
+  its credentials and every user's connection. It is refused while the build
+  serving the instance has it, until a release step has run without it, and
+  while another build that used the database in the last 24 hours has it. The
+  release step now marks a connector its build lacks, as it does an app, and
+  each build records which apps and connectors it carries at its release step,
+  when its server starts and on the cron tick. The Remove dialog adds **Remove
+  code and delete this checkout's data**, under the same checks. The audit log
+  records `<kind>.data.delete`, `connector.missing` and `connector.returned`.
+  Migration 0012; run `npm run db:local` to apply it.
+- **Link your repository on Admin > GitHub.** An admin creates a private GitHub
+  App from the page, installs it on the one repository the instance is built
+  from, and finishes linking. The instance refuses an installation on every
+  repository, on more than one, or on upstream MixOS, and checks again before
+  every operation, turning the link off if the installation was widened. The
+  App can't change workflows and gets no webhook events. Its private key is
+  stored encrypted under `GITHUB_APP_ENCRYPTION_KEY`; without that key the
+  page stays off. `npm run keys:generate -- --github-app` prints one, and
+  `npm run keys:rotate-github-app` re-encrypts the stored key when you rotate
+  it. Unlink uninstalls the App from GitHub before forgetting it. Linking,
+  unlinking, replacing the key and the link turning off are audited. See
+  `docs/hosting/README.md#linking-your-github-repository`.
 - **Preparing an update of an extension.** Install has an update mode: it
   downloads any release of an app or a connector installed from mixos.org,
   verifies and checks it as an install does, and leaves it in

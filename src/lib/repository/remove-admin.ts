@@ -20,6 +20,12 @@
  *      row, naming the admin, with `via: "button"`.
  *   4. Returns what happened as a value, since a thrown error reaches the
  *      browser as an opaque digest in production.
+ *
+ * The second button, "Remove code and delete this checkout's data", asks for
+ * the name typed, which is checked before anything is removed. Once the code is
+ * removed, it deletes the data with the same checks as Delete data
+ * (./delete-data-admin.ts): refused while another build that uses this database
+ * still has it. A refusal there leaves the removal done and the data kept.
  */
 
 import { z } from "zod";
@@ -29,6 +35,7 @@ import { CheckoutLockHeldError } from "../platform/checkout-lock";
 import { LockUnavailableError } from "../platform/lock";
 import { safeErrorMessage } from "../safe-error";
 import { EXTENSION_NAME_PATTERN } from "./backup";
+import { isDataKind, type DataDeleteOutcome, type DataKind, type DataPreview } from "./delete-data-outcomes";
 import { checkoutRoot } from "./install";
 import { LOCKED_MESSAGE } from "./pending-admin";
 import type { Refusal } from "./pending-outcomes";
@@ -46,6 +53,14 @@ export interface RemoveContext {
   revalidate(path: string, type?: "layout" | "page"): void;
   /** Whether this server stops serving a removed extension without a rebuild: `next dev`. */
   servesWithoutRebuild(): boolean;
+  /**
+   * What deleting its data along with its code would delete, and whether that
+   * would be refused: previewDataBeforeRemoval(). Without it, or when it
+   * answers null, the dialog offers only to keep the data.
+   */
+  previewData?(kind: DataKind, slug: string): Promise<DataPreview | null>;
+  /** Delete its data right after its code was removed: deleteDataAfterRemoval(). */
+  deleteData?(kind: DataKind, slug: string, actor: AdminActor): Promise<DataDeleteOutcome>;
   /** Tests: the checkout. This one otherwise. */
   root?: string;
   /** Tests: a stand-in for the registry generator. */
@@ -53,6 +68,12 @@ export interface RemoveContext {
 }
 
 const TargetSchema = z.object({ kind: ExtensionKindSchema, slug: z.string().regex(EXTENSION_NAME_PATTERN) });
+
+/** The removal's input: the target, and whether to delete its data too, with its name typed. */
+const RemovalSchema = TargetSchema.extend({
+  deleteData: z.boolean().optional(),
+  typedSlug: z.string().optional(),
+});
 
 const notAnExtension = (): Refusal => ({
   ok: false,
@@ -115,6 +136,9 @@ export async function previewForButton(input: unknown, ctx: RemoveContext): Prom
   } catch (err) {
     return removalRefusal(err);
   }
+  // Only when it can be removed, and only for the kinds that keep data.
+  const data =
+    plan.blockers.length === 0 && isDataKind(kind) && ctx.previewData ? await ctx.previewData(kind, slug) : null;
   return {
     ok: true,
     preview: {
@@ -127,20 +151,46 @@ export async function previewForButton(input: unknown, ctx: RemoveContext): Prom
       warnings: plan.warnings,
       pending: plan.pending,
       command: `npm run remove -- ${kind}/${slug}`,
+      data,
     },
   };
 }
 
 /**
- * Remove its code from this checkout. Refused, without a lock, on a built
- * deployment, audited as `<kind>.remove.rejected`, as removal itself audits
- * every refusal.
+ * Remove its code from this checkout, and with `deleteData` and the name typed,
+ * its data from this checkout's database after it. Refused, without a lock, on
+ * a built deployment, audited as `<kind>.remove.rejected`, as removal itself
+ * audits every refusal.
  */
 export async function removeFromButton(input: unknown, ctx: RemoveContext): Promise<RemoveOutcome> {
   const actor = await ctx.admin();
-  const target = TargetSchema.safeParse(input);
+  const target = RemovalSchema.safeParse(input);
   if (!target.success) return notAnExtension();
   const { kind, slug } = target.data;
+  const deleteData = target.data.deleteData === true;
+
+  // Before anything is removed: deleting data is only ever what was asked for.
+  if (deleteData) {
+    if (!isDataKind(kind)) {
+      return { ok: false, code: "no-data", message: "A theme holds no data. Nothing was removed.", tone: "info" };
+    }
+    if (!ctx.deleteData) {
+      return {
+        ok: false,
+        code: "unavailable",
+        message: "Deleting data isn't available here. Nothing was removed.",
+        tone: "info",
+      };
+    }
+    if ((target.data.typedSlug ?? "").trim() !== slug) {
+      return {
+        ok: false,
+        code: "not-confirmed",
+        message: `Type ${slug} to delete its data too. Nothing was removed.`,
+        tone: "warning",
+      };
+    }
+  }
 
   if (ctx.builtDeployment()) {
     await recordAdminAction(actor, {
@@ -165,6 +215,23 @@ export async function removeFromButton(input: unknown, ctx: RemoveContext): Prom
     return removalRefusal(err);
   }
 
+  // Its code is gone. Its data next, when asked: a refusal leaves it kept, and
+  // the removal stands, so nothing here may turn into a failed removal.
+  let data: DataDeleteOutcome | null = null;
+  if (deleteData && isDataKind(kind) && ctx.deleteData) {
+    try {
+      data = await ctx.deleteData(kind, slug, actor);
+    } catch (err) {
+      console.error("[remove] deleting the data after the removal failed:", err);
+      data = {
+        ok: false,
+        code: "unknown",
+        message: "Its data couldn't be deleted, and nothing in the database was changed. The server log says why.",
+        tone: "danger",
+      };
+    }
+  }
+
   ctx.revalidate(`/admin/${KIND_SEGMENT[kind]}`);
   // The theme is stamped on <html> in the root layout, and the one applied may
   // be the one that went.
@@ -181,6 +248,7 @@ export async function removeFromButton(input: unknown, ctx: RemoveContext): Prom
       discardedPending: result.discardedPending,
       servesNow: ctx.servesWithoutRebuild(),
       handBack: result.handBack,
+      data,
     },
   };
 }
