@@ -59,6 +59,17 @@
  * what the package says about itself. Every generator run gets `PATH` and
  * `TMPDIR` as its whole environment (`generatorEnv`).
  *
+ * ── AN UPDATE ───────────────────────────────────────────────────────────────
+ *
+ * The same steps, for another release of an app or a connector that is in
+ * place, installed from this catalogue (`UpdateRequest`, ./update.ts). Before
+ * step 1 it finds that folder's own install record, and whether the folder
+ * still matches it, from the files hash with nothing downloaded; after step 1,
+ * which way the release goes. Local changes, an older release, and a release
+ * whose order can't be told each need the admin's explicit say. At step 9 the
+ * release goes to pending like any app or connector, and its sidecar records
+ * what it replaces. The folder in place isn't touched.
+ *
  * ── WHAT THIS CANNOT DO, AND SAYS SO ────────────────────────────────────────
  *
  * The registries are generated at BUILD time (`prebuild` → `predev` →
@@ -83,37 +94,51 @@ import {
   parseCheckVerdict,
   type CheckVerdict,
 } from "./check-verdict";
-import { fetchInstallManifest, repositoryBaseUrl } from "./client";
-import { fetchExtensionTree } from "./fetch-source";
-import { filesHash, verifyContentHash } from "./content-hash";
+import { leftoverBackup } from "./backup";
+import { RepositoryError, fetchExtension, fetchInstallManifest, repositoryBaseUrl } from "./client";
+import { SourceFetchError, fetchExtensionTree } from "./fetch-source";
+import { ContentHashMismatch, contentHashesMatch, filesHash, verifyContentHash } from "./content-hash";
 import { handBackFor, type HandBack } from "./hand-back";
 import {
   INSTALL_RECORD_FILE,
   InstallRecordSchema,
   installRecordEntry,
+  readInstallRecord,
+  recordMismatch,
+  recordTarballUrl,
   repositoryFromTarballUrl,
   type InstallRecord,
 } from "./install-record";
 import { LEFT_OUT_NAMES, type LeftOut } from "./left-out";
+import { sourceHost } from "./provenance";
+import { folderState, needsOlderConsent, updateDirection, type UpdateDirection } from "./update";
 import { BUILT_DEPLOYMENT_NOTICE, isBuiltDeployment } from "../platform/build";
 import {
+  CheckoutLockHeldError,
   CheckoutLockLostError,
   describeCheckoutLockHolder,
   withCheckoutLock,
   type CheckoutLock,
 } from "../platform/checkout-lock";
-import { LockLostError, withPlatformLock, type PlatformLease } from "../platform/lock";
+import { LockLostError, LockUnavailableError, withPlatformLock, type PlatformLease } from "../platform/lock";
 import { satisfiesMinimum } from "../platform/version";
+import { safeErrorMessage } from "../safe-error";
 import {
+  isPendingKind,
+  isRealDirectory,
+  kindDir,
+  liveLocation,
   pathExists,
   pendingLocation,
   readSidecar,
   stagingLocation,
   writeSidecar,
+  type PendingKind,
   type PendingLocation,
   type PendingSidecar,
+  type Replaces,
 } from "./pending";
-import type { TarEntry } from "./tar";
+import { ArchiveError, type TarEntry } from "./tar";
 import {
   SlugSchema,
   isVerifiableHash,
@@ -265,13 +290,74 @@ export class InstallError extends Error {
       | "generator-failed"
       | "write-failed"
       | "lock-lost"
-      | "lock-unconfirmed",
+      | "lock-unconfirmed"
+      // An update's own refusals (see UpdateRequest).
+      | "not-updatable"
+      | "local-changes"
+      | "older-release"
+      | "already-current"
+      | "changed-meanwhile",
     /** The generator's own output, when it is what refused. */
     readonly detail?: string,
   ) {
     super(message);
     this.name = "InstallError";
   }
+}
+
+/**
+ * Any failure of an install or an update as a code and a message the admin
+ * pages can render honestly: the install action (./actions.ts), and the update
+ * dialog's (./update-admin.ts), which downloads and verifies a release too.
+ */
+export function describeInstallFailure(err: unknown): { code: string; message: string; detail?: string } {
+  // Not a failure of the extension or the repository — someone else is already
+  // installing, registering or removing. Its own code so the UI can offer "try again" rather than the
+  // tone the rest of this list deserves. Nothing has been downloaded or written.
+  if (err instanceof LockUnavailableError) {
+    return {
+      code: "locked",
+      message: "Another administrator is installing, registering or removing an extension. Try again in a moment.",
+    };
+  }
+  // The same, from the checkout lock: another install or registration in this
+  // checkout, or a registry generator run, which `npm run dev` and
+  // `npm run registry` start. Its message names the holder.
+  if (err instanceof CheckoutLockHeldError) {
+    return { code: "locked", message: err.message };
+  }
+  if (err instanceof ContentHashMismatch) {
+    return {
+      code: "checksum",
+      // The heading in the UI already says it failed, so this says what a
+      // failure MEANS. Two ways of saying "checksum verification failed" is a
+      // sentence the reader skips, and this is the one message on this screen
+      // that is worth reading.
+      message:
+        "The package downloaded from GitHub is not the package the repository " +
+        "published a checksum for, so nothing was written to this instance. " +
+        "Either the release was changed after it was published, or the download " +
+        "was altered in transit. Do not install this until the publisher has " +
+        "cut a new release.",
+      detail: `expected ${err.expected}\nreceived ${err.actual}`,
+    };
+  }
+  if (err instanceof InstallError) {
+    return { code: err.code, message: err.message, detail: err.detail };
+  }
+  if (err instanceof SourceFetchError) {
+    return { code: "download", message: err.message };
+  }
+  if (err instanceof ArchiveError) {
+    return { code: "invalid-package", message: err.message };
+  }
+  if (err instanceof RepositoryError) {
+    return { code: err.failure, message: err.message };
+  }
+  return {
+    code: "unknown",
+    message: safeErrorMessage(err, "The install failed."),
+  };
 }
 
 /** How the registry generator's run went, once the check accepted the extension. */
@@ -334,6 +420,8 @@ export interface InstallResult {
    * (./hand-back.ts). Null for a pending install, whose Register hands back.
    */
   handBack: HandBack | null;
+  /** For an update, what it replaces, as its pending sidecar records it. Null for an install. */
+  replaces: Replaces | null;
   /** What the admin has to do before this is actually live. */
   nextStep: string;
 }
@@ -1128,8 +1216,7 @@ export async function regenerateRegistry(
     return { ran: true, ok: false, stopped: true, output: run.output };
   }
 
-  const generated = await readRegistryModule(kind, root);
-  const present = generated.includes(`"${REGISTRY_KEY[kind]}": ${JSON.stringify(slug)}`);
+  const present = await listedInRegistry(kind, slug, root);
   return {
     ran: true,
     ok: present,
@@ -1138,6 +1225,16 @@ export async function regenerateRegistry(
       ? run.output
       : `${run.output}\n\nThe generator ran without error but ${slug} is not in ${REGISTRY_FILE_LABEL[kind]}.`,
   };
+}
+
+/**
+ * Whether the generated module for `kind`, this checkout's or the one under
+ * `root`, lists `slug`: a file this process reads, never the generator's output.
+ * Removal (./remove.ts) asks it after the generator ran without the folder.
+ */
+export async function listedInRegistry(kind: ExtensionKind, slug: string, root?: string): Promise<boolean> {
+  const generated = await readRegistryModule(kind, root);
+  return generated.includes(`"${REGISTRY_KEY[kind]}": ${JSON.stringify(slug)}`);
 }
 
 /**
@@ -1300,6 +1397,188 @@ export interface InstallOptions {
   allowYanked?: boolean;
   /** Who the install is for, as the audit row names them, for a pending install's sidecar. */
   installedBy?: string;
+  /**
+   * Install `version` as an update of the app or connector already in place,
+   * rather than as a new one. See UpdateRequest.
+   */
+  update?: UpdateRequest;
+}
+
+/**
+ * An update: another release of an app or a connector installed from this
+ * instance's catalogue, for the folder it is in (./update.ts).
+ *
+ * It is installed as any release is, into `.mixos/pending/`, and the folder in
+ * place isn't touched. Its sidecar records what it replaces, which is what
+ * Register will check the folder against when it puts the update in place.
+ * Before anything is downloaded, under the locks:
+ *
+ *   - the folder is there, with an install record of its own from the
+ *     catalogue this instance installs from (installedForUpdate());
+ *   - nothing of the slug waits in pending, as for an install;
+ *   - a folder that no longer matches its record's files hash, found without
+ *     downloading anything, needs `discardLocalChanges` (D12);
+ *   - a release older than the installed one, or one whose order can't be
+ *     told, needs `allowOlder` ("Install an older release");
+ *   - the release the folder runs, with no local changes, is nothing to do;
+ *   - what the admin reviewed, when given, must still be what is there.
+ */
+export interface UpdateRequest {
+  /** Discard the folder's local changes: required when it no longer matches its install record. */
+  discardLocalChanges?: boolean;
+  /** Install an older release: required when the target is older, or which is newer can't be told. */
+  allowOlder?: boolean;
+  /**
+   * What the admin reviewed, checked again under the locks: the installed
+   * release and the folder as they were, and the target's commit and content
+   * hash. The update is refused when any has changed since.
+   */
+  reviewed?: ReviewedUpdate;
+}
+
+export interface ReviewedUpdate {
+  installedCommit: string;
+  installedFilesHash: string;
+  /** The folder's own files hash, null when it had none (folderState() in ./update.ts). */
+  folderHash: string | null;
+  targetCommit: string;
+  targetContentHash: string;
+}
+
+/** The app or connector an update replaces: its folder and its own install record. */
+export interface InstalledExtension {
+  kind: PendingKind;
+  slug: string;
+  /** Absolute: `<root>/apps/<slug>`. */
+  dir: string;
+  /** Repo-relative: `apps/<slug>`. */
+  rel: string;
+  record: InstallRecord;
+}
+
+/**
+ * The app or connector `kind`/`slug` in the checkout at `root`, as an update
+ * would replace it: a real folder, with an install record of its own whose
+ * `source` is the catalogue this instance installs from. Throws InstallError
+ * `not-updatable`, saying why, for anything else. Reads only.
+ */
+export function installedForUpdate(
+  kind: ExtensionKind,
+  slug: string,
+  root: string = PROJECT_ROOT,
+): InstalledExtension {
+  if (!isPendingKind(kind)) throw themeNotUpdatable(slug);
+  const live = liveLocation(root, kind, slug);
+  if (!isRealDirectory(live.dir)) {
+    throw new InstallError(
+      `Nothing named ${slug} is in ${kindDir(kind)}/, so there is nothing to update. Install it from Browse.`,
+      "not-updatable",
+    );
+  }
+  const read = readInstallRecord(live.dir);
+  const file = `${live.rel}/${INSTALL_RECORD_FILE}`;
+  if (read.state === "missing") {
+    throw new InstallError(
+      `${live.rel} has no install record (${file}), so it is a local extension, which an update from a ` +
+        "Registry doesn't replace.",
+      "not-updatable",
+    );
+  }
+  if (read.state === "invalid") {
+    throw new InstallError(
+      `${file} can't be read (${read.reason}), so what an update would replace can't be told.`,
+      "not-updatable",
+    );
+  }
+  const mismatch = recordMismatch(read.record, kind, slug);
+  if (mismatch) {
+    throw new InstallError(`${file} isn't this folder's: ${mismatch}.`, "not-updatable");
+  }
+  const catalogue = repositoryBaseUrl();
+  if (read.record.source !== catalogue) {
+    throw new InstallError(
+      `${live.rel} was installed from ${sourceHost(read.record.source)}, and this instance installs from ` +
+        `${sourceHost(catalogue)}, so it isn't updated from here.`,
+      "not-updatable",
+    );
+  }
+  return { kind, slug, dir: live.dir, rel: live.rel, record: read.record };
+}
+
+/**
+ * Why a theme isn't updated: it registers as it installs, so an update would
+ * replace it there and then, and only apps and connectors wait in pending.
+ */
+function themeNotUpdatable(slug: string): InstallError {
+  return new InstallError(
+    `Updating a theme isn't supported yet. Remove themes/${slug}, then install it again from Browse.`,
+    "not-updatable",
+  );
+}
+
+/**
+ * The release an install record names, as install wrote it: downloaded from
+ * GitHub at the record's commit with the same pinned fetch, read in memory,
+ * checked against the record's content hash, and with what install leaves out
+ * left out. Nothing is written. An update asks for it only to say which files
+ * of the folder changed since (localChangesBetween() in ./update.ts).
+ *
+ * Throws as a download does: SourceFetchError when GitHub doesn't serve it,
+ * ContentHashMismatch when what it serves isn't what was installed.
+ */
+export async function fetchRecordedRelease(record: InstallRecord): Promise<TarEntry[]> {
+  const tarballUrl = recordTarballUrl(record);
+  if (!tarballUrl) {
+    throw new InstallError(`The install record of ${record.slug} doesn't name a download.`, "invalid-package");
+  }
+  const entries = await fetchExtensionTree({
+    tarballUrl,
+    commitSha: record.commitSha,
+    subpath: record.repository.subpath ?? undefined,
+  });
+  verifyContentHash(entries, record.contentHash);
+  return leaveOut(entries).written;
+}
+
+/**
+ * When the catalogue says each release of `kind`/`slug` was published, by
+ * commit, as ISO dates. Empty when the listing can't be read: an update's
+ * direction is then `unknown` unless the versions decide it.
+ */
+export async function publishedDates(kind: ExtensionKind, slug: string): Promise<Map<string, string>> {
+  try {
+    const listing = await fetchExtension(kind, slug);
+    const dates = new Map<string, string>();
+    for (const release of listing.releases) {
+      const at = Date.parse(release.releasedAt);
+      if (!Number.isNaN(at) && !dates.has(release.commitSha)) dates.set(release.commitSha, new Date(at).toISOString());
+    }
+    return dates;
+  } catch (err) {
+    console.warn(`[repository] could not read when the releases of ${kind}/${slug} were published:`, err);
+    return new Map();
+  }
+}
+
+/**
+ * Which way an update from the installed release to `to` goes
+ * (updateDirection() in ./update.ts), asking the catalogue for the dates only
+ * when the versions don't decide it.
+ */
+export async function directionOf(
+  kind: ExtensionKind,
+  record: Pick<InstallRecord, "slug" | "version" | "commitSha">,
+  to: { version: string; commitSha: string },
+): Promise<UpdateDirection> {
+  const from = { version: record.version, commitSha: record.commitSha, releasedAt: null };
+  const target = { version: to.version, commitSha: to.commitSha, releasedAt: null };
+  const direction = updateDirection(from, target);
+  if (direction !== "unknown") return direction;
+  const dates = await publishedDates(kind, record.slug);
+  return updateDirection(
+    { ...from, releasedAt: dates.get(record.commitSha) ?? null },
+    { ...target, releasedAt: dates.get(to.commitSha) ?? null },
+  );
 }
 
 /**
@@ -1402,9 +1681,12 @@ export async function installExtension(
   if (!SlugSchema.safeParse(slug).success) {
     throw new InstallError(`"${slug}" is not an extension slug.`, "invalid-package");
   }
+  // Before the locks too: a theme can't be updated (see themeNotUpdatable()).
+  if (options.update && !isPendingKind(kind)) throw themeNotUpdatable(slug);
 
+  const what = options.update ? "an update" : "an install";
   return withPlatformLock("repository.register", (lease) =>
-    withCheckoutLock(PROJECT_ROOT, `an install of ${kind}/${slug} from the Registry`, (lock) => {
+    withCheckoutLock(PROJECT_ROOT, `${what} of ${kind}/${slug} from the Registry`, (lock) => {
       if (lock.tookOver) {
         console.warn(
           `[repository] took over the checkout lock from ` +
@@ -1425,13 +1707,27 @@ async function runInstall(
 ): Promise<InstallResult> {
   const { dir, rel } = resolveInstallDir(kind, slug);
 
-  // Refuse to overwrite. Upgrading in place is a different operation with a
-  // different question attached — what happens to the data and grants the
-  // existing one already has — and quietly replacing a directory on an admin
-  // who meant to install something new is the worst possible answer to it.
-  if (pathExists(dir)) {
+  // An update needs what it replaces in place, installed from this catalogue
+  // (see UpdateRequest). It never writes there: the new release waits in
+  // pending, and the folder is replaced only when that is registered.
+  const installed = options.update ? installedForUpdate(kind, slug) : null;
+
+  // Otherwise, refuse to overwrite: quietly replacing a directory on an admin
+  // who meant to install something new would decide for them what happens to
+  // the data and grants the existing one already has.
+  if (!installed && pathExists(dir)) {
     throw new InstallError(
       `${rel} already exists in this checkout. Remove it first, or update it in its own source repo.`,
+      "already-installed",
+    );
+  }
+  // Nor over a removal that stopped midway, whose folder may be waiting in
+  // `.mixos/backup/` for recovery to put it back.
+  const leftover = leftoverBackup(PROJECT_ROOT, kind, slug);
+  if (leftover) {
+    throw new InstallError(
+      `A removal of ${slug} stopped before it finished, and left ${leftover.rel}. Run ` +
+        "`npm run remove -- --recover` in this checkout to put things back, then try again.",
       "already-installed",
     );
   }
@@ -1440,9 +1736,18 @@ async function runInstall(
   const where = kind === "theme" ? null : pendingLocation(PROJECT_ROOT, kind, slug);
   if (where) assertNotPending(kind, slug, where);
 
+  // An update's local changes, from the files hash, with nothing downloaded.
+  const local = installed ? folderState(installed.dir, installed.record) : null;
+  if (installed && local && options.update) assertUpdatable(installed, local, options.update);
+
   // Steps 1 to 6, in memory (verifyRelease()): nothing has touched the
   // filesystem yet, and nothing will until the content hash has been checked.
-  const { manifest, record, written, leftOut, tree } = await verifyRelease(kind, slug, options);
+  // An update's checks of its target run as soon as the target is known,
+  // before the yank gate, the floor and the download.
+  let replaces = null as Replaces | null;
+  const { manifest, record, written, leftOut, tree } = await verifyRelease(kind, slug, options, async (target) => {
+    if (installed && local && options.update) replaces = await updateTarget(installed, local, target, options.update);
+  });
 
   // Step 7, fenced by the locks (see stageTree).
   const staged = await stageTree(stagingLocation(PROJECT_ROOT, kind, slug).dir, tree, lease);
@@ -1483,6 +1788,8 @@ async function runInstall(
         check: { verdict: "accepted", deferred: check.deferred },
         // For Register to say again. Left off when nothing was left out.
         ...(Object.keys(leftOut).length > 0 ? { leftOut } : {}),
+        // For an update: what it replaces, for Register to check the folder against.
+        ...(replaces ? { replaces } : {}),
       },
       lease,
     );
@@ -1492,10 +1799,13 @@ async function runInstall(
       pending: true,
       registry: null,
       handBack: null,
-      nextStep:
-        `Installed to ${where.rel}/, where nothing runs it yet. Read its code there, then ` +
-        `register it in this checkout with \`npm run register -- ${kind}/${slug}\`, which runs ` +
-        `its code for the first time. Then commit ${INSTALL_SEGMENT[kind]}/${slug} and deploy it.`,
+      replaces,
+      nextStep: replaces
+        ? `This version of MixOS can't register updates yet. Discard it in Admin > ` +
+          `${kind === "app" ? "Apps" : "Connectors"}, or with \`npm run register -- ${kind}/${slug} --discard\`.`
+        : `Installed to ${where.rel}/, where nothing runs it yet. Read its code there, then ` +
+          `register it in this checkout with \`npm run register -- ${kind}/${slug}\`, which runs ` +
+          `its code for the first time. Then commit ${INSTALL_SEGMENT[kind]}/${slug} and deploy it.`,
     };
   }
 
@@ -1544,6 +1854,7 @@ async function runInstall(
     installPath: rel,
     pending: false,
     registry,
+    replaces: null,
     handBack: handBackFor(
       record,
       rel,
@@ -1580,8 +1891,10 @@ export interface VerifiedRelease {
  * check the content hash, pre-flight it, leave out what install never writes,
  * and work out the files hash and the install record. Nothing is written.
  *
- * Install writes the tree it returns (runInstall()). A proposal commits it to
- * the operator's repository through the GitHub App instead
+ * Install writes the tree it returns (runInstall()), and so does an update,
+ * whose checks of its target run in `onResolved`, once the release is known
+ * and before anything else is checked or downloaded. A proposal commits the
+ * tree to the operator's repository through the GitHub App instead
  * (src/lib/github/propose.ts): that runs on a built deployment, which never
  * writes an extension to its own disk and never runs the check, and the
  * repository's CI and the production build's generator check it there.
@@ -1590,11 +1903,19 @@ export async function verifyRelease(
   kind: ExtensionKind,
   slug: string,
   options: Pick<InstallOptions, "version" | "allowYanked"> = {},
+  onResolved?: (manifest: InstallManifest) => Promise<void>,
 ): Promise<VerifiedRelease> {
   if (!SlugSchema.safeParse(slug).success) {
     throw new InstallError(`"${slug}" is not an extension slug.`, "invalid-package");
   }
   const manifest = await resolveInstall(kind, slug, options.version);
+
+  // What the install record will say about where this came from, checked
+  // before anything is downloaded: a release whose answer can't be recorded is
+  // refused here rather than after the download.
+  const origin = recordedOrigin(kind, slug, manifest);
+
+  if (onResolved) await onResolved(manifest);
 
   if (manifest.yanked && !options.allowYanked) {
     throw new InstallError(
@@ -1630,11 +1951,6 @@ export async function verifyRelease(
     console.warn(`[repository] ${kind}/${slug}: ${compat.reason}`);
   }
 
-  // What the install record will say about where this came from, checked
-  // before anything is downloaded: a release whose answer can't be recorded is
-  // refused here rather than after the download.
-  const origin = recordedOrigin(kind, slug, manifest);
-
   // Steps 3–5. Nothing touches the filesystem here, and the caller writes
   // nothing until verifyContentHash has returned.
   const entries = await fetchExtensionTree({
@@ -1664,9 +1980,10 @@ export async function verifyRelease(
  * catalogue's answer: the catalogue, the release, and the GitHub repository its
  * download URL names, with the folder in it. Everything but the hashes, which
  * come from the download. Throws `invalid-package` for an answer with a value
- * the record can't hold, so nothing is downloaded for it.
+ * the record can't hold, so nothing is downloaded for it. Exported for the
+ * update dialog, which refuses such a release the same way.
  */
-function recordedOrigin(
+export function recordedOrigin(
   kind: ExtensionKind,
   slug: string,
   manifest: InstallManifest,
@@ -1722,4 +2039,88 @@ function assertNotPending(kind: ExtensionKind, slug: string, where: PendingLocat
       "already-installed",
     );
   }
+}
+
+/** The folder an update replaces, as folderState() in ./update.ts found it. */
+type FolderState = { modified: boolean; folderHash: string | null };
+
+/**
+ * An update's checks before anything is downloaded: what the admin reviewed is
+ * what is in place, and a folder with local changes is to have them discarded.
+ */
+function assertUpdatable(installed: InstalledExtension, local: FolderState, update: UpdateRequest): void {
+  const { record, rel } = installed;
+  const reviewed = update.reviewed;
+  if (
+    reviewed &&
+    (reviewed.installedCommit !== record.commitSha ||
+      !contentHashesMatch(reviewed.installedFilesHash, record.filesHash) ||
+      reviewed.folderHash !== local.folderHash)
+  ) {
+    throw new InstallError(
+      `${rel} changed since you reviewed this update, so nothing was downloaded. Review it again.`,
+      "changed-meanwhile",
+    );
+  }
+  if (local.modified && !update.discardLocalChanges) {
+    throw new InstallError(
+      `${rel} has changed since ${record.version} was installed: its files no longer match its install ` +
+        "record. An update replaces them, so it has to be told to discard those changes.",
+      "local-changes",
+    );
+  }
+}
+
+/**
+ * An update's checks once its target is known: it is the release reviewed; it
+ * isn't the release the folder runs, unless there are local changes to
+ * discard; and an older release, or one whose order can't be told, was chosen
+ * as such. Returns what the update replaces, for its sidecar.
+ */
+async function updateTarget(
+  installed: InstalledExtension,
+  local: FolderState,
+  manifest: InstallManifest,
+  update: UpdateRequest,
+): Promise<Replaces> {
+  const { kind, record, rel } = installed;
+  const host = sourceHost(record.source);
+  const reviewed = update.reviewed;
+  if (
+    reviewed &&
+    (manifest.commitSha !== reviewed.targetCommit ||
+      !contentHashesMatch(manifest.contentHash, reviewed.targetContentHash))
+  ) {
+    throw new InstallError(
+      `${host} now lists another commit or checksum for ${manifest.version} than the one you reviewed, so ` +
+        "nothing was downloaded. Review it again.",
+      "changed-meanwhile",
+    );
+  }
+  const direction = await directionOf(kind, record, manifest);
+  if (direction === "same" && !local.modified) {
+    throw new InstallError(
+      `${rel} already runs ${record.version}, and its files match it, so there is nothing to update.`,
+      "already-current",
+    );
+  }
+  if (needsOlderConsent(direction) && !update.allowOlder) {
+    throw new InstallError(
+      direction === "older"
+        ? `${manifest.version} is older than ${record.version}, which ${rel} runs. Installing an older ` +
+            "release has to be chosen explicitly."
+        : `Neither the versions nor ${host}'s dates say whether ${manifest.version} is newer than ` +
+            `${record.version}, which ${rel} runs. Installing it has to be chosen explicitly, as an older release.`,
+      "older-release",
+    );
+  }
+  return {
+    version: record.version,
+    gitTag: record.gitTag,
+    commitSha: record.commitSha,
+    filesHash: record.filesHash,
+    folderHash: local.folderHash,
+    localChangesDiscarded: local.modified,
+    direction,
+  };
 }

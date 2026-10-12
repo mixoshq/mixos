@@ -45,3 +45,11 @@ export function isBuiltDeployment(): boolean {
  */
 export const BUILT_DEPLOYMENT_NOTICE =
   "This deployment runs a build. Install and register in a checkout of your repository, commit, and deploy.";
+
+/** The same, for removing an extension's code, which is also a change to a checkout. */
+export const BUILT_DEPLOYMENT_REMOVE_NOTICE =
+  "This deployment runs a build. Remove the extension in a checkout of your repository, commit the deletion, and deploy.";
+
+/** The same, for updating an extension to another release, which is a change to a checkout too. */
+export const BUILT_DEPLOYMENT_UPDATE_NOTICE =
+  "This deployment runs a build. Update the extension in a checkout of your repository, commit, and deploy.";

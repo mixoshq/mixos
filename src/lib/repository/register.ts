@@ -46,6 +46,10 @@
  *    stays in the folder, to be committed with it.
  * 6. Audited: `<kind>.register`, or `<kind>.register.rejected` with the reason.
  *
+ * A pending update (./update.ts), which would replace a folder already in
+ * place, is refused at step 1, before anything moves, and says to discard it
+ * (pendingUpdateProblem() in ./pending.ts).
+ *
  * The result hands back what to commit and how (./hand-back.ts): the folder's
  * files, a commit message built from the record, and the commands.
  *
@@ -59,6 +63,11 @@
  * moved into place back into pending, since its registration never finished;
  * Register can then be run again. It asks first, and checks under the locks
  * that the checkout is still as it was shown.
+ *
+ * Recovery also deals with a removal that died midway (./remove.ts), from what
+ * it left in `.mixos/backup/` (./backup.ts): it puts back a folder the registry
+ * generator never accepted the checkout without, and finishes deleting one it
+ * did. `npm run remove -- --recover` is the same recovery.
  */
 
 import fs from "node:fs";
@@ -69,12 +78,22 @@ import { BUILT_DEPLOYMENT_NOTICE, isBuiltDeployment } from "../platform/build";
 import {
   CheckoutLockHeldError,
   describeCheckoutLockHolder,
+  isStaleHolder,
   pidRunning,
+  readCheckoutLock,
   withCheckoutLock,
   type CheckoutLock,
+  type CheckoutLockHolder,
 } from "../platform/checkout-lock";
 import { LockUnavailableError, withPlatformLock, type PlatformLease } from "../platform/lock";
 import { satisfiesMinimum } from "../platform/version";
+import {
+  backupLocation,
+  extensionFolder,
+  isExtensionName,
+  leftoverBackup,
+  readBackupRecord,
+} from "./backup";
 import { contentHashesMatch } from "./content-hash";
 import { handBackFor, type HandBack } from "./hand-back";
 import {
@@ -103,6 +122,7 @@ import {
   liveLocation,
   pathExists,
   pendingLocation,
+  pendingUpdateProblem,
   readSidecar,
   recordProblem,
   writeSidecar,
@@ -151,7 +171,8 @@ export type RegisterFailureCode =
   | "lock-lost"
   | "lock-unconfirmed"
   | "stopped"
-  | "changed-meanwhile";
+  | "changed-meanwhile"
+  | "update-pending";
 
 export class RegisterError extends Error {
   constructor(
@@ -173,7 +194,7 @@ export function describeRegisterFailure(err: unknown): { code: string; message: 
     return {
       code: "locked",
       message:
-        "Another install or registration holds the register lock (repository.register) in " +
+        "Another install, registration or removal holds the register lock (repository.register) in " +
         "the database, from this checkout or another instance using it. Try again when it " +
         "finishes. One that stopped without finishing releases it within 15 minutes.",
     };
@@ -396,6 +417,16 @@ async function runRegister(
       "changed-meanwhile",
     );
   }
+  // A removal of the same name that stopped midway may have its folder in
+  // `.mixos/backup/`, for recovery to put back where this would go.
+  const leftover = leftoverBackup(root, kind, slug);
+  if (leftover) {
+    throw new RegisterError(
+      `A removal of ${slug} stopped before it finished, and left ${leftover.rel}. Run ` +
+        "`npm run remove -- --recover` to put things back, then try again.",
+      "interrupted",
+    );
+  }
   if (pathExists(live.dir)) {
     throw new RegisterError(
       `${live.rel} already exists in this checkout, so ${slug} can't be registered over it. ` +
@@ -553,6 +584,16 @@ function pendingInstallFor(
     );
   }
   const record = readInstallRecord(where.folder);
+  // An update replaces the folder in place, which Register doesn't do yet
+  // (pendingUpdateProblem() in ./pending.ts). Nothing has moved.
+  if (read.sidecar.replaces) {
+    const own = record.state === "ok" && recordProblem(where, kind, slug, record) === null;
+    const to = own && record.state === "ok" ? record.record.version : null;
+    throw new RegisterError(
+      pendingUpdateProblem(kind, slug, read.sidecar.replaces, to, `${where.rel}/`),
+      "update-pending",
+    );
+  }
   const problem = recordProblem(where, kind, slug, record);
   if (problem || record.state !== "ok") {
     throw new RegisterError(`${where.rel}/ can't be registered. ${problem} ${discard}`, "unregistrable");
@@ -642,6 +683,8 @@ export async function discardPending(
           }
         : { installRecord: "missing or unreadable" }),
       ...(s ? { installedBy: s.installedBy, installedAt: s.installedAt } : { record: "missing or unreadable" }),
+      // A pending update: the release it would have replaced, which stays.
+      ...(s?.replaces ? { replaces: { version: s.replaces.version, commitSha: s.replaces.commitSha } } : {}),
     },
   });
   return result;
@@ -712,8 +755,24 @@ export type RecoveryAction =
   | "drop-staging"
   /** A half-written record, or a lock file set aside. */
   | "drop-temp"
-  /** A stopped registration with both the pending and the live folder there. */
-  | "resolve-by-hand";
+  /** A stopped registration with both the pending and the live folder there, or a backup recovery can't place. */
+  | "resolve-by-hand"
+  /** A removal stopped with the folder in `.mixos/backup/`, never accepted without it: move it back. */
+  | "restore-backup"
+  /** A removal the generator accepted stopped while deleting its backup: finish deleting it. */
+  | "finish-removal"
+  /** A removal stopped before moving the folder, or after moving it back: delete its record. */
+  | "clear-backup-record"
+  /** A backup's record that can't be read, with no backup beside it. */
+  | "drop-backup-record";
+
+/** The actions about `.mixos/backup/`, which a removal leaves: audited as `<kind>.remove.recover`. */
+const BACKUP_ACTIONS: ReadonlySet<RecoveryAction> = new Set([
+  "restore-backup",
+  "finish-removal",
+  "clear-backup-record",
+  "drop-backup-record",
+]);
 
 export interface RecoveryItem {
   kind: ExtensionKind | null;
@@ -732,12 +791,16 @@ export interface RecoveryItem {
 }
 
 /**
- * What a stopped install, registration or discard left in the checkout at
- * `root`, and what recovery would do about each. Reads only.
+ * What a stopped install, registration, discard or removal left in the
+ * checkout at `root`, and what recovery would do about each. Reads only.
  */
 export function planRecovery(root: string = checkoutRoot()): RecoveryItem[] {
   const items: RecoveryItem[] = [];
   const here = os.hostname();
+  // Who holds the checkout lock now, unless its holder has certainly stopped: a
+  // removal's record with that holder's token belongs to a removal still running.
+  const holder = readCheckoutLock(root).holder;
+  const liveHolder = holder && !isStaleHolder(holder) ? holder : null;
 
   for (const kind of ["app", "connector"] as const) {
     const parent = path.join(/* turbopackIgnore: true */ root, MIXOS_DIR, "pending", kindDir(kind));
@@ -791,6 +854,38 @@ export function planRecovery(root: string = checkoutRoot()): RecoveryItem[] {
         blocked: null,
         warning: null,
       });
+    }
+  }
+
+  for (const kind of ["app", "connector", "theme"] as const) {
+    const parent = path.join(/* turbopackIgnore: true */ root, MIXOS_DIR, "backup", kindDir(kind));
+    let names: string[];
+    try {
+      names = fs.readdirSync(parent);
+    } catch {
+      continue;
+    }
+    const slugs = new Set<string>();
+    for (const name of names.sort()) {
+      if (name.startsWith(".") && name.endsWith(".tmp")) {
+        items.push({
+          kind,
+          slug: null,
+          path: `${MIXOS_DIR}/backup/${kindDir(kind)}/${name}`,
+          action: "drop-temp",
+          found: "A record that was being written when its writer stopped.",
+          does: "Delete it.",
+          blocked: null,
+          warning: null,
+        });
+        continue;
+      }
+      const slug = name.endsWith(".json") ? name.slice(0, -".json".length) : name;
+      if (isExtensionName(slug)) slugs.add(slug);
+    }
+    for (const slug of [...slugs].sort()) {
+      const item = backupRecovery(root, kind, slug, liveHolder);
+      if (item) items.push(item);
     }
   }
 
@@ -908,6 +1003,107 @@ function pendingRecovery(root: string, kind: PendingKind, slug: string, here: st
   return null;
 }
 
+/**
+ * What a removal of `kind`/`slug` left in `.mixos/backup/` (./backup.ts), and
+ * what recovery would do about it. The record's token says whose it is: one the
+ * checkout lock holds now, from a holder that may still be running, is a
+ * removal under way, which is left alone. Any other has stopped, or has lost
+ * its lock and stops at its next check of it.
+ */
+function backupRecovery(
+  root: string,
+  kind: ExtensionKind,
+  slug: string,
+  liveHolder: CheckoutLockHolder | null,
+): RecoveryItem | null {
+  const where = backupLocation(root, kind, slug);
+  const live = extensionFolder(root, kind, slug);
+  const read = readBackupRecord(where.record);
+  const hasBackup = pathExists(where.folder);
+  const inPlace = pathExists(live.dir);
+  const base = { kind, slug, path: where.rel, blocked: null, warning: null };
+
+  if (read.state === "ok") {
+    const r = read.record;
+    const blocked =
+      liveHolder?.token !== r.token
+        ? null
+        : liveHolder.hostname === os.hostname()
+          ? `The removal that recorded it, pid ${r.pid} on this machine, is still running. Let it ` +
+            "finish, or stop it, then run this again."
+          : `The removal that recorded it holds this checkout's lock from another machine, ` +
+            `${liveHolder.hostname.replace(/[^\x20-\x7e]/g, "?")}, which this can't check. If it has stopped, run ` +
+            "`npm run register -- --break-lock`, then run this again.";
+    const stopped = `A removal of ${slug} (${describeRegistering(r)}) stopped`;
+    if (r.accepted) {
+      return {
+        ...base,
+        action: "finish-removal",
+        found:
+          `${stopped} after the registry generator accepted the checkout without ${live.rel}, ` +
+          `while it was deleting the copy in ${where.rel}/.`,
+        does: `Delete what is left of ${where.rel}/ and its record. The removal is done.`,
+        blocked,
+      };
+    }
+    if (hasBackup && !inPlace) {
+      return {
+        ...base,
+        action: "restore-backup",
+        found: `${stopped} with ${live.rel} moved to ${where.rel}/, before it was removed.`,
+        does: `Move it back to ${live.rel} and regenerate the registry. Remove it again after.`,
+        blocked,
+      };
+    }
+    if (!hasBackup) {
+      return {
+        ...base,
+        action: "clear-backup-record",
+        found: inPlace
+          ? `${stopped} while ${live.rel} was in place.`
+          : `${stopped}, and neither ${where.rel}/ nor ${live.rel} is there now.`,
+        does: `Delete its record, ${where.rel}.json, and regenerate the registry.`,
+        blocked,
+      };
+    }
+    return {
+      ...base,
+      action: "resolve-by-hand",
+      found: `${stopped}, and both ${where.rel}/ and ${live.rel} are there.`,
+      does: "Nothing.",
+      blocked:
+        blocked ?? "Recovery can't tell which copy to keep. Delete one of them by hand, then run this again.",
+    };
+  }
+
+  if (read.state === "unreadable") {
+    if (!hasBackup) {
+      return {
+        ...base,
+        action: "drop-backup-record",
+        found: `${where.rel}.json can't be read (${read.reason}), and there is no backup beside it.`,
+        does: "Delete it.",
+      };
+    }
+    return {
+      ...base,
+      action: "resolve-by-hand",
+      found: `${where.rel}/ is a backup whose record can't be read (${read.reason}).`,
+      does: "Nothing.",
+      blocked: `Recovery can't tell what made it. Move it back to ${live.rel} by hand, or delete it, then run this again.`,
+    };
+  }
+
+  if (!hasBackup) return null;
+  return {
+    ...base,
+    action: "resolve-by-hand",
+    found: `${where.rel}/ is a backup with no record of what made it.`,
+    does: "Nothing.",
+    blocked: `Recovery can't tell what made it. Move it back to ${live.rel} by hand, or delete it, then run this again.`,
+  };
+}
+
 /** A plan's identity: two plans are the same when they would do the same things. */
 function planKey(items: readonly RecoveryItem[]): string {
   return items.map((i) => `${i.action}:${i.path}:${i.blocked ? "blocked" : ""}`).join("\n");
@@ -916,6 +1112,8 @@ function planKey(items: readonly RecoveryItem[]): string {
 export interface RecoverOptions extends PendingActionOptions {
   /** Shown what recovery found and would do; resolves to whether to go ahead. */
   confirm: (items: RecoveryItem[]) => Promise<boolean>;
+  /** The command that asked, which the checkout lock names while recovery holds it. */
+  command?: string;
 }
 
 export interface RecoverResult {
@@ -930,10 +1128,11 @@ export interface RecoverResult {
 }
 
 /**
- * Deal with what a stopped install, registration or discard left. Shows the
- * plan and asks without holding a lock, then takes both, checks the checkout
- * is still as shown, and acts. Each pending install it acts on is audited as
- * `<kind>.register.recover`.
+ * Deal with what a stopped install, registration, discard or removal left.
+ * Shows the plan and asks without holding a lock, then takes both, checks the
+ * checkout is still as shown, and acts. Each pending install it acts on is
+ * audited as `<kind>.register.recover`, and each removal's backup as
+ * `<kind>.remove.recover`.
  */
 export async function recoverCheckout(options: RecoverOptions): Promise<RecoverResult> {
   const root = options.root ?? checkoutRoot();
@@ -941,7 +1140,7 @@ export async function recoverCheckout(options: RecoverOptions): Promise<RecoverR
   if (!items.some((i) => !i.blocked)) return { items, acted: [], cancelled: false, regenerated: null };
   if (!(await options.confirm(items))) return { items, acted: [], cancelled: true, regenerated: null };
 
-  const purpose = `npm run register -- --recover`;
+  const purpose = options.command ?? "npm run register -- --recover";
   const { acted, regenerated } = await withPlatformLock("repository.register", (lease) =>
     withCheckoutLock(root, purpose, async (lock) => {
       tellTakeover(lock, options);
@@ -961,7 +1160,9 @@ export async function recoverCheckout(options: RecoverOptions): Promise<RecoverR
         if (item.blocked) continue;
         await fence(`${soFar()} Run it again to finish.`);
         actOn(root, item);
-        if (item.action === "return-to-pending" || item.action === "clear-record") regenerate = true;
+        if (["return-to-pending", "clear-record", "restore-backup", "clear-backup-record"].includes(item.action)) {
+          regenerate = true;
+        }
         done.push(item);
       }
 
@@ -983,7 +1184,7 @@ export async function recoverCheckout(options: RecoverOptions): Promise<RecoverR
   for (const item of acted) {
     if (!item.kind || !item.slug || item.action === "drop-staging" || item.action === "drop-temp") continue;
     await recordAdminAction(options.actor, {
-      action: `${item.kind}.register.recover`,
+      action: `${item.kind}.${BACKUP_ACTIONS.has(item.action) ? "remove" : "register"}.recover`,
       targetType: item.kind,
       targetId: item.slug,
       details: { via: options.via, action: item.action, path: item.path },
@@ -1026,6 +1227,26 @@ function actOn(root: string, item: RecoveryItem): void {
       fs.rmSync(target, { recursive: true, force: true });
       return;
     case "resolve-by-hand":
+      return;
+    case "restore-backup": {
+      const where = backupLocation(root, item.kind!, item.slug!);
+      const live = extensionFolder(root, item.kind!, item.slug!);
+      fs.mkdirSync(path.dirname(live.dir), { recursive: true });
+      fs.renameSync(where.folder, live.dir);
+      fs.rmSync(where.record, { force: true });
+      return;
+    }
+    case "finish-removal": {
+      // The folder first: a record without its folder is what recovery
+      // clears, and a backup without its record is left for a person.
+      const where = backupLocation(root, item.kind!, item.slug!);
+      fs.rmSync(where.folder, { recursive: true, force: true });
+      fs.rmSync(where.record, { force: true });
+      return;
+    }
+    case "clear-backup-record":
+    case "drop-backup-record":
+      fs.rmSync(backupLocation(root, item.kind!, item.slug!).record, { force: true });
       return;
   }
 }

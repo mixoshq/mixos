@@ -29,6 +29,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Credential config    | `src/lib/connectors/config.ts`                |
 | Connector switch     | `src/lib/connectors/switch.ts`                |
 | Registry update check | `src/lib/repository/update-check.ts`, `src/lib/repository/updates.ts` |
+| MixOS release check  | `src/lib/platform/release-check.ts`, `src/lib/platform/releases.ts`, `src/components/admin/release-notes.tsx` |
 | GitHub App link      | `src/lib/github/` (§32)                        |
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
@@ -298,7 +299,9 @@ old activation, and with it the old grants, to different code that comes back
 under the same slug, so the release step records a hash of each app's files.
 An app that returns with different files comes back inactive and flagged on
 Admin > Apps until an admin activates it; one that returns with the same files
-comes back as it left. Both are audited (§28).
+comes back as it left. Both are audited (§28). The row and everything that
+hangs off it stay until an admin deletes them with Delete data (§31), after
+which an app that arrives under the slug starts with nothing.
 
 **A different extension under the same slug starts off, and without the old
 one's API keys.** Every release step also records each app's identity
@@ -1000,6 +1003,20 @@ Entirely at the application layer:
   spelling, so an app cannot hand-write SQL at runtime that would sidestep its
   schema. The registry generator enforces it on every build and every install.
 
+### Deleting an app's schema and role
+
+The release step creates an app's schema and role and never drops them: an app
+that leaves the build keeps both (§3.1). Only **Delete data**, by an admin,
+drops them ([`src/lib/repository/delete-data.ts`](../src/lib/repository/delete-data.ts),
+§31), and only by name, `app_<slug>` and `mixos_app_<slug>`, never by a prefix,
+so `notes_archive` is not part of `notes`. The schema has to belong to the role,
+and the role has to be one the release step could have made: no powers, no
+memberships, no use in another database. Dropping the schema must take nothing
+outside it, and the role must hold nothing else afterwards; otherwise the
+transaction rolls back and nothing is deleted. The app's row goes too, with its
+activation, grants, API keys and identity, so a later app under the slug
+arrives inactive with nothing (§3.1).
+
 ### Reachability of the database credential
 
 `DATABASE_URL` carries no `NEXT_PUBLIC_` prefix, which is what prevents Next.js
@@ -1350,6 +1367,9 @@ Consent is a **ceiling**, the live grant is a **floor**. A refresh copies
 `granted_apps` forward verbatim, so consent can never silently widen. `hasAppGrant`
 (not `hasAppAccess`) is used deliberately — it is the authorization fact, and it
 matches what the App Services broker already enforces for the same question.
+Deleting an app's data (§31) takes its slug out of every token's and code's
+`granted_apps`, so consent given to it never covers a later app with the same
+slug.
 
 The app gate (§3.1) is asked last, before a tool's module is imported. While
 the app's own migrations are behind this build, `tools/list` leaves its tools
@@ -2087,31 +2107,43 @@ Currently recorded: `connector.configure`, `connector.connect`,
 `connector.test`, `connector.disable`, `connector.enable`, `app.password.set`,
 `app.password.clear`, `app.setting.set`, `app.setting.clear`, `app.activate`,
 `app.deactivate`, `app.missing`, `app.returned`, `app.identity.changed`,
-`connector.identity.changed`, `theme.identity.changed`, `app.job.run`,
-`app.job.enable`, `app.job.disable`, `scheduler.start`, `scheduler.stop`,
-`theme.apply`, `user.create`, `user.profile.update`, `user.password.set`,
-`user.admin.grant`, `user.admin.revoke`, `user.grant.add`,
-`user.grant.revoke`, `user.role.set`, `user.sessions.revoke`; a Registry
-install as `app.install`, `connector.install` or `theme.install`, or, when the
-install is refused, `app.install.rejected`, `connector.install.rejected` or
+`connector.missing`, `connector.returned`, `connector.identity.changed`,
+`theme.identity.changed`, `app.job.run`, `app.job.enable`, `app.job.disable`,
+`scheduler.start`, `scheduler.stop`, `theme.apply`, `user.create`,
+`user.profile.update`, `user.password.set`, `user.admin.grant`,
+`user.admin.revoke`, `user.grant.add`, `user.grant.revoke`, `user.role.set`,
+`user.sessions.revoke`; a Registry install as `app.install`,
+`connector.install` or `theme.install`, or, when the install is refused,
+`app.install.rejected`, `connector.install.rejected` or
 `theme.install.rejected`; registering a pending app or connector as
 `app.register` or `connector.register`, or `app.register.rejected` and
 `connector.register.rejected` when it is refused; discarding one as
-`app.discard` or `connector.discard`; and recovery putting back or clearing
+`app.discard` or `connector.discard`; recovery putting back or clearing
 what a stopped one left as `app.register.recover` or
-`connector.register.recover` (§31); and the GitHub link's rows (§32),
-`github.app.create`, `github.link`, `github.link.disable`, `github.link.enable`,
-`github.link.refresh`, `github.app.key.replace`, `github.app.key.reencrypt`,
-`github.unlink`, `github.app.forget`, `github.branch-rule.override`,
+`connector.register.recover`; removing an extension's code as `app.remove`,
+`connector.remove` or `theme.remove`, or `<kind>.remove.rejected` when it is
+refused; recovery after a removal that stopped midway as
+`<kind>.remove.recover`; deleting what the database kept for an app or a
+connector as `app.data.delete` or `connector.data.delete`, with how much went,
+or `<kind>.data.delete.rejected` with the reason when it is refused; and an
+update of an app or a connector to another release, which waits in pending, as
+`app.update` or `connector.update`, with the release it replaces (`from`), the
+one it goes to (`to`), which way (`direction`: `newer`, `older`, `same` or
+`unknown`) and whether local changes are to be discarded
+(`localChangesDiscarded`), or `<kind>.update.rejected` with the reason (§31).
+The GitHub link's rows (§32) are `github.app.create`, `github.link`,
+`github.link.disable`, `github.link.enable`, `github.link.refresh`,
+`github.app.key.replace`, `github.app.key.reencrypt`, `github.unlink`,
+`github.app.forget`, `github.branch-rule.override`,
 `github.branch-rule.override.clear`, `github.previews.confirm` and
 `github.previews.confirm.clear`, with `.rejected` rows for a refused
-creation, link, key replacement or unlink; and a proposal through the App as
+creation, link, key replacement or unlink. A proposal through the App is
 `app.propose`, `connector.propose` or `theme.propose`, or
-`<kind>.propose.rejected` with the reason. `connector.disable` and `connector.enable`
-name the apps that declare the connector, in `details` as `requiredBy` and
-`optionalFor`. An `app.activate` or `connector.enable` that answered a
-different extension under the name, with the name typed, has the identity it
-replaced in `details` as `replaced`.
+`<kind>.propose.rejected` with the reason.
+`connector.disable` and `connector.enable` name the apps that declare the
+connector, in `details` as `requiredBy` and `optionalFor`. An `app.activate`
+or `connector.enable` that answered a different extension under the name, with
+the name typed, has the identity it replaced in `details` as `replaced`.
 
 **Connecting a connector.** An admin finishing the OAuth round trip for a
 tenant connector (§27), with Connect or Reconnect, is `connector.connect`
@@ -2131,7 +2163,9 @@ leaves its row even if the request is cut short, and a refused one leaves none.
 
 **Rows the release step writes.** `app.missing` (an app left the build),
 `app.returned` (it came back, with whether its files changed, both hashes, and
-whether it came back as a different extension) and `<kind>.identity.changed`
+whether it came back as a different extension), `connector.missing` and
+`connector.returned` (a connector with saved credentials or connections left
+the build, or came back) and `<kind>.identity.changed`
 (a different extension under the name, with both identities: for an app,
 whether it was switched off and how many API keys were revoked; for a
 connector, whether it was turned off; for a theme, whether it is the applied
@@ -2141,12 +2175,22 @@ in the step's own transaction, so the change and its record commit together:
 rule 2 is about not failing an admin's action, and here a failed write fails
 the step before anything it would have recorded is committed.
 
-**Rows the Register and Discard buttons write.** The same actions from Admin >
-Apps and Admin > Connectors name the signed-in admin, with `via: "button"` in
-`details`. A Register the page refuses on a built deployment, before any lock,
-is `<kind>.register.rejected` with `reason: "unsupported-environment"`.
+**Rows the Register, Discard and Remove buttons write.** The same actions from
+Admin > Apps, Admin > Connectors and Admin > Themes name the signed-in admin,
+with `via: "button"` in `details`, as the update dialog's rows do. A Register,
+a Remove or an update the page refuses on a built deployment, before any lock,
+is `<kind>.register.rejected`, `<kind>.remove.rejected` or
+`<kind>.update.rejected` with `reason: "unsupported-environment"`.
 
-**Rows `npm run register` writes.** Registering, discarding and recovering run
+**Rows Delete data writes.** `<kind>.data.delete` names the admin and records
+what went, by count, never a value. It is written in the deletion's own
+transaction, so the deletion and its record commit together: like the release
+step's rows, and unlike rule 2, a deletion that can't be recorded doesn't
+happen. One that follows **Remove code and delete this checkout's data** has
+`afterRemoval: true`. The deletion never touches this table.
+
+**Rows `npm run register` and `npm run remove` write.** Registering,
+discarding, removing and recovering run
 in a shell in the checkout, where nobody has signed in, so their rows have a
 null `actor_id`, `actor_email` `cli:<os user>@<hostname>`, and `via: "cli"` in
 `details`. The colon keeps the name from reading as an address. Nothing vouches
@@ -2157,6 +2201,8 @@ dialog's History marks them "(unverified)". A row whose `actor_id` became null
 because its admin was deleted still names their address and stays verified, so
 the label keys on the name, not on the null. They follow rule 2, as an admin's
 rows do: the registration has already happened when its row is written.
+`npm run register -- app/<slug> --smoke` writes `app.activate` and
+`user.grant.add` the same way, with `smoke: true` beside `via: "cli"` (§31).
 
 **The review checklist item for any new admin action**: call `recordAdminAction`
 alongside `requireAdmin`. Nothing upstream does either for you.
@@ -2357,7 +2403,8 @@ and `npm run register` passes the generator none of what it loaded to reach the
 database. Once registered, an app runs in the dev server with the server's
 environment, as every app does.
 
-**Staged and pending copies are never scanned.** Both are under `.mixos/`,
+**Staged and pending copies are never scanned,** and nor is the backup a
+removal makes. All are under `.mixos/`,
 outside every folder the generator reads, and the generator also skips every
 dot-prefixed folder in `apps/`, `connectors/` and `themes/`, as it skips
 `_template`. `.mixos/` is git-ignored, Docker-ignored and ESLint-ignored, `tsc`'s
@@ -2383,11 +2430,12 @@ a review of what will run (see **The review before Register**), and
 pending. Either way, in the checkout:
 
 1. The pending folder, its install record and its sidecar exist, and nothing
-   is where it would go. The **files hash**, recomputed from the folder with
-   the record left out, matches the record's. It is the content hash's
-   serialisation over the files install wrote, with every mode read as 644:
-   install writes every file 0644 and leaves out any `.gitignore` or
-   `.gitattributes`, so the content hash, which records the execute bit and
+   is where it would go. A pending update (see **Updating an extension**) is
+   refused here, before anything moves. The **files hash**, recomputed from
+   the folder with the record left out, matches the record's. It is the
+   content hash's serialisation over the files install wrote, with every mode
+   read as 644: install writes every file 0644 and leaves out any `.gitignore`
+   or `.gitattributes`, so the content hash, which records the execute bit and
    covers the package as published, can't be recomputed from disk. A folder
    with a file changed, added or removed since install, or a link in it, is
    refused, so what runs is what was verified and checked. A pending install
@@ -2479,6 +2527,37 @@ result points to Admin > Apps on the instance that serves the app. The action
 checks the database again before it acts, and then applies Activate's own checks
 and audit row (`app.activate`).
 
+### A smoke test after Register
+
+`npm run register -- app/<slug> --smoke` (`scripts/register-smoke.ts`) adds a
+smoke test to Register, in the checkout. Before Register, and so before anything
+changes, it refuses:
+
+- a database that isn't on this machine, by the rule "Activate in this
+  checkout" follows (`src/lib/db/locality.ts`). Other instances may use any
+  other database, and the smoke test would apply the app's migrations there
+  before anyone reviewed them in a pull request, then turn the app on and grant
+  it for all of them. `--database-is-disposable` is the caller saying the
+  database is theirs alone to throw away;
+- a server at the base URL that won't sign in the smoke user, or one whose user
+  isn't in the checkout's database, since it would then be testing another
+  database;
+- an app that replaces a different extension under its slug (§3.1), unless the
+  slug is typed with `--confirm-replaces <slug>`. The typed slug goes to
+  `setAppActive()`, which checks it again, as Activate on Admin > Apps does.
+
+After Register has released both locks, it runs `scripts/migrate.ts`, the app
+migrations `npm run migrate:apps` runs, without the generator run npm adds
+first: Register has just run the generator with `PATH` and `TMPDIR` only, and a
+second run would load the app's code with the shell's database URL and keys.
+Then, in a child process that reads the registry the generator just wrote,
+Activate's checks (a required connector must be configured) and a grant to the
+smoke user, each audited as the CLI (§28). Then `scripts/smoke-test-app.ts`,
+given only `PATH`, `TMPDIR` and the session; the password stays in the parent.
+The smoke test calls the app as that user, through the activation gate like any
+request. Nothing is rolled back: a migration can't be undone, and the app's code
+has already run.
+
 ### The install record
 
 Every install writes `.registry.json` at the root of the extension's folder
@@ -2558,6 +2637,38 @@ Extensions installed before installs kept a record are local. Reinstalling one
 from the Registry gives it a record, and the next release step on each
 instance treats it as a different extension, once.
 
+### The pull-request check
+
+`.github/workflows/extensions.yml` runs on pull requests that change `apps/`,
+`connectors/` or `themes/`, or the check's own files. It fails one in which an
+installed folder doesn't match its record (`scripts/check-install-records.ts`,
+hashing the folders as committed, before any extension's code runs), or a
+changed app fails the smoke test on a fresh instance in the job.
+
+The pull request's code runs in that job: npm's install scripts, the registry
+generator, the build and the server. So the job holds nothing worth taking:
+
+- `permissions: contents: read`, and nothing else;
+- the checkout uses `persist-credentials: false`, so the token isn't left in
+  `.git/config` for that code to read;
+- it is triggered by `pull_request`, never `pull_request_target`, which runs
+  with the repository's secrets and a write token;
+- no step reads a repository secret. The keys and the admin's password are made
+  in the job, and the database is a service container that goes with it;
+- it activates and grants by SQL (`scripts/ci-extensions.ts`), skipping
+  Activate's checks and audit row, which is right only for that database, so
+  the helper refuses any database that isn't on the runner;
+- the server log is printed with workflow commands stopped, so a line an app
+  logs can't act as one.
+
+A pull request from a fork gets a read-only token and no secrets whatever the
+workflow says. The job runs the pull request's own copy of the workflow and its
+scripts, so a pull request that changes them changes the check: Danger labels
+those changes `os-change` for review. The check finds broken code; it is no
+defence against hostile code, which runs in the same job and could change what
+the later steps run. The folder check comes first for that reason. What keeps
+hostile code harmless is that the job has nothing to give it.
+
 ### The update check
 
 Once a day, the scheduler tick asks the catalogue about the extensions this
@@ -2624,25 +2735,281 @@ published; a folder modified locally; one installed from another catalogue,
 which is never checked; and one line saying when the catalogue last answered.
 
 **Turning it off.** `MIXOS_UPDATE_CHECK=false` sends nothing and creates no ID.
-Unset, empty and `true` are on. A value that isn't true or false is off, and
-the release step reports it. Deleting an extension's `.registry.json` stops
-checking that extension, and deleting the `registry_instance_id` row gives the
-instance a new ID at the next check.
+It also turns off the release check below, so "off" means the instance sends
+mixos.org nothing on its own. Unset, empty and `true` are on. A value that isn't
+true or false is off, and the release step reports it. Deleting an extension's
+`.registry.json` stops checking that extension, and deleting the
+`registry_instance_id` row gives the instance a new ID at the next check.
+
+### The release check
+
+Once a day, the scheduler tick also asks the catalogue which releases of MixOS
+exist (`src/lib/platform/release-check.ts`), so admins hear when a newer one is
+out.
+
+**What is sent.** One request, from the server:
+
+```
+GET https://mixos.org/api/v1/mixos/releases
+User-Agent: MixOS
+```
+
+No instance ID, no version, no query, no body and no cookie. mixos.org records
+nothing for a `GET`, so it learns only that a MixOS somewhere asked, from the
+request's IP address. Requests reach it through Cloudflare, whose own logging
+applies to the connection.
+
+**When.** On the update check's schedule, in `platform_settings.mixos_release_check`:
+due 21 hours after the last success plus up to an hour; after a failure, an hour
+later, or at the catalogue's `Retry-After`, but never more than a day. A
+changed channel is due at once. It runs under its own lock,
+`platform.release-check`, with a two-minute lease. Nothing it does fails the
+tick.
+
+**Parsed, not trusted.** The request goes through the client's rules (see **The
+transport carrying the checksum**): https, an 8-second timeout, and redirects
+only within the catalogue's origin. Its cap is 512 KB, which is how large
+mixos.org lets the whole list grow. Each entry is checked on its own, and one
+that fails is left out, not the list: the tag must match
+`^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$` and be a version in full (no leading zeros,
+no empty part), the commit 40 lowercase hex characters, the date an ISO date,
+and the notes at most 20 KB. Unknown keys are dropped. The release kept is
+checked again when it is read back, so a hand-edited row can't put a bad tag in
+front of admins either.
+
+**Which release.** The newest on the channel, by semver, whatever order the
+list is in. `MIXOS_RELEASE_CHANNEL=stable`, the default, leaves out any release
+marked as a prerelease or whose tag has a suffix; `prerelease` keeps them. Any
+other value is read as `stable`, with a warning, and the release step reports
+it, so a typo shows fewer releases, never more.
+
+**What the answer can do: show one notice.** When the release kept is newer than
+this build, the top of every admin page says so: "MixOS 0.5.0 is available (this
+instance runs 0.4.2). A minor release: it may need changes." The notes come
+from commit subjects, so a merged pull request's title is enough to put text
+there, and they are rendered by mixos.org's rule for them
+(`src/components/admin/release-notes.tsx`): collapsed, raw HTML dropped, images
+dropped, so no tracking image loads in front of admins (the CSP allows
+`img-src https:`), and every link shown as its text and then its address, not
+clickable. The notice's only links are built from the checked tag: the
+release's page on mixos.org, `https://mixos.org/docs/releases/<tag>`, and
+`https://mixos.org/docs/operating/upgrading`. No address in the answer is ever
+fetched or made a link.
+
+**Never applied.** There is no button to apply a release. The check writes one
+row, its own, and takes its lock while it runs; it starts no process and writes
+no file. Taking a release is merging its tag into the operator's repository and
+deploying it.
+
+**Turning it off.** `MIXOS_UPDATE_CHECK=false`, the update check's switch,
+sends nothing for this check either, and the admin pages say the checks are off.
+
+### Removing an extension's code
+
+Removing an extension has two halves. Its code is a change to the repository,
+made in a checkout and shipped by a commit and a deploy, as installing it is.
+Its data is in each database, and stays: the release step marks an app or a
+connector that left the build and keeps everything it had (§3.1), until an
+admin deletes it there (below). No code the extension ships runs in either
+half.
+
+The code half is **Remove** on each tile of Admin > Apps, Connectors and
+Themes, or `npm run remove -- <kind>/<slug>`
+([`src/lib/repository/remove.ts`](../src/lib/repository/remove.ts)). Each says
+first what goes, what stays and what stands in the way, then asks. In the
+checkout, under both locks (below):
+
+1. It is refused while something depends on it, by the manifests in this
+   checkout: an app that requires the connector (`connectors`), or an app that
+   uses the app's services (`consumes`) or listens to its hooks (`listensTo`),
+   which the build refuses without it; and the last theme, which the build
+   needs. An app the build skips still counts, since the next build reads the
+   same manifest. It warns, without refusing, about an app that uses a
+   connector optionally, and about the theme this checkout's database applies.
+2. A record goes to `.mixos/backup/<kind dir>/<slug>.json`, with the checkout
+   lock's token, and the folder is renamed to `.mixos/backup/<kind dir>/<slug>/`,
+   out of the build.
+3. The registry generator runs, with `PATH` and `TMPDIR` only.
+4. If it fails, stops or still lists the extension, the folder is renamed back
+   and the registry regenerated. Otherwise the record says the generator
+   accepted it, and the backup and its record are deleted. A pending install
+   of the same name is discarded with it.
+5. It is audited as `<kind>.remove`, or `<kind>.remove.rejected` with the
+   reason (§28).
+
+The result hands back the commit that deletes the folder
+(`removalHandBackFor()` in `src/lib/repository/hand-back.ts`), its message
+built from the kind, the slug and, for an extension installed from a Registry,
+its record's version and source: `feat(<slug>): remove <kind> <slug>`, with
+`<version> from <host>` and the `Registry-Source` and `Registry-Version`
+trailers for an install. The install record goes with the folder, so one
+commit removes both. The server never runs git. `npm run remove` asks git,
+read-only, whether the folder holds work that isn't committed, which removing
+deletes, and whether git tracks the folder at all.
+
+**A removal that stops midway** leaves its record, and removal, Register and
+install refuse that slug until recovery has dealt with it:
+`npm run remove -- --recover`, which is `npm run register -- --recover`.
+Recovery leaves a record alone while the checkout lock holds its token and that
+holder may still be running: that removal is still under way. Otherwise it puts
+back a folder the generator never accepted the checkout without, and finishes
+deleting one it did. A
+backup it can't place, with no readable record or with the folder back in
+place too, is left for a person. Each one it acts on is audited as
+`<kind>.remove.recover`.
+
+**The generator's copies in `public/`.** A full run records each copy it makes
+in `public/` for pages read without a session (a theme's assets, an app's or a
+theme's screenshots, an app's brand marks, a connector's assets) in
+`src/generated/public-copies.json`, before it makes it. At its end it deletes
+the copies an earlier run recorded and this one didn't make, so a removed
+extension's files stop being served. It deletes only folders in that record,
+and nothing else in `public/` (`scripts/public-copies.ts`).
+
+### Deleting an extension's data
+
+The data half is **Delete data…** under Not in this build on Admin > Apps and
+Admin > Connectors, on each instance, by an admin who has read what goes and
+typed the name ([`src/lib/repository/delete-data.ts`](../src/lib/repository/delete-data.ts)).
+Both server actions require an admin first (§9), and the server checks the
+typed name. A theme holds no data, so it has none.
+
+**What decides is the database.** The build serving the request can't speak
+for the others: a host's rollback serves an older build without running a
+release step, a preview can share production's database, and checkouts can
+share a development database. So it is refused:
+
+- while the build serving this instance has the extension;
+- until a release step has marked it missing: `apps.missing_since` for an app
+  (§3.1), or `connector.missing.<name>` in `platform_settings` for a connector
+  with saved credentials or connections, which the release step sets when its
+  build lacks the connector and clears when it returns
+  (`scripts/sync-identities.ts`);
+- while any other build seen in the last 24 hours has it. Each build records
+  the apps and connectors it carries in `platform_builds_seen`
+  ([`src/lib/platform/builds-seen.ts`](../src/lib/platform/builds-seen.ts))
+  at its release step, which fails if it can't, and at server start and on the
+  cron tick, at most every ten minutes. A deployment is keyed by its commit and
+  a hash of what it carries, and a checkout by the random id in
+  `.mixos/checkout-id`. The caller's own build doesn't count, so a checkout can
+  delete its own data right after removing the code. Builds unseen for 30 days
+  are pruned.
+
+**What goes.** For an app: its schema and role (§8); its rows in
+`_migrations`, `app_settings`, `app_api_keys`, `app_scheduled_jobs`,
+`app_job_runs` and `app_open_events`, and the `telemetry_events` it was the
+source of; its slug in each MCP authorization's `granted_apps` (§17), which
+keeps every other app it lists; and its `apps` row, which takes its grants,
+installs, password and widgets with it by foreign key, along with its
+activation and identity. Calls it made to a connector or to another app's
+services are their telemetry, and stay. For a connector: `connector_configs`,
+every `user_connector_oauth` and `connector_scope_status` row, its webhook
+replay markers, its telemetry, and its keys in `platform_settings` (the switch,
+the identity and both marks). Every row is matched by its own column, equal to
+the name; no table or row is chosen by a prefix. `admin_audit_log` is always
+kept. With all of it gone, a later extension under the same name inherits
+nothing: it arrives as a new one.
+
+**One transaction, under the release step's lock** (`scripts/migration-lock.ts`),
+so it can't race a release step that marks or brings back the same extension.
+The checks run again under the lock, and while it decides, no build can record
+itself (`platform_builds_seen` is locked in share mode). Before dropping an app's
+schema it checks that the schema belongs to the app's role, and that the role
+has no powers, no memberships and no use in another database. After, it checks
+that nothing outside the schema went with it (a view, a key, a default or a
+column of another table, compared catalog row by catalog row), and that the
+role holds nothing more. Any of these, a lock it can't get within 15 seconds,
+or any error, rolls everything back, and nothing is deleted. The audit row is
+written in the same transaction (§28).
+
+**Right after Remove, in a checkout.** The Remove dialog's second button,
+"Remove code and delete this checkout's data", is destructive and asks for the
+name typed, which the server checks before removing anything. Once the code is
+removed it runs Delete data with the same checks, against the registry the
+generator just wrote. On a database only this machine reaches (a Unix socket,
+loopback or `host.docker.internal`, the test "Activate in this checkout" uses),
+the removal counts as the release step's mark; on a shared database it
+doesn't, and a release step has to run first. A production build of the
+checkout still serves the extension until it is rebuilt, so it is refused
+there. A refusal keeps the data, and the removal stands.
+
+### Updating an extension
+
+An update is another release of an app or a connector installed from this
+instance's catalogue, for the folder it is in. Install makes it, in an update
+mode ([`src/lib/repository/install.ts`](../src/lib/repository/install.ts),
+[`src/lib/repository/update.ts`](../src/lib/repository/update.ts)), with every
+step of **The order of operations is the control**, and leaves the release in
+`.mixos/pending/`. The folder in place isn't touched. Under both locks, before
+anything is downloaded:
+
+1. The folder is there, with an install record of its own whose `source` is the
+   catalogue this instance installs from. A local extension, one installed from
+   another catalogue, and a theme are refused.
+2. Nothing of the slug waits in pending, and no removal of it stopped midway.
+3. The folder's files hash is recomputed, with nothing downloaded, and compared
+   with its record's. A folder that no longer matches needs the admin to
+   discard its changes.
+
+Then, once the catalogue has named the release:
+
+4. Which way it goes: from the versions when both are dotted, in semver's
+   order, and otherwise from the dates the catalogue published the two
+   releases. A release published from mixos.org's website is named by its short
+   commit, and a publisher who withdraws newer releases can make the current
+   release an older one. A release older than the installed one, or one whose
+   order neither tells, needs the admin to choose "Install an older release".
+   The release in place, with no local changes, is nothing to update.
+5. A withdrawn release needs accepting, as for an install, and the release's
+   `requiresMixOS` has to hold.
+6. What the admin reviewed is pinned: the installed release, the folder's files
+   hash, and the target's commit and content hash. A change to any of them
+   since is refused.
+7. The download, the check and the rest are an install's. The sidecar records
+   what the update replaces: the installed version, commit and files hash, the
+   folder's own files hash as found, whether its changes are to be discarded,
+   and which way the update goes.
+
+It is audited as `<kind>.update`, with `from`, `to`, `direction` and
+`localChangesDiscarded`, or `<kind>.update.rejected` with the reason (§28).
+
+**What the admin is shown first.** The update dialog's actions
+(`src/lib/repository/update-actions.ts`) require an admin and refuse on a built
+deployment. They take no lock and write nothing. They list the catalogue's
+releases, each with its date and which way it goes, and download the release
+picked, pinned and checked against its content hash, in memory, to compare it
+with the folder: the publisher's claims, what the manifest declares, new
+migrations (forward-only, so back up the database first), the migrations an
+older release lacks (a database that ran them stays at the newer schema),
+whether it was withdrawn, and its `requiresMixOS`. When the folder has local
+changes, the installed release is downloaded the same way, only to name the
+files that changed. The install record, file modes, a manifest change that is
+only `lastUpdated`, and the files install leaves out aren't counted. If GitHub
+no longer serves the installed release, the dialog says the folder differs
+without naming the files. The link to GitHub's compare view is built from the
+record's values and the catalogue's validated answer.
+
+**Register doesn't put an update in place yet.** It refuses a pending update,
+before anything moves, and says to discard it. Discard deletes a pending update
+as it deletes any pending install. Nothing on the admin pages opens the update
+dialog yet.
 
 ### Two locks: the register lease and the checkout lock
 
 Two installs or registrations at once would run two generators over the same
 `src/generated/*.ts` files, and one's rollback could land on top of the other's
-success. So install, Register, Discard and recovery each run under two locks.
+success. So install, Register, Discard, removal and recovery each run under two
+locks.
 
 **The register lock**, `repository.register`
 ([`src/lib/platform/lock.ts`](../src/lib/platform/lock.ts)), is a row in
 `_platform_locks`, which every instance using the database shares, rather than a
 Postgres advisory lock, because a session advisory lock does not survive a
-transaction pooler. An admin who installs, registers or discards while it is
-held is told "Another administrator is installing or registering. Try again in a
-moment." and offered **Try again**, and an install or a registration is audited
-as `<kind>.install.rejected` or `<kind>.register.rejected` with
+transaction pooler. An admin who installs, registers, discards or removes while
+it is held is told "Another administrator is installing, registering or removing
+an extension. Try again in a moment." and offered **Try again**, and an install,
+a registration or a removal is audited as `<kind>.install.rejected`,
+`<kind>.register.rejected` or `<kind>.remove.rejected` with
 `reason: "locked"`. When it is the checkout lock that is held, the message names
 its holder instead, such as the registry generator `npm run dev` started.
 
@@ -2680,7 +3047,8 @@ that:
   started included.
 - **Both locks are checked before the disk changes.** Every change (staging,
   deleting a staged copy the check refused, moving into pending or into place,
-  a rollback, deleting a pending install, each step of a recovery) begins with
+  a rollback, deleting a pending install, moving a folder into or out of
+  `.mixos/backup/`, each step of a recovery) begins with
   `assertHeld()`, `update _platform_locks set acquired_at = now() where name =
   $1 and holder = $2 returning 1`, which renews the lease only while the row
   still holds this acquisition's random token, and then reads the lock file back
@@ -2745,8 +3113,11 @@ one; adding a second should be a deliberate code change with a floor.
 
 Every entry point in the admin pages is a server action that calls
 `requireAdmin()` itself, before it reads anything else (§9): install, the
-review, Register, Discard and Activate in this checkout
-(`src/lib/repository/actions.ts`, `src/lib/repository/pending-actions.ts`). The
+review, Register, Discard, Activate in this checkout, Remove and Delete data,
+and what each shows first, and the update dialog's overview, comparison and
+update (`src/lib/repository/actions.ts`, `src/lib/repository/pending-actions.ts`,
+`src/lib/repository/remove-actions.ts`, `src/lib/repository/delete-data-actions.ts`,
+`src/lib/repository/update-actions.ts`). The
 pages' own gates guard the render only, and the actions are reachable without
 ever loading them. Both outcomes are audited (§28): `app.install` records the
 version, commit, verified hash, files hash, where it went, the check's verdict
@@ -2800,18 +3171,19 @@ below), so on those the flags decide only whether the catalogue can be browsed.
 ### What it deliberately will not do
 
 - **Overwrite.** An existing directory, or an install of the same slug already
-  waiting in pending, is refused rather than replaced. Upgrading in place is a
-  different operation with a different question attached — what happens to the
-  data and grants the installed one already has.
+  waiting in pending, is refused rather than replaced. An update (see
+  **Updating an extension**) is the one way to another release of an extension
+  in place, and it doesn't write there either: the release waits in pending, and
+  only Register will replace the folder.
 - **Run from a built artifact.** `checkInstallable()` refuses up front when
   `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
   `output: "standalone"` tree, which its server `chdir`s to before listening
-  (`isBuiltDeployment()`, `src/lib/platform/build.ts`). Register, Discard and
-  the review refuse on the same marker, before any lock. Each says it as
-  information, not as a fault: "This deployment runs a build. Install and
-  register in a checkout of your repository, commit, and deploy." Browse still
-  shows the catalogue and each release there, with that sentence in place of the
-  install button.
+  (`isBuiltDeployment()`, `src/lib/platform/build.ts`). Register, Discard,
+  Remove and the review refuse on the same marker, before any lock. Each says it
+  as information, not as a fault: "This deployment runs a build. Install and
+  register in a checkout of your repository, commit, and deploy.", and Remove
+  says the same of removing. Browse still shows the catalogue and each release
+  there, with that sentence in place of the install button.
 
   This check has to be a marker rather than a capability probe, because the
   capability probe can pass while the capability is absent.
@@ -2924,9 +3296,9 @@ runs with `NODE_ENV=production` and is one of the profiles the entry exists to
 serve. In a real deployment the name does not resolve and the request simply
 fails to connect.
 
-**Redirects stay on the catalogue.** Search, listing and install-manifest
-requests follow at most three redirects, and only within the catalogue's own
-origin: the same scheme, host and port. They are followed by hand, by the code
+**Redirects stay on the catalogue.** Search, listing, install-manifest and
+release-list requests follow at most three redirects, and only within the
+catalogue's own origin: the same scheme, host and port. They are followed by hand, by the code
 that follows a download's redirects (`src/lib/repository/redirects.ts`). Any
 other redirect, such as one to another host or from https to http, is refused
 before anything is sent to it, with an error that names the catalogue and not
@@ -2937,8 +3309,9 @@ redirect at all (see **The update check**).
 ### State of the upstream
 
 The endpoints are live: `/api/v1/search`, `/api/v1/<kind>/<slug>`,
-`/api/v1/<kind>/<slug>/install` and the update check's `/api/v1/updates`. Two
-things about them shape the client.
+`/api/v1/<kind>/<slug>/install`, the update check's `/api/v1/updates` and the
+release check's `/api/v1/mixos/releases`. Two things about them shape the
+client.
 
 **Search returns summaries, not listings.** `/search` answers with
 `ExtensionSummary` — no `sourceRepo`, no `releases`, no `description` — which is
