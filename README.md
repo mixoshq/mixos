@@ -340,6 +340,7 @@ first shows what will run, or in a terminal:
 ```bash
 npm run register                        # what is waiting
 npm run register -- app/<slug>          # move it into apps/ and run its code
+npm run register -- app/<slug> --smoke  # and migrate, activate and smoke-test it here
 npm run register -- app/<slug> --discard
 npm run register -- --recover           # after one that stopped midway
 ```
@@ -364,7 +365,10 @@ deploy: removing hands back the commands and a commit message, as Register
 does. `npm run remove -- --recover` puts back one that stopped midway.
 
 Don't edit an installed folder. The registry generator compares it with its
-record, and Browse then says "modified locally". On Windows,
+record, and Browse then says "modified locally". A pull request with an
+installed folder that no longer matches its record fails the extensions check
+(`.github/workflows/extensions.yml`), which also smoke-tests each app a pull
+request changes. On Windows,
 work in WSL, or set `git config core.autocrlf false` in the repository:
 converting line endings changes the files, so every installed folder would
 count as modified. Extensions added before installs kept a record count as
@@ -621,6 +625,14 @@ are in the build. To make an instance run only what it was deployed with, set
 catalogue's Browse pages and its install actions go away for that kind, and
 Register, from the page or `npm run register`, won't register it
 ([details](docs/hosting/README.md#fixing-what-an-instance-runs)).
+
+Once a day, each instance asks mixos.org about the extensions it installed from
+there, so admins see a release its publisher withdrew. It sends a random
+instance ID and each of those extensions' kind, slug and version, and nothing
+else. It also reads mixos.org's list of MixOS releases, sending nothing about
+the instance, so admins see when a newer one is out.
+`MIXOS_UPDATE_CHECK=false` turns both off
+([what is sent and kept](docs/hosting/README.md#what-mixos-sends-to-mixosorg)).
 
 Before exposing a deployment publicly, read
 [docs/security-architecture.md](docs/security-architecture.md) — the trust

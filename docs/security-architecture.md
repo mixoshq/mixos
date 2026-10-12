@@ -28,6 +28,8 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Client SDK           | `src/lib/apps/sdk.ts`                         |
 | Credential config    | `src/lib/connectors/config.ts`                |
 | Connector switch     | `src/lib/connectors/switch.ts`                |
+| Registry update check | `src/lib/repository/update-check.ts`, `src/lib/repository/updates.ts` |
+| MixOS release check  | `src/lib/platform/release-check.ts`, `src/lib/platform/releases.ts`, `src/components/admin/release-notes.tsx` |
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
 | Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
@@ -2143,6 +2145,8 @@ dialog's History marks them "(unverified)". A row whose `actor_id` became null
 because its admin was deleted still names their address and stays verified, so
 the label keys on the name, not on the null. They follow rule 2, as an admin's
 rows do: the registration has already happened when its row is written.
+`npm run register -- app/<slug> --smoke` writes `app.activate` and
+`user.grant.add` the same way, with `smoke: true` beside `via: "cli"` (§31).
 
 **The review checklist item for any new admin action**: call `recordAdminAction`
 alongside `requireAdmin`. Nothing upstream does either for you.
@@ -2237,7 +2241,8 @@ taken (below), nothing of that slug may be in place or waiting in pending, and:
 
 ```
 1. GET /api/v1/<kind>/<slug>/install     the commit, the URL, the hash
-2. Refuse a yanked release unless the admin was shown why and insisted
+2. Refuse a yanked release unless the admin was shown why and insisted,
+   and refuse one whose requiresMixOS is above this checkout's version
 3. Download from GitHub, PINNED TO THE COMMIT, through the host allowlist
 4. Read the archive IN MEMORY — reject symlinks, traversal, oversize trees
 5. VERIFY THE CONTENT HASH — a mismatch ends it here, nothing written
@@ -2465,6 +2470,37 @@ result points to Admin > Apps on the instance that serves the app. The action
 checks the database again before it acts, and then applies Activate's own checks
 and audit row (`app.activate`).
 
+### A smoke test after Register
+
+`npm run register -- app/<slug> --smoke` (`scripts/register-smoke.ts`) adds a
+smoke test to Register, in the checkout. Before Register, and so before anything
+changes, it refuses:
+
+- a database that isn't on this machine, by the rule "Activate in this
+  checkout" follows (`src/lib/db/locality.ts`). Other instances may use any
+  other database, and the smoke test would apply the app's migrations there
+  before anyone reviewed them in a pull request, then turn the app on and grant
+  it for all of them. `--database-is-disposable` is the caller saying the
+  database is theirs alone to throw away;
+- a server at the base URL that won't sign in the smoke user, or one whose user
+  isn't in the checkout's database, since it would then be testing another
+  database;
+- an app that replaces a different extension under its slug (§3.1), unless the
+  slug is typed with `--confirm-replaces <slug>`. The typed slug goes to
+  `setAppActive()`, which checks it again, as Activate on Admin > Apps does.
+
+After Register has released both locks, it runs `scripts/migrate.ts`, the app
+migrations `npm run migrate:apps` runs, without the generator run npm adds
+first: Register has just run the generator with `PATH` and `TMPDIR` only, and a
+second run would load the app's code with the shell's database URL and keys.
+Then, in a child process that reads the registry the generator just wrote,
+Activate's checks (a required connector must be configured) and a grant to the
+smoke user, each audited as the CLI (§28). Then `scripts/smoke-test-app.ts`,
+given only `PATH`, `TMPDIR` and the session; the password stays in the parent.
+The smoke test calls the app as that user, through the activation gate like any
+request. Nothing is rolled back: a migration can't be undone, and the app's code
+has already run.
+
 ### The install record
 
 Every install writes `.registry.json` at the root of the extension's folder
@@ -2498,6 +2534,20 @@ mixos.org · 1.2.0" (with "modified locally" when it is), "A local extension
 uses this name", or "Installed from <host>; not checked here" for one from
 another catalogue.
 
+**The floor, at install, Register and build.** A release may declare
+`requiresMixOS`, the oldest MixOS it runs on, and the record keeps it. Install
+(step 2) and Register (step 2) refuse a release whose floor is above this
+checkout's version, `package.json`'s, with no override. Every build checks each
+record's floor against the version it stamps, and fails, naming the extension,
+its floor and the version, when one is above it: leaving the extension out
+instead would drop it from that deploy without a word. All three compare
+`X.Y.Z` numerically (`X` and `X.Y` count as `X.0.0` and `X.Y.0`, a leading `v`,
+`>=`, `~` or `^` is ignored, and a `-` or `+` suffix is dropped), and none
+enforces a floor that doesn't read as a version; each says so instead. A local
+extension has no record, so the build doesn't check it. The install dialog and
+the review say whether this checkout meets the floor, from a verdict the server
+works out, so this build's version stays out of every page bundle (§18).
+
 **The pre-commit stamp leaves it alone.** `scripts/stamp-updated.ts` never
 stamps `lastUpdated` in a folder that holds its own record, so committing an
 install doesn't change the files it verified.
@@ -2529,6 +2579,173 @@ extension local.
 Extensions installed before installs kept a record are local. Reinstalling one
 from the Registry gives it a record, and the next release step on each
 instance treats it as a different extension, once.
+
+### The pull-request check
+
+`.github/workflows/extensions.yml` runs on pull requests that change `apps/`,
+`connectors/` or `themes/`, or the check's own files. It fails one in which an
+installed folder doesn't match its record (`scripts/check-install-records.ts`,
+hashing the folders as committed, before any extension's code runs), or a
+changed app fails the smoke test on a fresh instance in the job.
+
+The pull request's code runs in that job: npm's install scripts, the registry
+generator, the build and the server. So the job holds nothing worth taking:
+
+- `permissions: contents: read`, and nothing else;
+- the checkout uses `persist-credentials: false`, so the token isn't left in
+  `.git/config` for that code to read;
+- it is triggered by `pull_request`, never `pull_request_target`, which runs
+  with the repository's secrets and a write token;
+- no step reads a repository secret. The keys and the admin's password are made
+  in the job, and the database is a service container that goes with it;
+- it activates and grants by SQL (`scripts/ci-extensions.ts`), skipping
+  Activate's checks and audit row, which is right only for that database, so
+  the helper refuses any database that isn't on the runner;
+- the server log is printed with workflow commands stopped, so a line an app
+  logs can't act as one.
+
+A pull request from a fork gets a read-only token and no secrets whatever the
+workflow says. The job runs the pull request's own copy of the workflow and its
+scripts, so a pull request that changes them changes the check: Danger labels
+those changes `os-change` for review. The check finds broken code; it is no
+defence against hostile code, which runs in the same job and could change what
+the later steps run. The folder check comes first for that reason. What keeps
+hostile code harmless is that the job has nothing to give it.
+
+### The update check
+
+Once a day, the scheduler tick asks the catalogue about the extensions this
+build installed from it (`src/lib/repository/update-check.ts`). It is how a
+release its publisher withdrew, for a security problem say, reaches the admins
+of every instance that runs it.
+
+**What is sent.** One request, from the server, never from a browser:
+
+```
+POST https://mixos.org/api/v1/updates
+{ "instanceId": "<random UUID>",
+  "items": [{ "kind": "app", "slug": "files", "version": "1.2.0" }] }
+```
+
+`items` lists the kind, slug and version of each extension whose install
+record names the catalogue this instance browses, from
+`src/generated/registry-installs.ts`. The instance ID is a random UUID, made
+the first time there is something to check and kept in this database as
+`platform_settings.registry_instance_id`. It is derived from nothing: not the
+host name, the URL, a key or a user. One database is one instance, so a checkout
+and production are two.
+
+**What is not sent:** local extensions, extensions installed from another
+catalogue, users, data, settings, the instance's URL, and the MixOS version.
+
+**What mixos.org keeps:** for each instance and extension, the version it last
+listed, a two-letter country, and when it was first and last seen, deleted 30
+days after the last check that listed it; and for each release an instance
+lists for the first time, a row that counts the install, kept for 30 days and
+then only as daily totals. The IP address isn't stored in the Registry's
+database. mixos.org's
+[API docs](https://mixos.org/docs/api#what-we-record-and-what-we-do-not) say the
+same from its side.
+
+**When.** The tick runs every five minutes on most hosts, and a check is due 21
+hours after the last success, plus up to an hour at random, so that Vercel
+Hobby's daily tick, which can come 23 hours after the last, still checks every
+day. A change to the installed set is checked at the next tick. The check runs
+under the `repository.update-check` lock, a two-minute lease, so instances that
+share a database make one request between them. A failure keeps the last answer
+and tries again in an hour, or after the catalogue's `Retry-After`, but never
+more than a day later. The state is one JSON value,
+`platform_settings.registry_update_check`. Nothing the check does fails the
+tick.
+
+**What the answer can do: show notices.** It goes through the client's rules
+(see **The transport carrying the checksum**): https, an 8-second timeout and a
+4 MB cap. It is a POST, so it follows no redirect, and an answer that is one
+is a failure: following it would send the ID and the list again, to wherever
+the redirect pointed. An answer is kept only for an
+item that was sent, at the version sent. The publisher's reason is plain text,
+trimmed, with control and bidi characters removed, at most 500 characters. A
+latest version must be one install could record, and download URLs and hashes
+are ignored. Nothing is updated, switched off or downloaded because of an
+answer.
+
+Under the header of Admin > Apps, Connectors and Themes, admins see a withdrawn
+release, on all three pages, with **Deactivate** for an app, which is the
+admin's act and audited as `app.deactivate`; a different current release on its
+kind's page, called newer only when both versions are dotted, with the MixOS
+version it needs when this instance is older; a listing that is no longer
+published; a folder modified locally; one installed from another catalogue,
+which is never checked; and one line saying when the catalogue last answered.
+
+**Turning it off.** `MIXOS_UPDATE_CHECK=false` sends nothing and creates no ID.
+It also turns off the release check below, so "off" means the instance sends
+mixos.org nothing on its own. Unset, empty and `true` are on. A value that isn't
+true or false is off, and the release step reports it. Deleting an extension's
+`.registry.json` stops checking that extension, and deleting the
+`registry_instance_id` row gives the instance a new ID at the next check.
+
+### The release check
+
+Once a day, the scheduler tick also asks the catalogue which releases of MixOS
+exist (`src/lib/platform/release-check.ts`), so admins hear when a newer one is
+out.
+
+**What is sent.** One request, from the server:
+
+```
+GET https://mixos.org/api/v1/mixos/releases
+User-Agent: MixOS
+```
+
+No instance ID, no version, no query, no body and no cookie. mixos.org records
+nothing for a `GET`, so it learns only that a MixOS somewhere asked, from the
+request's IP address. Requests reach it through Cloudflare, whose own logging
+applies to the connection.
+
+**When.** On the update check's schedule, in `platform_settings.mixos_release_check`:
+due 21 hours after the last success plus up to an hour; after a failure, an hour
+later, or at the catalogue's `Retry-After`, but never more than a day. A
+changed channel is due at once. It runs under its own lock,
+`platform.release-check`, with a two-minute lease. Nothing it does fails the
+tick.
+
+**Parsed, not trusted.** The request goes through the client's rules (see **The
+transport carrying the checksum**): https, an 8-second timeout, and redirects
+only within the catalogue's origin. Its cap is 512 KB, which is how large
+mixos.org lets the whole list grow. Each entry is checked on its own, and one
+that fails is left out, not the list: the tag must match
+`^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$` and be a version in full (no leading zeros,
+no empty part), the commit 40 lowercase hex characters, the date an ISO date,
+and the notes at most 20 KB. Unknown keys are dropped. The release kept is
+checked again when it is read back, so a hand-edited row can't put a bad tag in
+front of admins either.
+
+**Which release.** The newest on the channel, by semver, whatever order the
+list is in. `MIXOS_RELEASE_CHANNEL=stable`, the default, leaves out any release
+marked as a prerelease or whose tag has a suffix; `prerelease` keeps them. Any
+other value is read as `stable`, with a warning, and the release step reports
+it, so a typo shows fewer releases, never more.
+
+**What the answer can do: show one notice.** When the release kept is newer than
+this build, the top of every admin page says so: "MixOS 0.5.0 is available (this
+instance runs 0.4.2). A minor release: it may need changes." The notes come
+from commit subjects, so a merged pull request's title is enough to put text
+there, and they are rendered by mixos.org's rule for them
+(`src/components/admin/release-notes.tsx`): collapsed, raw HTML dropped, images
+dropped, so no tracking image loads in front of admins (the CSP allows
+`img-src https:`), and every link shown as its text and then its address, not
+clickable. The notice's only links are built from the checked tag: the
+release's page on mixos.org, `https://mixos.org/docs/releases/<tag>`, and
+`https://mixos.org/docs/operating/upgrading`. No address in the answer is ever
+fetched or made a link.
+
+**Never applied.** There is no button to apply a release. The check writes one
+row, its own, and takes its lock while it runs; it starts no process and writes
+no file. Taking a release is merging its tag into the operator's repository and
+deploying it.
+
+**Turning it off.** `MIXOS_UPDATE_CHECK=false`, the update check's switch,
+sends nothing for this check either, and the admin pages say the checks are off.
 
 ### Removing an extension's code
 
@@ -2890,19 +3107,22 @@ runs with `NODE_ENV=production` and is one of the profiles the entry exists to
 serve. In a real deployment the name does not resolve and the request simply
 fails to connect.
 
-**Redirects stay on the catalogue.** Search, listing and install-manifest
-requests follow at most three redirects, and only within the catalogue's own
-origin: the same scheme, host and port. They are followed by hand, by the code
+**Redirects stay on the catalogue.** Search, listing, install-manifest and
+release-list requests follow at most three redirects, and only within the
+catalogue's own origin: the same scheme, host and port. They are followed by hand, by the code
 that follows a download's redirects (`src/lib/repository/redirects.ts`). Any
 other redirect, such as one to another host or from https to http, is refused
 before anything is sent to it, with an error that names the catalogue and not
 where the redirect pointed. The reason is the one above: whoever answers a
-followed redirect chooses the hash.
+followed redirect chooses the hash. The update check's POST follows no
+redirect at all (see **The update check**).
 
 ### State of the upstream
 
-The endpoints are live: `/api/v1/search`, `/api/v1/<kind>/<slug>` and
-`/api/v1/<kind>/<slug>/install`. Two things about them shape the client.
+The endpoints are live: `/api/v1/search`, `/api/v1/<kind>/<slug>`,
+`/api/v1/<kind>/<slug>/install`, the update check's `/api/v1/updates` and the
+release check's `/api/v1/mixos/releases`. Two things about them shape the
+client.
 
 **Search returns summaries, not listings.** `/search` answers with
 `ExtensionSummary` — no `sourceRepo`, no `releases`, no `description` — which is
