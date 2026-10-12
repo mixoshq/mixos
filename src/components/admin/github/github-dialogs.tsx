@@ -9,15 +9,17 @@ import TypedConfirmDialog from "@/components/admin/typed-confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
-import { Textarea } from "@/components/ui/input";
+import { Checkbox, Textarea } from "@/components/ui/input";
 import {
   confirmBranchProtectionAction,
+  confirmPreviewChecklistAction,
   forgetAppAction,
   unlinkAction,
   withdrawBranchProtectionAction,
+  withdrawPreviewChecklistAction,
 } from "@/lib/github/actions";
 import type { GitHubOutcome } from "@/lib/github/outcomes";
-import { OutcomeNotice } from "./github-parts";
+import { OutcomeNotice, PREVIEW_ITEMS } from "./github-parts";
 
 /**
  * Admin > GitHub's dialogs. Each closes with what its action answered, which
@@ -297,6 +299,99 @@ export function WithdrawOverrideButton({ onDone }: { onDone: (result: GitHubOutc
         setBusy(true);
         try {
           onDone(await withdrawBranchProtectionAction());
+        } catch {
+          onDone(UNREACHED);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      Withdraw
+    </Button>
+  );
+}
+
+/** Confirm the preview checklist: every item ticked, or nothing is recorded. */
+export function ChecklistDialog({ repository, onClose }: { repository: string; onClose: Close }) {
+  const [ticked, setTicked] = useState<Set<string>>(() => new Set());
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<GitHubOutcome | null>(null);
+  const all = PREVIEW_ITEMS.every((item) => ticked.has(item.id));
+
+  const submit = async () => {
+    setBusy(true);
+    setRefusal(null);
+    let result: GitHubOutcome;
+    try {
+      result = await confirmPreviewChecklistAction({ items: [...ticked] });
+    } catch {
+      result = UNREACHED;
+    }
+    setBusy(false);
+    if (result.ok) onClose(result);
+    else setRefusal(result);
+  };
+
+  return (
+    <Dialog
+      open
+      onClose={busy ? () => {} : () => onClose(null)}
+      title="Confirm previews are off"
+      subtitle={repository}
+      footer={
+        <>
+          <Button variant="ghost" onClick={() => onClose(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="primary" busy={busy} busyLabel="Recording…" disabled={!all} onClick={submit}>
+            Confirm
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4 text-sm">
+        <p className="text-foreground">
+          A preview of a branch runs its code with the host&apos;s secrets, and the App&apos;s branches carry a
+          publisher&apos;s code. The instance reads your workflows, render.yaml and vercel.json itself. These live in
+          the hosts&apos; own settings, where it can&apos;t look. Tick each one that holds.
+        </p>
+        <div className="space-y-3">
+          {PREVIEW_ITEMS.map((item) => (
+            <Checkbox
+              key={item.id}
+              label={item.text}
+              checked={ticked.has(item.id)}
+              onChange={(e) =>
+                setTicked((s) => {
+                  const next = new Set(s);
+                  if (e.target.checked) next.add(item.id);
+                  else next.delete(item.id);
+                  return next;
+                })
+              }
+            />
+          ))}
+        </div>
+        <p className="text-muted-foreground">The audit log records who confirmed it.</p>
+        {refusal && <OutcomeNotice outcome={refusal} />}
+      </div>
+    </Dialog>
+  );
+}
+
+/** Withdraw the checklist's confirmation. */
+export function WithdrawChecklistButton({ onDone }: { onDone: (result: GitHubOutcome) => void }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      busy={busy}
+      busyLabel="Withdrawing…"
+      onClick={async () => {
+        setBusy(true);
+        try {
+          onDone(await withdrawPreviewChecklistAction());
         } catch {
           onDone(UNREACHED);
         } finally {
