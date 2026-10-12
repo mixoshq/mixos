@@ -1,0 +1,156 @@
+name: extensions
+
+# Pull requests that change an extension get two checks, in one job:
+#
+#   1. Every folder installed from the Registry still matches its
+#      .registry.json: the files hash, recomputed from this checkout
+#      (scripts/check-install-records.ts). It runs before any extension's code.
+#   2. Each app the pull request changes answers its routes on a fresh MixOS:
+#      a throwaway Postgres, keys made for this run, the release step (which
+#      creates the first admin), a production build and the server, the app
+#      activated and granted by SQL, then scripts/smoke-test-app.ts signed in
+#      as that admin. A 5xx, a timeout or a refused request fails the check. A
+#      route that answers 503 UNAVAILABLE is skipped: it needs a connector's
+#      credentials, and this job has none.
+#
+# A change to this file, the smoke script or the two helpers tests every app,
+# so the check tests itself on its own pull request (scripts/ci-extensions.ts).
+#
+# WHAT THE PULL REQUEST'S CODE CAN REACH. Its code runs here: npm's install
+# scripts, the registry generator, the build and the server all run it. So the
+# job holds nothing worth taking. `contents: read` is its only permission, the
+# checkout doesn't keep the token, no step reads a repository secret, the keys
+# are made in the job, and the database goes away with it. Never change the
+# trigger to `pull_request_target`, which runs with the repository's secrets
+# and a write token. docs/security-architecture.md §31 has the rest.
+
+on:
+  pull_request:
+    paths:
+      - "apps/**"
+      - "connectors/**"
+      - "themes/**"
+      - ".github/workflows/extensions.yml"
+      - "scripts/smoke-test-app.ts"
+      - "scripts/app-smoke.ts"
+      - "scripts/check-install-records.ts"
+      - "scripts/ci-extensions.ts"
+
+permissions:
+  contents: read
+
+# A force-push or a quick follow-up commit supersedes the run in flight.
+concurrency:
+  group: extensions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Installed folders and smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        # -eo pipefail, which a bare `run` doesn't set: a failed `git diff`
+        # must fail its step, not hand an empty list along the pipe.
+        shell: bash
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          # Not a secret. The database lives as long as this job.
+          POSTGRES_PASSWORD: throwaway
+          POSTGRES_DB: mixos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      DATABASE_URL: postgres://postgres:throwaway@localhost:5432/mixos
+      PGSSLMODE: disable
+      PORT: "3000"
+      NEXTAUTH_URL: http://localhost:3000
+      INITIAL_ADMIN_EMAIL: smoke@example.com
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The token stays out of .git/config, where the pull request's code
+          # could read it.
+          persist-credentials: false
+          # The merge commit and its first parent, the base branch: what the
+          # pull request changes is the difference between the two.
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Installed folders match their .registry.json
+        run: npx tsx scripts/check-install-records.ts
+
+      - name: Apps to test
+        id: apps
+        run: git diff --name-only --no-renames -z HEAD^1 HEAD | npx tsx scripts/ci-extensions.ts apps >> "$GITHUB_OUTPUT"
+
+      - name: Keys for this run
+        if: steps.apps.outputs.slugs != ''
+        run: |
+          npx tsx scripts/generate-keys.ts | grep -E '^[A-Z0-9_]+=' > "$RUNNER_TEMP/keys.env"
+          echo "INITIAL_ADMIN_PASSWORD=$(openssl rand -hex 24)" >> "$RUNNER_TEMP/keys.env"
+          while IFS='=' read -r _ value; do echo "::add-mask::$value"; done < "$RUNNER_TEMP/keys.env"
+          cat "$RUNNER_TEMP/keys.env" >> "$GITHUB_ENV"
+
+      - name: Release step
+        if: steps.apps.outputs.slugs != ''
+        run: npm run release
+
+      - name: Build
+        if: steps.apps.outputs.slugs != ''
+        run: npm run build
+
+      - name: Start the server
+        if: steps.apps.outputs.slugs != ''
+        run: |
+          nohup npm run start > "$RUNNER_TEMP/server.log" 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fsS "http://localhost:$PORT/api/health/ready" > /dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          echo "The server wasn't ready after two minutes."
+          exit 1
+
+      # The slugs come through the environment, never pasted into the script,
+      # and ci-extensions.ts prints only lowercase letters, digits, - and _.
+      - name: Activate and grant the apps
+        if: steps.apps.outputs.slugs != ''
+        env:
+          SLUGS: ${{ steps.apps.outputs.slugs }}
+        run: |
+          read -ra slugs <<< "$SLUGS"
+          npx tsx scripts/ci-extensions.ts activate --user "$INITIAL_ADMIN_EMAIL" "${slugs[@]}"
+
+      - name: Smoke test
+        if: steps.apps.outputs.slugs != ''
+        env:
+          SLUGS: ${{ steps.apps.outputs.slugs }}
+        run: |
+          read -ra slugs <<< "$SLUGS"
+          SMOKE_EMAIL="$INITIAL_ADMIN_EMAIL" SMOKE_PASSWORD="$INITIAL_ADMIN_PASSWORD" \
+            npx tsx scripts/smoke-test-app.ts "${slugs[@]}" --base-url "http://localhost:$PORT" --skip-unavailable
+
+      - name: Server log
+        if: failure() && steps.apps.outputs.slugs != ''
+        run: |
+          # What the apps logged is theirs to choose, so no line of it is read
+          # as a workflow command.
+          token="$(openssl rand -hex 16)"
+          echo "::stop-commands::$token"
+          cat "$RUNNER_TEMP/server.log" || true
+          echo "::$token::"
