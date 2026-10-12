@@ -11,8 +11,9 @@ A MixOS deployment is three things:
    with one `DATABASE_URL` and uses nothing but Postgres itself. There is no
    PostgREST, no Supabase API and no service-role key involved.
 3. **A tick.** `GET /api/cron` with `Authorization: Bearer $CRON_SECRET` every
-   five minutes, which drives scheduled jobs and the daily
-   [update check](#what-mixos-sends-to-mixosorg). Vercel Cron, a cron job on
+   five minutes, which drives scheduled jobs, the daily
+   [update check](#what-mixos-sends-to-mixosorg) and the daily check for
+   [new releases of MixOS](#new-releases-of-mixos). Vercel Cron, a cron job on
    the host platform, or a `curl` loop all work.
 
 Each deploy also runs **the release step** before new code takes traffic. It
@@ -57,7 +58,8 @@ on its own.
 | `CRON_SECRET` | Yes | The bearer token the tick sends. Without it `/api/cron` refuses every call, and jobs never run. |
 | `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | For the first deploy | The release step creates this account if no account has the email. It never changes an existing one, so the variables are safe to leave set. |
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind and install from it. See [Fixing what an instance runs](#fixing-what-an-instance-runs). |
-| `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance asks mixos.org once a day about the extensions it installed from there, so admins see a release its publisher withdrew. `false` sends nothing. See [What MixOS sends to mixos.org](#what-mixos-sends-to-mixosorg). |
+| `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance asks mixos.org once a day about the extensions it installed from there, so admins see a release its publisher withdrew, and about new releases of MixOS. `false` sends nothing. See [What MixOS sends to mixos.org](#what-mixos-sends-to-mixosorg). |
+| `MIXOS_RELEASE_CHANNEL` | No, default `stable` | Which releases of MixOS the admin pages tell you about: `stable`, or `prerelease` to include prereleases. See [New releases of MixOS](#new-releases-of-mixos). |
 | `MIXOS_COMMIT` | No | The commit the admin pages show beside the MixOS version. For the Docker image it's a build argument. See [Which build is running](#which-build-is-running). |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated domains allowed to sign in. Blank: any. |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | No | Web Push, for apps that send notifications. |
@@ -212,9 +214,47 @@ check tries again an hour later, or after the wait mixos.org asks for, but
 never more than a day later.
 
 To turn it off, set `MIXOS_UPDATE_CHECK=false`: nothing is sent and no ID is
-created, and admins aren't told about withdrawn releases. Any value other than
-`true` or `false` is read as `false`, and the release step reports it. To stop
+created, and admins aren't told about withdrawn releases. The same switch stops
+the check for [new releases of MixOS](#new-releases-of-mixos), so with it off
+the instance sends nothing to mixos.org on its own. Any value other than `true`
+or `false` is read as `false`, and the release step reports it. To stop
 checking one extension, delete its `.registry.json`.
+
+### New releases of MixOS
+
+Once a day, each instance also asks mixos.org which releases of MixOS exist, so
+admins hear when a newer one is out. The tick sends one request, from the
+server:
+
+```
+GET https://mixos.org/api/v1/mixos/releases
+User-Agent: MixOS
+```
+
+- **Sent:** nothing about the instance. No ID, no version, no query and no
+  body. mixos.org records nothing for a `GET`, so all it learns is that a MixOS
+  somewhere asked, from the request's IP address.
+- **Shown:** when a newer release is out, a notice at the top of every admin
+  page, such as "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor
+  release: it may need changes." Its notes are collapsed, and their links are
+  shown as text, never as links. The notice links to the release's page on
+  mixos.org and to [Upgrading](#upgrading). Under the version at the foot of
+  the admin pages, a line says when mixos.org last answered.
+- **Never applied.** Nothing is merged, downloaded or deployed. Taking a release
+  is up to you: merge its tag into your copy, as [Upgrading](#upgrading) says.
+
+The check keeps the update check's schedule: about once a day, and an hour
+after a failure, or later if mixos.org asks, but never more than a day later.
+Its last answer is kept in the database as
+`platform_settings.mixos_release_check`.
+
+**The channel.** `MIXOS_RELEASE_CHANNEL=stable`, the default, tells you about
+releases only. `prerelease` adds prereleases, tags with a suffix such as
+`v0.3.0-rc.1`, which are for trying a version before it's final. Any other
+value is read as `stable`, and the release step reports it.
+
+**Turning it off.** `MIXOS_UPDATE_CHECK=false` turns this check off along with
+the update check. Nothing is sent, and the admin pages say the checks are off.
 
 ### The release step
 
@@ -337,7 +377,8 @@ which counts as a different extension too.
 
 The admin pages show the MixOS version and the commit the deployment was built
 from, for example `MixOS 0.4.2 · commit 3e1f0a2`, so you can check that a deploy
-landed. Only admins see them.
+landed, and when a newer release is out (see
+[New releases of MixOS](#new-releases-of-mixos)). Only admins see them.
 
 The version is `package.json`'s, stamped into every build. The commit comes from
 the host:
@@ -396,9 +437,10 @@ database as `DATABASE_URL`.
 
 Each version of MixOS is a release: a tag on this repository's `main`, such
 as `v0.2.0`, listed on the [releases page](https://github.com/mixoshq/mixos/releases)
-with notes that put breaking changes first. Upgrade by merging the newest
-release tag into your fork. Don't merge `upstream/main`: between releases it
-holds work that hasn't been released yet.
+with notes that put breaking changes first. When a newer one is out, the admin
+pages say so ([New releases of MixOS](#new-releases-of-mixos)). Upgrade by
+merging the newest release tag into your fork. Don't merge `upstream/main`:
+between releases it holds work that hasn't been released yet.
 
 1. **Back up the database.** Migrations only go forward, so a backup is the
    way back. `pg_dump` works on every path; for the database in the Compose
