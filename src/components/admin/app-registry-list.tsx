@@ -9,6 +9,7 @@ import { Search } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import type { AppReplacement } from "@/lib/apps/access";
 import AppTile from "./app-tile";
+import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +42,8 @@ export default function AppRegistryList({
   replacedBySlug,
 }: Props) {
   const [query, setQuery] = useState("");
+  /** The app whose Remove dialog is open, or null. One dialog for the grid. */
+  const [removing, setRemoving] = useState<RemoveTarget | null>(null);
   const lower = query.toLowerCase();
   /*
     Search is the only filter left. The status tabs it sat beside — All /
@@ -83,7 +86,7 @@ export default function AppRegistryList({
         like a different kind of object from the other two.
       */}
       {filtered.length > 0 ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((app) => (
             <AppTile
               key={app.slug}
@@ -96,6 +99,7 @@ export default function AppRegistryList({
               isActive={activeBySlug[app.slug] === true}
               returnedChangedAt={returnedChangedBySlug[app.slug] ?? null}
               replacement={replacedBySlug[app.slug] ?? null}
+              onRemove={() => setRemoving({ kind: "app", slug: app.slug, name: app.name })}
             />
           ))}
         </div>
@@ -108,6 +112,7 @@ export default function AppRegistryList({
             : "No apps found. Add an app to the /apps directory."}
         </div>
       )}
+      {removing && <RemoveDialog target={removing} onClose={() => setRemoving(null)} />}
     </>
   );
 }
