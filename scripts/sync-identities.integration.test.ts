@@ -169,7 +169,9 @@ describe("a connector or a theme under a name a different one had", { skip }, ()
 
   test("the first release step records the rest, and changes nothing else", async () => {
     const { value } = await release([installOf("connector", MAPS), installOf("theme", DAWN)]);
-    assert.deepEqual(value, { connectors: [], themes: [] });
+    // Every connector with credentials is in this build, so none is marked missing.
+    assert.deepEqual(value, { connectors: [], themes: [], missing: [], returned: [] });
+    assert.deepEqual(await settings("connector.missing."), {});
     assert.deepEqual(await settings("connector.identity."), {
       [`connector.identity.${CRM}`]: "local",
       [`connector.identity.${MAIL}`]: "local",

@@ -37,16 +37,30 @@
 // A connector or theme that leaves the build keeps its record, so one that
 // comes back as a different extension is caught as well.
 //
+// CONNECTORS THIS BUILD LACKS. A connector this database holds credentials
+// or connections for (connector_configs, user_connector_oauth), and that this
+// build doesn't carry, is marked `connector.missing.<name>`, with when as its
+// value, and audited `connector.missing`. Nothing is deleted: its credentials
+// and its users' connections stay until an admin deletes them with Delete data
+// (src/lib/repository/delete-data.ts), which needs this mark. A build that
+// carries it again clears the mark, audited `connector.returned`. Apps have the
+// same mark in their rows (scripts/sync-app-registry.ts); a theme holds no data.
+//
 // One transaction under the release step's lock (scripts/migration-lock.ts),
-// like the app registry sync, so the records, the switches and the audit rows
-// are written whole or not at all.
+// like the app registry sync, so the records, the switches, the marks and the
+// audit rows are written whole or not at all.
 
 import type { Sql, TransactionSql } from "postgres";
 import { connectorNames } from "../src/generated/connector-registry";
 import { registryInstalls } from "../src/generated/registry-installs";
 import { themeSlugs } from "../src/generated/theme-registry";
 import { RELEASE_STEP_ACTOR } from "../src/lib/apps/audit-actors";
-import { connectorReplacedKey, connectorSwitchKey } from "../src/lib/connectors/switch-keys";
+import {
+  MISSING_KEY_PREFIX,
+  connectorMissingKey,
+  connectorReplacedKey,
+  connectorSwitchKey,
+} from "../src/lib/connectors/switch-keys";
 import {
   describeIdentity,
   extensionIdentity,
@@ -88,6 +102,10 @@ export interface ReplacedTheme {
 export interface IdentitySyncResult {
   connectors: ReplacedConnector[];
   themes: ReplacedTheme[];
+  /** Connectors this database holds credentials for that this build lacks, marked by this run. */
+  missing: string[];
+  /** Connectors marked missing until this run. */
+  returned: string[];
 }
 
 /** platform_settings' key for the applied theme (src/lib/themes/active.ts). */
@@ -95,7 +113,7 @@ const APPLIED_THEME_KEY = "theme";
 
 async function audit(
   tx: TransactionSql,
-  action: "connector.identity.changed" | "theme.identity.changed",
+  action: "connector.identity.changed" | "theme.identity.changed" | "connector.missing" | "connector.returned",
   targetType: "connector" | "theme",
   targetId: string,
   details: Record<string, unknown>,
@@ -130,7 +148,7 @@ export async function syncIdentities(
     const recorded = new Map(rows.map((r) => [r.key, r.value]));
     const appliedTheme = recorded.get(APPLIED_THEME_KEY);
 
-    const result: IdentitySyncResult = { connectors: [], themes: [] };
+    const result: IdentitySyncResult = { connectors: [], themes: [], missing: [], returned: [] };
     for (const w of wanted) {
       const previous = recorded.get(w.key);
       if (previous === w.identity) continue;
@@ -167,6 +185,47 @@ export async function syncIdentities(
         result.themes.push({ slug: w.slug, previous, identity: w.identity, applied });
       }
     }
+
+    // A connector this database holds credentials or connections for, that
+    // this build lacks: marked once, keeping when it was first marked, and
+    // kept whole. By exact name, from the rows that hold them.
+    const marked = await tx<{ key: string }[]>`
+      insert into public.platform_settings (key, value)
+      select ${MISSING_KEY_PREFIX}::text || held.name, ${new Date().toISOString()}
+      from (
+        select connector_name as name from public.connector_configs
+        union
+        select connector_name from public.user_connector_oauth
+      ) as held
+      where not (held.name = any(${build.connectors}))
+      on conflict (key) do nothing
+      returning key
+    `;
+    for (const { key } of marked) {
+      const name = key.slice(MISSING_KEY_PREFIX.length);
+      const [held] = await tx<{ credentials: boolean; connections: number }[]>`
+        select
+          exists (select 1 from public.connector_configs where connector_name = ${name}) as credentials,
+          (select count(*)::int from public.user_connector_oauth where connector_name = ${name}) as connections
+      `;
+      await audit(tx, "connector.missing", "connector", name, { ...held });
+      result.missing.push(name);
+    }
+
+    // Back in this build: the mark goes, with when it was set in the audit row.
+    const back = await tx<{ key: string; value: string }[]>`
+      delete from public.platform_settings
+      where key = any(${build.connectors.map(connectorMissingKey)})
+      returning key, value
+    `;
+    for (const row of back) {
+      const name = row.key.slice(MISSING_KEY_PREFIX.length);
+      await audit(tx, "connector.returned", "connector", name, { missingSince: row.value });
+      result.returned.push(name);
+    }
+
+    result.missing.sort();
+    result.returned.sort();
     return result;
   });
 }
@@ -191,6 +250,12 @@ export async function syncAndReportIdentities(
       `  ${t.slug}: a different theme than before (was ${describeIdentity(t.previous)}; ` +
         `now ${describeIdentity(t.identity)})${t.applied ? ", and it is the applied theme" : ""}`,
     );
+  }
+  for (const name of result.missing) {
+    console.log(`  ${name}: not in this build — marked missing; its credentials and connections are kept`);
+  }
+  for (const name of result.returned) {
+    console.log(`  ${name}: back in the build`);
   }
   return result;
 }

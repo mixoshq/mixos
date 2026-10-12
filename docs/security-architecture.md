@@ -298,7 +298,9 @@ old activation, and with it the old grants, to different code that comes back
 under the same slug, so the release step records a hash of each app's files.
 An app that returns with different files comes back inactive and flagged on
 Admin > Apps until an admin activates it; one that returns with the same files
-comes back as it left. Both are audited (§28).
+comes back as it left. Both are audited (§28). The row and everything that
+hangs off it stay until an admin deletes them with Delete data (§31), after
+which an app that arrives under the slug starts with nothing.
 
 **A different extension under the same slug starts off, and without the old
 one's API keys.** Every release step also records each app's identity
@@ -991,6 +993,20 @@ Entirely at the application layer:
   spelling, so an app cannot hand-write SQL at runtime that would sidestep its
   schema. The registry generator enforces it on every build and every install.
 
+### Deleting an app's schema and role
+
+The release step creates an app's schema and role and never drops them: an app
+that leaves the build keeps both (§3.1). Only **Delete data**, by an admin,
+drops them ([`src/lib/repository/delete-data.ts`](../src/lib/repository/delete-data.ts),
+§31), and only by name, `app_<slug>` and `mixos_app_<slug>`, never by a prefix,
+so `notes_archive` is not part of `notes`. The schema has to belong to the role,
+and the role has to be one the release step could have made: no powers, no
+memberships, no use in another database. Dropping the schema must take nothing
+outside it, and the role must hold nothing else afterwards; otherwise the
+transaction rolls back and nothing is deleted. The app's row goes too, with its
+activation, grants, API keys and identity, so a later app under the slug
+arrives inactive with nothing (§3.1).
+
 ### Reachability of the database credential
 
 `DATABASE_URL` carries no `NEXT_PUBLIC_` prefix, which is what prevents Next.js
@@ -1341,6 +1357,9 @@ Consent is a **ceiling**, the live grant is a **floor**. A refresh copies
 `granted_apps` forward verbatim, so consent can never silently widen. `hasAppGrant`
 (not `hasAppAccess`) is used deliberately — it is the authorization fact, and it
 matches what the App Services broker already enforces for the same question.
+Deleting an app's data (§31) takes its slug out of every token's and code's
+`granted_apps`, so consent given to it never covers a later app with the same
+slug.
 
 The app gate (§3.1) is asked last, before a tool's module is imported. While
 the app's own migrations are behind this build, `tools/list` leaves its tools
@@ -2078,13 +2097,14 @@ Currently recorded: `connector.configure`, `connector.connect`,
 `connector.test`, `connector.disable`, `connector.enable`, `app.password.set`,
 `app.password.clear`, `app.setting.set`, `app.setting.clear`, `app.activate`,
 `app.deactivate`, `app.missing`, `app.returned`, `app.identity.changed`,
-`connector.identity.changed`, `theme.identity.changed`, `app.job.run`,
-`app.job.enable`, `app.job.disable`, `scheduler.start`, `scheduler.stop`,
-`theme.apply`, `user.create`, `user.profile.update`, `user.password.set`,
-`user.admin.grant`, `user.admin.revoke`, `user.grant.add`,
-`user.grant.revoke`, `user.role.set`, `user.sessions.revoke`; a Registry
-install as `app.install`, `connector.install` or `theme.install`, or, when the
-install is refused, `app.install.rejected`, `connector.install.rejected` or
+`connector.missing`, `connector.returned`, `connector.identity.changed`,
+`theme.identity.changed`, `app.job.run`, `app.job.enable`, `app.job.disable`,
+`scheduler.start`, `scheduler.stop`, `theme.apply`, `user.create`,
+`user.profile.update`, `user.password.set`, `user.admin.grant`,
+`user.admin.revoke`, `user.grant.add`, `user.grant.revoke`, `user.role.set`,
+`user.sessions.revoke`; a Registry install as `app.install`,
+`connector.install` or `theme.install`, or, when the install is refused,
+`app.install.rejected`, `connector.install.rejected` or
 `theme.install.rejected`; registering a pending app or connector as
 `app.register` or `connector.register`, or `app.register.rejected` and
 `connector.register.rejected` when it is refused; discarding one as
@@ -2092,12 +2112,14 @@ install is refused, `app.install.rejected`, `connector.install.rejected` or
 what a stopped one left as `app.register.recover` or
 `connector.register.recover`; removing an extension's code as `app.remove`,
 `connector.remove` or `theme.remove`, or `<kind>.remove.rejected` when it is
-refused; and recovery after a removal that stopped midway as
-`<kind>.remove.recover` (§31). `connector.disable` and `connector.enable`
-name the apps that declare the connector, in `details` as `requiredBy` and
-`optionalFor`. An `app.activate` or `connector.enable` that answered a
-different extension under the name, with the name typed, has the identity it
-replaced in `details` as `replaced`.
+refused; recovery after a removal that stopped midway as
+`<kind>.remove.recover`; and deleting what the database kept for an app or a
+connector as `app.data.delete` or `connector.data.delete`, with how much went,
+or `<kind>.data.delete.rejected` with the reason when it is refused (§31).
+`connector.disable` and `connector.enable` name the apps that declare the
+connector, in `details` as `requiredBy` and `optionalFor`. An `app.activate`
+or `connector.enable` that answered a different extension under the name, with
+the name typed, has the identity it replaced in `details` as `replaced`.
 
 **Connecting a connector.** An admin finishing the OAuth round trip for a
 tenant connector (§27), with Connect or Reconnect, is `connector.connect`
@@ -2117,7 +2139,9 @@ leaves its row even if the request is cut short, and a refused one leaves none.
 
 **Rows the release step writes.** `app.missing` (an app left the build),
 `app.returned` (it came back, with whether its files changed, both hashes, and
-whether it came back as a different extension) and `<kind>.identity.changed`
+whether it came back as a different extension), `connector.missing` and
+`connector.returned` (a connector with saved credentials or connections left
+the build, or came back) and `<kind>.identity.changed`
 (a different extension under the name, with both identities: for an app,
 whether it was switched off and how many API keys were revoked; for a
 connector, whether it was turned off; for a theme, whether it is the applied
@@ -2132,6 +2156,13 @@ Admin > Apps, Admin > Connectors and Admin > Themes name the signed-in admin,
 with `via: "button"` in `details`. A Register or a Remove the page refuses on a
 built deployment, before any lock, is `<kind>.register.rejected` or
 `<kind>.remove.rejected` with `reason: "unsupported-environment"`.
+
+**Rows Delete data writes.** `<kind>.data.delete` names the admin and records
+what went, by count, never a value. It is written in the deletion's own
+transaction, so the deletion and its record commit together: like the release
+step's rows, and unlike rule 2, a deletion that can't be recorded doesn't
+happen. One that follows **Remove code and delete this checkout's data** has
+`afterRemoval: true`. The deletion never touches this table.
 
 **Rows `npm run register` and `npm run remove` write.** Registering,
 discarding, removing and recovering run
@@ -2751,9 +2782,10 @@ sends nothing for this check either, and the admin pages say the checks are off.
 
 Removing an extension has two halves. Its code is a change to the repository,
 made in a checkout and shipped by a commit and a deploy, as installing it is.
-Its data is in each database, and stays: the release step marks an app that
-left the build and keeps everything it had (§3.1), and a connector keeps its
-credentials. No code the extension ships runs to remove it.
+Its data is in each database, and stays: the release step marks an app or a
+connector that left the build and keeps everything it had (§3.1), until an
+admin deletes it there (below). No code the extension ships runs in either
+half.
 
 The code half is **Remove** on each tile of Admin > Apps, Connectors and
 Themes, or `npm run remove -- <kind>/<slug>`
@@ -2807,6 +2839,73 @@ theme's screenshots, an app's brand marks, a connector's assets) in
 the copies an earlier run recorded and this one didn't make, so a removed
 extension's files stop being served. It deletes only folders in that record,
 and nothing else in `public/` (`scripts/public-copies.ts`).
+
+### Deleting an extension's data
+
+The data half is **Delete data…** under Not in this build on Admin > Apps and
+Admin > Connectors, on each instance, by an admin who has read what goes and
+typed the name ([`src/lib/repository/delete-data.ts`](../src/lib/repository/delete-data.ts)).
+Both server actions require an admin first (§9), and the server checks the
+typed name. A theme holds no data, so it has none.
+
+**What decides is the database.** The build serving the request can't speak
+for the others: a host's rollback serves an older build without running a
+release step, a preview can share production's database, and checkouts can
+share a development database. So it is refused:
+
+- while the build serving this instance has the extension;
+- until a release step has marked it missing: `apps.missing_since` for an app
+  (§3.1), or `connector.missing.<name>` in `platform_settings` for a connector
+  with saved credentials or connections, which the release step sets when its
+  build lacks the connector and clears when it returns
+  (`scripts/sync-identities.ts`);
+- while any other build seen in the last 24 hours has it. Each build records
+  the apps and connectors it carries in `platform_builds_seen`
+  ([`src/lib/platform/builds-seen.ts`](../src/lib/platform/builds-seen.ts))
+  at its release step, which fails if it can't, and at server start and on the
+  cron tick, at most every ten minutes. A deployment is keyed by its commit and
+  a hash of what it carries, and a checkout by the random id in
+  `.mixos/checkout-id`. The caller's own build doesn't count, so a checkout can
+  delete its own data right after removing the code. Builds unseen for 30 days
+  are pruned.
+
+**What goes.** For an app: its schema and role (§8); its rows in
+`_migrations`, `app_settings`, `app_api_keys`, `app_scheduled_jobs`,
+`app_job_runs` and `app_open_events`, and the `telemetry_events` it was the
+source of; its slug in each MCP authorization's `granted_apps` (§17), which
+keeps every other app it lists; and its `apps` row, which takes its grants,
+installs, password and widgets with it by foreign key, along with its
+activation and identity. Calls it made to a connector or to another app's
+services are their telemetry, and stay. For a connector: `connector_configs`,
+every `user_connector_oauth` and `connector_scope_status` row, its webhook
+replay markers, its telemetry, and its keys in `platform_settings` (the switch,
+the identity and both marks). Every row is matched by its own column, equal to
+the name; no table or row is chosen by a prefix. `admin_audit_log` is always
+kept. With all of it gone, a later extension under the same name inherits
+nothing: it arrives as a new one.
+
+**One transaction, under the release step's lock** (`scripts/migration-lock.ts`),
+so it can't race a release step that marks or brings back the same extension.
+The checks run again under the lock, and while it decides, no build can record
+itself (`platform_builds_seen` is locked in share mode). Before dropping an app's
+schema it checks that the schema belongs to the app's role, and that the role
+has no powers, no memberships and no use in another database. After, it checks
+that nothing outside the schema went with it (a view, a key, a default or a
+column of another table, compared catalog row by catalog row), and that the
+role holds nothing more. Any of these, a lock it can't get within 15 seconds,
+or any error, rolls everything back, and nothing is deleted. The audit row is
+written in the same transaction (§28).
+
+**Right after Remove, in a checkout.** The Remove dialog's second button,
+"Remove code and delete this checkout's data", is destructive and asks for the
+name typed, which the server checks before removing anything. Once the code is
+removed it runs Delete data with the same checks, against the registry the
+generator just wrote. On a database only this machine reaches (a Unix socket,
+loopback or `host.docker.internal`, the test "Activate in this checkout" uses),
+the removal counts as the release step's mark; on a shared database it
+doesn't, and a release step has to run first. A production build of the
+checkout still serves the extension until it is rebuilt, so it is refused
+there. A refusal keeps the data, and the removal stands.
 
 ### Two locks: the register lease and the checkout lock
 
@@ -2927,9 +3026,10 @@ one; adding a second should be a deliberate code change with a floor.
 
 Every entry point in the admin pages is a server action that calls
 `requireAdmin()` itself, before it reads anything else (§9): install, the
-review, Register, Discard, Activate in this checkout, and Remove and what it
-shows first (`src/lib/repository/actions.ts`,
-`src/lib/repository/pending-actions.ts`, `src/lib/repository/remove-actions.ts`). The
+review, Register, Discard, Activate in this checkout, Remove and Delete data,
+and what each shows first (`src/lib/repository/actions.ts`,
+`src/lib/repository/pending-actions.ts`, `src/lib/repository/remove-actions.ts`,
+`src/lib/repository/delete-data-actions.ts`). The
 pages' own gates guard the render only, and the actions are reachable without
 ever loading them. Both outcomes are audited (§28): `app.install` records the
 version, commit, verified hash, files hash, where it went, the check's verdict
