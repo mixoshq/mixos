@@ -255,6 +255,20 @@ just pulled.
   `<kind>.remove`, and `npm run remove -- --recover` puts back one that stopped
   midway. The registry generator now also deletes its copies in `public/` of
   an extension that is gone.
+- **Delete an extension's data.** Admin > Apps and Admin > Connectors list
+  under **Not in this build** what the database keeps for an app or a
+  connector the build no longer has, each with **Delete data…**: destructive,
+  with its name typed. Keeping is the default. For an app it drops the schema
+  and database role and deletes its rows, grants and settings; for a connector,
+  its credentials and every user's connection. It is refused while the build
+  serving the instance has it, until a release step has run without it, and
+  while another build that used the database in the last 24 hours has it. The
+  release step now marks a connector its build lacks, as it does an app, and
+  each build records which apps and connectors it carries at its release step,
+  when its server starts and on the cron tick. The Remove dialog adds **Remove
+  code and delete this checkout's data**, under the same checks. The audit log
+  records `<kind>.data.delete`, `connector.missing` and `connector.returned`.
+  Migration 0012; run `npm run db:local` to apply it.
 
 ## 2026-10-07
 
