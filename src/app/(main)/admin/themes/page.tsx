@@ -12,6 +12,7 @@ import { installEnabled } from "@/lib/repository/policy";
 import { themeRegistry } from "@/generated/theme-registry";
 import { getActiveTheme, setActiveTheme } from "@/lib/themes/active";
 import ThemeRegistryList from "@/components/admin/theme-registry-list";
+import RegistryNotices from "@/components/admin/registry-notices";
 
 export const metadata = { title: "Themes" };
 
@@ -80,6 +81,7 @@ export default async function ThemesAdminPage() {
           </a>
         </div>
       </div>
+      <RegistryNotices kind="theme" />
 
       <ThemeRegistryList
         themes={themeRegistry}

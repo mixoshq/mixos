@@ -243,6 +243,48 @@ just pulled.
   installed from the Registry, before or after this change, is switched off
   once at the first release step that carries it, and an app's API keys are
   revoked.
+- **The build checks each installed extension's MixOS floor.** When an
+  extension's `.registry.json` says it needs a newer MixOS than the version
+  being built, `package.json`'s, the registry generator stops the build, naming
+  the extension, its floor and the version: upgrade MixOS, or install an older
+  release of the extension. A local extension isn't checked, and a floor that
+  isn't a version is a warning, as at install. The install dialog and the
+  review before Register now say whether this checkout meets a release's floor:
+  "Requires MixOS 0.2.0 or newer. This checkout runs 0.1.0, which doesn't meet
+  it." **Breaking:** a checkout or a deploy that carries such an extension no
+  longer builds. To try one before its MixOS is released, bump `package.json`
+  locally, and don't ship the extension until that release is merged.
+- **Withdrawn releases reach the instances running them.** Once a day the tick
+  asks mixos.org about the extensions installed from it. Admin > Apps,
+  Connectors and Themes then show a release its publisher withdrew, with the
+  reason and, for an app, a **Deactivate** button; a newer release; a listing
+  no longer published; and when mixos.org last answered. It sends a random
+  instance ID and each extension's kind, slug and version, nothing else, and
+  acts on nothing. `MIXOS_UPDATE_CHECK=false` turns it off. See
+  `docs/hosting/README.md#what-mixos-sends-to-mixosorg`.
+- **Smoke-test an app as you register it, and in every pull request that
+  changes one.** `npm run register -- app/<slug> --smoke` registers the app,
+  then runs its migrations, activates it, grants it to the user you sign in as
+  (`SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`) and runs
+  `scripts/smoke-test-app.ts` against your dev server. It reports and never
+  rolls back. It refuses a database that isn't on your machine unless you pass
+  `--database-is-disposable`, and an app that replaces a different extension
+  unless you pass `--confirm-replaces <slug>`. A new workflow,
+  `.github/workflows/extensions.yml`, fails a pull request that changes
+  `apps/`, `connectors/` or `themes/` when an installed folder no longer matches
+  its `.registry.json`, or when a changed app fails the smoke test on a fresh
+  instance. It has read-only access and no secrets. See
+  `docs/hosting/README.md`.
+- **The admin pages say when a newer MixOS is out.** Once a day the tick reads
+  mixos.org's list of MixOS releases, an anonymous `GET` that sends nothing
+  about the instance and that mixos.org doesn't record. When a newer release
+  is out, the top of every admin page says so: "MixOS 0.5.0 is available (this
+  instance runs 0.4.2). A minor release: it may need changes." Its notes are
+  collapsed, with links shown as text, and the notice links to the release's
+  page on mixos.org and to the upgrade guide. Nothing is applied for you.
+  `MIXOS_RELEASE_CHANNEL=prerelease` adds prereleases, and
+  `MIXOS_UPDATE_CHECK=false` turns this check off too. See
+  `docs/hosting/README.md#new-releases-of-mixos`.
 - **Remove an extension's code.** Admin > Apps, Connectors and Themes have
   **Remove** on each tile, and `npm run remove -- <kind>/<slug>` does the same
   in a checkout. It says first what goes and what stays, then moves the folder

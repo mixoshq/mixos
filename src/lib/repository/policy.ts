@@ -51,8 +51,15 @@ export interface InstallFlag {
   problem: string | null;
 }
 
-/** Interpret one flag's raw value. Pure, for testing and for release.ts. */
-export function parseInstallFlag(name: string, raw: string | undefined): InstallFlag {
+/**
+ * Interpret one flag's raw value. Pure, for testing and for release.ts.
+ * `off` says what reading it as false turns off, for the problem's message.
+ */
+export function parseInstallFlag(
+  name: string,
+  raw: string | undefined,
+  off = "installing is off",
+): InstallFlag {
   const value = (raw ?? "").trim().toLowerCase();
   if (value === "" || ON.has(value)) return { enabled: true, problem: null };
   if (OFF.has(value)) return { enabled: false, problem: null };
@@ -60,7 +67,7 @@ export function parseInstallFlag(name: string, raw: string | undefined): Install
     enabled: false,
     problem:
       `${name}=${JSON.stringify(raw)} is not true or false, so it is treated as false ` +
-      `and installing is off. Use true or false.`,
+      `and ${off}. Use true or false.`,
   };
 }
 
@@ -82,11 +89,99 @@ export function installEnabled(kind: ExtensionKind): boolean {
   return enabled;
 }
 
-/** Every flag whose value was not recognised, for a configuration report. */
-export function installFlagProblems(): string[] {
-  return (Object.keys(INSTALL_FLAG) as ExtensionKind[])
-    .map((kind) => parseInstallFlag(INSTALL_FLAG[kind], process.env[INSTALL_FLAG[kind]]).problem)
-    .filter((p): p is string => p !== null);
+/**
+ * Whether this instance asks the catalogue about the extensions it installed
+ * from it, and about new releases of MixOS: MIXOS_UPDATE_CHECK
+ * (./update-check.ts and src/lib/platform/release-check.ts).
+ *
+ * ON BY DEFAULT, because the check is how a release its publisher withdrew,
+ * for a security problem say, reaches the instances running it, and a safety
+ * notice behind an opt-in reaches almost nobody. Off, neither check sends
+ * anything, and no instance ID is created.
+ *
+ * The install flags' parser, so a typo fails the same way: anything but true
+ * or false is off, and the release step reports it. Read per tick, so changing
+ * it needs a restart and not a rebuild.
+ */
+export const UPDATE_CHECK_FLAG = "MIXOS_UPDATE_CHECK";
+
+function updateCheckFlag(): InstallFlag {
+  return parseInstallFlag(UPDATE_CHECK_FLAG, process.env[UPDATE_CHECK_FLAG], "update checks are off");
+}
+
+export function updateCheckEnabled(): boolean {
+  const { enabled, problem } = updateCheckFlag();
+  if (problem && !warned.has(UPDATE_CHECK_FLAG)) {
+    warned.add(UPDATE_CHECK_FLAG);
+    console.warn(`[install-policy] ${problem}`);
+  }
+  return enabled;
+}
+
+/**
+ * Which releases of MixOS the admin pages say are out: MIXOS_RELEASE_CHANNEL
+ * (src/lib/platform/release-check.ts).
+ *
+ *   - `stable`, the default: releases only. One marked as a prerelease, or
+ *     whose tag has a suffix such as `-rc.1`, is left out.
+ *   - `prerelease`: prereleases as well.
+ *
+ * Read like the switches above: trimmed, in any case, with unset or empty the
+ * default. Anything else is `stable`, with a warning, and the release step
+ * reports it, so a typo shows fewer releases, never more. Read per tick and
+ * per page, so changing it needs a restart and not a rebuild.
+ */
+export const RELEASE_CHANNEL_SETTING = "MIXOS_RELEASE_CHANNEL";
+
+export const RELEASE_CHANNELS = ["stable", "prerelease"] as const;
+export type ReleaseChannel = (typeof RELEASE_CHANNELS)[number];
+
+export interface ReleaseChannelSetting {
+  channel: ReleaseChannel;
+  /** Set when the value was not recognised, and was read as `stable`. */
+  problem: string | null;
+}
+
+/** Interpret MIXOS_RELEASE_CHANNEL's raw value. Pure, for testing and for release.ts. */
+export function parseReleaseChannel(raw: string | undefined): ReleaseChannelSetting {
+  const value = (raw ?? "").trim().toLowerCase();
+  if (value === "") return { channel: "stable", problem: null };
+  if (value === "stable" || value === "prerelease") return { channel: value, problem: null };
+  return {
+    channel: "stable",
+    problem:
+      `${RELEASE_CHANNEL_SETTING}=${JSON.stringify(raw)} is not stable or prerelease, so it is ` +
+      `treated as stable and prereleases aren't shown. Use stable or prerelease.`,
+  };
+}
+
+/** This instance's release channel. */
+export function releaseChannel(): ReleaseChannel {
+  const { channel, problem } = parseReleaseChannel(process.env[RELEASE_CHANNEL_SETTING]);
+  if (problem && !warned.has(RELEASE_CHANNEL_SETTING)) {
+    warned.add(RELEASE_CHANNEL_SETTING);
+    console.warn(`[release-check] ${problem}`);
+  }
+  return channel;
+}
+
+/** What is wrong with MIXOS_RELEASE_CHANNEL, for the release step's report, or null. */
+export function releaseChannelProblem(): string | null {
+  return parseReleaseChannel(process.env[RELEASE_CHANNEL_SETTING]).problem;
+}
+
+/**
+ * Every switch whose value was not recognised, the install flags and
+ * MIXOS_UPDATE_CHECK, for a configuration report. MIXOS_RELEASE_CHANNEL isn't
+ * a switch, and has `releaseChannelProblem()`.
+ */
+export function flagProblems(): string[] {
+  return [
+    ...(Object.keys(INSTALL_FLAG) as ExtensionKind[]).map(
+      (kind) => parseInstallFlag(INSTALL_FLAG[kind], process.env[INSTALL_FLAG[kind]]).problem,
+    ),
+    updateCheckFlag().problem,
+  ].filter((p): p is string => p !== null);
 }
 
 /** What an admin, or a log, is told when a kind is off. */
