@@ -11,14 +11,21 @@
  * remembering to update this file — which is the failure mode that produced the
  * problem this split exists to fix.
  *
- *   npx tsx scripts/generate-keys.ts            # all eight, paste-ready
- *   npx tsx scripts/generate-keys.ts --missing  # only the ones not already set
- *   npx tsx scripts/generate-keys.ts --check    # exit 1 if any is missing/invalid
+ * The optional keys (`OPTIONAL_PLATFORM_KEYS`) each turn a feature on, so they
+ * are printed only when asked for, and `--check` validates one only when it is
+ * set.
+ *
+ *   npx tsx scripts/generate-keys.ts               # all eight, paste-ready
+ *   npx tsx scripts/generate-keys.ts --missing     # only the ones not already set
+ *   npx tsx scripts/generate-keys.ts --check       # exit 1 if any is missing/invalid
+ *   npx tsx scripts/generate-keys.ts --github-app  # GITHUB_APP_ENCRYPTION_KEY only
  */
 import { randomBytes } from "node:crypto";
 import {
   DEPLOYMENT_SECRETS,
+  OPTIONAL_PLATFORM_KEYS,
   PLATFORM_KEYS,
+  malformedOptionalKeys,
   missingDeploymentSecrets,
   missingPlatformKeys,
   platformKey,
@@ -33,14 +40,29 @@ const secretNames = Object.keys(DEPLOYMENT_SECRETS) as DeploymentSecretName[];
 const keyNames = Object.keys(PLATFORM_KEYS) as PlatformKeyName[];
 const total = secretNames.length + keyNames.length;
 
+function print(specs: PlatformKeySpec[]): void {
+  for (const spec of specs) {
+    console.log(`# ${spec.purpose}`);
+    console.log(`# Rotating: ${spec.rotationEffect}`);
+    console.log(`${spec.env}=${randomBytes(KEY_BYTES).toString("hex")}\n`);
+  }
+}
+
 function main() {
   const mode = process.argv[2];
 
   if (mode === "--check") {
     loadEnv();
-    const missing = [...missingDeploymentSecrets(), ...missingPlatformKeys()];
+    const missing = [...missingDeploymentSecrets(), ...missingPlatformKeys(), ...malformedOptionalKeys()];
     if (missing.length === 0) {
       console.log(`All ${total} keys are set and well-formed.`);
+      for (const spec of Object.values(OPTIONAL_PLATFORM_KEYS)) {
+        console.log(
+          process.env[spec.env]
+            ? `${spec.env} is set and well-formed.`
+            : `${spec.env} is not set, so what it turns on is off.`,
+        );
+      }
       return;
     }
     console.error(`${missing.length} key(s) missing or malformed:\n`);
@@ -49,6 +71,15 @@ function main() {
       "\nGenerate the missing ones with:\n  npx tsx scripts/generate-keys.ts --missing",
     );
     process.exit(1);
+  }
+
+  if (mode === "--github-app") {
+    console.log(
+      "# Turns on the GitHub App (Admin > GitHub). Set it where the app runs,\n" +
+        "# and keep a copy: the App's private key is stored encrypted under it.\n",
+    );
+    print([OPTIONAL_PLATFORM_KEYS.githubAppEncryption]);
+    return;
   }
 
   const onlyMissing = mode === "--missing";
@@ -82,11 +113,11 @@ function main() {
     "# Keys for a MixOS deployment. Each protects exactly one thing, so rotating\n" +
       "# one has a bounded blast radius. See src/lib/env/keys.ts.\n",
   );
-  for (const spec of wanted) {
-    console.log(`# ${spec.purpose}`);
-    console.log(`# Rotating: ${spec.rotationEffect}`);
-    console.log(`${spec.env}=${randomBytes(KEY_BYTES).toString("hex")}\n`);
-  }
+  print(wanted);
+  console.log(
+    "# Not printed: GITHUB_APP_ENCRYPTION_KEY, which turns on the GitHub App.\n" +
+      "# npm run keys:generate -- --github-app prints one.",
+  );
 }
 
 main();

@@ -311,6 +311,18 @@ just pulled.
   code and delete this checkout's data**, under the same checks. The audit log
   records `<kind>.data.delete`, `connector.missing` and `connector.returned`.
   Migration 0012; run `npm run db:local` to apply it.
+- **Link your repository on Admin > GitHub.** An admin creates a private GitHub
+  App from the page, installs it on the one repository the instance is built
+  from, and finishes linking. The instance refuses an installation on every
+  repository, on more than one, or on upstream MixOS, and checks again before
+  every operation, turning the link off if the installation was widened. The
+  App can't change workflows and gets no webhook events. Its private key is
+  stored encrypted under `GITHUB_APP_ENCRYPTION_KEY`; without that key the
+  page stays off. `npm run keys:generate -- --github-app` prints one, and
+  `npm run keys:rotate-github-app` re-encrypts the stored key when you rotate
+  it. Unlink uninstalls the App from GitHub before forgetting it. Linking,
+  unlinking, replacing the key and the link turning off are audited. See
+  `docs/hosting/README.md#linking-your-github-repository`.
 
 ## 2026-10-07
 
