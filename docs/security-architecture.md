@@ -2123,9 +2123,14 @@ what a stopped one left as `app.register.recover` or
 `connector.register.recover`; removing an extension's code as `app.remove`,
 `connector.remove` or `theme.remove`, or `<kind>.remove.rejected` when it is
 refused; recovery after a removal that stopped midway as
-`<kind>.remove.recover`; and deleting what the database kept for an app or a
+`<kind>.remove.recover`; deleting what the database kept for an app or a
 connector as `app.data.delete` or `connector.data.delete`, with how much went,
-or `<kind>.data.delete.rejected` with the reason when it is refused (§31).
+or `<kind>.data.delete.rejected` with the reason when it is refused; and an
+update of an app or a connector to another release, which waits in pending, as
+`app.update` or `connector.update`, with the release it replaces (`from`), the
+one it goes to (`to`), which way (`direction`: `newer`, `older`, `same` or
+`unknown`) and whether local changes are to be discarded
+(`localChangesDiscarded`), or `<kind>.update.rejected` with the reason (§31).
 The GitHub link's rows (§32) are `github.app.create`, `github.link`,
 `github.link.disable`, `github.link.enable`, `github.link.refresh`,
 `github.app.key.replace`, `github.app.key.reencrypt`, `github.unlink`,
@@ -2169,9 +2174,10 @@ the step before anything it would have recorded is committed.
 
 **Rows the Register, Discard and Remove buttons write.** The same actions from
 Admin > Apps, Admin > Connectors and Admin > Themes name the signed-in admin,
-with `via: "button"` in `details`. A Register or a Remove the page refuses on a
-built deployment, before any lock, is `<kind>.register.rejected` or
-`<kind>.remove.rejected` with `reason: "unsupported-environment"`.
+with `via: "button"` in `details`, as the update dialog's rows do. A Register,
+a Remove or an update the page refuses on a built deployment, before any lock,
+is `<kind>.register.rejected`, `<kind>.remove.rejected` or
+`<kind>.update.rejected` with `reason: "unsupported-environment"`.
 
 **Rows Delete data writes.** `<kind>.data.delete` names the admin and records
 what went, by count, never a value. It is written in the deletion's own
@@ -2421,11 +2427,12 @@ a review of what will run (see **The review before Register**), and
 pending. Either way, in the checkout:
 
 1. The pending folder, its install record and its sidecar exist, and nothing
-   is where it would go. The **files hash**, recomputed from the folder with
-   the record left out, matches the record's. It is the content hash's
-   serialisation over the files install wrote, with every mode read as 644:
-   install writes every file 0644 and leaves out any `.gitignore` or
-   `.gitattributes`, so the content hash, which records the execute bit and
+   is where it would go. A pending update (see **Updating an extension**) is
+   refused here, before anything moves. The **files hash**, recomputed from
+   the folder with the record left out, matches the record's. It is the
+   content hash's serialisation over the files install wrote, with every mode
+   read as 644: install writes every file 0644 and leaves out any `.gitignore`
+   or `.gitattributes`, so the content hash, which records the execute bit and
    covers the package as published, can't be recomputed from disk. A folder
    with a file changed, added or removed since install, or a link in it, is
    refused, so what runs is what was verified and checked. A pending install
@@ -2923,6 +2930,67 @@ doesn't, and a release step has to run first. A production build of the
 checkout still serves the extension until it is rebuilt, so it is refused
 there. A refusal keeps the data, and the removal stands.
 
+### Updating an extension
+
+An update is another release of an app or a connector installed from this
+instance's catalogue, for the folder it is in. Install makes it, in an update
+mode ([`src/lib/repository/install.ts`](../src/lib/repository/install.ts),
+[`src/lib/repository/update.ts`](../src/lib/repository/update.ts)), with every
+step of **The order of operations is the control**, and leaves the release in
+`.mixos/pending/`. The folder in place isn't touched. Under both locks, before
+anything is downloaded:
+
+1. The folder is there, with an install record of its own whose `source` is the
+   catalogue this instance installs from. A local extension, one installed from
+   another catalogue, and a theme are refused.
+2. Nothing of the slug waits in pending, and no removal of it stopped midway.
+3. The folder's files hash is recomputed, with nothing downloaded, and compared
+   with its record's. A folder that no longer matches needs the admin to
+   discard its changes.
+
+Then, once the catalogue has named the release:
+
+4. Which way it goes: from the versions when both are dotted, in semver's
+   order, and otherwise from the dates the catalogue published the two
+   releases. A release published from mixos.org's website is named by its short
+   commit, and a publisher who withdraws newer releases can make the current
+   release an older one. A release older than the installed one, or one whose
+   order neither tells, needs the admin to choose "Install an older release".
+   The release in place, with no local changes, is nothing to update.
+5. A withdrawn release needs accepting, as for an install, and the release's
+   `requiresMixOS` has to hold.
+6. What the admin reviewed is pinned: the installed release, the folder's files
+   hash, and the target's commit and content hash. A change to any of them
+   since is refused.
+7. The download, the check and the rest are an install's. The sidecar records
+   what the update replaces: the installed version, commit and files hash, the
+   folder's own files hash as found, whether its changes are to be discarded,
+   and which way the update goes.
+
+It is audited as `<kind>.update`, with `from`, `to`, `direction` and
+`localChangesDiscarded`, or `<kind>.update.rejected` with the reason (§28).
+
+**What the admin is shown first.** The update dialog's actions
+(`src/lib/repository/update-actions.ts`) require an admin and refuse on a built
+deployment. They take no lock and write nothing. They list the catalogue's
+releases, each with its date and which way it goes, and download the release
+picked, pinned and checked against its content hash, in memory, to compare it
+with the folder: the publisher's claims, what the manifest declares, new
+migrations (forward-only, so back up the database first), the migrations an
+older release lacks (a database that ran them stays at the newer schema),
+whether it was withdrawn, and its `requiresMixOS`. When the folder has local
+changes, the installed release is downloaded the same way, only to name the
+files that changed. The install record, file modes, a manifest change that is
+only `lastUpdated`, and the files install leaves out aren't counted. If GitHub
+no longer serves the installed release, the dialog says the folder differs
+without naming the files. The link to GitHub's compare view is built from the
+record's values and the catalogue's validated answer.
+
+**Register doesn't put an update in place yet.** It refuses a pending update,
+before anything moves, and says to discard it. Discard deletes a pending update
+as it deletes any pending install. Nothing on the admin pages opens the update
+dialog yet.
+
 ### Two locks: the register lease and the checkout lock
 
 Two installs or registrations at once would run two generators over the same
@@ -3043,9 +3111,10 @@ one; adding a second should be a deliberate code change with a floor.
 Every entry point in the admin pages is a server action that calls
 `requireAdmin()` itself, before it reads anything else (§9): install, the
 review, Register, Discard, Activate in this checkout, Remove and Delete data,
-and what each shows first (`src/lib/repository/actions.ts`,
-`src/lib/repository/pending-actions.ts`, `src/lib/repository/remove-actions.ts`,
-`src/lib/repository/delete-data-actions.ts`). The
+and what each shows first, and the update dialog's overview, comparison and
+update (`src/lib/repository/actions.ts`, `src/lib/repository/pending-actions.ts`,
+`src/lib/repository/remove-actions.ts`, `src/lib/repository/delete-data-actions.ts`,
+`src/lib/repository/update-actions.ts`). The
 pages' own gates guard the render only, and the actions are reachable without
 ever loading them. Both outcomes are audited (§28): `app.install` records the
 version, commit, verified hash, files hash, where it went, the check's verdict
@@ -3099,9 +3168,10 @@ below), so on those the flags decide only whether the catalogue can be browsed.
 ### What it deliberately will not do
 
 - **Overwrite.** An existing directory, or an install of the same slug already
-  waiting in pending, is refused rather than replaced. Upgrading in place is a
-  different operation with a different question attached — what happens to the
-  data and grants the installed one already has.
+  waiting in pending, is refused rather than replaced. An update (see
+  **Updating an extension**) is the one way to another release of an extension
+  in place, and it doesn't write there either: the release waits in pending, and
+  only Register will replace the folder.
 - **Run from a built artifact.** `checkInstallable()` refuses up front when
   `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
   `output: "standalone"` tree, which its server `chdir`s to before listening
