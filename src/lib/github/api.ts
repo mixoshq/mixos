@@ -17,6 +17,9 @@
  *     response; the link's own check says the repository was renamed instead.
  *   - A slow or large answer: 10 seconds for the whole exchange, body included,
  *     and 4 MB, read with a running count rather than `res.json()`.
+ *   - Any method but GET, POST and DELETE. GitHub merges a pull request with a
+ *     PUT and moves a branch with a PATCH; this client can send neither, and
+ *     what it POSTs to a repository is checked in ./repository.ts.
  *
  * ── WHAT IT NEVER DOES ──────────────────────────────────────────────────────
  *
@@ -44,6 +47,9 @@ export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 /** GitHub's own error message, cleaned and capped before it reaches an admin. */
 const MAX_GITHUB_MESSAGE = 200;
+
+/** The only methods this client sends. */
+const METHODS: ReadonlySet<string> = new Set(["GET", "POST", "DELETE"]);
 
 export type GitHubFailure =
   /** No answer: DNS, connection refused, timeout. */
@@ -138,6 +144,11 @@ export function segment(value: string | number): string {
  */
 export async function githubRequest(path: string, request: GitHubRequest): Promise<GitHubAnswer> {
   const method = request.method ?? "GET";
+  // Checked at run time too: GitHub merges a pull request with a PUT and moves
+  // a branch with a PATCH, and this client sends neither, whatever the types.
+  if (!METHODS.has(method)) {
+    throw new GitHubError("Refusing to send a request with a method this client doesn't use.", "path");
+  }
   const url = assertApiPath(path);
   if (request.params) url.search = request.params.toString();
 
