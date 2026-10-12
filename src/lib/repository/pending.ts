@@ -36,6 +36,14 @@
  * package (./left-out.ts). While a registration is under way it also records
  * that registration's holder, so one that died midway can be told from one
  * still running.
+ *
+ * ── A PENDING UPDATE ────────────────────────────────────────────────────────
+ *
+ * An update of an extension already in `apps/` or `connectors/` waits here too
+ * (./update.ts). Its sidecar also records what it replaces: the installed
+ * release, from that folder's install record, and the folder as the update
+ * found it. Register refuses a pending update for now, with
+ * pendingUpdateProblem(); Discard deletes one as it deletes any.
  */
 
 import { randomUUID } from "node:crypto";
@@ -44,13 +52,14 @@ import path from "node:path";
 import { z } from "zod";
 import {
   INSTALL_RECORD_FILE,
+  InstallRecordSchema,
   readInstallRecord,
   recordMismatch,
   type InstallRecord,
   type RecordRead,
 } from "./install-record";
 import { LeftOutSchema } from "./left-out";
-import { SlugSchema, type ExtensionKind } from "./types";
+import { CONTENT_HASH_PATTERN, SlugSchema, type ExtensionKind } from "./types";
 
 /** The kinds that wait in pending. A theme registers when it is installed. */
 export type PendingKind = "app" | "connector";
@@ -165,6 +174,36 @@ export const RegisteringSchema = z.strictObject({
 });
 export type Registering = z.infer<typeof RegisteringSchema>;
 
+/**
+ * Which way an update goes from the installed release (updateDirection() in
+ * ./update.ts): `unknown` when neither the versions nor the dates say.
+ */
+export const UPDATE_DIRECTIONS = ["newer", "older", "same", "unknown"] as const;
+export type UpdateDirection = (typeof UPDATE_DIRECTIONS)[number];
+
+/**
+ * What a pending update replaces: the installed release, from the install
+ * record in its folder, and that folder as the update found it. What Register
+ * will check the folder against before it puts the update in place.
+ */
+export const ReplacesSchema = z.strictObject({
+  version: InstallRecordSchema.shape.version,
+  gitTag: InstallRecordSchema.shape.gitTag,
+  commitSha: InstallRecordSchema.shape.commitSha,
+  /** The record's files hash: the folder as install wrote it. */
+  filesHash: InstallRecordSchema.shape.filesHash,
+  /**
+   * The folder's own files hash when the update was made: the record's when it
+   * matched, another when it had been edited, and null when it held something
+   * no files hash covers, such as a link.
+   */
+  folderHash: z.string().regex(CONTENT_HASH_PATTERN).nullable(),
+  /** Whether the admin chose to discard the folder's local changes. True whenever folderHash isn't filesHash. */
+  localChangesDiscarded: z.boolean(),
+  direction: z.enum(UPDATE_DIRECTIONS),
+});
+export type Replaces = z.infer<typeof ReplacesSchema>;
+
 export const PendingSidecarSchema = z.strictObject({
   kind: z.enum(["app", "connector"]),
   slug: SlugSchema,
@@ -180,6 +219,8 @@ export const PendingSidecarSchema = z.strictObject({
   }),
   /** What install left out of the package, by name. Absent when it left out nothing. */
   leftOut: LeftOutSchema.optional(),
+  /** Present only for an update: what it replaces in `apps/` or `connectors/`. */
+  replaces: ReplacesSchema.optional(),
   /** Present only while a registration is under way, or after one died midway. */
   register: RegisteringSchema.optional(),
 });
@@ -301,6 +342,7 @@ export function listPendingInstalls(root: string): PendingInstall[] {
       const read = readSidecar(where.sidecar);
       const record: RecordRead = hasFolder ? readInstallRecord(where.folder) : { state: "missing" };
       const own = record.state === "ok" && recordMismatch(record.record, kind, slug) === null;
+      const replaces = read.state === "ok" ? read.sidecar.replaces : undefined;
       out.push({
         kind,
         slug,
@@ -308,7 +350,12 @@ export function listPendingInstalls(root: string): PendingInstall[] {
         hasFolder,
         sidecar: read.state === "ok" ? read.sidecar : null,
         record: own && record.state === "ok" ? record.record : null,
-        problem: pendingProblem(where, hasFolder, read) ?? withRemedy(recordProblem(where, kind, slug, record)),
+        problem:
+          pendingProblem(where, hasFolder, read) ??
+          withRemedy(recordProblem(where, kind, slug, record)) ??
+          (replaces
+            ? pendingUpdateProblem(kind, slug, replaces, record.state === "ok" ? record.record.version : null)
+            : null),
       });
     }
   }
@@ -358,6 +405,30 @@ export function recordProblem(
 /** A problem with what to do about it, or null. */
 function withRemedy(problem: string | null): string | null {
   return problem ? `${problem} Discard it and install it again.` : null;
+}
+
+/**
+ * What the pending list, the review and Register say of a pending update:
+ * Register can't put one in place yet, and what to do with it instead. `to` is
+ * the version waiting, when its record can be read. `subject` names it, "It"
+ * where the reader is already looking at it.
+ *
+ * The one place a pending update is turned away. The swap that puts one in
+ * place, with a backup of the folder it replaces, is the rest of the update
+ * (docs/plans/20261008_2300-extension-lifecycle.md §1.7), and replaces this.
+ */
+export function pendingUpdateProblem(
+  kind: PendingKind,
+  slug: string,
+  replaces: Replaces,
+  to: string | null,
+  subject = "It",
+): string {
+  return (
+    `${subject} is an update of ${kindDir(kind)}/${slug} from ${replaces.version}${to ? ` to ${to}` : ""}, ` +
+    "and this version of MixOS can't register updates yet. Discard it with " +
+    `\`npm run register -- ${kind}/${slug} --discard\`.`
+  );
 }
 
 /** A directory at `p` itself, not a link to one. */

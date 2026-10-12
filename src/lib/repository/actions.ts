@@ -27,8 +27,6 @@ import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
 import { recordAdminAction } from "@/lib/apps/admin-audit";
 import { safeErrorMessage } from "@/lib/safe-error";
-import { CheckoutLockHeldError } from "@/lib/platform/checkout-lock";
-import { LockUnavailableError } from "@/lib/platform/lock";
 import { floorVerdict } from "@/lib/platform/version";
 import type { FloorVerdict } from "@/lib/platform/version-floor";
 import {
@@ -37,11 +35,9 @@ import {
   repositoryBaseUrl,
   searchRepository,
 } from "./client";
-import { ContentHashMismatch } from "./content-hash";
-import { SourceFetchError } from "./fetch-source";
-import { ArchiveError } from "./tar";
 import {
   InstallError,
+  describeInstallFailure,
   installExtension,
   resolveInstall,
   type InstallResult,
@@ -273,7 +269,7 @@ export async function installExtensionAction(input: {
 
     return { ok: true, result };
   } catch (err) {
-    const failure = describeFailure(err);
+    const failure = describeInstallFailure(err);
 
     await recordAdminAction(actor, {
       action: `${input.kind}.install.rejected`,
@@ -291,55 +287,4 @@ export async function installExtensionAction(input: {
 
     return { ok: false, ...failure };
   }
-}
-
-/** Map a thrown error onto something the UI can render honestly. */
-function describeFailure(err: unknown): { code: string; message: string; detail?: string } {
-  // Not a failure of the extension or the repository — someone else is already
-  // installing, registering or removing. Its own code so the UI can offer "try again" rather than the
-  // tone the rest of this list deserves. Nothing has been downloaded or written.
-  if (err instanceof LockUnavailableError) {
-    return {
-      code: "locked",
-      message: "Another administrator is installing, registering or removing an extension. Try again in a moment.",
-    };
-  }
-  // The same, from the checkout lock: another install or registration in this
-  // checkout, or a registry generator run, which `npm run dev` and
-  // `npm run registry` start. Its message names the holder.
-  if (err instanceof CheckoutLockHeldError) {
-    return { code: "locked", message: err.message };
-  }
-  if (err instanceof ContentHashMismatch) {
-    return {
-      code: "checksum",
-      // The heading in the UI already says it failed, so this says what a
-      // failure MEANS. Two ways of saying "checksum verification failed" is a
-      // sentence the reader skips, and this is the one message on this screen
-      // that is worth reading.
-      message:
-        "The package downloaded from GitHub is not the package the repository " +
-        "published a checksum for, so nothing was written to this instance. " +
-        "Either the release was changed after it was published, or the download " +
-        "was altered in transit. Do not install this until the publisher has " +
-        "cut a new release.",
-      detail: `expected ${err.expected}\nreceived ${err.actual}`,
-    };
-  }
-  if (err instanceof InstallError) {
-    return { code: err.code, message: err.message, detail: err.detail };
-  }
-  if (err instanceof SourceFetchError) {
-    return { code: "download", message: err.message };
-  }
-  if (err instanceof ArchiveError) {
-    return { code: "invalid-package", message: err.message };
-  }
-  if (err instanceof RepositoryError) {
-    return { code: err.failure, message: err.message };
-  }
-  return {
-    code: "unknown",
-    message: safeErrorMessage(err, "The install failed."),
-  };
 }
