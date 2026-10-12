@@ -64,9 +64,11 @@ import { sql } from "@/lib/db/client";
  * Named so that two unrelated operations do not serialise against each other.
  * `repository.update-check` keeps two instances sharing a database, or two
  * overlapping ticks, from checking with the catalogue at once
- * (src/lib/repository/update-check.ts).
+ * (src/lib/repository/update-check.ts). `github.app` keeps two admins, or an
+ * admin and `npm run keys:rotate-github-app`, from changing the GitHub link at
+ * once (src/lib/github/link.ts).
  */
-export type LockName = "repository.register" | "repository.update-check";
+export type LockName = "repository.register" | "repository.update-check" | "github.app";
 
 /**
  * Many renewals long, so a database that drops a few cannot cost a live holder
