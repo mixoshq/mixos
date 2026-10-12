@@ -101,6 +101,8 @@ import {
   type RegistryInstall,
 } from "../src/lib/repository/install-record";
 import { sourceHost } from "../src/lib/repository/provenance";
+import { KIND_SEGMENT } from "../src/lib/repository/types";
+import { checkFloor } from "../src/lib/platform/version-floor";
 import {
   CheckoutLockHeldError,
   CheckoutLockLostError,
@@ -2136,6 +2138,54 @@ export const registryInstalls: RegistryInstall[] = ${JSON.stringify(installs, nu
   );
 }
 
+/**
+ * Each install's `requiresMixOS`, from its record, against the version this
+ * build stamps (D15 in docs/plans/20261008_2300-extension-lifecycle.md).
+ * `error` names every extension whose floor is above it, and main() fails the
+ * build with it: leaving the extension out instead would drop it from that
+ * deploy without a word.
+ *
+ * Install and Register compare a floor the same way (checkFloor() in
+ * src/lib/platform/version-floor.ts): `X.Y.Z` compared numerically, `X` and
+ * `X.Y` read as `X.0.0` and `X.Y.0`, a leading `v`, `>=`, `~` or `^` ignored,
+ * and a pre-release or build suffix dropped. A floor that doesn't read as a
+ * version isn't enforced there, with a reason logged, so here it is a
+ * warning. A local extension has no record, so scanRegistryInstalls() doesn't
+ * list it, and it is never checked.
+ *
+ * The version is package.json's, so a checkout of unreleased work that bumps
+ * it locally builds an extension whose floor is the coming release.
+ *
+ * Exported for its tests; main() is the caller.
+ */
+function checkInstalledFloors(
+  installs: readonly RegistryInstall[],
+  version: string,
+): { error: string | null; warnings: string[] } {
+  const unmet: string[] = [];
+  const warnings: string[] = [];
+  for (const install of installs) {
+    const file = `${KIND_SEGMENT[install.kind]}/${install.slug}/${INSTALL_RECORD_FILE}`;
+    const check = checkFloor(install.requiresMixOS, version);
+    if (!check.allowed) {
+      unmet.push(`  ${file}: release ${install.version} requires MixOS ${install.requiresMixOS} or newer.`);
+    } else if (check.reason) {
+      warnings.push(`${file}: requiresMixOS "${install.requiresMixOS}" isn't a version, so it isn't checked, here or at install.`);
+    }
+  }
+  if (unmet.length === 0) return { error: null, warnings };
+  const one = unmet.length === 1;
+  return {
+    error:
+      `This build is MixOS ${version}, and ${one ? "an extension" : `${unmet.length} extensions`} installed ` +
+      `from a Registry need${one ? "s" : ""} a newer one:\n` +
+      `${unmet.join("\n")}\n` +
+      `Upgrade MixOS, or install an older release of ${one ? "it" : "each"} that runs on ${version}. ` +
+      `The build stops rather than leave ${one ? "it" : "them"} out of this deploy.`,
+    warnings,
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Build stamp                                                               */
 /* -------------------------------------------------------------------------- */
@@ -2213,8 +2263,10 @@ function packageVersion(): string {
  * the dev server has nothing to recompile. A timestamp — or a git SHA, which
  * moves on every commit — would invalidate that on every `predev`. The commit
  * is read at runtime instead (`mixosCommit` in src/lib/platform/version.ts).
+ *
+ * Returns the version it stamped, which installs' floors are checked against.
  */
-function writeBuildInfo(apps: readonly AppManifest[], report = true): void {
+function writeBuildInfo(apps: readonly AppManifest[], report = true): string {
   const version = packageVersion();
   const schema = expectedSchemaVersion();
   const appMigrations = expectedAppMigrations(apps);
@@ -2244,6 +2296,7 @@ export const EXPECTED_APP_MIGRATIONS: readonly { slug: string; file: string }[] 
         `${appMigrations.length} app migration(s)`,
     );
   }
+  return version;
 }
 
 async function main() {
@@ -2261,7 +2314,7 @@ async function main() {
 
   console.log("Scanning apps...");
   const apps = await scanApps();
-  writeBuildInfo(apps);
+  const version = writeBuildInfo(apps);
   const slugs = apps.map((m) => `"${m.slug}"`).join(", ");
 
   // Build static import maps for pages and widgets
@@ -2515,6 +2568,11 @@ export function getTheme(slug: string): ThemeManifest {
     `Generated registry installs with ${installs.length} extension(s) installed from a Registry` +
       (installs.some((i) => i.modified) ? `, ${installs.filter((i) => i.modified).length} modified locally` : ""),
   );
+
+  // An install that needs a newer MixOS than this build fails it.
+  const floors = checkInstalledFloors(installs, version);
+  for (const warning of floors.warnings) console.warn(`  ${warning}`);
+  if (floors.error) throw new Error(floors.error);
 
   // Last, once everything else is written: a run that stops before here
   // deletes nothing from public/.
@@ -3006,6 +3064,7 @@ if (require.main === module) {
 }
 
 export {
+  checkInstalledFloors,
   checkStaged,
   readRegistered,
   runFullGenerator,

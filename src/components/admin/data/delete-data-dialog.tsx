@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import Notice from "@/components/ui/notice";
 import { deleteDataAction, previewDataDeletionAction } from "@/lib/repository/delete-data-actions";
 import {
   describeData,
@@ -22,7 +23,6 @@ import {
 } from "@/lib/repository/delete-data-outcomes";
 import type { Refusal } from "@/lib/repository/pending-outcomes";
 import { KIND_LABEL } from "@/lib/repository/types";
-import Notice from "../pending/notice";
 import WithCode from "../pending/with-code";
 
 /** An extension whose data this database keeps, as a Not in this build list names it. */

@@ -62,7 +62,7 @@
 import path from "path";
 import { createPgClient, databaseNamed } from "../src/lib/db/pg-options";
 import { missingDeploymentSecrets, missingPlatformKeys } from "../src/lib/env/keys";
-import { installFlagProblems } from "../src/lib/repository/policy";
+import { flagProblems, releaseChannelProblem } from "../src/lib/repository/policy";
 import { seedAdmin } from "./admin-seed";
 import { migrateAppSchemas } from "./app-migrations";
 import { migratePlatform } from "./platform-migrations";
@@ -90,11 +90,19 @@ function reportMissingConfiguration(): void {
   }
 
   // Read as false, so the instance is more locked down than whoever typed the
-  // value may have meant. Worth saying before the deploy goes live.
-  const flags = installFlagProblems();
+  // value may have meant: installs off, or update checks off. Worth saying
+  // before the deploy goes live.
+  const flags = flagProblems();
   if (flags.length > 0) {
-    console.warn("\nInstall flags with values that are not true or false:");
+    console.warn("\nSwitches with values that are not true or false:");
     for (const line of flags) console.warn(`  - ${line}`);
+  }
+
+  // Read as stable, so admins hear about fewer releases than whoever typed it meant.
+  const channel = releaseChannelProblem();
+  if (channel) {
+    console.warn("\nA release channel that is not stable or prerelease:");
+    console.warn(`  - ${channel}`);
   }
 }
 
