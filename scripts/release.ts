@@ -57,7 +57,7 @@
 import path from "path";
 import { createPgClient, databaseNamed } from "../src/lib/db/pg-options";
 import { missingDeploymentSecrets, missingPlatformKeys } from "../src/lib/env/keys";
-import { flagProblems } from "../src/lib/repository/policy";
+import { flagProblems, releaseChannelProblem } from "../src/lib/repository/policy";
 import { seedAdmin } from "./admin-seed";
 import { migrateAppSchemas } from "./app-migrations";
 import { migratePlatform } from "./platform-migrations";
@@ -90,6 +90,13 @@ function reportMissingConfiguration(): void {
   if (flags.length > 0) {
     console.warn("\nSwitches with values that are not true or false:");
     for (const line of flags) console.warn(`  - ${line}`);
+  }
+
+  // Read as stable, so admins hear about fewer releases than whoever typed it meant.
+  const channel = releaseChannelProblem();
+  if (channel) {
+    console.warn("\nA release channel that is not stable or prerelease:");
+    console.warn(`  - ${channel}`);
   }
 }
 
