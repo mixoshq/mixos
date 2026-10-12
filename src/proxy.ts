@@ -4,7 +4,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { isUpdatingAppPage } from "@/lib/apps/app-gate";
-import { buildCsp, cspNonce } from "@/lib/csp";
+import { buildCsp, cspNonce, formActionsFor } from "@/lib/csp";
 import { maintenanceState, type MaintenanceState } from "@/lib/platform/maintenance";
 import { appMaintenanceGate, maintenanceGate } from "@/lib/platform/maintenance-gate";
 
@@ -120,7 +120,7 @@ function hasSessionCookie(request: NextRequest): boolean {
  */
 function withCsp(request: NextRequest): NextResponse {
   const nonce = cspNonce();
-  const csp = buildCsp(nonce);
+  const csp = buildCsp(nonce, { formActions: formActionsFor(request.nextUrl.pathname) });
 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);

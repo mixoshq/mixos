@@ -60,6 +60,7 @@ on its own.
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind and install from it. See [Fixing what an instance runs](#fixing-what-an-instance-runs). |
 | `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance asks mixos.org once a day about the extensions it installed from there, so admins see a release its publisher withdrew, and about new releases of MixOS. `false` sends nothing. See [What MixOS sends to mixos.org](#what-mixos-sends-to-mixosorg). |
 | `MIXOS_RELEASE_CHANNEL` | No, default `stable` | Which releases of MixOS the admin pages tell you about: `stable`, or `prerelease` to include prereleases. See [New releases of MixOS](#new-releases-of-mixos). |
+| `GITHUB_APP_ENCRYPTION_KEY` | No | Turns on Admin > GitHub, which links the instance to its repository through a GitHub App you own. 32 random bytes; `npm run keys:generate -- --github-app` prints one. The App's private key is stored encrypted under it, so **back it up**. See [Linking your GitHub repository](#linking-your-github-repository). |
 | `MIXOS_COMMIT` | No | The commit the admin pages show beside the MixOS version. For the Docker image it's a build argument. See [Which build is running](#which-build-is-running). |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated domains allowed to sign in. Blank: any. |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | No | Web Push, for apps that send notifications. |
@@ -289,6 +290,66 @@ value is read as `stable`, and the release step reports it.
 
 **Turning it off.** `MIXOS_UPDATE_CHECK=false` turns this check off along with
 the update check. Nothing is sent, and the admin pages say the checks are off.
+
+### Linking your GitHub repository
+
+Admin > GitHub links an instance to the repository it is built from, through
+a private GitHub App you own. It is off until `GITHUB_APP_ENCRYPTION_KEY` is
+set. Generate a value, set it where the instance runs, and restart it:
+
+```
+npm run keys:generate -- --github-app
+```
+
+Keep a copy: the App's private key is stored encrypted under it. Link from the
+deployed instance, not from a development checkout.
+
+1. **Create the App.** Choose your account, or the organization that owns the
+   repository. The App asks for contents and pull requests to write, and
+   checks, commit statuses and metadata to read. It doesn't ask for workflows
+   or any webhook event.
+2. **Install it** on GitHub. Choose **Only select repositories**, then the one
+   repository this instance is built from.
+3. **Finish linking.** The instance checks that the installation covers one
+   chosen repository, and that it isn't upstream MixOS, then records it.
+
+Before every operation, the instance checks the installation again. If it
+covers every repository, or more than one, the link turns off. Narrow it on
+GitHub, then choose **Check again**.
+
+**Add a ruleset.** The App can write to any branch, and your host deploys the
+default branch, so require pull requests there. In the repository's
+**Settings > Rules > Rulesets**:
+
+- a branch ruleset on the default branch, with **Require a pull request before
+  merging** and **Restrict deletions**;
+- a tag ruleset on all tags, with **Restrict creations** and
+  **Restrict updates**.
+
+Don't put the App on either bypass list. Admin > GitHub shows whether a pull
+request rule applies. It reads rulesets only, so if you use classic branch
+protection, or your repository is private on GitHub Free, which has no
+rulesets, confirm that on the page instead. Linking doesn't need the rule;
+proposing changes through the App will.
+
+**Replace the private key** by generating a new one in the App's settings on
+GitHub and pasting it on the page. The instance checks it with GitHub before
+storing it. Then delete the old key on GitHub.
+
+**Unlink** uninstalls the App from GitHub, then deletes its key and the link
+here. If GitHub refuses, nothing is deleted. Then delete the App in its
+settings on GitHub.
+
+**Rotating `GITHUB_APP_ENCRYPTION_KEY`.** Re-encrypt the stored key with the
+old and the new key, then set the new key and restart:
+
+```
+GITHUB_APP_ENCRYPTION_KEY_OLD=<old key> GITHUB_APP_ENCRYPTION_KEY_NEW=<new key> \
+  DATABASE_URL=<database> npm run keys:rotate-github-app
+```
+
+With Docker Compose, put both in the shell's environment and run
+`docker compose -f deploy/docker-compose.yml run --rm -e GITHUB_APP_ENCRYPTION_KEY_OLD -e GITHUB_APP_ENCRYPTION_KEY_NEW migrate node ops/rekey-github-app.cjs`.
 
 ### The release step
 

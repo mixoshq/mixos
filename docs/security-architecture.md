@@ -30,6 +30,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Connector switch     | `src/lib/connectors/switch.ts`                |
 | Registry update check | `src/lib/repository/update-check.ts`, `src/lib/repository/updates.ts` |
 | MixOS release check  | `src/lib/platform/release-check.ts`, `src/lib/platform/releases.ts`, `src/components/admin/release-notes.tsx` |
+| GitHub App link      | `src/lib/github/` (§32)                        |
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
 | Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
@@ -648,6 +649,7 @@ What the platform does between those two boxes, in order:
 | `APP_API_KEY_SECRET`        | HMAC digests for app API keys (the `key` tier) | Lets an attacker mint app API keys |
 | `APP_SETTINGS_ENCRYPTION_KEY` | AES-256-GCM for `password`-typed app settings (`context.env`) | Exposes every app-scoped secret an admin entered |
 | `APP_UNLOCK_SECRET`         | Signs app password-unlock cookies    | Bypass of every app password |
+| `GITHUB_APP_ENCRYPTION_KEY` | AES-256-GCM for the GitHub App's private key (§32). Optional: unset, the App is off | With the database, lets an attacker sign as the App, which writes to the linked repository's contents and pull requests |
 | `CRON_SECRET`               | Authenticates the scheduler tick -> /api/cron | Attacker can trigger every app background job  |
 | `VAPID_PRIVATE_KEY`         | Signs Web Push messages              | Attacker could send push to existing subscribers; no data read access |
 | `VAPID_PUBLIC_KEY` / `VAPID_SUBJECT` | Client subscribe key / contact URL | Not secret; public key is handed to the browser to subscribe |
@@ -686,6 +688,14 @@ npm run keys:check        # exits non-zero naming anything missing or malformed
 The generator enumerates the inventory rather than listing names, so a key added
 there is generated without anyone remembering to update it — that drift is
 exactly what produced the RLS gap in §8.
+
+One more key is optional. `GITHUB_APP_ENCRYPTION_KEY` turns on the GitHub App
+(§32), and follows the same rules: 32 random bytes, independent, and a
+malformed value is an error, never a quiet "off". `npm run keys:generate`
+leaves it out unless asked (`-- --github-app`), and `npm run keys:check`
+checks it when it is set. Rotating it doesn't lose the App:
+`npm run keys:rotate-github-app` takes the old and the new key and
+re-encrypts the stored App key.
 
 **Do not point two keys at the same value, and do not derive one from another.**
 
@@ -2116,6 +2126,12 @@ refused; recovery after a removal that stopped midway as
 `<kind>.remove.recover`; and deleting what the database kept for an app or a
 connector as `app.data.delete` or `connector.data.delete`, with how much went,
 or `<kind>.data.delete.rejected` with the reason when it is refused (§31).
+The GitHub link's rows (§32) are `github.app.create`, `github.link`,
+`github.link.disable`, `github.link.enable`, `github.link.refresh`,
+`github.app.key.replace`, `github.app.key.reencrypt`, `github.unlink`,
+`github.app.forget`, `github.branch-rule.override` and
+`github.branch-rule.override.clear`, with `.rejected` rows for a refused
+creation, link, key replacement or unlink.
 `connector.disable` and `connector.enable` name the apps that declare the
 connector, in `details` as `requiredBy` and `optionalFor`. An `app.activate`
 or `connector.enable` that answered a different extension under the name, with
@@ -3248,3 +3264,142 @@ an unverifiable download is not something anyone is in a position to weigh.
 **The mixos.org side has landed.** Publishing a release reads its tagged
 archive and stores the `contentHash` computed with the serialisation above, so
 a release published that way can be verified and installed.
+
+---
+
+## 32. The GitHub App
+
+Admin > GitHub links the instance to the one repository it is built from,
+through a private GitHub App the operator owns
+([`src/lib/github/`](../src/lib/github/)). It is off while
+`GITHUB_APP_ENCRYPTION_KEY` is unset (§5). It links and checks; nothing in this
+release writes to the repository. The App's write permissions are for
+proposing changes as pull requests, which builds on this.
+
+### What the App may do
+
+Exactly `contents: write`, `pull_requests: write`, `checks: read`,
+`statuses: read` and `metadata: read` (`APP_PERMISSIONS`,
+`src/lib/github/manifest.ts`). Not `workflows`, so nothing it writes can change
+a workflow, and not `administration`, so it can't change branch rules. It
+subscribes to no events, and its webhook is inactive. It is private, so it can
+be installed only on the account that owns it.
+
+### Creating it
+
+Admin > GitHub posts the App's manifest to GitHub. That page is the only one
+whose `form-action` allows another origin, `https://github.com`
+(`formActionsFor()`, `src/lib/csp.ts`).
+
+The round trip carries a `state`: 32 random bytes in an HttpOnly cookie in the
+admin's browser, kept in `platform_settings` only as a SHA-256 hash with the
+admin's user id. It lasts 15 minutes and works once. The route GitHub returns to
+(`/api/admin/github/created`) requires an admin, the same state in the query
+and the cookie, and the admin who started it, and deletes it. Only then is the
+code exchanged (`POST /app-manifests/{code}/conversions`). The App's id, slug,
+owner and private key are kept; the webhook and OAuth secrets in the same answer
+are never stored. An App whose permissions or events differ from the manifest's
+isn't recorded. While an App is recorded, another can't be created.
+
+### Linking
+
+The admin installs the App on GitHub, choosing one repository. The setup URL
+(`/api/admin/github/installed`) changes nothing: it takes the admin back to the
+page, where Finish linking, a server action, does the work. With the App's JWT
+and a metadata-only token it requires one installation, on the App owner's
+account, with selected repositories, exactly one, that isn't upstream MixOS
+(compared by repository id, `UPSTREAM_REPOSITORY_ID`), and no permission beyond
+the App's. A read token narrowed to that repository then reads it and its
+default branch's rules, and the repository's id, owner, name, default branch,
+fork and parent are recorded.
+
+### Every operation
+
+Each operation reads the installation again first (`judgeInstallation()`,
+`src/lib/github/installation.ts`). If it now covers every repository, more than
+one, a different one, upstream, a permission beyond the App's, or another
+account, the link is switched off, audited, and nothing uses it. Check again
+switches it back on once every check passes. A repository renamed on GitHub
+keeps its id, and is refused until Check again records the new name. An
+uninstalled or suspended installation is refused without switching anything
+off.
+
+### Tokens
+
+Minted per operation from a JWT (RS256 with `node:crypto`, nine minutes):
+
+- **Listing:** `metadata: read` over the whole installation, only to count its
+  repositories. Narrowed, it would see one however many there are.
+- **Read:** `contents`, `checks`, `statuses` and `pull_requests`, read.
+- **Write:** `contents` and `pull_requests`, write. Unused in this release.
+
+Read and write are narrowed with `repository_ids` to the linked repository.
+GitHub's answer must name that repository and those permissions, or the token
+is revoked unused. Each token is revoked when its operation ends. No token or
+JWT is stored, logged, audited or sent to a browser;
+`src/lib/github/link.integration.test.ts` looks for every one the fake GitHub
+issues in all four places.
+
+### The HTTP client
+
+`src/lib/github/api.ts` is the only code that sends requests to GitHub, and only
+to `https://api.github.com`. A path must be absolute, made of percent-encoded
+segments, and parse back to itself. Repository paths are built from the stored
+record only (`src/lib/github/repository.ts`). Redirects are never followed. A
+request has 10 seconds, body included, and an answer 4 MB. Nothing is logged:
+errors name the method, the path, the status and at most 200 characters of
+GitHub's message, and never the manifest code, which can be exchanged for the
+App's key within the hour. Every answer is Zod-parsed.
+
+### What is stored
+
+`platform_settings`, no migration: `github_app`, `github_app_key` (the private
+key, AES-256-GCM under `GITHUB_APP_ENCRYPTION_KEY`), `github_link`,
+`github_branch_rule`, `github_branch_rule_override` and
+`github_manifest_state`. A row that doesn't fit its schema reads as corrupt, so
+a damaged record can't pass for "no App".
+
+### The private key
+
+GitHub has no API to create or revoke an App's keys. To replace one, the admin
+generates a key in the App's settings and pastes it: a JWT signed with it has
+to get this App's id from `GET /app`, or nothing changes. The page shows the
+fingerprint GitHub shows, and reminds the admin to delete the old key there.
+The pasted key is posted to `/api/admin/github/key`, which requires an admin,
+this origin and the CSRF token (§7), rather than to a server action, whose
+arguments `next dev` prints.
+
+`npm run keys:rotate-github-app` re-encrypts the stored key from the old
+`GITHUB_APP_ENCRYPTION_KEY` to a new one, in one transaction under the
+`github.app` lock. It reads both keys and the database from its own environment
+only, and is audited as the CLI.
+
+### Unlinking
+
+Unlink uninstalls the App (`DELETE /app/installations/{id}` with its JWT), asks
+GitHub again, and forgets the key and the ids only once GitHub lists no
+installation. If GitHub refuses, nothing is forgotten: an App still installed
+would keep a key on GitHub's side that can write to the repository, with
+nothing here to say so. Forget skips the uninstall. It is offered only when the
+stored key can't be read or GitHub refuses it, and needs the App's slug typed.
+
+### The default branch
+
+The App can write to any branch, and every supported host deploys the default
+branch. So proposals will need a `pull_request` rule on it, read with
+`GET /repos/{owner}/{repo}/rules/branches/{branch}` at link time and on Check
+again (`branchRuleSatisfied()`). That lists ruleset rules only. Classic branch
+protection doesn't show there, and private repositories on GitHub Free can't
+have rulesets, so an admin can confirm either, with the repository's name
+typed, audited. If GitHub won't show the rules at all (a 403 or 404), linking
+goes ahead and records that, since linking doesn't need the rule. [The hosting guide](hosting/README.md#linking-your-github-repository)
+gives the ruleset.
+
+### Authorization and audit
+
+The page, its server actions (`src/lib/github/actions.ts`) and its three
+routes, under `/api/admin/github/`, require an admin before anything else (§9). Creating, linking, switching the
+link off or on, recording a rename, replacing or re-encrypting the key,
+unlinking, forgetting and confirming a branch protection are audited (§28),
+against target type `github-app` and the App's id. Refusals of a creation, a
+link, a key or an unlink are audited as `.rejected`, with the reason.

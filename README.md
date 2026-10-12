@@ -638,6 +638,11 @@ the instance, so admins see when a newer one is out.
 `MIXOS_UPDATE_CHECK=false` turns both off
 ([what is sent and kept](docs/hosting/README.md#what-mixos-sends-to-mixosorg)).
 
+An admin can link a deployment to the repository it is built from, on
+**Admin > GitHub**, through a private GitHub App of your own, installed on that
+one repository. It is off until `GITHUB_APP_ENCRYPTION_KEY` is set
+([linking your repository](docs/hosting/README.md#linking-your-github-repository)).
+
 Before exposing a deployment publicly, read
 [docs/security-architecture.md](docs/security-architecture.md) — the trust
 boundaries, the key inventory and what rotating each key costs, and the
