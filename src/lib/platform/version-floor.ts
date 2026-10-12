@@ -30,6 +30,14 @@
  * `>=` that is accepted and ignored because it means what the field already
  * means, and any pre-release or build suffix dropped. Anything else is
  * unparseable and is treated as unknown — see `checkFloor`.
+ *
+ * ── MIXOS'S OWN RELEASES ARE COMPARED IN FULL ───────────────────────────────
+ *
+ * The release notice (src/lib/platform/releases.ts) compares a tag from
+ * mixos.org's list of MixOS releases with this build, and there the suffix is
+ * the point: `v0.5.0-rc.1` is a prerelease, older than `v0.5.0`. So it has its
+ * own strict parse, `parseReleaseVersion`, separate from `parseVersion` above,
+ * which keeps reading floors as coarsely as it always has.
  */
 
 /** A parsed `X.Y.Z`. Missing minor/patch read as 0, so "1" is "1.0.0". */
@@ -165,8 +173,8 @@ export interface FloorVerdict {
 /**
  * The verdict as the install and review dialogs say it, for example
  * "Requires MixOS 0.2.0 or newer. This checkout runs 0.1.0, which doesn't
- * meet it." The update dialog should say it the same way, for the release it
- * would update to.
+ * meet it." The update dialog says it the same way, for the release it would
+ * update to.
  */
 export function describeFloor(floor: FloorVerdict): string {
   const here = `This ${floor.where} runs ${floor.current}`;
@@ -179,4 +187,110 @@ export function describeFloor(floor: FloorVerdict): string {
       : `Its minimum MixOS version, "${floor.declared}", isn't a version, so it isn't checked. ${here}.`;
   }
   return `Requires MixOS ${floor.declared} or newer. ${here}, which ${floor.met ? "meets" : "doesn't meet"} it.`;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  MixOS's own releases                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** A release's version in full, suffix included. */
+export interface ReleaseVersion {
+  major: number;
+  minor: number;
+  patch: number;
+  /** The suffix's identifiers: `["rc", "1"]` for `-rc.1`, empty for a final release. */
+  prerelease: string[];
+}
+
+const NUMBER = "0|[1-9]\\d*";
+const IDENTIFIER = `${NUMBER}|\\d*[A-Za-z][0-9A-Za-z]*`;
+
+/**
+ * Semver's grammar, narrowed as scripts/release-prep.ts narrows it: no build
+ * metadata, and a suffix of letters and digits between dots (`-rc.1`, not
+ * `-rc-1`). No leading zeros, in the numbers or in a numeric identifier, and
+ * no empty identifier, so `v1.2.3-rc..1` and `v01.2.3` are not versions even
+ * though they look like tags.
+ */
+const RELEASE_VERSION = new RegExp(
+  `^v?(${NUMBER})\\.(${NUMBER})\\.(${NUMBER})(?:-((?:${IDENTIFIER})(?:\\.(?:${IDENTIFIER}))*))?$`,
+);
+
+/**
+ * A release tag, `v0.5.0` or `v0.5.0-rc.1`, or a build's version, `0.5.0`, in
+ * full. Null for anything else, untrimmed: unlike `parseVersion`, this drops
+ * nothing.
+ */
+export function parseReleaseVersion(raw: string): ReleaseVersion | null {
+  const m = RELEASE_VERSION.exec(raw);
+  if (!m) return null;
+  const [major, minor, patch] = [m[1], m[2], m[3]].map(Number);
+  // Past 2^53 two different numbers compare equal.
+  if (![major, minor, patch].every(Number.isSafeInteger)) return null;
+  return { major, minor, patch, prerelease: m[4] ? m[4].split(".") : [] };
+}
+
+/** Semver's order for one identifier of a suffix: numbers by value, before words, which go by ASCII. */
+function compareIdentifiers(a: string, b: string): number {
+  const aNumeric = /^\d+$/.test(a);
+  const bNumeric = /^\d+$/.test(b);
+  if (aNumeric !== bNumeric) return aNumeric ? -1 : 1;
+  // With no leading zeros, a longer number is a larger one, so no digit
+  // string is ever converted, however long.
+  if (aNumeric && a.length !== b.length) return a.length < b.length ? -1 : 1;
+  return a === b ? 0 : a < b ? -1 : 1;
+}
+
+/**
+ * Semver precedence, -1, 0 or 1: `0.5.0-rc.2` < `0.5.0-rc.10` < `0.5.0` <
+ * `0.5.1`. A prerelease comes before the release it leads to.
+ */
+export function compareReleaseVersions(a: ReleaseVersion, b: ReleaseVersion): -1 | 0 | 1 {
+  for (const part of ["major", "minor", "patch"] as const) {
+    if (a[part] !== b[part]) return a[part] < b[part] ? -1 : 1;
+  }
+  if (a.prerelease.length === 0 || b.prerelease.length === 0) {
+    if (a.prerelease.length === b.prerelease.length) return 0;
+    return a.prerelease.length === 0 ? 1 : -1;
+  }
+  for (let i = 0; i < Math.max(a.prerelease.length, b.prerelease.length); i++) {
+    // All before it equal, the shorter suffix comes first.
+    if (i === a.prerelease.length) return -1;
+    if (i === b.prerelease.length) return 1;
+    const order = compareIdentifiers(a.prerelease[i], b.prerelease[i]);
+    if (order !== 0) return order < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * How big a step a newer release is: the largest part that changed.
+ * `prerelease` when only the suffix did, as from `0.5.0-rc.1` to `0.5.0-rc.2`
+ * or to `0.5.0`.
+ */
+export type ReleaseStep = "major" | "minor" | "patch" | "prerelease";
+
+export type ReleaseComparison = { order: "older" } | { order: "same" } | { order: "newer"; step: ReleaseStep };
+
+/**
+ * A release against the version running: older, the same, or newer and by how
+ * much. Null when either isn't a version. `release` is usually a tag,
+ * `v0.5.0`, and `running` a build's version, `0.4.2`; either may carry a `v`.
+ */
+export function compareRelease(release: string, running: string): ReleaseComparison | null {
+  const to = parseReleaseVersion(release);
+  const from = parseReleaseVersion(running);
+  if (!to || !from) return null;
+  const order = compareReleaseVersions(to, from);
+  if (order < 0) return { order: "older" };
+  if (order === 0) return { order: "same" };
+  const step: ReleaseStep =
+    to.major !== from.major
+      ? "major"
+      : to.minor !== from.minor
+        ? "minor"
+        : to.patch !== from.patch
+          ? "patch"
+          : "prerelease";
+  return { order: "newer", step };
 }

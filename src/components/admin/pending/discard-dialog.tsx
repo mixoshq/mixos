@@ -23,8 +23,11 @@ export default function DiscardDialog({
   target,
   onClose,
 }: {
-  /** With its folder, repo-relative, to name what is deleted. */
-  target: (PendingTarget & { path: string }) | null;
+  /**
+   * With its folder, repo-relative, to name what is deleted, and for an update
+   * the version in place, which stays.
+   */
+  target: (PendingTarget & { path: string; updateFrom?: string | null }) | null;
   onClose: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -72,12 +75,21 @@ export default function DiscardDialog({
       {outcome?.ok ? (
         <Notice tone="success">
           Deleted <code className="font-mono text-xs">{outcome.pendingPath}/</code> and its
-          record. Install it again from Browse to use it.
+          record.{" "}
+          {target.updateFrom
+            ? `${target.name} stays at ${target.updateFrom}.`
+            : "Install it again from Browse to use it."}
         </Notice>
       ) : outcome && !outcome.ok ? (
         <Notice tone={outcome.tone} title={locked ? "Not discarded yet" : "Not discarded"}>
           <WithCode text={outcome.message} />
         </Notice>
+      ) : target.updateFrom ? (
+        <p className="text-sm text-foreground">
+          This deletes the update waiting in <code className="font-mono text-xs">{target.path}/</code> and
+          its record of what install verified. None of its code has run, and the {target.updateFrom} in
+          place stays as it is.
+        </p>
       ) : (
         <p className="text-sm text-foreground">
           This deletes <code className="font-mono text-xs">{target.path}/</code> and
