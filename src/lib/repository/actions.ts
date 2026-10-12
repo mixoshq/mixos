@@ -291,12 +291,12 @@ export async function installExtensionAction(input: {
 /** Map a thrown error onto something the UI can render honestly. */
 function describeFailure(err: unknown): { code: string; message: string; detail?: string } {
   // Not a failure of the extension or the repository — someone else is already
-  // installing or registering. Its own code so the UI can offer "try again" rather than the
+  // installing, registering or removing. Its own code so the UI can offer "try again" rather than the
   // tone the rest of this list deserves. Nothing has been downloaded or written.
   if (err instanceof LockUnavailableError) {
     return {
       code: "locked",
-      message: "Another administrator is installing or registering. Try again in a moment.",
+      message: "Another administrator is installing, registering or removing an extension. Try again in a moment.",
     };
   }
   // The same, from the checkout lock: another install or registration in this

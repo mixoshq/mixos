@@ -491,6 +491,27 @@ describe("an install from the Registry", { concurrency: false }, () => {
     assert.equal(exists("apps/bare"), false);
   });
 
+  test("refuses a slug whose removal stopped midway, before downloading anything", async () => {
+    const { installExtension, InstallError } = await install();
+    const { backupLocation } = await import("./backup");
+    const where = backupLocation(root, "app", "probe-app");
+    fs.mkdirSync(where.folder, { recursive: true });
+    const before = downloads;
+    try {
+      await assert.rejects(
+        installExtension("app", "probe-app"),
+        (err: unknown) =>
+          err instanceof InstallError &&
+          err.code === "already-installed" &&
+          /A removal of probe-app stopped before it finished, and left \.mixos\/backup\/apps\/probe-app\./.test(err.message) &&
+          /npm run remove -- --recover/.test(err.message),
+      );
+    } finally {
+      fs.rmSync(where.folder, { recursive: true, force: true });
+    }
+    assert.equal(downloads, before);
+  });
+
   test("is refused while another process holds the checkout lock, naming it, before downloading", async () => {
     const { installExtension } = await install();
     const { tryAcquireCheckoutLock, CheckoutLockHeldError } = await import("../platform/checkout-lock");

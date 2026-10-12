@@ -347,7 +347,10 @@ describe("Register", () => {
     rowLockTaken = true;
     const outcome = await registerFromButton({ kind: "app", slug: "acme", reviewedFilesHash: reviewed }, registerContext());
     assert.deepEqual(outcome, { ok: false, code: "locked", message: LOCKED_MESSAGE, tone: "neutral" });
-    assert.equal(LOCKED_MESSAGE, "Another administrator is installing or registering. Try again in a moment.");
+    assert.equal(
+      LOCKED_MESSAGE,
+      "Another administrator is installing, registering or removing an extension. Try again in a moment.",
+    );
     assert.ok(exists(".mixos/pending/apps/acme"));
     assert.equal(audit[0].action, "app.register.rejected");
     assert.equal(audit[0].details.reason, "locked");
