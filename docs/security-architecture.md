@@ -29,6 +29,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Credential config    | `src/lib/connectors/config.ts`                |
 | Connector switch     | `src/lib/connectors/switch.ts`                |
 | Registry update check | `src/lib/repository/update-check.ts`, `src/lib/repository/updates.ts` |
+| MixOS release check  | `src/lib/platform/release-check.ts`, `src/lib/platform/releases.ts`, `src/components/admin/release-notes.tsx` |
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
 | Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
@@ -2606,10 +2607,74 @@ published; a folder modified locally; one installed from another catalogue,
 which is never checked; and one line saying when the catalogue last answered.
 
 **Turning it off.** `MIXOS_UPDATE_CHECK=false` sends nothing and creates no ID.
-Unset, empty and `true` are on. A value that isn't true or false is off, and
-the release step reports it. Deleting an extension's `.registry.json` stops
-checking that extension, and deleting the `registry_instance_id` row gives the
-instance a new ID at the next check.
+It also turns off the release check below, so "off" means the instance sends
+mixos.org nothing on its own. Unset, empty and `true` are on. A value that isn't
+true or false is off, and the release step reports it. Deleting an extension's
+`.registry.json` stops checking that extension, and deleting the
+`registry_instance_id` row gives the instance a new ID at the next check.
+
+### The release check
+
+Once a day, the scheduler tick also asks the catalogue which releases of MixOS
+exist (`src/lib/platform/release-check.ts`), so admins hear when a newer one is
+out.
+
+**What is sent.** One request, from the server:
+
+```
+GET https://mixos.org/api/v1/mixos/releases
+User-Agent: MixOS
+```
+
+No instance ID, no version, no query, no body and no cookie. mixos.org records
+nothing for a `GET`, so it learns only that a MixOS somewhere asked, from the
+request's IP address. Requests reach it through Cloudflare, whose own logging
+applies to the connection.
+
+**When.** On the update check's schedule, in `platform_settings.mixos_release_check`:
+due 21 hours after the last success plus up to an hour; after a failure, an hour
+later, or at the catalogue's `Retry-After`, but never more than a day. A
+changed channel is due at once. It runs under its own lock,
+`platform.release-check`, with a two-minute lease. Nothing it does fails the
+tick.
+
+**Parsed, not trusted.** The request goes through the client's rules (see **The
+transport carrying the checksum**): https, an 8-second timeout, and redirects
+only within the catalogue's origin. Its cap is 512 KB, which is how large
+mixos.org lets the whole list grow. Each entry is checked on its own, and one
+that fails is left out, not the list: the tag must match
+`^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$` and be a version in full (no leading zeros,
+no empty part), the commit 40 lowercase hex characters, the date an ISO date,
+and the notes at most 20 KB. Unknown keys are dropped. The release kept is
+checked again when it is read back, so a hand-edited row can't put a bad tag in
+front of admins either.
+
+**Which release.** The newest on the channel, by semver, whatever order the
+list is in. `MIXOS_RELEASE_CHANNEL=stable`, the default, leaves out any release
+marked as a prerelease or whose tag has a suffix; `prerelease` keeps them. Any
+other value is read as `stable`, with a warning, and the release step reports
+it, so a typo shows fewer releases, never more.
+
+**What the answer can do: show one notice.** When the release kept is newer than
+this build, the top of every admin page says so: "MixOS 0.5.0 is available (this
+instance runs 0.4.2). A minor release: it may need changes." The notes come
+from commit subjects, so a merged pull request's title is enough to put text
+there, and they are rendered by mixos.org's rule for them
+(`src/components/admin/release-notes.tsx`): collapsed, raw HTML dropped, images
+dropped, so no tracking image loads in front of admins (the CSP allows
+`img-src https:`), and every link shown as its text and then its address, not
+clickable. The notice's only links are built from the checked tag: the
+release's page on mixos.org, `https://mixos.org/docs/releases/<tag>`, and
+`https://mixos.org/docs/operating/upgrading`. No address in the answer is ever
+fetched or made a link.
+
+**Never applied.** There is no button to apply a release. The check writes one
+row, its own, and takes its lock while it runs; it starts no process and writes
+no file. Taking a release is merging its tag into the operator's repository and
+deploying it.
+
+**Turning it off.** `MIXOS_UPDATE_CHECK=false`, the update check's switch,
+sends nothing for this check either, and the admin pages say the checks are off.
 
 ### Two locks: the register lease and the checkout lock
 
@@ -2906,9 +2971,9 @@ runs with `NODE_ENV=production` and is one of the profiles the entry exists to
 serve. In a real deployment the name does not resolve and the request simply
 fails to connect.
 
-**Redirects stay on the catalogue.** Search, listing and install-manifest
-requests follow at most three redirects, and only within the catalogue's own
-origin: the same scheme, host and port. They are followed by hand, by the code
+**Redirects stay on the catalogue.** Search, listing, install-manifest and
+release-list requests follow at most three redirects, and only within the
+catalogue's own origin: the same scheme, host and port. They are followed by hand, by the code
 that follows a download's redirects (`src/lib/repository/redirects.ts`). Any
 other redirect, such as one to another host or from https to http, is refused
 before anything is sent to it, with an error that names the catalogue and not
@@ -2919,8 +2984,9 @@ redirect at all (see **The update check**).
 ### State of the upstream
 
 The endpoints are live: `/api/v1/search`, `/api/v1/<kind>/<slug>`,
-`/api/v1/<kind>/<slug>/install` and the update check's `/api/v1/updates`. Two
-things about them shape the client.
+`/api/v1/<kind>/<slug>/install`, the update check's `/api/v1/updates` and the
+release check's `/api/v1/mixos/releases`. Two things about them shape the
+client.
 
 **Search returns summaries, not listings.** `/search` answers with
 `ExtensionSummary` — no `sourceRepo`, no `releases`, no `description` — which is
