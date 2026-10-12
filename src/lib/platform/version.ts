@@ -44,7 +44,13 @@
 
 import { EXPECTED_SCHEMA_VERSION, MIXOS_VERSION } from "@/generated/build-info";
 import { isBuiltDeployment } from "./build";
-import { checkFloor, type FloorVerdict, type MinimumCheck } from "./version-floor";
+import {
+  checkFloor,
+  compareRelease,
+  type FloorVerdict,
+  type MinimumCheck,
+  type ReleaseComparison,
+} from "./version-floor";
 
 export { EXPECTED_SCHEMA_VERSION };
 
@@ -100,6 +106,19 @@ export function satisfiesMinimum(
   current: string = mixosVersion(),
 ): MinimumCheck {
   return checkFloor(required, current);
+}
+
+/**
+ * A release of MixOS, such as the tag `v0.5.0`, against this build: older, the
+ * same, or newer and how big a step (`compareRelease()` in ./version-floor.ts).
+ * Compared in full, so a prerelease of this version is older and its final
+ * release newer. Null when the tag, or this build's version, isn't a version.
+ */
+export function compareWithThisBuild(
+  tag: string,
+  current: string = mixosVersion(),
+): ReleaseComparison | null {
+  return compareRelease(tag, current);
 }
 
 /**
