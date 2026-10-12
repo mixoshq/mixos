@@ -28,6 +28,15 @@ import { z } from "zod";
 export const LEFT_OUT_NAMES = [".gitignore", ".gitattributes"] as const;
 export type LeftOutName = (typeof LEFT_OUT_NAMES)[number];
 
+/**
+ * Whether a file of this name is one install leaves out. Compared folded, as
+ * foldPath() in ./install.ts folds it, so `.GitIgnore` is one too.
+ */
+export function isLeftOutName(name: string): boolean {
+  const folded = name.normalize("NFC").toUpperCase().toLowerCase().normalize("NFC");
+  return (LEFT_OUT_NAMES as readonly string[]).includes(folded);
+}
+
 /** How many files of each name install left out: `{ ".gitignore": 2 }`, or `{}`. */
 export const LeftOutSchema = z.partialRecord(z.enum(LEFT_OUT_NAMES), z.number().int().positive());
 export type LeftOut = z.infer<typeof LeftOutSchema>;

@@ -437,7 +437,8 @@ export function describeUpdate(
   const floor = latest ? floorLine(result.latestRequiresMixOS, current) : "";
 
   if (result.withdrawn) {
-    const why = result.reason ? `: “${result.reason}”.` : ".";
+    // A reason that ends its own sentence keeps its mark, and gets no second one.
+    const why = result.reason ? `: “${result.reason}”${/[.!?]$/.test(result.reason) ? "" : "."}` : ".";
     const next = latest ? ` The current release is ${latest}.${floor}` : " There is no release to move to.";
     return { ...of, type: "withdrawn", text: `${name} ${result.version} was withdrawn by its publisher${why}${next}` };
   }
