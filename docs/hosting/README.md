@@ -114,7 +114,9 @@ deployment's own machine (`localhost`, `127.0.0.1`, `[::1]` or
 
 A deployment runs what its build carries. Its Browse pages show the catalogue,
 and say: "This deployment runs a build. Install and register in a checkout of
-your repository, commit, and deploy." To add an extension:
+your repository, commit, and deploy." With the GitHub App linked, a deployment
+can propose an extension as a pull request instead; see
+[Proposing an extension](#proposing-an-extension). To add one from a checkout:
 
 1. In a checkout of your repository, running `npm run dev`, install it from
    Browse. An app or a connector waits in `.mixos/pending/`, where none of its
@@ -276,6 +278,61 @@ GITHUB_APP_ENCRYPTION_KEY_OLD=<old key> GITHUB_APP_ENCRYPTION_KEY_NEW=<new key> 
 
 With Docker Compose, put both in the shell's environment and run
 `docker compose -f deploy/docker-compose.yml run --rm -e GITHUB_APP_ENCRYPTION_KEY_OLD -e GITHUB_APP_ENCRYPTION_KEY_NEW migrate node ops/rekey-github-app.cjs`.
+
+### Proposing an extension
+
+With the App linked, a deployment's Browse pages show **Propose to
+owner/repo** where a checkout shows Install. Proposing downloads the release,
+checks it against the hash mixos.org published, and opens a pull request into
+your default branch that adds the extension's folder, with its
+`.registry.json`, on the branch `mixos/install/<kind>-<slug>`. Nothing runs on
+the instance.
+
+Admin > GitHub shows what proposals need:
+
+- the pull request rule on the default branch, or another protection you
+  confirmed;
+- **Previews elsewhere** confirmed: Render service previews, Railway PR
+  environments and Coolify preview deployments off, and nothing else that
+  builds the repository's branches or pull requests with secrets. The App
+  can't read those settings, so it asks you.
+
+Before each proposal, the instance reads the default branch and refuses,
+naming the file, when:
+
+- a workflow uses `pull_request_target`;
+- a workflow that runs for pull requests into the default branch, or for
+  pushes to `mixos/**`, uses a secret other than `GITHUB_TOKEN`, asks for a
+  write permission, sets no `permissions`, or runs on a self-hosted runner;
+- `render.yaml` turns previews on;
+- on Vercel, `vercel.json` doesn't turn off deployments of `mixos/**`.
+
+A pull request from a branch in your repository gets its secrets, which is why.
+To keep such a workflow, skip each of its jobs for the App's pull requests:
+
+```yaml
+jobs:
+  deploy:
+    if: ${{ !startsWith(github.head_ref, 'mixos/') }}
+```
+
+A `branches-ignore` on a `pull_request` trigger doesn't do it, because it
+filters the target branch. MixOS's own workflows pass as they are. The instance
+also refuses when the extension's folder is already on the default branch, or
+the branch exists.
+
+**Merging is the deploy.** Your repository's CI checks the pull request: the
+build runs the registry generator, and `extensions.yml` smoke-tests a changed
+app. Admin > Apps, Connectors and Themes list the App's open pull requests with
+their checks:
+
+- **No CI ran:** nothing checked the head commit within ten minutes. On a new
+  fork, GitHub keeps workflows off until you turn them on under **Actions**.
+  Don't merge it unchecked.
+- **Changed since proposed:** someone pushed to the branch after the App opened
+  it. Read those commits before you merge.
+
+When the merge deploys, an app arrives inactive: activate it on Admin > Apps.
 
 ### The release step
 
