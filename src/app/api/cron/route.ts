@@ -10,6 +10,7 @@ import { pruneRateBuckets } from "@/lib/rate-limit";
 import { pruneUnlockFailures } from "@/lib/apps/unlock-rate-limit";
 import { pruneRouteTelemetry } from "@/lib/apps/telemetry";
 import { pruneWebhookEvents } from "@/lib/connectors/webhook";
+import { recordThisBuild } from "@/lib/platform/this-build";
 
 /**
  * Scheduler tick endpoint, invoked by Vercel Cron (see vercel.json).
@@ -80,6 +81,10 @@ export async function GET(request: NextRequest) {
       .map((c) => c.name),
   );
   const prunedUnlockFailures = await pruneUnlockFailures();
+  // Which apps and connectors this build carries, for Delete data on every
+  // instance sharing the database (src/lib/platform/builds-seen.ts). At most
+  // every ten minutes, and it never throws.
+  const buildSeen = await recordThisBuild();
 
   return NextResponse.json({
     ok: true,
@@ -88,5 +93,6 @@ export async function GET(request: NextRequest) {
     prunedRouteEvents,
     prunedUnlockFailures,
     prunedWebhookEvents,
+    buildSeen,
   });
 }

@@ -5,8 +5,10 @@
 // `npm run migrate:apps` — apply every app's pending migrations from
 // apps/<slug>/migrations/, after mirroring the app registry into public.apps.
 // The work is in scripts/app-migrations.ts. Then the release step's identity
-// check for connectors and themes (scripts/sync-identities.ts), so a checkout's
-// database catches a different extension under a name as a deployment's does.
+// check for connectors and themes, with its marks for connectors this build
+// lacks (scripts/sync-identities.ts), so a checkout's database catches a
+// different extension under a name as a deployment's does; and the record of
+// what this checkout carries (scripts/record-build.ts).
 //
 // The platform schema has to be in place first — `npm run db:migrate`, or on
 // the local Docker stack `npm run db:local`, which `npm run dev:docker` runs for
@@ -15,6 +17,7 @@
 import { createPgClient } from "../src/lib/db/pg-options";
 import { migrateAppSchemas } from "./app-migrations";
 import { loadEnv } from "./load-env";
+import { recordAndReportBuild } from "./record-build";
 import { syncAndReportIdentities } from "./sync-identities";
 
 /**
@@ -30,6 +33,8 @@ async function main() {
     await migrateAppSchemas(sql);
     console.log("");
     await syncAndReportIdentities(sql);
+    console.log("");
+    await recordAndReportBuild(sql);
     console.log("\nApp migrations complete.");
   } finally {
     await sql.end();
