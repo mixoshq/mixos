@@ -26,6 +26,7 @@ import { pendingLocation, writeSidecar } from "@/lib/repository/pending";
 import type { Registered } from "@/lib/repository/pending-outcomes";
 import { reviewPendingInstall } from "@/lib/repository/review";
 import type { TarEntry } from "@/lib/repository/tar";
+import DiscardDialog from "./discard-dialog";
 import PendingInstallsList, { type PendingItem } from "./pending-installs-list";
 import RegisterResult from "./register-result";
 import { ReviewPrompt } from "./review-dialog";
@@ -60,6 +61,7 @@ const item = (fields: Partial<PendingItem> = {}): PendingItem => ({
   path: ".mixos/pending/apps/acme",
   version: "1.2.0",
   installed: "Installed 3 mins ago by admin@example.com",
+  updateFrom: null,
   problem: null,
   canRegister: true,
   canDiscard: true,
@@ -103,6 +105,35 @@ test("a pending install with a problem says it, and offers only what still works
   assert.doesNotMatch(seen, /Review and register/);
   // Discard for the orphan, none for the stopped registration.
   assert.equal(seen.match(/\bDiscard\b(?! it)/g)?.length, 1);
+});
+
+test("a pending update says Register can't put it in place yet, offers only Discard, and Discard keeps the release in place", () => {
+  const update = item({
+    version: "1.3.0",
+    installed: "Update from 1.2.0, downloaded 3 mins ago by admin@example.com",
+    updateFrom: "1.2.0",
+    problem:
+      "It is an update of apps/acme from 1.2.0 to 1.3.0, and this version of MixOS can't register updates yet. " +
+      "Discard it with `npm run register -- app/acme --discard`.",
+    canRegister: false,
+  });
+  const seen = text(render(createElement(PendingInstallsList, { kind: "app", items: [update] })));
+  assert.match(seen, /Needs attention 1\.3\.0 Update from 1\.2\.0, downloaded 3 mins ago by admin@example\.com/);
+  assert.match(seen, /can't register updates yet\. Discard it with npm run register -- app\/acme --discard \./);
+  assert.doesNotMatch(seen, /Review and register/);
+  assert.match(seen, /--discard \. Discard $/);
+
+  const asking = text(
+    render(
+      createElement(DiscardDialog, {
+        target: { kind: "app", slug: "acme", name: "Acme Board", path: ".mixos/pending/apps/acme", updateFrom: "1.2.0" },
+        onClose: () => {},
+      }),
+    ),
+  );
+  assert.match(asking, /This deletes the update waiting in \.mixos\/pending\/apps\/acme\/ and its record of what install verified\./);
+  assert.match(asking, /None of its code has run, and the 1\.2\.0 in place stays as it is\./);
+  assert.doesNotMatch(asking, /Install it again from Browse/);
 });
 
 test("nothing pending renders nothing", () => {

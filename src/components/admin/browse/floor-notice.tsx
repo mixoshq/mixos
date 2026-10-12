@@ -10,8 +10,8 @@ import Notice from "@/components/ui/notice";
  * line when it is met or can't be compared, and a warning when it isn't met,
  * since install refuses that release. Nothing for a release with no floor.
  *
- * The update dialog should show the floor of the release it would update to
- * with this too, from floorVerdict() on the server.
+ * The update dialog shows the floor of the release it would update to with
+ * this too, from floorVerdict() on the server (../update/update-dialog.tsx).
  */
 export default function FloorNotice({
   floor,
