@@ -7,10 +7,11 @@
  * Connectors and Themes, beside the installs waiting there.
  *
  * Read with a read token, on every render of the page: the pull requests open
- * from a branch the App names (`mixos/install/<kind>-<slug>`, ./names.ts), in
- * the linked repository, into its default branch. Each is joined to the
- * `<kind>.propose` audit row that recorded the commit the App made, and two
- * things are said plainly:
+ * from a branch the App names (`mixos/install/<kind>-<slug>`, or for a MixOS
+ * update `mixos/update-<tag>`, ./names.ts), in the linked repository, into its
+ * default branch. Each is joined to the `<kind>.propose` audit row (for a
+ * MixOS update, `mixos.update.propose`) that recorded the commit the App made,
+ * and two things are said plainly:
  *
  *   - "No CI ran", in the danger tone, when nothing has checked the head
  *     commit ten minutes after it arrived. GitHub turns workflows off on a new
@@ -27,12 +28,11 @@
 
 import type { AdminActor } from "@/lib/apps/admin-audit";
 import { sql } from "@/lib/db/client";
-import type { ExtensionKind } from "@/lib/repository/types";
 import { GitHubError } from "./api";
 import { GitHubLinkError, featureRefusal, withLinkedRepository } from "./link";
 import { repositoryUrl } from "./manifest";
 import { parseProposalBranch } from "./names";
-import type { ProposalsView, ProposedPullRequest } from "./outcomes";
+import type { ProposalKind, ProposalsView, ProposedPullRequest } from "./outcomes";
 import {
   CheckRunsSchema,
   CombinedStatusSchema,
@@ -103,17 +103,22 @@ interface Proposed {
   by: string;
 }
 
+/** The audit action that records a proposal of `kind`. */
+export function proposeAction(kind: ProposalKind): string {
+  return kind === "mixos" ? "mixos.update.propose" : `${kind}.propose`;
+}
+
 /**
  * The latest `<kind>.propose` row for each of `numbers` in the repository with
  * id `repositoryId`, by pull request number.
  */
-async function proposedRows(kind: ExtensionKind, repositoryId: number, numbers: number[]): Promise<Map<number, Proposed>> {
+async function proposedRows(kind: ProposalKind, repositoryId: number, numbers: number[]): Promise<Map<number, Proposed>> {
   const found = new Map<number, Proposed>();
   if (numbers.length === 0) return found;
   const rows = (await sql`
     select target_id, actor_email, created_at, details
     from public.admin_audit_log
-    where action = ${`${kind}.propose`}
+    where action = ${proposeAction(kind)}
       and details->>'repositoryId' = ${String(repositoryId)}
       and details->>'pullRequest' = any(${numbers.map(String)})
     order by created_at desc
@@ -135,12 +140,20 @@ async function proposedRows(kind: ExtensionKind, repositoryId: number, numbers: 
   return found;
 }
 
+/** The branch's slug, or for a MixOS update its tag, when the branch proposes `kind`. */
+function slugFor(kind: ProposalKind, ref: string): string | null {
+  const branch = parseProposalBranch(ref);
+  if (!branch) return null;
+  if (kind === "mixos") return branch.action === "mixos-update" ? branch.tag : null;
+  return branch.action === "install" && branch.kind === kind ? branch.slug : null;
+}
+
 /**
  * The App's open pull requests for `kind`, with their checks. `actor` is the
  * admin looking: a check that finds the installation widened switches the
  * link off, audited against them (./link.ts).
  */
-export async function readProposals(actor: AdminActor, kind: ExtensionKind, now: Date = new Date()): Promise<ProposalsView> {
+export async function readProposals(actor: AdminActor, kind: ProposalKind, now: Date = new Date()): Promise<ProposalsView> {
   if (featureRefusal()) return { state: "off" };
   let record;
   try {
@@ -163,10 +176,10 @@ export async function readProposals(actor: AdminActor, kind: ExtensionKind, now:
         "GET /repos/{owner}/{repo}/pulls",
       );
       const ours = pulls.flatMap((pull) => {
-        const branch = parseProposalBranch(pull.head.ref);
+        const slug = slugFor(kind, pull.head.ref);
         const sameRepository = pull.head.repo?.id === repo.record.id;
-        if (!branch || branch.kind !== kind || !sameRepository || pull.base.ref !== repo.record.defaultBranch) return [];
-        return [{ pull, slug: branch.slug }];
+        if (slug === null || !sameRepository || pull.base.ref !== repo.record.defaultBranch) return [];
+        return [{ pull, slug }];
       });
       const listed = ours.slice(0, MAX_LISTED);
       const proposed = await proposedRows(kind, repo.record.id, listed.map((o) => o.pull.number));

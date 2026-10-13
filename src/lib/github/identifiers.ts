@@ -24,9 +24,32 @@
  */
 export const UPSTREAM_REPOSITORY_ID = 1345491436;
 
+/**
+ * Upstream MixOS by name, for the one place a name is needed: the cross-fork
+ * `compare` that checks a release's tag before an update pull request is
+ * opened (./update-pull.ts). Fixed here, never taken from input or from a
+ * response, and still compared by id everywhere a repository is judged.
+ */
+export const UPSTREAM_REPOSITORY = {
+  id: UPSTREAM_REPOSITORY_ID,
+  owner: "mixoshq",
+  name: "mixos",
+  defaultBranch: "main",
+} as const;
+
 /** Whether `id` is upstream MixOS's repository. */
 export function isUpstream(id: number): boolean {
   return id === UPSTREAM_REPOSITORY_ID;
+}
+
+/**
+ * Whether a linked repository is a fork of upstream MixOS, by its recorded
+ * parent's id. A fork of another fork isn't: its objects are in the network
+ * too, but its recorded parent is a stranger's repository, so it takes the
+ * private copy's path (the compare link and the merge by hand).
+ */
+export function isForkOfUpstream(record: { fork: boolean; parent: { id: number } | null }): boolean {
+  return record.fork && record.parent !== null && isUpstream(record.parent.id);
 }
 
 /** A GitHub id: a positive whole number JavaScript holds exactly. */

@@ -5,14 +5,16 @@
 /**
  * What a write token may write: refs only under refs/heads/mixos/, tree paths
  * only under the operation's folder, no merge endpoint, no default branch, no
- * auto-merge, and names that skip no checks. Every refusal happens before a
- * request is sent; `fetch` here fails the test if it is reached.
+ * auto-merge, and names that skip no checks. Then a MixOS update's narrower
+ * scope: one ref at one commit, once, and one pull request, and nothing else.
+ * Every refusal happens before a request is sent; `fetch` here fails the test
+ * if it is reached.
  */
 
 import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { GitHubError, githubRequest } from "./api";
-import { guardWrite, isExtensionFolder, linkedRepository, type WriteScope } from "./repository";
+import { guardWrite, isExtensionFolder, isUpdateBranch, linkedRepository, type WriteScope } from "./repository";
 import type { RepositoryRecord } from "./store";
 
 const record: RepositoryRecord = {
@@ -177,5 +179,73 @@ describe("what a write token may write", () => {
   test("guardWrite returns only what it checked", () => {
     const body = guardWrite(record, scope, "/git/refs", { ref: "refs/heads/mixos/install/app-files", sha: SHA });
     assert.deepEqual(body, { ref: "refs/heads/mixos/install/app-files", sha: SHA });
+  });
+});
+
+/* ── a MixOS update's scope: one ref at one commit, and one pull request ─── */
+
+describe("what a MixOS update may write", () => {
+  const only: WriteScope = { refOnly: { branch: "mixos/update-v0.5.0", sha: SHA } };
+  const update = () => linkedRepository(record, "write", "ghs_test", only);
+  const ref = { ref: "refs/heads/mixos/update-v0.5.0", sha: SHA };
+  const pull = { title: "Update MixOS to v0.5.0 [skip preview]", head: "mixos/update-v0.5.0", base: "main", body: "x" };
+
+  test("no blob, tree or commit: the commit is upstream's", async () => {
+    await refused("/git/blobs", { content: "eA==", encoding: "base64" }, /writes no blob, tree or commit/, update());
+    await refused("/git/trees", tree([file("apps/files/a")]), /writes no blob, tree or commit/, update());
+    await refused("/git/commits", { message: "Update", tree: SHA, parents: [SHA2] }, /writes no blob, tree or commit/, update());
+    for (const suffix of ["/merges", "/merge-upstream", "/pulls/1/merge", "/git/tags", ""]) {
+      await refused(suffix, ref, /writes no blob, tree or commit/, update());
+    }
+  });
+
+  test("the one ref the scope names, at the one commit, and no other", async () => {
+    await refused("/git/refs", { ref: "refs/heads/mixos/update-v0.5.1", sha: SHA }, /creates refs\/heads\/mixos\/update-v0\.5\.0 only/, update());
+    await refused("/git/refs", { ref: "refs/heads/mixos/install/app-files", sha: SHA }, /creates refs\/heads\/mixos\/update-v0\.5\.0 only/, update());
+    await refused("/git/refs", { ref: "refs/heads/main", sha: SHA }, /creates refs\/heads\/mixos\/update-v0\.5\.0 only/, update());
+    await refused("/git/refs", { ref: "refs/tags/v0.5.0", sha: SHA }, /creates refs\/heads\/mixos\/update-v0\.5\.0 only/, update());
+    await refused("/git/refs", { ref: ref.ref, sha: SHA2 }, /release's commit only/, update());
+    await refused("/git/refs", { ...ref, force: true }, /isn't a ref/, update());
+    await update().post("/git/refs", ref);
+    assert.deepEqual(sent, [{ url: "https://api.github.com/repos/acme/mixos/git/refs", method: "POST", body: ref }]);
+  });
+
+  test("a pull request from that branch into the default branch, with a clean title", async () => {
+    await refused("/pulls", { ...pull, head: "mixos/install/app-files" }, /comes from mixos\/update-v0\.5\.0 only/, update());
+    await refused("/pulls", { ...pull, head: "mixos/update-v0.5.1" }, /comes from mixos\/update-v0\.5\.0 only/, update());
+    await refused("/pulls", { ...pull, base: "release" }, /default branch only/, update());
+    await refused("/pulls", { ...pull, title: "Update [skip ci]" }, /skip ci/, update());
+    await refused("/pulls", { ...pull, title: "Update [render preview]" }, /render preview/, update());
+    await refused("/pulls", { ...pull, title: "Update\nMixOS" }, /one line/, update());
+    await refused("/pulls", { ...pull, draft: true }, /isn't a pull request/, update());
+    await update().post("/pulls", pull);
+    assert.deepEqual(sent[0]?.body, pull);
+  });
+
+  test("each of the two writes goes once", async () => {
+    const repo = update();
+    await repo.post("/git/refs", ref);
+    await assert.rejects(repo.post("/git/refs", ref), /once/);
+    await repo.post("/pulls", pull);
+    await assert.rejects(repo.post("/pulls", pull), /once/);
+    assert.deepEqual(sent.map((s) => s.url.replace("https://api.github.com/repos/acme/mixos", "")), ["/git/refs", "/pulls"]);
+  });
+
+  test("the scope itself is checked: an update branch at a commit, never the default branch", async () => {
+    for (const bad of [
+      { refOnly: { branch: "mixos/update/app-files", sha: SHA } },
+      { refOnly: { branch: "mixos/update-v0.5", sha: SHA } },
+      { refOnly: { branch: "mixos/update-v01.5.0", sha: SHA } },
+      { refOnly: { branch: "mixos/install/app-files", sha: SHA } },
+      { refOnly: { branch: "main", sha: SHA } },
+      { refOnly: { branch: "mixos/update-v0.5.0", sha: "main" } },
+      { refOnly: { branch: "mixos/update-v0.5.0", sha: SHA.slice(0, 39) } },
+    ] as WriteScope[]) {
+      await refused("/git/refs", ref, /isn't an update branch at a commit/, linkedRepository(record, "write", "t", bad));
+    }
+    const mixosDefault = linkedRepository({ ...record, defaultBranch: "mixos/update-v0.5.0" }, "write", "t", only);
+    await refused("/git/refs", ref, /default branch/, mixosDefault);
+    assert.equal(isUpdateBranch("mixos/update-v0.5.0-rc.1"), true);
+    assert.equal(isUpdateBranch("mixos/update-0.5.0"), false);
   });
 });
