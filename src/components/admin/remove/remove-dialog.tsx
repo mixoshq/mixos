@@ -6,11 +6,12 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { GitPullRequest, Loader2 } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import type { ProposalTarget } from "@/lib/github/outcomes";
 import { describeData, type DataDeleteOutcome } from "@/lib/repository/delete-data-outcomes";
 import type { RemovalNote } from "@/lib/repository/remove";
 import { previewRemovalAction, removeExtensionAction } from "@/lib/repository/remove-actions";
@@ -22,9 +23,10 @@ import {
   type RemoveOutcome,
   type Removed,
 } from "@/lib/repository/remove-outcomes";
-import { KIND_LABEL, type ExtensionKind } from "@/lib/repository/types";
+import { KIND_LABEL, KIND_SEGMENT, type ExtensionKind } from "@/lib/repository/types";
 import Notice from "@/components/ui/notice";
 import { Lines } from "../data/delete-data-dialog";
+import ProposeChangeDialog from "../github/propose-change-dialog";
 import WithCode from "../pending/with-code";
 import RemovalHandBackPanel from "./removal-hand-back";
 
@@ -45,7 +47,9 @@ export interface RemoveTarget {
  * It says first what goes and what stays: the folder goes from this checkout,
  * and the data stays in each database. It names whatever depends on the
  * extension, and while anything does, there is no button to press. A built
- * deployment has no checkout, so there it says how removing works instead.
+ * deployment has no checkout, so there it says how removing works instead,
+ * and with the GitHub App linked offers "Propose removal", which opens a pull
+ * request that deletes the folder (../github/propose-change-dialog.tsx).
  * Removing checks everything again under its locks, and hands back the commit
  * that deletes the folder.
  *
@@ -58,13 +62,18 @@ export interface RemoveTarget {
  */
 export default function RemoveDialog({
   target,
+  propose = null,
   onClose,
 }: {
   target: RemoveTarget;
+  /** On a built deployment with the GitHub App linked: where a removal can be proposed instead. */
+  propose?: ProposalTarget | null;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [preview, setPreview] = useState<PreviewOutcome | null>(null);
+  /** "Propose removal" was pressed: the proposal's dialog takes this one's place. */
+  const [proposing, setProposing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<RemoveOutcome | null>(null);
   /** On the last step of "Remove code and delete this checkout's data". */
@@ -114,6 +123,17 @@ export default function RemoveDialog({
     if (outcome?.ok) router.refresh();
     onClose();
   }, [outcome, onClose, router]);
+
+  // The proposal's dialog, in this one's place.
+  if (proposing && propose) {
+    return (
+      <ProposeChangeDialog
+        target={{ action: "remove", kind, slug, name: target.name }}
+        repository={propose.repository}
+        onClose={onClose}
+      />
+    );
+  }
 
   const removed = outcome?.ok === true;
   const refused = outcome?.ok === false && !locked;
@@ -192,9 +212,34 @@ export default function RemoveDialog({
           Checking what depends on it…
         </p>
       ) : !preview.ok ? (
-        <Notice tone={preview.tone}>
-          <WithCode text={preview.message} />
-        </Notice>
+        preview.code === "unsupported-environment" && propose ? (
+          <div className="space-y-5">
+            <Notice tone={preview.tone}>
+              <WithCode text={preview.message} />
+            </Notice>
+            <Section title="Or propose it">
+              <p className="text-sm text-foreground">
+                With the GitHub App linked, this deployment can open a pull request on {propose.repository} that
+                deletes <code className="font-mono text-xs">{`${KIND_SEGMENT[kind]}/${slug}/`}</code>. It says first what
+                depends on it and what stays, and merging it is the deploy.
+              </p>
+              {propose.off && <p className="mt-2 text-sm text-muted-foreground">{propose.off}</p>}
+              <Button
+                className="mt-3"
+                variant="primary"
+                icon={<GitPullRequest className="h-4 w-4" aria-hidden />}
+                disabled={propose.off !== null}
+                onClick={() => setProposing(true)}
+              >
+                Propose removal to {propose.repository}
+              </Button>
+            </Section>
+          </div>
+        ) : (
+          <Notice tone={preview.tone}>
+            <WithCode text={preview.message} />
+          </Notice>
+        )
       ) : (
         <div className="space-y-6">
           {confirming && preview.preview.data ? (

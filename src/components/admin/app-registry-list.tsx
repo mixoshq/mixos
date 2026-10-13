@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import type { AppReplacement } from "@/lib/apps/access";
+import type { ProposalTarget } from "@/lib/github/outcomes";
 import AppTile from "./app-tile";
 import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
 import { CARD_SHELL } from "@/components/ui/card";
@@ -30,6 +31,8 @@ interface Props {
   returnedChangedBySlug: Record<string, string>;
   /** Apps the release step found under a slug a different extension had. */
   replacedBySlug: Record<string, AppReplacement>;
+  /** On a built deployment with the GitHub App linked: where a removal can be proposed instead. */
+  proposal?: ProposalTarget | null;
 }
 
 export default function AppRegistryList({
@@ -40,6 +43,7 @@ export default function AppRegistryList({
   activeBySlug,
   returnedChangedBySlug,
   replacedBySlug,
+  proposal = null,
 }: Props) {
   const [query, setQuery] = useState("");
   /** The app whose Remove dialog is open, or null. One dialog for the grid. */
@@ -112,7 +116,7 @@ export default function AppRegistryList({
             : "No apps found. Add an app to the /apps directory."}
         </div>
       )}
-      {removing && <RemoveDialog target={removing} onClose={() => setRemoving(null)} />}
+      {removing && <RemoveDialog target={removing} propose={proposal} onClose={() => setRemoving(null)} />}
     </>
   );
 }
