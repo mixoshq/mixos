@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { ExternalLink, Store } from "lucide-react";
 import { revalidatePath } from "next/cache";
@@ -13,6 +14,7 @@ import { themeRegistry } from "@/generated/theme-registry";
 import { getActiveTheme, setActiveTheme } from "@/lib/themes/active";
 import ThemeRegistryList from "@/components/admin/theme-registry-list";
 import RegistryNotices from "@/components/admin/registry-notices";
+import ProposedPullRequests from "@/components/admin/github/proposed-pull-requests";
 
 export const metadata = { title: "Themes" };
 
@@ -82,6 +84,10 @@ export default async function ThemesAdminPage() {
         </div>
       </div>
       <RegistryNotices kind="theme" />
+      {/* Read from GitHub: the rest of the page doesn't wait for it. */}
+      <Suspense fallback={null}>
+        <ProposedPullRequests kind="theme" />
+      </Suspense>
 
       <ThemeRegistryList
         themes={themeRegistry}
