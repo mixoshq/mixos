@@ -590,6 +590,37 @@ export function folderDifferences(before: string, after: string): FolderDifferen
   };
 }
 
+/**
+ * The same, for two releases in memory, as install would write them: what a
+ * tree of `after` in `before`'s place changes. A proposal through the GitHub
+ * App compares the release the folder on the default branch holds with the
+ * one it goes to this way, since nothing is on its disk
+ * (src/lib/github/propose-change.ts). Modes are ignored: install writes every
+ * file the same way.
+ */
+export function releaseDifferences(before: readonly TarEntry[], after: readonly TarEntry[]): FolderDifferences {
+  const was = new Map(before.map((e) => [e.path, e.data]));
+  const changed: string[] = [];
+  const added: string[] = [];
+  for (const entry of after) {
+    const old = was.get(entry.path);
+    if (old === undefined) added.push(entry.path);
+    else if (!old.equals(entry.data)) changed.push(entry.path);
+  }
+  const now = new Set(after.map((e) => e.path));
+  const removed = [...was.keys()].filter((p) => !now.has(p));
+  const c = cut(changed);
+  const a = cut(added);
+  const r = cut(removed);
+  return {
+    changed: c.names,
+    added: a.names,
+    removed: r.names,
+    more: { changed: c.more, added: a.more, removed: r.more },
+    incomplete: false,
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /*  A pending update, against the folder it replaces                            */
 /* -------------------------------------------------------------------------- */

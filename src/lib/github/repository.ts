@@ -25,7 +25,10 @@
  *   - refs only under `refs/heads/mixos/`, never the default branch, never a
  *     tag;
  *   - tree paths only under the one folder the operation's WriteScope names,
- *     each a file, mode 100644, with no `..`, `.git` or control character;
+ *     each a file, mode 100644, with no `..`, `.git` or control character; a
+ *     deletion (`sha: null`) only in an update's or a removal's scope, under
+ *     that same folder, so an install can delete nothing and nothing can
+ *     delete outside the folder;
  *   - a commit with one parent, no author or committer of its own (the App's
  *     bot commits it), and no message that would skip the repository's checks;
  *   - a pull request from a branch under `mixos/` in this repository, into the
@@ -46,7 +49,7 @@ import { SlugSchema } from "@/lib/repository/types";
 import { GitHubError, githubRequest, segment } from "./api";
 import { isBranchName } from "./identifiers";
 import type { TokenShape } from "./manifest";
-import { APP_BRANCH_PREFIX, UPDATE_BRANCH_PREFIX, isReleaseTag, renderPreviewMarker } from "./names";
+import { APP_BRANCH_PREFIX, UPDATE_BRANCH_PREFIX, isExtensionAction, isReleaseTag, renderPreviewMarker, type ExtensionAction } from "./names";
 import { BranchRulesSchema, RepositorySchema, Sha, parseAnswer, type GitHubRepository } from "./schemas";
 import type { RepositoryRecord } from "./store";
 
@@ -64,10 +67,10 @@ export function repositoryPath(record: Pick<RepositoryRecord, "owner" | "name">,
 /**
  * What one write operation may change, fixed before the operation starts.
  *
- * A proposal's scope names the folder its tree writes under, `apps/files`.
- * Rank 31 widens that for an update or a removal, which replace or delete
- * files in the same folder (tree entries with `sha: null`, which guardWrite()
- * refuses today).
+ * A proposal's scope names the folder its tree writes under, `apps/files`,
+ * and what it does to it. An install adds files; an update replaces them,
+ * deleting the ones the new release lacks; a removal deletes every one. Only
+ * the last two may send a deletion, and only under the folder.
  *
  * A MixOS update's scope names no folder: the one branch it may create, at
  * the one commit, and nothing else. guardWrite() then refuses every blob,
@@ -75,8 +78,8 @@ export function repositoryPath(record: Pick<RepositoryRecord, "owner" | "name">,
  * once each.
  */
 export type WriteScope =
-  | { folder: string; refOnly?: undefined }
-  | { folder?: undefined; refOnly: { branch: string; sha: string } };
+  | { folder: string; action: ExtensionAction; refOnly?: undefined }
+  | { folder?: undefined; action?: undefined; refOnly: { branch: string; sha: string } };
 
 /** The linked repository, as one operation's token reaches it. */
 export interface LinkedRepository {
@@ -139,7 +142,8 @@ const TreeEntry = z.strictObject({
   mode: z.literal("100644"),
   type: z.literal("blob"),
   content: z.string().optional(),
-  sha: Sha.optional(),
+  /** A blob's id, or null to delete the file at `path`. */
+  sha: z.union([Sha, z.null()]).optional(),
 });
 
 const TreeBody = z.strictObject({
@@ -204,6 +208,7 @@ export function isUpdateBranch(branch: string): boolean {
 export function guardWrite(record: RepositoryRecord, scope: WriteScope, suffix: string, body: unknown): unknown {
   if (scope.refOnly) return guardRefOnlyWrite(record, scope.refOnly, suffix, body);
   if (!isExtensionFolder(scope.folder)) refuse("the write scope isn't an extension's folder.");
+  if (!isExtensionAction(scope.action)) refuse("the write scope doesn't say what the operation does.");
   switch (suffix) {
     case "/git/blobs":
       return parsed(BlobBody, body, "a blob");
@@ -212,7 +217,12 @@ export function guardWrite(record: RepositoryRecord, scope: WriteScope, suffix: 
       const tree = parsed(TreeBody, body, "a tree");
       const seen = new Set<string>();
       for (const entry of tree.tree) {
-        if ((entry.content === undefined) === (entry.sha === undefined)) {
+        if (entry.sha === null) {
+          // A deletion: only what replaces or deletes the folder sends one, and
+          // only for a path in it, which assertInside() holds it to below.
+          if (scope.action === "install") refuse(`an install deletes nothing, and the tree would delete ${JSON.stringify(entry.path)}.`);
+          if (entry.content !== undefined) refuse(`${JSON.stringify(entry.path)} can't be deleted and written at once.`);
+        } else if ((entry.content === undefined) === (entry.sha === undefined)) {
           refuse(`${JSON.stringify(entry.path)} needs its content or a blob's id, one of the two.`);
         }
         assertInside(entry.path, scope.folder);
