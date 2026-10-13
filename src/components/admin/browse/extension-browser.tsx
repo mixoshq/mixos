@@ -5,6 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { Search, ServerCrash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CARD_SHELL } from "@/components/ui/card";
@@ -24,8 +25,10 @@ import {
   type SortKey,
 } from "@/lib/repository/types";
 import Notice from "@/components/ui/notice";
+import type { ProposalTarget } from "@/lib/github/outcomes";
 import ReviewDialog, { type PendingTarget } from "../pending/review-dialog";
 import ExtensionCard from "./extension-card";
+import ProposeDialog from "./propose-dialog";
 import RegisterDialog from "./register-dialog";
 
 /**
@@ -57,6 +60,7 @@ export default function ExtensionBrowser({
   pendingSlugs,
   installable,
   installableTone,
+  proposal = null,
 }: {
   kind: ExtensionKind;
   /** Origin of the repository being browsed, for links out to its listings. */
@@ -82,6 +86,11 @@ export default function ExtensionBrowser({
    * for a checkout that can't, which is something to fix.
    */
   installableTone: "info" | "warning";
+  /**
+   * On a built deployment with the GitHub App linked: the repository a
+   * proposal goes to, and why proposals are off, when they are.
+   */
+  proposal?: ProposalTarget | null;
 }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("relevance");
@@ -91,6 +100,7 @@ export default function ExtensionBrowser({
   // The extension to install, then the pending install to review and register.
   const [chosen, setChosen] = useState<ExtensionSummary | null>(null);
   const [reviewing, setReviewing] = useState<PendingTarget | null>(null);
+  const [proposing, setProposing] = useState<ExtensionSummary | null>(null);
   const [installed, setInstalled] = useState(() => new Map(Object.entries(installedAtLoad)));
   const [pendingNow, setPendingNow] = useState(() => new Set(pendingSlugs));
 
@@ -133,8 +143,21 @@ export default function ExtensionBrowser({
   return (
     <>
       {installable && (
-        <div className="mb-4">
-          <Notice tone={installableTone}>{installable}</Notice>
+        <div className="mb-4 space-y-3">
+          <Notice tone={installableTone}>
+            {installable}
+            {proposal && ` Or propose one to ${proposal.repository}: that opens a pull request there, and merging it is the deploy.`}
+          </Notice>
+          {proposal?.off && (
+            <Notice tone="warning" title={`Proposing to ${proposal.repository} is off`}>
+              <p>{proposal.off}</p>
+              <p className="mt-1">
+                <Link href="/admin/github" className="underline underline-offset-2">
+                  Admin &gt; GitHub
+                </Link>
+              </p>
+            </Notice>
+          )}
         </div>
       )}
 
@@ -231,6 +254,8 @@ export default function ExtensionBrowser({
                 repositoryOrigin={repositoryOrigin}
                 installed={installed.get(e.slug) ?? null}
                 pendingSlugs={pendingNow}
+                propose={proposal ? { repository: proposal.repository, disabled: proposal.off !== null } : null}
+                onPropose={setProposing}
                 onInstall={setChosen}
                 onReview={(extension) =>
                   setReviewing({
@@ -283,6 +308,15 @@ export default function ExtensionBrowser({
           setReviewing(target);
         }}
       />
+      {/* On a deployment with the GitHub App linked: a pull request instead of an install. */}
+      {proposal && (
+        <ProposeDialog
+          key={proposing ? `propose:${proposing.kind}/${proposing.slug}` : "propose:none"}
+          extension={proposing}
+          repository={proposal.repository}
+          onClose={() => setProposing(null)}
+        />
+      )}
       {/* An app or a connector installed into pending: review, then Register. */}
       <ReviewDialog
         key={reviewing ? `review:${reviewing.kind}/${reviewing.slug}` : "review:none"}

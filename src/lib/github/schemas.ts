@@ -103,6 +103,92 @@ export const BranchRulesSchema = z.array(
   }),
 );
 
+/* -------------------------------------------------------------------------- */
+/*  Proposals: the git data API, contents, pull requests and checks             */
+/* -------------------------------------------------------------------------- */
+
+/** A full git object id. */
+export const Sha = z.string().regex(/^[0-9a-f]{40}$/, "not a git object id");
+
+/** GET /repos/{owner}/{repo}/git/ref/{ref}, and POST /repos/{owner}/{repo}/git/refs. */
+export const GitRefSchema = z.object({
+  ref: z.string(),
+  object: z.object({ sha: Sha, type: z.string() }),
+});
+
+/** GET and POST /repos/{owner}/{repo}/git/commits. */
+export const GitCommitSchema = z.object({
+  sha: Sha,
+  tree: z.object({ sha: Sha }),
+  parents: z.array(z.object({ sha: Sha })),
+});
+
+/** POST /repos/{owner}/{repo}/git/blobs. */
+export const GitBlobCreatedSchema = z.object({ sha: Sha });
+
+/** One entry of a tree, as GET and POST /repos/{owner}/{repo}/git/trees give it. */
+export const GitTreeEntrySchema = z.object({
+  path: z.string(),
+  mode: z.string(),
+  type: z.string(),
+  sha: Sha,
+});
+
+/** GET and POST /repos/{owner}/{repo}/git/trees: one level of the tree. */
+export const GitTreeSchema = z.object({
+  sha: Sha,
+  tree: z.array(GitTreeEntrySchema),
+  truncated: z.boolean(),
+});
+
+/** One entry of GET /repos/{owner}/{repo}/contents/{dir}. */
+export const ContentEntrySchema = z.object({
+  name: z.string(),
+  type: z.string(),
+  size: z.number().int().min(0),
+});
+export const ContentDirectorySchema = z.array(ContentEntrySchema);
+
+/** GET /repos/{owner}/{repo}/contents/{file}: a file, in base64 up to 1 MB. */
+export const ContentFileSchema = z.object({
+  type: z.literal("file"),
+  encoding: z.string(),
+  content: z.string(),
+  size: z.number().int().min(0),
+});
+
+/** One pull request, as POST /pulls and GET /pulls give it. */
+export const PullRequestSchema = z.object({
+  number: z.number().int().positive(),
+  state: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  user: z.object({ login: z.string(), type: z.string() }).nullable(),
+  head: z.object({
+    ref: z.string(),
+    sha: Sha,
+    repo: z.object({ id: Id }).nullable(),
+  }),
+  base: z.object({ ref: z.string(), sha: Sha }),
+});
+export type PullRequest = z.infer<typeof PullRequestSchema>;
+export const PullRequestListSchema = z.array(PullRequestSchema);
+
+/** GET /repos/{owner}/{repo}/commits/{ref}/check-runs. */
+export const CheckRunsSchema = z.object({
+  total_count: z.number().int().min(0),
+  check_runs: z.array(z.object({ status: z.string(), conclusion: z.string().nullable() })),
+});
+export type CheckRuns = z.infer<typeof CheckRunsSchema>;
+
+/** GET /repos/{owner}/{repo}/commits/{ref}/status: the combined commit status. */
+export const CombinedStatusSchema = z.object({
+  state: z.string(),
+  total_count: z.number().int().min(0),
+  statuses: z.array(z.object({ state: z.string() })),
+});
+export type CombinedStatus = z.infer<typeof CombinedStatusSchema>;
+
 /**
  * Parse one answer, or throw a GitHubError naming what didn't fit: the paths of
  * the fields, never what they held.

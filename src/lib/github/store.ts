@@ -11,6 +11,7 @@
  *   github_link                  the installation and the one repository, and whether it is off
  *   github_branch_rule           what the last read of the default branch's rules found
  *   github_branch_rule_override  an admin's confirmation that another protection applies
+ *   github_preview_checklist     an admin's confirmation that no host builds previews of App branches
  *   github_manifest_state        the pending "create the App" round trip: a hash of its state
  *
  * Ids and names are stored as GitHub gave them, after ./identifiers.ts has
@@ -39,6 +40,7 @@ export const SETTING = {
   link: "github_link",
   branchRule: "github_branch_rule",
   override: "github_branch_rule_override",
+  previewChecklist: "github_preview_checklist",
   manifestState: "github_manifest_state",
 } as const;
 
@@ -124,6 +126,24 @@ export const OverrideRecordSchema = z.object({
 });
 export type OverrideRecord = z.infer<typeof OverrideRecordSchema>;
 
+/**
+ * What the App can't read for itself, and an admin confirms before the first
+ * proposal: that no host or service builds the App's branches or pull requests
+ * with secrets. Render's service previews set in its dashboard, Railway's PR
+ * environments and Coolify's preview deployments live in those hosts'
+ * settings, not in the repository (./propose.ts reads what is in it).
+ */
+export const PREVIEW_CHECKLIST = ["render", "railway", "coolify", "other"] as const;
+export type PreviewChecklistItem = (typeof PREVIEW_CHECKLIST)[number];
+
+export const PreviewChecklistSchema = z.object({
+  repositoryId: Id,
+  items: z.array(z.enum(PREVIEW_CHECKLIST)),
+  at: z.string(),
+  by: z.string(),
+});
+export type PreviewChecklistRecord = z.infer<typeof PreviewChecklistSchema>;
+
 export const ManifestStateSchema = z.object({
   /** SHA-256 of the state, hex. The state itself is only in the admin's cookie. */
   hash: z.string().regex(/^[0-9a-f]{64}$/),
@@ -161,6 +181,8 @@ export interface GitHubState {
   link: LinkRecord | null;
   branchRule: BranchRuleRecord | null;
   override: OverrideRecord | null;
+  /** Null unless every item is confirmed, for the linked repository. */
+  previewChecklist: PreviewChecklistRecord | null;
 }
 
 /** The pool, or a transaction on it. */
@@ -174,10 +196,18 @@ async function rows(db: Db, keys: string[]): Promise<Map<string, string>> {
 }
 
 export async function readGitHubState(db: Db = sql): Promise<GitHubState> {
-  const found = await rows(db, [SETTING.app, SETTING.key, SETTING.link, SETTING.branchRule, SETTING.override]);
+  const found = await rows(db, [
+    SETTING.app,
+    SETTING.key,
+    SETTING.link,
+    SETTING.branchRule,
+    SETTING.override,
+    SETTING.previewChecklist,
+  ]);
   const link = parseRow(LinkRecordSchema, SETTING.link, found.get(SETTING.link));
   const branchRule = parseRow(BranchRuleRecordSchema, SETTING.branchRule, found.get(SETTING.branchRule));
   const override = parseRow(OverrideRecordSchema, SETTING.override, found.get(SETTING.override));
+  const checklist = parseRow(PreviewChecklistSchema, SETTING.previewChecklist, found.get(SETTING.previewChecklist));
   return {
     app: parseRow(AppRecordSchema, SETTING.app, found.get(SETTING.app)),
     hasKey: found.has(SETTING.key),
@@ -186,6 +216,13 @@ export async function readGitHubState(db: Db = sql): Promise<GitHubState> {
     // nothing about it.
     branchRule: branchRule && link && branchRule.repositoryId === link.repository.id ? branchRule : null,
     override: override && link && override.repositoryId === link.repository.id ? override : null,
+    previewChecklist:
+      checklist &&
+      link &&
+      checklist.repositoryId === link.repository.id &&
+      PREVIEW_CHECKLIST.every((item) => checklist.items.includes(item))
+        ? checklist
+        : null,
   };
 }
 
@@ -286,7 +323,12 @@ export async function recordApp(app: AppRecord, sealedKey: string): Promise<bool
     if (inserted.length === 0) return false;
     await put(tx, SETTING.key, sealedKey);
     // Nothing from before this App can describe it.
-    await tx`delete from public.platform_settings where key = any(${[SETTING.link, SETTING.branchRule, SETTING.override]})`;
+    await tx`delete from public.platform_settings where key = any(${[
+      SETTING.link,
+      SETTING.branchRule,
+      SETTING.override,
+      SETTING.previewChecklist,
+    ]})`;
     return true;
   });
 }
@@ -314,7 +356,7 @@ export async function recordLink(link: LinkRecord, rule: BranchRuleRecord | null
     `) as unknown as unknown[];
     if (inserted.length === 0) return false;
     // Anything left from an earlier link describes another repository.
-    await tx`delete from public.platform_settings where key = any(${[SETTING.override]})`;
+    await tx`delete from public.platform_settings where key = any(${[SETTING.override, SETTING.previewChecklist]})`;
     if (rule) await put(tx, SETTING.branchRule, JSON.stringify(rule));
     else await tx`delete from public.platform_settings where key = ${SETTING.branchRule}`;
     return true;
@@ -353,6 +395,17 @@ export async function saveOverride(override: OverrideRecord): Promise<void> {
 export async function clearOverride(): Promise<boolean> {
   const deleted = (await sql`
     delete from public.platform_settings where key = ${SETTING.override} returning key
+  `) as unknown as unknown[];
+  return deleted.length > 0;
+}
+
+export async function savePreviewChecklist(checklist: PreviewChecklistRecord): Promise<void> {
+  await put(sql, SETTING.previewChecklist, JSON.stringify(checklist));
+}
+
+export async function clearPreviewChecklist(): Promise<boolean> {
+  const deleted = (await sql`
+    delete from public.platform_settings where key = ${SETTING.previewChecklist} returning key
   `) as unknown as unknown[];
   return deleted.length > 0;
 }
