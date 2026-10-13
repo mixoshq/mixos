@@ -349,6 +349,19 @@ just pulled.
   `render.yaml` turns off the web service's previews, Danger skips App
   branches, and CI checks out without keeping its token. See
   `docs/hosting/README.md#proposing-an-extension`.
+- **MixOS update pull requests.** With the GitHub App linked and the
+  repository a fork of `mixoshq/mixos`, the release notice offers **Open an
+  update pull request**. It first asks GitHub whether upstream's tag is at
+  the release's commit and on upstream's `main`; if GitHub can't confirm it
+  (it answers 404 while upstream is private), or the release changes a
+  workflow, nothing is opened and the notice gives the compare link to merge
+  by hand. Otherwise it creates `mixos/update-<tag>` at that commit and opens
+  a pull request with the notes as text, GitHub's numbers and the upgrade
+  checklist. The App can write only that branch and that pull request for
+  it, and never merges. A private copy gets the `git fetch upstream --tags &&
+  git merge <tag>` steps instead. Admin > GitHub lists open update pull
+  requests with their checks. Audited as `mixos.update.propose`. See
+  `docs/hosting/README.md#updating-mixos-through-the-app`.
 
 ## 2026-10-07
 
