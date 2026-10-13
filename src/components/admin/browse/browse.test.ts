@@ -223,3 +223,42 @@ test("an installed extension's listing says where it came from, in one of three 
     assert.doesNotMatch(text(html), /\bInstalled\b(?! from)/);
   }
 });
+
+test("one installed from this catalogue offers Update in a checkout, how to update on a built deployment, and its review once one waits", () => {
+  const extension = {
+    slug: "acme",
+    kind: "app" as const,
+    name: "Acme Board",
+    tagline: "Boards.",
+    categories: [],
+    keywords: [],
+    author: { handle: "acme", verified: false },
+    license: "MIT",
+    installCount: 3,
+    featured: false,
+    latestVersion: "1.3.0",
+  };
+  const card = (fields: Partial<Parameters<typeof ExtensionCard>[0]> = {}, installed = provenanceOf("app", "acme", [install()], "https://mixos.org")) =>
+    text(
+      render(
+        createElement(ExtensionCard, {
+          extension,
+          repositoryOrigin: "https://mixos.org",
+          installed,
+          pendingSlugs: new Set<string>(),
+          onInstall: () => {},
+          onReview: () => {},
+          ...fields,
+        }),
+      ),
+    ).trim();
+
+  assert.match(card({ onUpdate: () => {} }), /Installed from mixos\.org · 1\.2\.0 Update View listing$/);
+  // The current release in place: another release can still be picked.
+  assert.match(card({ onUpdate: () => {}, extension: { ...extension, latestVersion: "1.2.0" } }), /Installed from mixos\.org · 1\.2\.0 Change release View listing$/);
+  assert.match(card({ updateHelpUrl: "https://mixos.org/docs/operating/hosting#updating-an-extension" }), /Installed from mixos\.org · 1\.2\.0 How to update \(opens in a new tab\) View listing$/);
+  assert.match(card({ onUpdate: () => {}, pendingSlugs: new Set(["acme"]) }), /Installed from mixos\.org · 1\.2\.0 Review and register View listing$/);
+  // Nothing to update for one from another catalogue, or a local one.
+  assert.doesNotMatch(card({ onUpdate: () => {} }, provenanceOf("app", "acme", [install({ source: "http://localhost:4321" })], "https://mixos.org")), /Update/);
+  assert.doesNotMatch(card({ onUpdate: () => {} }, provenanceOf("app", "acme", [], "https://mixos.org")), /Update/);
+});

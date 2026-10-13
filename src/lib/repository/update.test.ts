@@ -21,13 +21,16 @@ import {
   compareDeclarations,
   compareDottedVersions,
   compareMigrations,
+  folderDifferences,
   folderMigrations,
   folderState,
   localChangesBetween,
   needsOlderConsent,
   onlyLastUpdated,
   releaseMigrations,
+  sameRepository,
   shownClaims,
+  unhashableProblem,
   updateDirection,
   type ReleaseRef,
 } from "./update";
@@ -107,7 +110,11 @@ describe("what changed in the folder", () => {
 
   test("a folder as install wrote it has no local changes, found from the files hash alone", () => {
     const dir = folder(RELEASE);
-    assert.deepEqual(folderState(dir, { filesHash: filesHash(RELEASE) }), { modified: false, folderHash: filesHash(RELEASE) });
+    assert.deepEqual(folderState(dir, { filesHash: filesHash(RELEASE) }), {
+      modified: false,
+      folderHash: filesHash(RELEASE),
+      unhashable: null,
+    });
     const listed = localChangesBetween(dir, "app", RELEASE);
     assert.deepEqual([listed.changed, listed.added, listed.removed, listed.ignored], [[], [], [], []]);
   });
@@ -161,7 +168,19 @@ describe("what changed in the folder", () => {
     fs.rmSync(path.join(dir, "README.md"));
     fs.symlinkSync("/etc/hosts", path.join(dir, "README.md"));
     fs.symlinkSync("/etc/hosts", path.join(dir, "hosts"));
-    assert.deepEqual(folderState(dir, { filesHash: filesHash(RELEASE) }), { modified: true, folderHash: null });
+    const state = folderState(dir, { filesHash: filesHash(RELEASE) });
+    assert.deepEqual(state, {
+      modified: true,
+      folderHash: null,
+      unhashable: "README.md is a symbolic link, which install never writes.",
+    });
+    // An update can't be made over it: nothing could tell later whether it changed.
+    assert.equal(
+      unhashableProblem("apps/board", state),
+      "apps/board holds something no files hash covers (README.md is a symbolic link, which install never writes), " +
+        "so an update couldn't tell later whether the folder changed. Take that out of the folder first.",
+    );
+    assert.equal(unhashableProblem("apps/board", { unhashable: null }), null);
     const listed = localChangesBetween(dir, "app", RELEASE);
     assert.deepEqual([listed.changed, listed.added], [["README.md"], ["hosts"]]);
   });
@@ -261,5 +280,58 @@ describe("what the release it goes to changes", () => {
       changed: [],
       lacking: [],
     });
+  });
+});
+
+describe("one folder against another", () => {
+  test("what a commit of one in the other's place changes: the files changed, added and deleted, the record included", () => {
+    const before = folder([file("app.json", '{"name":"A"}\n'), file("api/a/route.ts", "a\n"), file("old.ts", "old\n")]);
+    const after = folder([file("app.json", '{"name":"A"}\n'), file("api/a/route.ts", "b\n"), file("new.ts", "new\n")]);
+    fs.writeFileSync(path.join(after, ".registry.json"), '{"version":"2"}\n');
+    assert.deepEqual(folderDifferences(before, after), {
+      changed: [".registry.json", "api/a/route.ts"],
+      added: ["new.ts"],
+      removed: ["old.ts"],
+      more: { changed: 0, added: 0, removed: 0 },
+      incomplete: false,
+    });
+    assert.deepEqual(folderDifferences(before, before).changed, []);
+  });
+
+  test("a link in a file's place counts as changed, and is never read through", () => {
+    const before = folder([file("README.md", "hello\n"), file("app.json", "{}\n")]);
+    const after = folder([file("app.json", "{}\n")]);
+    fs.symlinkSync(path.join(before, "README.md"), path.join(after, "README.md"));
+    assert.deepEqual(folderDifferences(before, after).changed, ["README.md"]);
+  });
+
+  test("long lists are cut, with how many more", () => {
+    const before = folder([file("app.json", "{}\n")]);
+    const after = folder([
+      file("app.json", "{}\n"),
+      ...Array.from({ length: 53 }, (_, i) => file(`f${String(i).padStart(2, "0")}.ts`, "x\n")),
+    ]);
+    const changes = folderDifferences(before, after);
+    assert.equal(changes.added.length, 50);
+    assert.equal(changes.more.added, 3);
+  });
+
+  test("a theme's manifest whose only change is lastUpdated isn't a local change", () => {
+    const manifest = (extra: Record<string, unknown>) => `${JSON.stringify({ name: "Dusk", ...extra }, null, 2)}\n`;
+    const release = [file("theme.json", manifest({})), file("theme.css", ":root {}\n")];
+    const dir = folder([file("theme.json", manifest({ lastUpdated: "2026-10-11T09:00:00.000Z" })), file("theme.css", ":root {}\n")]);
+    const local = localChangesBetween(dir, "theme", release);
+    assert.deepEqual([local.changed, local.ignored], [[], ["lastUpdated"]]);
+  });
+
+  test("a migration with no bytes to compare on either side counts as changed", () => {
+    const sql = Buffer.from("create table t (id int);\n");
+    assert.deepEqual(compareMigrations(new Map([["0001.sql", sql]]), new Map([["0001.sql", null]])).changed, ["0001.sql"]);
+    assert.deepEqual(compareMigrations(new Map([["0001.sql", sql]]), new Map([["0001.sql", sql]])).changed, []);
+  });
+
+  test("two repositories are one when GitHub would say so", () => {
+    assert.equal(sameRepository({ owner: "Acme", name: "Board" }, { owner: "acme", name: "board" }), true);
+    assert.equal(sameRepository({ owner: "acme", name: "board" }, { owner: "mallory", name: "board" }), false);
   });
 });

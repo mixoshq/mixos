@@ -54,6 +54,12 @@ import { KIND_SEGMENT, type ExtensionSummary } from "@/lib/repository/types";
  * another catalogue; or a local extension that only shares the name. Matching
  * the name alone, as this did, called all three "Installed".
  *
+ * One installed from this catalogue can be updated from here: Update opens
+ * the update dialog in a checkout ("Change release" when the catalogue's
+ * current release is the one in place), and on a built deployment the card
+ * links to how updating works. An update already waiting in pending offers its
+ * review instead.
+ *
  * ── ON A DEPLOYMENT WITH THE GITHUB APP LINKED ──────────────────────────────
  *
  * A built deployment doesn't install. With the App linked, the button is
@@ -71,6 +77,8 @@ export default function ExtensionCard({
   propose = null,
   onInstall,
   onReview,
+  onUpdate,
+  updateHelpUrl = null,
   onPropose,
 }: {
   extension: ExtensionSummary;
@@ -85,9 +93,16 @@ export default function ExtensionCard({
   onInstall: (extension: ExtensionSummary) => void;
   /** Open the review of a pending install, which leads to Register. */
   onReview: (extension: ExtensionSummary) => void;
+  /** Open the update dialog, for one installed from this catalogue. Absent where this deployment can't install. */
+  onUpdate?: (extension: ExtensionSummary) => void;
+  /** Where a built deployment reads how updating works, in place of the button. */
+  updateHelpUrl?: string | null;
   onPropose?: (extension: ExtensionSummary) => void;
 }) {
   const pending = !installed && pendingSlugs.has(extension.slug);
+  const fromHere = installed?.from === "catalogue" ? installed : null;
+  const updatePending = fromHere !== null && pendingSlugs.has(extension.slug);
+  const newer = fromHere !== null && (fromHere.modified || (extension.latestVersion ?? fromHere.version) !== fromHere.version);
   // No version means no published release: nothing to fetch and no hash to
   // verify against. Browsable, not installable, and the button says which.
   const installable = Boolean(extension.latestVersion);
@@ -144,21 +159,44 @@ export default function ExtensionCard({
           review, so there isn't one.
         */}
         {installed ? (
-          <p
-            className={cn(
-              "inline-flex min-w-0 items-center gap-1.5 text-xs",
-              installed.from === "catalogue" ? "text-foreground" : "text-muted-foreground",
-            )}
-            title={provenanceDetail(installed)}
-          >
-            {installed.from === "catalogue" &&
-              (installed.modified ? (
-                <PencilLine className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              ) : (
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              ))}
-            {provenanceLine(installed)}
-          </p>
+          <>
+            <p
+              className={cn(
+                "inline-flex min-w-0 items-center gap-1.5 text-xs",
+                installed.from === "catalogue" ? "text-foreground" : "text-muted-foreground",
+              )}
+              title={provenanceDetail(installed)}
+            >
+              {installed.from === "catalogue" &&
+                (installed.modified ? (
+                  <PencilLine className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                ) : (
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                ))}
+              {provenanceLine(installed)}
+            </p>
+            {fromHere &&
+              (updatePending ? (
+                <Button variant="primary" size="sm" onClick={() => onReview(extension)}>
+                  Review and register
+                </Button>
+              ) : onUpdate ? (
+                <Button variant={newer ? "primary" : "secondary"} size="sm" onClick={() => onUpdate(extension)}>
+                  {newer ? "Update" : "Change release"}
+                </Button>
+              ) : updateHelpUrl ? (
+                <a
+                  href={updateHelpUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                >
+                  How to update
+                  <ExternalLink className="h-3 w-3" aria-hidden />
+                  <span className="sr-only"> (opens in a new tab)</span>
+                </a>
+              ) : null)}
+          </>
         ) : pending ? (
           <Button variant="primary" size="sm" onClick={() => onReview(extension)}>
             Review and register

@@ -10,7 +10,9 @@
  *
  * And the hand-back after removing an extension's code: the commit that
  * deletes the folder, built from the kind, the name and, for an install, the
- * record's version and source; run the same way.
+ * record's version and source; run the same way. And after an update: the
+ * commit that changes the folder, naming both releases, and how to roll it
+ * back.
  */
 
 import { after, describe, test } from "node:test";
@@ -34,7 +36,12 @@ import {
   removalHandBackFor,
   removalHandBackLines,
   removalSubject,
+  rollbackFor,
   shellWord,
+  updateBranchName,
+  updateCommitMessage,
+  updateHandBackFor,
+  updateSubject,
 } from "./hand-back";
 import { InstallRecordSchema, type InstallRecord } from "./install-record";
 
@@ -373,6 +380,121 @@ describe("the removal's commit", () => {
     assert.deepEqual(git(repo, "show", "--name-status", "--format=", "HEAD").stdout.trim().split("\n").sort(), [
       "D\tapps/files/.registry.json",
       "D\tapps/files/app.json",
+    ]);
+    assert.equal(git(repo, "diff", "--cached", "--name-only").stdout.trim(), "other.txt");
+  });
+});
+
+describe("the update's commit", () => {
+  const FROM = { version: "1.1.0", commitSha: "a".repeat(40), direction: "newer" as const, localChangesDiscarded: false };
+  const CHANGES = {
+    changed: [".registry.json", "app.json"],
+    added: ["new.ts"],
+    removed: ["old.ts"],
+    more: { changed: 0, added: 0, removed: 0 },
+    incomplete: false,
+  };
+
+  test("its subject names both releases, from identifiers; its trailers are the record's and the release it replaces", () => {
+    assert.equal(updateSubject(RECORD, FROM), "feat(files): update app files from 1.1.0 to 1.2.0");
+    assert.equal(updateBranchName(RECORD), "update-app-files");
+    const message = updateCommitMessage(RECORD, FROM, "apps/files");
+    const lines = message.split("\n");
+    assert.deepEqual(lines.slice(-8), [
+      "Registry-Source: https://mixos.org",
+      "Registry-Version: 1.2.0",
+      `Registry-Commit: ${SHA}`,
+      `Registry-Content-Hash: ${HASH}`,
+      `Registry-Files-Hash: ${HASH}`,
+      "Registry-Listing: https://mixos.org/extend/apps/files",
+      "Registry-Replaces-Version: 1.1.0",
+      `Registry-Replaces-Commit: ${"a".repeat(40)}`,
+    ]);
+    assert.match(message, /^Updated from mixos\.org and registered in a checkout\. It replaces 1\.1\.0\./m);
+    assert.doesNotMatch(message, /discarded|a newer release/);
+    const older = updateCommitMessage(RECORD, { ...FROM, direction: "older", localChangesDiscarded: true }, "apps/files");
+    assert.match(older, /It replaces 1\.1\.0,\s+a newer release\./);
+    assert.match(older, /^Local changes to apps\/files were discarded\.$/m);
+  });
+
+  test("it never holds anything that turns a repository's workflows off, whatever the records hold", () => {
+    for (const version of ["1.2.0", "9f2be41", SHA])
+      for (const slug of ["files", "skip-ci", "no-ci", "skip-checks"])
+        for (const from of ["0.9.0", "abcdef1"])
+          for (const kind of ["app", "connector", "theme"] as const) {
+            const record = InstallRecordSchema.parse({ ...RECORD, kind, slug, version, gitTag: `${slug}@v1` });
+            const message = updateCommitMessage(record, { ...FROM, version: from, direction: "older", localChangesDiscarded: true }, `${kind}s/${slug}`);
+            assert.equal(ciSkipMarker(message), null, message);
+          }
+  });
+
+  test("how to roll it back, and an app's migrations, which neither way undoes", () => {
+    assert.match(rollbackFor("app"), /revert the commit and deploy again, or redeploy the previous build on your host\. Neither undoes a migration it ran/);
+    assert.doesNotMatch(rollbackFor("connector"), /migration/);
+    const handBack = updateHandBackFor(RECORD, FROM, "apps/files", [{ path: "app.json", bytes: 3 }], CHANGES);
+    assert.deepEqual(handBack.update, { from: "1.1.0", direction: "newer", changes: CHANGES, rollback: rollbackFor("app") });
+    assert.match(handBack.commands, /^git switch -c update-app-files\ngit add apps\/files\ngit commit -F - -- apps\/files <<'MSG'\nfeat\(files\): update app files from 1\.1\.0 to 1\.2\.0\n/);
+  });
+
+  test("for a terminal: what the commit changes, the commands, and how to roll it back", () => {
+    const lines = handBackLines(updateHandBackFor(RECORD, FROM, "apps/files", [{ path: "app.json", bytes: 3 }], CHANGES), { isApp: true });
+    const text = lines.join("\n");
+    assert.match(text, /^It runs in this checkout now, and nowhere else until you commit the change to apps\/files and deploy it\.$/m);
+    assert.match(
+      text,
+      /^What the commit changes in apps\/files\/ \(2 changed, 1 added, 1 deleted\):\n {4}changed  \.registry\.json\n {4}changed  app\.json\n {4}added    new\.ts\n {4}deleted  old\.ts$/m,
+    );
+    assert.match(text, /The message records both releases and where they came from:/);
+    assert.equal(lines.at(-1), rollbackFor("app"));
+    assert.doesNotMatch(text, /arrives inactive/);
+  });
+
+  test("run in a repository, they commit the change to the folder alone, its deleted files included", (t) => {
+    const env = {
+      PATH: process.env.PATH ?? "",
+      HOME: tmp,
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_AUTHOR_NAME: "Test",
+      GIT_AUTHOR_EMAIL: "test@example.com",
+      GIT_COMMITTER_NAME: "Test",
+      GIT_COMMITTER_EMAIL: "test@example.com",
+    } as unknown as NodeJS.ProcessEnv;
+    const git = (cwd: string, ...args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8", env });
+    const repo = path.join(tmp, "repo-update");
+    fs.mkdirSync(path.join(repo, "apps", "files"), { recursive: true });
+    if (git(repo, "init", "-q", "-b", "main").status !== 0) {
+      t.skip("git isn't available");
+      return;
+    }
+    for (const [name, text] of [["app.json", "{}\n"], ["old.ts", "old\n"], [".registry.json", '{"version":"1.1.0"}\n']]) {
+      fs.writeFileSync(path.join(repo, "apps", "files", name), text);
+    }
+    git(repo, "add", "apps");
+    git(repo, "commit", "-q", "-m", "add files 1.1.0");
+    fs.writeFileSync(path.join(repo, "other.txt"), "staged, not ours\n");
+    git(repo, "add", "other.txt");
+    // What the swap leaves: the folder as the new release has it.
+    fs.writeFileSync(path.join(repo, "apps", "files", "app.json"), '{"name":"Files"}\n');
+    fs.rmSync(path.join(repo, "apps", "files", "old.ts"));
+    fs.writeFileSync(path.join(repo, "apps", "files", "new.ts"), "new\n");
+    fs.writeFileSync(path.join(repo, "apps", "files", ".registry.json"), '{"version":"1.2.0"}\n');
+
+    const handBack = updateHandBackFor(RECORD, FROM, "apps/files", [{ path: "app.json", bytes: 17 }], CHANGES);
+    const script = handBack.commands.replace(/\ngit push -u origin HEAD$/, "\n");
+    const run = spawnSync("bash", ["-e", "-c", script], { cwd: repo, encoding: "utf8", env });
+    assert.equal(run.status, 0, run.stderr);
+
+    assert.equal(git(repo, "branch", "--show-current").stdout.trim(), "update-app-files");
+    assert.equal(git(repo, "log", "-1", "--format=%B").stdout.trim(), handBack.commitMessage);
+    assert.equal(
+      git(repo, "log", "-1", "--format=%(trailers:key=Registry-Replaces-Version,valueonly)").stdout.trim(),
+      "1.1.0",
+    );
+    assert.deepEqual(git(repo, "show", "--name-status", "--format=", "HEAD").stdout.trim().split("\n").sort(), [
+      "A\tapps/files/new.ts",
+      "D\tapps/files/old.ts",
+      "M\tapps/files/.registry.json",
+      "M\tapps/files/app.json",
     ]);
     assert.equal(git(repo, "diff", "--cached", "--name-only").stdout.trim(), "other.txt");
   });

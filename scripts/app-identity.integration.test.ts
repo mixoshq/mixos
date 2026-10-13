@@ -274,13 +274,21 @@ describe("an app under a slug a different extension had", { skip }, () => {
       // GitHub matches names without case, and so does the identity.
       repository: { owner: "Acme", name: "MixOS-Files", subpath: "apps/files" },
     });
+    // Different files, as an update that Register swapped in leaves them.
     writeApp(files, "export const GET = defineRoute({ roles: [] });\n");
     await release([app(files)], [update]);
 
     const r = await row();
-    assert.deepEqual([r?.is_active, r?.identity_changed_at], [true, null]);
+    assert.deepEqual([r?.is_active, r?.identity_changed_at, r?.returned_changed_at], [true, null, null]);
     assert.equal(await liveKeys(), 1);
     assert.equal((await audited("app.identity.changed")).length, 1);
+    // Its grant and its settings belong to the slug, and are as they were.
+    const [kept] = await sql`
+      select
+        (select count(*)::int from public.user_app_grants where app_slug = ${files}) as grants,
+        (select count(*)::int from public.app_settings where app_slug = ${files}) as settings
+    `;
+    assert.deepEqual({ ...kept }, { grants: 1, settings: 1 });
   });
 
   test("a release from another repository is a different extension", async () => {

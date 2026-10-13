@@ -21,6 +21,7 @@ import type {
   ReviewOutcome,
 } from "@/lib/repository/pending-outcomes";
 import type { PendingReview } from "@/lib/repository/review";
+import type { PendingUpdateReview } from "@/lib/repository/update";
 import { KIND_LABEL } from "@/lib/repository/types";
 import Notice from "@/components/ui/notice";
 import RegisterResult from "./register-result";
@@ -112,12 +113,21 @@ export default function ReviewDialog({
   const registered = outcome?.ok === true;
   const refused = outcome?.ok === false && !locked;
   const ready = review?.ok === true && review.review.problem === null;
+  const update = review?.ok ? review.update : null;
 
   return (
     <Dialog
       open
       onClose={busy ? () => {} : close}
-      title={registered ? `${target.name} registered` : `Review ${target.name}`}
+      title={
+        registered
+          ? outcome.result.update
+            ? `${target.name} updated`
+            : `${target.name} registered`
+          : update
+            ? `Review the update of ${target.name}`
+            : `Review ${target.name}`
+      }
       subtitle={`${KIND_LABEL[kind].one} · ${target.slug}`}
       size="lg"
       footer={
@@ -170,6 +180,7 @@ export default function ReviewDialog({
           <ReviewPrompt
             review={review.review}
             listing={review.listing}
+            update={review.update}
             read={read}
             onRead={setRead}
           />
@@ -195,21 +206,28 @@ export default function ReviewDialog({
 export function ReviewPrompt({
   review,
   listing,
+  update = null,
   read,
   onRead,
 }: {
   review: PendingReview;
   listing: ListingFacts;
+  /** For a pending update: how it compares with the folder it replaces. */
+  update?: PendingUpdateReview | null;
   read: boolean;
   onRead: (read: boolean) => void;
 }) {
   return (
     <div className="space-y-6">
-      <ReviewPanel review={review} listing={listing} />
+      <ReviewPanel review={review} listing={listing} update={update} />
       {review.problem === null && (
         <div className="space-y-2 border-t border-border pt-4">
           <Checkbox
-            label="I've read what will run, and I want to run it in this checkout."
+            label={
+              update
+                ? `I've read what will run, and I want to run it in this checkout in place of ${update.from.version}.`
+                : "I've read what will run, and I want to run it in this checkout."
+            }
             checked={read}
             onChange={(e) => onRead(e.target.checked)}
           />
