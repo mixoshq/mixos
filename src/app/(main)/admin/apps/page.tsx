@@ -17,6 +17,7 @@ import AppRegistryList from "@/components/admin/app-registry-list";
 import AppsNotInBuild from "@/components/admin/apps-not-in-build";
 import BrandConflicts from "@/components/admin/brand-conflicts";
 import ProposedPullRequests from "@/components/admin/github/proposed-pull-requests";
+import { proposalTarget } from "@/lib/github/propose";
 import PendingInstalls from "@/components/admin/pending/pending-installs";
 import RegistryNotices from "@/components/admin/registry-notices";
 import { getActiveTheme } from "@/lib/themes/active";
@@ -37,6 +38,9 @@ export default async function AppsAdminPage() {
   // their slug. See getAppBuildStatus.
   const buildStatus = await getAppBuildStatus();
   const { theme } = await getActiveTheme();
+  // On a built deployment with the GitHub App linked, Remove offers a pull
+  // request instead; from what is stored, without asking GitHub on every render.
+  const proposal = await proposalTarget("app");
 
   // Precompute the missing-connector map once per page load. Shown here as a
   // warning only — it is not a gate on this page any more. An app that needs an
@@ -117,6 +121,7 @@ export default async function AppsAdminPage() {
         activeBySlug={activeBySlug}
         returnedChangedBySlug={buildStatus.returnedChanged}
         replacedBySlug={buildStatus.replaced}
+        proposal={proposal}
       />
       <AppsNotInBuild
         apps={buildStatus.notInBuild}
