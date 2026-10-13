@@ -199,6 +199,8 @@ export const WHAT_THE_RELEASE_CHECK_SENDS = docsUrl("security/surface#the-releas
 export interface ReleaseNotice {
   /** The release's tag, `v0.5.0`. */
   tag: string;
+  /** The release's commit, 40 hex characters, as the list's schema checked it. */
+  commitSha: string;
   /** "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor release: it may need changes." */
   text: string;
   /** Its notes, untrusted Markdown, possibly empty. Rendered collapsed, with links as text. */
@@ -252,6 +254,7 @@ export function describeRelease(
       : "";
   return {
     tag: latest.tag,
+    commitSha: latest.commitSha,
     text: `MixOS ${version} is available (this instance runs ${current}). ${stepSentence(comparison.step, to)}${trial}`,
     notes: latest.notes,
     releaseUrl,

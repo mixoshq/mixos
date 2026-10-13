@@ -35,6 +35,11 @@
  *     default branch, with a one-line title that skips no checks and starts no
  *     Render preview.
  *
+ * A MixOS update (./update-pull.ts) gets a narrower scope still, with no
+ * folder: one branch, `mixos/update-<tag>`, at the one commit the scope names,
+ * created once, and one pull request from it. No blob, tree or commit: the
+ * commit already exists, upstream's, and the App adds nothing to it.
+ *
  * A refusal is a GitHubError with failure "path", before anything is sent.
  */
 
@@ -44,7 +49,7 @@ import { SlugSchema } from "@/lib/repository/types";
 import { GitHubError, githubRequest, segment } from "./api";
 import { isBranchName } from "./identifiers";
 import type { TokenShape } from "./manifest";
-import { APP_BRANCH_PREFIX, isExtensionAction, renderPreviewMarker, type ExtensionAction } from "./names";
+import { APP_BRANCH_PREFIX, UPDATE_BRANCH_PREFIX, isExtensionAction, isReleaseTag, renderPreviewMarker, type ExtensionAction } from "./names";
 import { BranchRulesSchema, RepositorySchema, Sha, parseAnswer, type GitHubRepository } from "./schemas";
 import type { RepositoryRecord } from "./store";
 
@@ -67,10 +72,14 @@ export function repositoryPath(record: Pick<RepositoryRecord, "owner" | "name">,
  * deleting the ones the new release lacks; a removal deletes every one. Only
  * the last two may send a deletion, and only under the folder.
  *
- * Rank 32's MixOS update creates a branch at a commit and writes no tree, so
- * it gets a scope with no folder at all, beside this one.
+ * A MixOS update's scope names no folder: the one branch it may create, at
+ * the one commit, and nothing else. guardWrite() then refuses every blob,
+ * tree and commit, and `post()` lets the ref and the pull request through
+ * once each.
  */
-export type WriteScope = { folder: string; action: ExtensionAction };
+export type WriteScope =
+  | { folder: string; action: ExtensionAction; refOnly?: undefined }
+  | { folder?: undefined; action?: undefined; refOnly: { branch: string; sha: string } };
 
 /** The linked repository, as one operation's token reaches it. */
 export interface LinkedRepository {
@@ -94,6 +103,8 @@ export function linkedRepository(
   scope?: WriteScope,
 ): LinkedRepository {
   const auth = { kind: "installation", token } as const;
+  /** What a ref-only scope has sent already: each of its two writes goes once. */
+  const sent = new Set<string>();
   return {
     record,
     shape,
@@ -105,6 +116,10 @@ export function linkedRepository(
         throw new GitHubError("Only a write token with a write scope writes. This is a bug in the caller.", "path");
       }
       const allowed = guardWrite(record, scope, suffix, body);
+      if (scope.refOnly) {
+        if (sent.has(suffix)) refuse(`a MixOS update POSTs to ${JSON.stringify(suffix)} once.`);
+        sent.add(suffix);
+      }
       return (await githubRequest(repositoryPath(record, suffix), { method: "POST", auth, body: allowed })).data;
     },
   };
@@ -181,11 +196,17 @@ function assertInside(path: string, folder: string): void {
   }
 }
 
+/** `mixos/update-v0.5.0`: the update branch prefix and a release tag, nothing else. */
+export function isUpdateBranch(branch: string): boolean {
+  return branch.startsWith(UPDATE_BRANCH_PREFIX) && isReleaseTag(branch.slice(UPDATE_BRANCH_PREFIX.length));
+}
+
 /**
  * The body to send for a POST to `suffix`, or a GitHubError when the App never
  * sends that: see the module comment. Exported for its tests.
  */
 export function guardWrite(record: RepositoryRecord, scope: WriteScope, suffix: string, body: unknown): unknown {
+  if (scope.refOnly) return guardRefOnlyWrite(record, scope.refOnly, suffix, body);
   if (!isExtensionFolder(scope.folder)) refuse("the write scope isn't an extension's folder.");
   if (!isExtensionAction(scope.action)) refuse("the write scope doesn't say what the operation does.");
   switch (suffix) {
@@ -245,6 +266,49 @@ export function guardWrite(record: RepositoryRecord, scope: WriteScope, suffix: 
 
     default:
       return refuse(`the App doesn't POST to ${JSON.stringify(suffix)}.`);
+  }
+}
+
+/**
+ * A MixOS update's writes: the one ref the scope names, at the one commit,
+ * and a pull request from that branch. Everything a proposal may write that
+ * this one doesn't (a blob, a tree, a commit) is refused: the commit is
+ * upstream's, and the App adds nothing to it.
+ */
+function guardRefOnlyWrite(
+  record: RepositoryRecord,
+  only: { branch: string; sha: string },
+  suffix: string,
+  body: unknown,
+): unknown {
+  if (!isUpdateBranch(only.branch) || !Sha.safeParse(only.sha).success) {
+    refuse("the write scope isn't an update branch at a commit.");
+  }
+  if (only.branch === record.defaultBranch || record.defaultBranch.startsWith(APP_BRANCH_PREFIX)) {
+    refuse("the App never writes the default branch.");
+  }
+  switch (suffix) {
+    case "/git/refs": {
+      const ref = parsed(RefBody, body, "a ref");
+      if (ref.ref !== `refs/heads/${only.branch}`) {
+        refuse(`a MixOS update creates refs/heads/${only.branch} only, not ${JSON.stringify(ref.ref)}.`);
+      }
+      if (ref.sha !== only.sha) refuse("a MixOS update's branch starts at the release's commit only.");
+      return ref;
+    }
+
+    case "/pulls": {
+      const pull = parsed(PullBody, body, "a pull request");
+      if (pull.head !== only.branch) refuse(`a MixOS update's pull request comes from ${only.branch} only.`);
+      if (pull.base !== record.defaultBranch) refuse("a pull request goes into the default branch only.");
+      if (UNPRINTABLE.test(pull.title)) refuse("a pull request's title is one line.");
+      const marker = ciSkipMarker(pull.title) ?? renderPreviewMarker(pull.title);
+      if (marker) refuse(`the title holds ${JSON.stringify(marker)}.`);
+      return pull;
+    }
+
+    default:
+      return refuse(`a MixOS update doesn't POST to ${JSON.stringify(suffix)}: it writes no blob, tree or commit.`);
   }
 }
 

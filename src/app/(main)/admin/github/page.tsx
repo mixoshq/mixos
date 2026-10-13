@@ -2,8 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { Suspense } from "react";
 import Notice from "@/components/ui/notice";
 import GitHubPanel from "@/components/admin/github/github-panel";
+import UpdatePullRequests from "@/components/admin/github/update-pull-requests";
 import { requireAdmin } from "@/lib/apps/access";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { CREATED_OUTCOMES, type CreatedOutcome, type OutcomeTone } from "@/lib/github/outcomes";
@@ -93,6 +95,10 @@ export default async function GitHubAdminPage({
           </Notice>
         )}
         <GitHubPanel state={state} installedHint={installed} />
+        {/* Read from GitHub: the rest of the page doesn't wait for it. */}
+        <Suspense fallback={null}>
+          <UpdatePullRequests />
+        </Suspense>
       </div>
     </div>
   );

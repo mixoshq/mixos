@@ -347,9 +347,9 @@ export default function GitHubPanel({
             />
             <CardBody>
               <p className="text-sm text-foreground">
-                On a deployment, Browse proposes an extension as a pull request from a branch under{" "}
-                <code className="font-mono text-xs">mixos/</code>. Before each one, the instance reads your
-                workflows, <code className="font-mono text-xs">render.yaml</code> and, on Vercel,{" "}
+                On a deployment, Browse proposes an extension, and the release notice an update of MixOS, as a pull
+                request from a branch under <code className="font-mono text-xs">mixos/</code>. Before each one, the
+                instance reads your workflows, <code className="font-mono text-xs">render.yaml</code> and, on Vercel,{" "}
                 <code className="font-mono text-xs">vercel.json</code>, and refuses if any would build that branch
                 with secrets. It can&apos;t read hosts&apos; own settings, so proposals also need you to confirm:
               </p>
