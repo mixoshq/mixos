@@ -24,6 +24,12 @@ services:
     # 503 until the database is reachable and on the schema this build expects,
     # so a deploy whose migrations failed never goes live.
     healthCheckPath: /api/health/ready
+    # No pull request previews. A preview copies this service's environment,
+    # DATABASE_URL and every key included, and runs the pull request's code
+    # with it. The GitHub App's pull requests carry a publisher's code, and the
+    # instance refuses to propose while this is on. docs/hosting/render.md.
+    previews:
+      generation: off
     envVars:
       # The internal connection string: the private network, no TLS — Render
       # does not use it there, and pg-options.ts would otherwise require it.

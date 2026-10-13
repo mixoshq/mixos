@@ -4,7 +4,7 @@
 
 "use client";
 
-import { CheckCircle2, ExternalLink, PencilLine, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ExternalLink, GitPullRequest, PencilLine, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CARD_SHELL } from "@/components/ui/card";
@@ -53,14 +53,25 @@ import { KIND_SEGMENT, type ExtensionSummary } from "@/lib/repository/types";
  * catalogue at a version, perhaps modified locally since; installed from
  * another catalogue; or a local extension that only shares the name. Matching
  * the name alone, as this did, called all three "Installed".
+ *
+ * ── ON A DEPLOYMENT WITH THE GITHUB APP LINKED ──────────────────────────────
+ *
+ * A built deployment doesn't install. With the App linked, the button is
+ * "Propose to <owner>/<repo>" instead, which opens a pull request on the
+ * repository the deployment is built from (./propose-dialog.tsx). It is shown
+ * but off while something the instance already knows stops proposals: the
+ * link is off, there is no branch rule, or the preview checklist isn't
+ * confirmed. The page says which.
  */
 export default function ExtensionCard({
   extension,
   repositoryOrigin,
   installed,
   pendingSlugs,
+  propose = null,
   onInstall,
   onReview,
+  onPropose,
 }: {
   extension: ExtensionSummary;
   /** Origin of the repository being browsed, for the listing link. */
@@ -69,9 +80,12 @@ export default function ExtensionCard({
   installed: Provenance | null;
   /** Identifiers waiting in `.mixos/pending/` to be registered. */
   pendingSlugs: ReadonlySet<string>;
+  /** Set on a built deployment with the GitHub App linked: propose instead of installing. */
+  propose?: { repository: string; disabled: boolean } | null;
   onInstall: (extension: ExtensionSummary) => void;
   /** Open the review of a pending install, which leads to Register. */
   onReview: (extension: ExtensionSummary) => void;
+  onPropose?: (extension: ExtensionSummary) => void;
 }) {
   const pending = !installed && pendingSlugs.has(extension.slug);
   // No version means no published release: nothing to fetch and no hash to
@@ -148,6 +162,17 @@ export default function ExtensionCard({
         ) : pending ? (
           <Button variant="primary" size="sm" onClick={() => onReview(extension)}>
             Review and register
+          </Button>
+        ) : propose ? (
+          <Button
+            variant="primary"
+            size="sm"
+            className="max-w-full"
+            icon={<GitPullRequest className="h-4 w-4 shrink-0" aria-hidden />}
+            disabled={!installable || propose.disabled}
+            onClick={() => onPropose?.(extension)}
+          >
+            <span className="truncate">{installable ? `Propose to ${propose.repository}` : "No release"}</span>
           </Button>
         ) : (
           <Button

@@ -85,3 +85,20 @@ export function PermissionsList() {
     </dl>
   );
 }
+
+/**
+ * What the App can't read for itself, and an admin confirms before proposing:
+ * PREVIEW_CHECKLIST in src/lib/github/store.ts, in the same order.
+ */
+export const PREVIEW_ITEMS = [
+  {
+    id: "render",
+    text: "Render: service previews are off for every service built from this repository, or it isn't on Render.",
+  },
+  { id: "railway", text: "Railway: PR environments are off for this project, or it isn't on Railway." },
+  { id: "coolify", text: "Coolify: preview deployments are off for this application, or it isn't on Coolify." },
+  {
+    id: "other",
+    text: "Nothing else builds this repository's branches or pull requests with secrets: no other host, CI service or deploy hook.",
+  },
+] as const;

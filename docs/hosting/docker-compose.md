@@ -132,6 +132,12 @@ in the resource's environment variables. Coolify leaves the source commit out of
 builds by default, so also make it available during the build, in the
 resource's advanced build settings.
 
+Keep **Preview Deployments** off for this resource while the
+[GitHub App](README.md#proposing-an-extension) is linked. A preview builds a
+pull request's code and runs it with the resource's environment, and the App's
+pull requests carry a publisher's code. The App can't read this setting, so
+Admin > GitHub asks you to confirm it.
+
 ## Dokploy
 
 [Dokploy](https://dokploy.com) works the same way:

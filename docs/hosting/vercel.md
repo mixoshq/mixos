@@ -117,6 +117,20 @@ Production** on a preview deployment, both with the production environment. So
 both run the release step, as a push does. Promoting a staged production
 deployment doesn't rebuild: its release step ran when it was built.
 
+## Previews of the GitHub App's branches
+
+`vercel.json` turns off deployments of branches under `mixos/`, which are the
+ones the [GitHub App](README.md#proposing-an-extension) proposes extensions on:
+
+```json
+"git": { "deploymentEnabled": { "mixos/**": false } }
+```
+
+A Preview deployment of one would run a publisher's code with your Preview
+environment variables before anyone reviewed it. Other branches keep their
+Previews. If your copy of `vercel.json` doesn't have this, add it: an instance
+on Vercel refuses to propose without it.
+
 ## Moving from an existing Vercel and Supabase deployment
 
 Nothing about the database changes. Deploy this version, whose production build

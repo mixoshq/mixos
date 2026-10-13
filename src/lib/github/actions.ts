@@ -27,11 +27,13 @@ import {
   MANIFEST_STATE_TTL_MS,
   checkLink,
   confirmBranchProtection,
+  confirmPreviewChecklist,
   finishLinking,
   forgetApp,
   startAppCreation,
   unlink,
   withdrawBranchProtection,
+  withdrawPreviewChecklist,
   type LinkContext,
 } from "./link";
 import type { GitHubOutcome, StartOutcome } from "./outcomes";
@@ -108,4 +110,14 @@ export async function confirmBranchProtectionAction(input: {
 /** Withdraw that confirmation. */
 export async function withdrawBranchProtectionAction(): Promise<GitHubOutcome> {
   return done(await withdrawBranchProtection(thisInstance));
+}
+
+/** Confirm that no host builds previews of the App's branches: what the App can't read for itself. */
+export async function confirmPreviewChecklistAction(input: { items: string[] }): Promise<GitHubOutcome> {
+  return done(await confirmPreviewChecklist(input, thisInstance));
+}
+
+/** Withdraw that confirmation. */
+export async function withdrawPreviewChecklistAction(): Promise<GitHubOutcome> {
+  return done(await withdrawPreviewChecklist(thisInstance));
 }
