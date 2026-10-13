@@ -139,14 +139,36 @@ export interface RemovalNote {
   apps: NamedApp[];
 }
 
-/** One app in this checkout, as far as removal needs it: what its manifest says it depends on. */
-interface AppLinks extends NamedApp {
+/** One app in a build, as far as removal needs it: what its manifest says it depends on. */
+export interface AppLinks extends NamedApp {
   connectors: string[];
   optionalConnectors: string[];
   /** The apps whose services it uses. */
   consumes: string[];
   /** The apps whose hooks it listens to. */
   listensTo: string[];
+}
+
+/** A theme in a build: its folder's name, and the name its manifest gives it. */
+export interface ThemeInBuild {
+  slug: string;
+  name: string;
+}
+
+/**
+ * What a build holds, as far as what depends on an extension goes. Read from
+ * the manifests in this checkout here, and from the generated registries on a
+ * built deployment, which proposes a removal through the GitHub App instead
+ * (src/lib/github/propose-change.ts). Either way the same rules judge it.
+ */
+export interface DependencyFacts {
+  /** What holds the facts, for the notes' words: this checkout, or the instance that proposes. */
+  here: "checkout" | "instance";
+  apps: readonly AppLinks[];
+  /** Every theme, by name in order: pages use the first when none is applied (FALLBACK_THEME). */
+  themes: readonly ThemeInBuild[];
+  /** The theme this database applies: a slug, null for none, undefined if it can't be read. Asked only when it matters. */
+  storedTheme(): Promise<string | null | undefined>;
 }
 
 /** The manifest each kind is read from, and the field that names it. */
@@ -221,6 +243,14 @@ const appsNamed = (value: unknown): string[] =>
       )
     : [];
 
+/** Every theme in this checkout, by name, with the name its manifest gives it. */
+function checkoutThemes(root: string): ThemeInBuild[] {
+  return extensionFolders(root, "theme").map((slug) => ({
+    slug,
+    name: displayName(readManifest(path.join(/* turbopackIgnore: true */ root, "themes", slug), "theme"), "theme", slug),
+  }));
+}
+
 /** Every app in this checkout and what it depends on, from its app.json. */
 function checkoutApps(root: string): AppLinks[] {
   return extensionFolders(root, "app").map((slug) => {
@@ -246,8 +276,8 @@ const them = (apps: readonly NamedApp[]) => (apps.length === 1 ? "it" : "them");
 const their = (apps: readonly NamedApp[]) => (apps.length === 1 ? "its" : "their");
 const s = (apps: readonly NamedApp[]) => (apps.length === 1 ? "s" : "");
 
-/** The theme `platform_settings` applies in this checkout's database: a slug, null for none, undefined if it can't be read. */
-async function storedTheme(): Promise<string | null | undefined> {
+/** The theme `platform_settings` applies in this database: a slug, null for none, undefined if it can't be read. */
+export async function storedTheme(): Promise<string | null | undefined> {
   try {
     // The key src/lib/themes/active.ts reads and Apply writes.
     const rows = (await sql`
@@ -260,16 +290,29 @@ async function storedTheme(): Promise<string | null | undefined> {
 }
 
 /** What refuses removing `kind`/`slug` from the checkout at `root`, and what to warn about. */
-async function dependents(
+function dependents(
   root: string,
+  kind: ExtensionKind,
+  slug: string,
+): Promise<{ blockers: RemovalNote[]; warnings: RemovalNote[] }> {
+  return dependentsOf({ here: "checkout", apps: checkoutApps(root), themes: checkoutThemes(root), storedTheme }, kind, slug);
+}
+
+/**
+ * What refuses removing `kind`/`slug` from a build that holds `facts`, and
+ * what to warn about: the module comment's rules, from the facts alone.
+ */
+export async function dependentsOf(
+  facts: DependencyFacts,
   kind: ExtensionKind,
   slug: string,
 ): Promise<{ blockers: RemovalNote[]; warnings: RemovalNote[] }> {
   const blockers: RemovalNote[] = [];
   const warnings: RemovalNote[] = [];
+  const here = facts.here === "checkout" ? "this checkout" : "this instance";
 
   if (kind === "connector") {
-    const apps = checkoutApps(root);
+    const apps = facts.apps;
     const required = apps.filter((a) => a.connectors.includes(slug));
     // An app that declares it both ways requires it.
     const optional = apps.filter((a) => !a.connectors.includes(slug) && a.optionalConnectors.includes(slug));
@@ -292,7 +335,7 @@ async function dependents(
   }
 
   if (kind === "app") {
-    const others = checkoutApps(root).filter((a) => a.slug !== slug);
+    const others = facts.apps.filter((a) => a.slug !== slug);
     const consumers = others.filter((a) => a.consumes.includes(slug));
     const listeners = others.filter((a) => a.listensTo.includes(slug));
     if (consumers.length > 0) {
@@ -316,30 +359,25 @@ async function dependents(
   }
 
   if (kind === "theme") {
-    const themes = extensionFolders(root, "theme");
-    const left = themes.filter((t) => t !== slug);
+    const themes = facts.themes.map((t) => t.slug);
+    const left = facts.themes.filter((t) => t.slug !== slug);
     if (left.length === 0) {
       blockers.push({
         code: "last-theme",
         apps: [],
-        message: "It is the only theme in this checkout, and the build needs one. Add another theme first.",
+        message: `It is the only theme in ${facts.here === "checkout" ? "this checkout" : "the build"}, and the build needs one. Add another theme first.`,
       });
     } else {
       // What the root layout shows: the applied theme while it is installed,
       // or the first by name (FALLBACK_THEME, written by the generator).
-      const stored = await storedTheme();
-      const fallback = left[0];
-      const fallbackName = displayName(
-        readManifest(path.join(/* turbopackIgnore: true */ root, "themes", fallback), "theme"),
-        "theme",
-        fallback,
-      );
+      const stored = await facts.storedTheme();
+      const fallbackName = left[0].name;
       if (stored === slug) {
         warnings.push({
           code: "applied-theme",
           apps: [],
           message:
-            `It is the applied theme in this checkout's database, so pages here use ${fallbackName} ` +
+            `It is the applied theme in ${here}'s database, so pages here use ${fallbackName} ` +
             `once it's gone, until an admin applies another. An instance that applies it does the same ` +
             `once the removal is deployed there.`,
         });
@@ -348,7 +386,7 @@ async function dependents(
           code: "applied-theme",
           apps: [],
           message:
-            `No theme is applied in this checkout's database, so pages here use the first theme by name, ` +
+            `No theme is applied in ${here}'s database, so pages here use the first theme by name, ` +
             `which is this one. They use ${fallbackName} once it's gone.`,
         });
       }

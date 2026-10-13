@@ -321,7 +321,7 @@ describe("the GitHub link", { skip }, () => {
     fake.requests.length = 0;
     await assert.rejects(p.withLinkedRepository("write", ADMIN, async () => undefined), /needs a write scope/);
     assert.equal(fake.calls().filter((c) => c.endsWith("/access_tokens")).length, 0, "refused before a token is minted");
-    await p.withLinkedRepository("write", ADMIN, async () => undefined, { scope: { folder: "apps/files" } });
+    await p.withLinkedRepository("write", ADMIN, async () => undefined, { scope: { folder: "apps/files", action: "install" } });
     assert.deepEqual(fake.requests.filter((r) => r.path.endsWith("/access_tokens")).map((r) => r.body)[1], {
       repository_ids: [501],
       permissions: { contents: "write", pull_requests: "write" },
