@@ -14,6 +14,11 @@
  */
 
 import type { FloorVerdict } from "@/lib/platform/version-floor";
+import type { RemovalNote } from "@/lib/repository/remove";
+import type { ExtensionKind } from "@/lib/repository/types";
+import type { FolderDifferences } from "@/lib/repository/update";
+import type { ComparisonFacts, PickableRelease, ReleaseView } from "@/lib/repository/update-outcomes";
+import type { ProposalAction } from "./names";
 
 export type OutcomeTone = "success" | "info" | "neutral" | "warning" | "danger";
 
@@ -107,6 +112,8 @@ export interface ProposalCheckLine {
   detail: string;
   /** What a file check found, file by file. */
   findings?: ProposalFinding[];
+  /** The refusal's code when the line doesn't hold and it isn't the line's id: `folder-mismatch`. */
+  code?: string;
 }
 
 export interface ProposalFinding {
@@ -156,12 +163,80 @@ export type ProposeOutcome =
 /**
  * Whether Browse offers "Propose to <owner>/<repo>", read from what is stored:
  * null on a checkout, or with nothing linked. `off` says why it is offered but
- * can't be used yet.
+ * can't be used yet. The notices, the Browse cards of installed extensions
+ * and the Remove dialog offer "Propose update" and "Propose removal" on the
+ * same answer.
  */
 export interface ProposalTarget {
   repository: string;
   off: string | null;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Updates and removals                                                        */
+/* -------------------------------------------------------------------------- */
+
+/** What the App does to an extension already in the build. */
+export type ChangeAction = "update" | "remove";
+
+/**
+ * What the propose dialog shows for an update or a removal when it opens:
+ * what this build runs and what the default branch holds of it, the releases
+ * to pick from, what depends on it, the names, and the checks. Nothing is
+ * downloaded for it.
+ */
+export interface ChangeProposalPreview {
+  ok: true;
+  action: ChangeAction;
+  /** `owner/name`. */
+  repository: string;
+  repositoryUrl: string;
+  defaultBranch: string;
+  kind: ExtensionKind;
+  slug: string;
+  /** The manifest's name as this build has it, or the slug. */
+  name: string;
+  /** `apps/files`. */
+  folder: string;
+  /** The catalogue's host, as people say it: `mixos.org`. */
+  host: string;
+  /** The release this build runs, from its install record, with what the listing says of it. */
+  installed: ReleaseView & {
+    /** Null when the listing no longer has it, or couldn't be read. */
+    yanked: boolean | null;
+    yankedReason: string | null;
+  };
+  /** The folder on the default branch: how many files it holds. Null when it isn't there. */
+  onBranch: { files: number } | null;
+  /** For an update: the releases on the catalogue, newest first. Empty for a removal, or when the listing couldn't be read. */
+  releases: PickableRelease[];
+  listingProblem: string | null;
+  /** The release the picker starts on: the catalogue's current one when it is something to do. */
+  suggested: string | null;
+  /** For a removal: what stops it, and what to know first. Null for an update. */
+  removal: { blockers: RemovalNote[]; warnings: RemovalNote[] } | null;
+  /** The branch, and a removal's title. An update's title names the release picked. */
+  names: { branch: string; title: string | null };
+  lines: ProposalCheckLine[];
+  /** Every line holds, and for a removal nothing depends on it. */
+  ready: boolean;
+}
+
+export type ChangeProposalCheckOutcome = ChangeProposalPreview | Extract<GitHubOutcome, { ok: false }>;
+
+/**
+ * Everything the dialog says about updating the folder on the default branch
+ * to one release, both downloaded and verified in memory to say it: the
+ * update dialog's comparison, plus the files the tree changes and the names.
+ */
+export interface UpdateProposalComparison extends ComparisonFacts {
+  ok: true;
+  /** What the tree changes in the folder, file by file. */
+  files: FolderDifferences;
+  names: { branch: string; title: string };
+}
+
+export type UpdateProposalCompareOutcome = UpdateProposalComparison | Extract<GitHubOutcome, { ok: false }>;
 
 /** An open pull request the App opened, as the Apps page lists it. */
 export interface ProposedPullRequest {
@@ -170,7 +245,9 @@ export interface ProposedPullRequest {
   kind: "app" | "connector" | "theme";
   slug: string;
   branch: string;
-  /** From the `<kind>.propose` audit row, when there is one. */
+  /** What it proposes, from its branch's name. */
+  action: ProposalAction;
+  /** From the `<kind>.propose` audit row, when there is one: the release added or updated to, or the one removed. */
   version: string | null;
   proposedAt: string | null;
   proposedBy: string | null;

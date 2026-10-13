@@ -224,15 +224,31 @@ export function updateSubject(record: InstallRecord, from: Pick<ReplacedRelease,
 }
 
 /**
+ * How a change reached the repository: made in a checkout and committed by a
+ * person, or verified by an instance and proposed through the GitHub App
+ * (src/lib/github/propose-change.ts). One sentence of the message says which.
+ */
+export type ChangeRoute = "checkout" | "app";
+
+/**
  * The commit message for an update of the folder `folder` (repo-relative) to
  * `record`'s release: subject, body and trailers, the record's and the release
  * it replaces, each a validated value.
  */
-export function updateCommitMessage(record: InstallRecord, from: ReplacedRelease, folder: string): string {
+export function updateCommitMessage(
+  record: InstallRecord,
+  from: ReplacedRelease,
+  folder: string,
+  route: ChangeRoute = "checkout",
+): string {
   const source = recordSourceUrl(record);
+  const how =
+    route === "app"
+      ? `Updated from ${sourceHost(record.source)}, verified by an instance and proposed through the GitHub App.`
+      : `Updated from ${sourceHost(record.source)} and registered in a checkout.`;
   const body = [
     ...wrap(
-      `Updated from ${sourceHost(record.source)} and registered in a checkout. It replaces ${from.version}` +
+      `${how} It replaces ${from.version}` +
         `${from.direction === "older" ? ", a newer release" : ""}. ${folder}/${INSTALL_RECORD_FILE} records the ` +
         "release and the hashes that were verified.",
     ),
@@ -456,9 +472,10 @@ function wrap(text: string, width = 72): string[] {
 }
 
 /** The commit message for deleting `folder` (repo-relative): subject, body and, for an install, its trailers. */
-export function removalCommitMessage(target: RemovalTarget, folder: string): string {
+export function removalCommitMessage(target: RemovalTarget, folder: string, route: ChangeRoute = "checkout"): string {
+  const how = route === "app" ? "Removal proposed through the GitHub App." : "Removed in a checkout.";
   const body = [
-    ...wrap(`Removed in a checkout. ${KEPT_DATA[target.kind]}`),
+    ...wrap(`${how} ${KEPT_DATA[target.kind]}`),
     ...(target.installed ? ["", ...wrap(`Its install record, ${folder}/${INSTALL_RECORD_FILE}, goes with it.`)] : []),
   ];
   const trailers = target.installed
