@@ -76,6 +76,18 @@ serving. The pre-deploy logs say why.
 The admin pages show the MixOS version and the commit the running deploy was
 built from, which Render sets as `RENDER_GIT_COMMIT`.
 
+## Previews
+
+`render.yaml` turns pull request previews off for the web service, with
+`previews: { generation: off }`. A preview copies the service's environment,
+the database URL and every key included, and runs the pull request's code with
+it. The [GitHub App's](README.md#proposing-an-extension) pull requests carry a
+publisher's code, so the instance refuses to propose while `render.yaml` turns
+previews on, and their titles carry `[skip preview]` as well. If you created
+the service in the dashboard rather than from the Blueprint, turn its previews
+off in its settings. The App can't see that setting, so Admin > GitHub asks you
+to confirm it.
+
 ## Troubleshooting
 
 - **The deploy fails at the health check.** Open the pre-deploy logs. If the

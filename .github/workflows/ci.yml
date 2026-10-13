@@ -28,6 +28,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The token stays out of .git/config. The pull request's code runs
+          # in this job (npm ci, the generator, the build), and a GitHub App
+          # pull request's code comes from a publisher.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:

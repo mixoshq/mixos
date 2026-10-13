@@ -8,6 +8,7 @@ import { ArrowLeft } from "lucide-react";
 import { registryInstalls } from "@/generated/registry-installs";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin } from "@/lib/apps/access";
+import { proposalTarget } from "@/lib/github/propose";
 import { isBuiltDeployment } from "@/lib/platform/build";
 import { repositoryBaseUrl } from "@/lib/repository/client";
 import { checkInstallable, checkoutRoot } from "@/lib/repository/install";
@@ -82,6 +83,10 @@ export default async function BrowsePage({
     installedSlugs.map((slug) => [slug, provenanceOf(kind, slug, registryInstalls, origin)]),
   );
 
+  // On a built deployment with the GitHub App linked, Propose takes Install's
+  // place: from what is stored, without asking GitHub on every render.
+  const proposal = await proposalTarget(kind);
+
   const label = KIND_LABEL[kind];
 
   return (
@@ -140,6 +145,7 @@ export default async function BrowsePage({
         pendingSlugs={pendingSlugs}
         installable={ok ? null : (reason ?? null)}
         installableTone={code === "built-deployment" ? "info" : "warning"}
+        proposal={proposal}
       />
     </div>
   );

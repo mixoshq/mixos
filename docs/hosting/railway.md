@@ -100,6 +100,15 @@ The admin pages show the MixOS version and the commit the running deployment
 was built from, which Railway sets as `RAILWAY_GIT_COMMIT_SHA` on deploys from
 GitHub.
 
+## PR environments
+
+Keep PR environments off for this project while the
+[GitHub App](README.md#proposing-an-extension) is linked: in the project's
+settings, under **Environments**. A PR environment deploys a pull request's
+code with copies of your variables, and the App's pull requests carry a
+publisher's code. The App can't read this setting, so Admin > GitHub asks you
+to confirm it before the first proposal.
+
 ## Troubleshooting
 
 - **The release step can't connect, with a TLS or SSL error.** Set

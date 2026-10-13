@@ -2140,9 +2140,12 @@ releases; and recovery after an update that stopped midway as
 The GitHub link's rows (§32) are `github.app.create`, `github.link`,
 `github.link.disable`, `github.link.enable`, `github.link.refresh`,
 `github.app.key.replace`, `github.app.key.reencrypt`, `github.unlink`,
-`github.app.forget`, `github.branch-rule.override` and
-`github.branch-rule.override.clear`, with `.rejected` rows for a refused
-creation, link, key replacement or unlink.
+`github.app.forget`, `github.branch-rule.override`,
+`github.branch-rule.override.clear`, `github.previews.confirm` and
+`github.previews.confirm.clear`, with `.rejected` rows for a refused
+creation, link, key replacement or unlink. A proposal through the App is
+`app.propose`, `connector.propose` or `theme.propose`, or
+`<kind>.propose.rejected` with the reason.
 `connector.disable` and `connector.enable` name the apps that declare the
 connector, in `details` as `requiredBy` and `optionalFor`. An `app.activate`
 or `connector.enable` that answered a different extension under the name, with
@@ -3431,9 +3434,9 @@ a release published that way can be verified and installed.
 Admin > GitHub links the instance to the one repository it is built from,
 through a private GitHub App the operator owns
 ([`src/lib/github/`](../src/lib/github/)). It is off while
-`GITHUB_APP_ENCRYPTION_KEY` is unset (§5). It links and checks; nothing in this
-release writes to the repository. The App's write permissions are for
-proposing changes as pull requests, which builds on this.
+`GITHUB_APP_ENCRYPTION_KEY` is unset (§5). On a built deployment, Browse uses it
+to propose an extension as a pull request on that repository. That is the only
+thing the App writes.
 
 ### What the App may do
 
@@ -3490,7 +3493,9 @@ Minted per operation from a JWT (RS256 with `node:crypto`, nine minutes):
 - **Listing:** `metadata: read` over the whole installation, only to count its
   repositories. Narrowed, it would see one however many there are.
 - **Read:** `contents`, `checks`, `statuses` and `pull_requests`, read.
-- **Write:** `contents` and `pull_requests`, write. Unused in this release.
+- **Write:** `contents` and `pull_requests`, write. Only for a proposal's
+  writes, and only what [What the App may write](#what-the-app-may-write)
+  allows.
 
 Read and write are narrowed with `repository_ids` to the linked repository.
 GitHub's answer must name that repository and those permissions, or the token
@@ -3514,8 +3519,8 @@ App's key within the hour. Every answer is Zod-parsed.
 
 `platform_settings`, no migration: `github_app`, `github_app_key` (the private
 key, AES-256-GCM under `GITHUB_APP_ENCRYPTION_KEY`), `github_link`,
-`github_branch_rule`, `github_branch_rule_override` and
-`github_manifest_state`. A row that doesn't fit its schema reads as corrupt, so
+`github_branch_rule`, `github_branch_rule_override`,
+`github_preview_checklist` and `github_manifest_state`. A row that doesn't fit its schema reads as corrupt, so
 a damaged record can't pass for "no App".
 
 ### The private key
@@ -3545,20 +3550,130 @@ stored key can't be read or GitHub refuses it, and needs the App's slug typed.
 ### The default branch
 
 The App can write to any branch, and every supported host deploys the default
-branch. So proposals will need a `pull_request` rule on it, read with
-`GET /repos/{owner}/{repo}/rules/branches/{branch}` at link time and on Check
-again (`branchRuleSatisfied()`). That lists ruleset rules only. Classic branch
+branch. So proposals need a `pull_request` rule on it, read with
+`GET /repos/{owner}/{repo}/rules/branches/{branch}` at link time, on Check
+again and before every proposal (`branchRuleSatisfied()`). That lists ruleset rules only. Classic branch
 protection doesn't show there, and private repositories on GitHub Free can't
 have rulesets, so an admin can confirm either, with the repository's name
 typed, audited. If GitHub won't show the rules at all (a 403 or 404), linking
 goes ahead and records that, since linking doesn't need the rule. [The hosting guide](hosting/README.md#linking-your-github-repository)
 gives the ruleset.
 
+### Proposing an install
+
+On a built deployment with the App linked, Browse shows **Propose to
+owner/repo** where a checkout shows Install (`src/lib/github/propose.ts`).
+Under the `github.app` lock:
+
+1. In memory, with install's own steps (`verifyRelease()`,
+   `src/lib/repository/install.ts`): resolve, the yank gate, `requiresMixOS`
+   against this build, the pinned download, the content hash, `preflight()`,
+   leaving out `.gitignore` and `.gitattributes`, the files hash and
+   `.registry.json`. Nothing is written to the instance's disk, and nothing
+   runs install's check: the repository's CI and the production build's
+   generator check the code there.
+2. With a read token, at the default branch's head: its rules, read again;
+   every workflow, `render.yaml` and, on Vercel, `vercel.json` (below); whether
+   the extension's folder is already there, compared without case; and whether
+   the branch `mixos/install/<kind>-<slug>` exists. Any of them refuses. So
+   does a preview checklist no admin has confirmed.
+3. With a write token: a blob for each binary file (at most 40, and 20 MB in
+   all), then one tree on the head's tree with every text file inline and every
+   file mode 100644. GitHub's tree for the folder has to have the git id of
+   the verified files, or nothing more is written. Then a commit with the head
+   as its one parent, the branch, and a pull request into the default branch.
+4. Audited as `<kind>.propose` with the pull request's number and URL, the
+   branch and the head commit the App made, or `<kind>.propose.rejected` with
+   the reason. A branch left without a pull request is named in the refusal.
+
+### What the App may write
+
+`LinkedRepository.post()` (`src/lib/github/repository.ts`) sends only what
+`guardWrite()` allows, whatever its caller asks for: a POST to `git/blobs`,
+`git/trees`, `git/commits`, `git/refs` or `pulls`, with exactly the fields a
+proposal sends. Refs only under `refs/heads/mixos/`, never the default branch
+and never a tag. Tree paths only under the folder the operation's scope names,
+each a file of mode 100644, with no `..`, `.git` or control character. A
+commit with one parent, written by the App's bot, whose message skips no check.
+A pull request from a `mixos/` branch in the repository, into the default
+branch. The client sends no PUT or PATCH (`src/lib/github/api.ts`), so nothing
+can merge a pull request, move a branch or turn on auto-merge, which only
+GraphQL can.
+
+### Names and the pull request's body
+
+The branch, the commit message and the title are built only from validated
+identifiers (`src/lib/github/names.ts`): the kind, the slug, the version, the
+commit, the hashes and the catalogue's origin, never the manifest's `name`. A
+commit message holding `[skip ci]` or a sibling, or a `skip-checks:` trailer,
+would turn off the repository's checks for that commit, and a title holding
+`[render preview]` would start a Render preview, which copies the service's
+environment. Both are checked before anything is sent. The title is
+`Add <kind> <slug> <version> from mixos.org [skip preview]`.
+
+The body (`src/lib/github/pull-body.ts`) says what was verified, what runs and
+when, the MixOS floor, a withdrawal an admin accepted, and what merging does on
+this host. What the publisher wrote (the name, their handle, the permissions
+they claim, a withdrawal's reason) appears only in a fenced block labelled as
+their claims, one line each, with control characters collapsed and `\`, `[`,
+`]`, `@` and `#` escaped, so it can't mention anyone, link anything or close an
+issue. File paths are the publisher's too, so the body counts files by kind and
+never names them.
+
+### Where the proposed code runs first
+
+In the repository's CI, on the pull request. A pull request from a branch in
+the same repository gets the repository's secrets, unlike one from a fork. So
+before each proposal the instance reads every file in `.github/workflows/`
+(`src/lib/github/workflows.ts`) and refuses, naming the file, when one:
+
+- uses `pull_request_target`;
+- runs for the App's pull request or branch (`pull_request` or `merge_group`
+  into the default branch, a review, a push to the branch, `create`, or
+  `workflow_run` unless its `branches` leave the branch out) and uses a secret
+  other than `GITHUB_TOKEN`, asks for a write permission, sets no
+  `permissions`, or runs on a self-hosted runner. Unless every job in it has
+  `if: ${{ !startsWith(github.head_ref, 'mixos/') }}` and it runs only on pull
+  request events: on a push, `head_ref` is empty and the job runs;
+- can't be read the way GitHub reads it: duplicate keys, tags, merge keys, or
+  more than one document.
+
+A `branches-ignore` on a `pull_request` trigger filters the target, so it
+doesn't leave the App's pull requests out. A `paths` filter doesn't count
+either: anyone who can push to the branch can change what it touches. The
+instance also refuses when `render.yaml` turns previews on, and, on Vercel,
+when `vercel.json` doesn't turn off deployments of `mixos/**`.
+
+The App can't read Render's service previews set in its dashboard, Railway's PR
+environments or Coolify's preview deployments, so an admin confirms a
+checklist on Admin > GitHub (`github_preview_checklist`), audited. This
+repository's own files pass: `danger.yml`'s job skips App branches, `ci.yml`
+checks out with `persist-credentials: false`, `extensions.yml`, which is the
+check, has `contents: read` only, and `vercel.json` and `render.yaml` turn off
+previews of App branches. A workflow changed on the default branch after a
+proposal is read at the next one, not before.
+
+### The App's pull requests
+
+Admin > Apps, Connectors and Themes list the App's open pull requests of that
+kind, read with a read token (`src/lib/github/proposals.ts`), with their
+checks. A head commit nothing has checked ten minutes after the proposal shows
+"No CI ran", in the danger tone: GitHub keeps workflows off on a new fork until
+its owner turns them on, so on many forks nothing runs at all. A head that
+isn't the commit in the `<kind>.propose` row shows "Changed since proposed":
+anyone with push access can add a commit to the branch after the App opens the
+pull request. A pull request on a `mixos/install/` branch with no such row is
+marked as not proposed from this instance. Links are built from the stored
+repository and the pull request's number.
+
 ### Authorization and audit
 
-The page, its server actions (`src/lib/github/actions.ts`) and its three
-routes, under `/api/admin/github/`, require an admin before anything else (§9). Creating, linking, switching the
-link off or on, recording a rename, replacing or re-encrypting the key,
-unlinking, forgetting and confirming a branch protection are audited (§28),
-against target type `github-app` and the App's id. Refusals of a creation, a
-link, a key or an unlink are audited as `.rejected`, with the reason.
+The page, its server actions (`src/lib/github/actions.ts`,
+`src/lib/github/propose-actions.ts`) and its three routes, under
+`/api/admin/github/`, require an admin before anything else (§9). Creating,
+linking, switching the link off or on, recording a rename, replacing or
+re-encrypting the key, unlinking, forgetting, confirming a branch protection
+and confirming the preview checklist are audited (§28), against target type
+`github-app` and the App's id. Refusals of a creation, a link, a key or an
+unlink are audited as `.rejected`, with the reason. A proposal is audited
+against the extension, as `<kind>.propose` or `<kind>.propose.rejected`.
