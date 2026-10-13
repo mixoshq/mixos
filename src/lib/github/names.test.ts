@@ -8,11 +8,14 @@ import { ciSkipMarker } from "@/lib/repository/hand-back";
 import { InstallRecordSchema, type InstallRecord } from "@/lib/repository/install-record";
 import {
   extensionFolder,
+  isReleaseTag,
   parseProposalBranch,
   proposalBranch,
   proposalCommitMessage,
   proposalTitle,
   renderPreviewMarker,
+  updateBranch,
+  updateTitle,
 } from "./names";
 
 const record: InstallRecord = {
@@ -104,6 +107,29 @@ describe("a proposal's names", () => {
     assert.equal(renderPreviewMarker("render a preview"), null);
     for (const text of ["[skip ci]", "[CI SKIP]", "[no ci]", "[skip actions]", "[actions skip]", "x\nskip-checks: true\n", "  Skip-Checks : yes"]) {
       assert.ok(ciSkipMarker(text), text);
+    }
+  });
+});
+
+describe("a MixOS update's names", () => {
+  test("the branch and the title, from a release tag the list's schema accepts", () => {
+    assert.equal(updateBranch("v0.5.0"), "mixos/update-v0.5.0");
+    assert.equal(updateBranch("v0.5.0-rc.1"), "mixos/update-v0.5.0-rc.1");
+    assert.equal(updateTitle("v0.5.0"), "Update MixOS to v0.5.0 [skip preview]");
+    assert.equal(ciSkipMarker(updateTitle("v10.20.30")), null);
+    assert.equal(renderPreviewMarker(updateTitle("v10.20.30")), null);
+    for (const bad of ["0.5.0", "v0.5", "v01.5.0", "v0.5.0 [skip ci]", "v0.5.0\nskip-checks: true", "main", "v0.5.0/x", "", "v0.5.0-"]) {
+      assert.equal(isReleaseTag(bad), false, bad);
+      assert.throws(() => updateBranch(bad), bad);
+      assert.throws(() => updateTitle(bad), bad);
+    }
+  });
+
+  test("an update branch is read back, and told from an install's and from rank 31's", () => {
+    assert.deepEqual(parseProposalBranch("mixos/update-v0.5.0"), { action: "mixos-update", tag: "v0.5.0" });
+    assert.deepEqual(parseProposalBranch("mixos/update-v0.5.0-rc.1"), { action: "mixos-update", tag: "v0.5.0-rc.1" });
+    for (const ref of ["mixos/update/app-files", "mixos/update-0.5.0", "mixos/update-v0.5", "mixos/update-", "mixos/update-v0.5.0/x", "mixos/updates-v0.5.0"]) {
+      assert.equal(parseProposalBranch(ref), null, ref);
     }
   });
 });
