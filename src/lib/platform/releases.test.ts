@@ -87,6 +87,7 @@ describe("the notice", () => {
   test("a minor release under 0.x may need changes, as the bump rule makes one", () => {
     assert.deepEqual(notice("v0.5.0", "0.4.2", {}, "stable"), {
       tag: "v0.5.0",
+      commitSha: "9f2b4c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39",
       text: "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor release: it may need changes.",
       notes: "### Fixes\n\n- the notes for v0.5.0",
       releaseUrl: "https://mixos.org/docs/releases/v0.5.0",
