@@ -41,6 +41,11 @@
  *
  * checkProposal() runs step 2 without the lock, and without downloading
  * anything, for the dialog to show before the first proposal.
+ *
+ * A MixOS update (./update-pull.ts) shares what step 2 reads of the default
+ * branch itself (inspectDefaultBranch(), judgeDefaultBranch()) and the
+ * refusal's shape: an update is a proposal too, with the same rule, checklist
+ * and preview checks, and its own checks on top.
  */
 
 import { z } from "zod";
@@ -122,7 +127,7 @@ export function thisHost(env: Readonly<Record<string, string | undefined>> = pro
 }
 
 /** A refusal with what to tell the admin, and what the audit row adds. */
-class ProposalRefusal extends Error {
+export class ProposalRefusal extends Error {
   constructor(
     readonly outcome: Extract<ProposeOutcome, { ok: false }>,
     readonly details: Record<string, unknown> = {},
@@ -156,8 +161,12 @@ function precondition(kind: ExtensionKind): Extract<GitHubOutcome, { ok: false }
 /*  Browse: whether to offer it                                                 */
 /* -------------------------------------------------------------------------- */
 
-/** Why proposals are off, from what is stored, or null when they can go ahead as far as it knows. */
-function offReason(state: GitHubState): string | null {
+/**
+ * Why proposals are off, from what is stored, or null when they can go ahead
+ * as far as it knows. The release notice's offer reads it too
+ * (./update-pull.ts): an update needs what a proposal needs.
+ */
+export function offReason(state: GitHubState): string | null {
   if (!state.link) return "Nothing is linked.";
   if (state.link.disabled) return "The GitHub link is off. Check again on Admin > GitHub.";
   if (!branchRuleSatisfied(state).ok) {
@@ -239,7 +248,7 @@ async function readText(
 }
 
 /** A branch's head commit, or null when there is no such branch. */
-async function branchHead(repo: LinkedRepository, branch: string): Promise<string | null> {
+export async function branchHead(repo: LinkedRepository, branch: string): Promise<string | null> {
   const data = await getOrNull(repo, `/git/ref/heads/${branch.split("/").map(segment).join("/")}`);
   if (data === null) return null;
   const ref = parseAnswer(GitRefSchema, data, "GET /repos/{owner}/{repo}/git/ref/{ref}");
@@ -261,8 +270,8 @@ function targetOf(kind: ExtensionKind, slug: string): Target {
   return { kind, slug, folder: extensionFolder(kind, slug), branch: proposalBranch(kind, slug) };
 }
 
-/** What step 2 read. */
-interface Inspection {
+/** What step 2 reads of the default branch itself, for any proposal. */
+export interface DefaultBranchInspection {
   /** The default branch's head commit, and its tree: what the proposal builds on. */
   head: string;
   baseTree: string;
@@ -271,12 +280,25 @@ interface Inspection {
   findings: Finding[];
   workflowCount: number;
   renderYaml: boolean;
+}
+
+/** What step 2 read, for an install. */
+interface Inspection extends DefaultBranchInspection {
   folderExists: boolean;
   branchExists: boolean;
 }
 
-/** Step 2: everything read at the default branch's head, with `repo`'s read token. */
-async function inspect(repo: LinkedRepository, target: Target, onVercel: boolean): Promise<Inspection> {
+/**
+ * The default branch at its head, with `repo`'s read token: the head and its
+ * tree, the rules (read again, before every proposal), every workflow,
+ * `render.yaml` and, on Vercel, `vercel.json`, judged for `branch`, the branch
+ * the proposal will push.
+ */
+export async function inspectDefaultBranch(
+  repo: LinkedRepository,
+  branch: string,
+  onVercel: boolean,
+): Promise<DefaultBranchInspection> {
   const defaultBranch = repo.record.defaultBranch;
   const head = await branchHead(repo, defaultBranch);
   if (!head) {
@@ -290,7 +312,7 @@ async function inspect(repo: LinkedRepository, target: Target, onVercel: boolean
   const rules = await readBranchRulesOrNone(repo);
 
   const findings: Finding[] = [];
-  const where = { defaultBranch, branch: target.branch };
+  const where = { defaultBranch, branch };
   const workflows = ((await readFolder(repo, ".github/workflows", head)) ?? []).filter((e) => /\.ya?ml$/i.test(e.name));
   if (workflows.length > MAX_WORKFLOWS) {
     findings.push({
@@ -318,13 +340,8 @@ async function inspect(repo: LinkedRepository, target: Target, onVercel: boolean
   if (onVercel) {
     const vercel = await readText(repo, "vercel.json", head);
     if (vercel && "problem" in vercel) findings.push({ file: "vercel.json", problem: vercel.problem });
-    else findings.push(...checkVercelJson(vercel ? vercel.text : null, target.branch));
+    else findings.push(...checkVercelJson(vercel ? vercel.text : null, branch));
   }
-
-  // On a case-insensitive checkout, apps/Files is apps/files.
-  const siblings = (await readFolder(repo, kindDir(target.kind), head)) ?? [];
-  const folderExists = siblings.some((e) => e.name.normalize("NFC").toLowerCase() === target.slug);
-  const branchExists = (await branchHead(repo, target.branch)) !== null;
 
   return {
     head,
@@ -333,9 +350,17 @@ async function inspect(repo: LinkedRepository, target: Target, onVercel: boolean
     findings,
     workflowCount: workflows.length,
     renderYaml: render !== null,
-    folderExists,
-    branchExists,
   };
+}
+
+/** Step 2: everything read at the default branch's head, with `repo`'s read token. */
+async function inspect(repo: LinkedRepository, target: Target, onVercel: boolean): Promise<Inspection> {
+  const base = await inspectDefaultBranch(repo, target.branch, onVercel);
+  // On a case-insensitive checkout, apps/Files is apps/files.
+  const siblings = (await readFolder(repo, kindDir(target.kind), base.head)) ?? [];
+  const folderExists = siblings.some((e) => e.name.normalize("NFC").toLowerCase() === target.slug);
+  const branchExists = (await branchHead(repo, target.branch)) !== null;
+  return { ...base, folderExists, branchExists };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -345,8 +370,16 @@ async function inspect(repo: LinkedRepository, target: Target, onVercel: boolean
 const isWorkflowFile = (f: Finding) => f.file.startsWith(".github/");
 const asFindings = (found: Finding[]): ProposalFinding[] => found.map((f) => ({ file: f.file, problem: f.problem }));
 
-/** The dialog's lines, in the order a refusal names them. */
-function judge(inspection: Inspection, state: GitHubState, target: Target, onVercel: boolean): ProposalCheckLine[] {
+/**
+ * The lines every proposal has, in the order a refusal names them: the branch
+ * rule, the preview checklist, the workflows, `render.yaml` and, on Vercel,
+ * `vercel.json`.
+ */
+export function judgeDefaultBranch(
+  inspection: DefaultBranchInspection,
+  state: GitHubState,
+  onVercel: boolean,
+): ProposalCheckLine[] {
   const branch = inspection.rules.branch;
   const viaRule = inspection.rules.pullRequest;
   const lines: ProposalCheckLine[] = [];
@@ -406,6 +439,13 @@ function judge(inspection: Inspection, state: GitHubState, target: Target, onVer
       detail: found.length === 0 ? "Vercel doesn't deploy the App's branches." : `vercel.json ${found[0].problem}`,
     });
   }
+  return lines;
+}
+
+/** The dialog's lines, in the order a refusal names them. */
+function judge(inspection: Inspection, state: GitHubState, target: Target, onVercel: boolean): ProposalCheckLine[] {
+  const branch = inspection.rules.branch;
+  const lines = judgeDefaultBranch(inspection, state, onVercel);
 
   lines.push({
     id: "folder",
@@ -847,7 +887,7 @@ async function rejected(
 }
 
 /** Any failure as what to tell the admin. */
-function describe(err: unknown): Extract<ProposeOutcome, { ok: false }> {
+export function describe(err: unknown): Extract<ProposeOutcome, { ok: false }> {
   if (err instanceof ProposalRefusal) return err.outcome;
   if (err instanceof GitHubLinkError) return err.outcome;
   if (err instanceof LockUnavailableError) {
