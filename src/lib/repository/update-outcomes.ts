@@ -14,9 +14,11 @@
  */
 
 import type { FloorVerdict } from "../platform/version-floor";
+import type { HandBack } from "./hand-back";
 import type { ReviewedUpdate } from "./install";
-import type { PendingKind, UpdateDirection } from "./pending";
+import type { UpdateDirection } from "./pending";
 import type { Refusal } from "./pending-outcomes";
+import type { ExtensionKind } from "./types";
 import type { ClaimChanges, DeclarationChange, LocalChanges, MigrationChanges } from "./update";
 
 /** A release, as the dialog names it. */
@@ -46,7 +48,7 @@ export interface PickableRelease {
 
 /** What the dialog shows first: what is installed, what changed in it, and what it can update to. */
 export interface UpdateOverview {
-  kind: PendingKind;
+  kind: ExtensionKind;
   slug: string;
   /** The manifest's name, or the slug. */
   name: string;
@@ -74,7 +76,7 @@ export type OverviewOutcome = { ok: true; overview: UpdateOverview } | Refusal;
 
 /** Everything the dialog says about updating to one release, downloaded and verified to say it. */
 export interface UpdateComparison {
-  kind: PendingKind;
+  kind: ExtensionKind;
   slug: string;
   name: string;
   path: string;
@@ -95,7 +97,10 @@ export interface UpdateComparison {
   floor: FloorVerdict;
   /** The publisher's claims on the catalogue, from release to release. */
   claims: ({ state: "ok" } & ClaimChanges) | { state: "unavailable"; message: string };
-  /** What the package's manifest declares, the rows that change. Null when either manifest can't be read. */
+  /**
+   * What the package's manifest declares, the rows that change. Null when
+   * either manifest can't be read; empty for a theme, which runs no code.
+   */
   declarations: DeclarationChange[] | null;
   /** An app's migrations, from the folder to the release. Empty for a connector. */
   migrations: MigrationChanges;
@@ -111,19 +116,25 @@ export interface UpdateComparison {
 
 export type ComparisonOutcome = { ok: true; comparison: UpdateComparison } | Refusal;
 
-/** What the update made: the release waiting in pending, and what it replaces. */
+/**
+ * What the update made: for an app or a connector, the release waiting in
+ * pending for Register, and what it replaces; for a theme, which registers as
+ * it installs, the release in place, and what to commit.
+ */
 export interface PreparedUpdate {
-  kind: PendingKind;
+  kind: ExtensionKind;
   slug: string;
   name: string;
-  /** Repo-relative: `apps/<slug>`, unchanged. */
+  /** Repo-relative: `apps/<slug>`, unchanged until Register; `themes/<slug>`, updated. */
   path: string;
-  /** Repo-relative: `.mixos/pending/apps/<slug>`, where the release waits. */
-  pendingPath: string;
+  /** Repo-relative: `.mixos/pending/apps/<slug>`, where the release waits. Null for a theme, which doesn't. */
+  pendingPath: string | null;
   from: { version: string; gitTag: string | null };
   to: { version: string; gitTag: string | null; commitSha: string };
   direction: UpdateDirection;
   localChangesDiscarded: boolean;
+  /** For a theme: what to commit, and how to roll it back. Null while a release waits for Register. */
+  handBack: HandBack | null;
   /** What to do next, in a paragraph. */
   nextStep: string;
 }
