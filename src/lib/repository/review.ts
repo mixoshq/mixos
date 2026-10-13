@@ -14,7 +14,9 @@
  * is the repository and commit install downloaded and verified. Nothing here
  * imports, evaluates or executes a file the package ships. The publisher's
  * claims come from the catalogue, which the review action asks separately
- * (listingFacts() in ./pending-admin.ts).
+ * (listingFacts() in ./pending-admin.ts), and so does the comparison of a
+ * pending update with the folder it replaces (reviewPendingUpdate() in
+ * ./update.ts).
  *
  * Every path below is a runtime path in a checkout, built from arguments, so
  * each join is marked for Turbopack's tracer to leave alone (see ./pending.ts).
@@ -40,12 +42,14 @@ import {
   kindDir,
   listPendingInstalls,
   pendingLocation,
-  pendingUpdateProblem,
   readSidecar,
   recordProblem,
+  replacesProblem,
   type PendingKind,
   type PendingSidecar,
+  type Replaces,
 } from "./pending";
+import type { ExtensionKind } from "./types";
 
 /** One group of files that will run, as the review lists them. */
 export interface RunGroup {
@@ -92,6 +96,8 @@ export interface PendingReview {
   declared: Declaration[] | null;
   /** The release's floor against this checkout's version. `met` is false when Register would refuse it. */
   requiresMixOS: FloorVerdict;
+  /** For an update, what it replaces, from its sidecar: Register moves that folder aside first. Null for an install. */
+  replaces: Replaces | null;
   /**
    * What stands in the way of registering it now, or null. Register checks all
    * of it again under its locks; this says so before anyone asks.
@@ -147,12 +153,15 @@ function readText(file: string, limit: number): string | null {
   }
 }
 
+/** The manifest each kind's folder holds. */
+const MANIFEST_FILE: Record<ExtensionKind, string> = { app: "app.json", connector: "connector.json", theme: "theme.json" };
+
 /**
  * The manifest in an extension's folder, pending or in place, parsed as JSON
  * and nothing more, or null.
  */
-export function readManifest(folder: string, kind: PendingKind): Record<string, unknown> | null {
-  const file = path.join(/* turbopackIgnore: true */ folder, kind === "app" ? "app.json" : "connector.json");
+export function readManifest(folder: string, kind: ExtensionKind): Record<string, unknown> | null {
+  const file = path.join(/* turbopackIgnore: true */ folder, MANIFEST_FILE[kind]);
   const text = readText(file, MAX_MANIFEST_BYTES);
   if (text === null) return null;
   try {
@@ -169,11 +178,15 @@ export function shownText(value: string, max: number = MAX_VALUE_CHARS): string 
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
+/** The name a manifest gives its extension, made fit to show, or `slug` when it gives none. */
+export function manifestName(manifest: Record<string, unknown> | null, kind: ExtensionKind, slug: string): string {
+  const name = manifest?.[kind === "connector" ? "displayName" : "name"];
+  return typeof name === "string" && name.trim() ? shownText(name) : slug;
+}
+
 /** The name a pending install's manifest gives itself, or its slug. */
 export function pendingDisplayName(root: string, kind: PendingKind, slug: string): string {
-  const manifest = readManifest(pendingLocation(root, kind, slug).folder, kind);
-  const name = manifest?.[kind === "app" ? "name" : "displayName"];
-  return typeof name === "string" && name.trim() ? shownText(name) : slug;
+  return manifestName(readManifest(pendingLocation(root, kind, slug).folder, kind), kind, slug);
 }
 
 /** How many `.sql` files an app folder's `migrations/` holds. */
@@ -369,12 +382,11 @@ export function reviewPendingInstall(root: string, kind: PendingKind, slug: stri
   const files = listed.map((f) => f.path);
   const manifest = readManifest(where.folder, kind);
 
-  // What Register will find: the files as install verified them, or not.
+  // What Register will find: the files as install verified them, or not, and
+  // for an update, the folder in place as the update found it, or not.
   let problem: string | null = null;
   if (sidecar.register) {
     problem = "A registration of it stopped before it finished. Run `npm run register -- --recover` in this checkout.";
-  } else if (sidecar.replaces) {
-    problem = pendingUpdateProblem(kind, slug, sidecar.replaces, record.version);
   } else {
     try {
       if (!contentHashesMatch(folderFilesHash(where.folder), record.filesHash)) {
@@ -386,15 +398,15 @@ export function reviewPendingInstall(root: string, kind: PendingKind, slug: stri
       problem = `${err.message} Register would refuse it. Discard it and install it again.`;
     }
   }
+  if (!problem && sidecar.replaces) problem = replacesProblem(root, kind, slug, sidecar.replaces);
 
   const floor = floorVerdict(record.requiresMixOS);
   if (!problem && !floor.met) problem = floor.reason ?? "This checkout's MixOS is older than the release requires.";
 
-  const name = manifest?.[kind === "app" ? "name" : "displayName"];
   return {
     kind,
     slug,
-    name: typeof name === "string" && name.trim() ? shownText(name) : slug,
+    name: manifestName(manifest, kind, slug),
     folder: where.rel,
     target: `${kindDir(kind)}/${slug}`,
     release: {
@@ -415,6 +427,7 @@ export function reviewPendingInstall(root: string, kind: PendingKind, slug: stri
     deferred: sidecar.check.deferred.map((d) => shownText(d, MAX_LINE_CHARS)),
     declared: manifest ? declaredBy(kind, manifest) : null,
     requiresMixOS: floor,
+    replaces: sidecar.replaces ?? null,
     problem,
   };
 }
