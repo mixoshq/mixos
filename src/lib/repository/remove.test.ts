@@ -23,7 +23,7 @@ import os from "node:os";
 import path from "node:path";
 import { cliActorName } from "../apps/audit-actors";
 import { readCheckoutLock, tryAcquireCheckoutLock } from "../platform/checkout-lock";
-import { backupLocation, readBackupRecord, writeBackupRecord, type BackupRecord } from "./backup";
+import { backupLocation, readBackupRecord, writeBackupRecord, type RemovalRecord } from "./backup";
 import { ciSkipMarker } from "./hand-back";
 import { filesHash, hashFileTree } from "./content-hash";
 import { INSTALL_RECORD_FILE, serializeInstallRecord, type InstallRecord } from "./install-record";
@@ -617,7 +617,7 @@ describe("a removal the generator doesn't accept", () => {
 
 describe("recovering a removal that stopped midway", () => {
   /** A removal's record, as it writes one before the folder moves. */
-  const recordOf = (slug: string, fields: Partial<BackupRecord> = {}): BackupRecord => ({
+  const recordOf = (slug: string, fields: Partial<RemovalRecord> = {}): RemovalRecord => ({
     operation: "remove",
     kind: "app",
     slug,
@@ -628,7 +628,7 @@ describe("recovering a removal that stopped midway", () => {
     ...fields,
   });
   /** What a removal killed after it moved the folder leaves. */
-  function killedAfterMove(slug: string, fields: Partial<BackupRecord> = {}) {
+  function killedAfterMove(slug: string, fields: Partial<RemovalRecord> = {}) {
     app(slug);
     const where = backupLocation(root, "app", slug);
     writeBackupRecord(where.record, recordOf(slug, fields));

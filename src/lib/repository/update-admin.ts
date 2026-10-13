@@ -3,8 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * The update dialog's work: what updating an app or a connector to another
- * release would do, and making the update. Behind the server actions in
+ * The update dialog's work: what updating an extension to another release would
+ * do, and making the update. Behind the server actions in
  * ./update-actions.ts, which pass in the signed-in admin and the facts about
  * this deployment, so a test can pass its own.
  *
@@ -56,10 +56,9 @@ import {
   type InstalledExtension,
 } from "./install";
 import { githubCompareUrl, githubSourceUrl, isRecordedVersion, recordSourceUrl } from "./install-record";
-import type { PendingKind } from "./pending";
 import type { NoticeTone, Refusal } from "./pending-outcomes";
 import { sourceHost } from "./provenance";
-import { readManifest, shownText } from "./review";
+import { manifestName, readManifest, shownText } from "./review";
 import {
   compareClaims,
   compareDeclarations,
@@ -70,7 +69,9 @@ import {
   needsOlderConsent,
   releaseManifest,
   releaseMigrations,
+  sameRepository,
   shownClaims,
+  unhashableProblem,
   updateDirection,
   type LocalChanges,
   type ReleaseRef,
@@ -175,16 +176,6 @@ function isoOrNull(value: string | null | undefined): string | null {
   return Number.isNaN(at) ? null : new Date(at).toISOString();
 }
 
-/** The name an extension's manifest gives itself, made fit to show, or its slug. */
-function displayName(manifest: Record<string, unknown> | null, kind: PendingKind, slug: string): string {
-  const name = manifest?.[kind === "app" ? "name" : "displayName"];
-  return typeof name === "string" && name.trim() ? shownText(name) : slug;
-}
-
-/** Two repositories are one when GitHub would say so: owner and name, in any case. */
-function sameRepository(a: { owner: string; name: string }, b: { owner: string; name: string }): boolean {
-  return a.owner.toLowerCase() === b.owner.toLowerCase() && a.name.toLowerCase() === b.name.toLowerCase();
-}
 
 /* -------------------------------------------------------------------------- */
 /*  The overview                                                                */
@@ -201,7 +192,7 @@ export async function updateOverview(kind: ExtensionKind, slug: string, root: st
   const installed = installedForUpdate(kind, slug, root);
   const { record } = installed;
   const host = sourceHost(record.source);
-  const name = displayName(readManifest(installed.dir, installed.kind), installed.kind, slug);
+  const name = manifestName(readManifest(installed.dir, installed.kind), installed.kind, slug);
   const state = folderState(installed.dir, record);
   const local: LocalChanges = state.modified ? await listLocalChanges(installed) : { state: "none" };
 
@@ -363,7 +354,7 @@ export async function compareUpdate(
   return {
     kind: installed.kind,
     slug,
-    name: displayName(before, installed.kind, slug),
+    name: manifestName(before, installed.kind, slug),
     path: installed.rel,
     host,
     from: { ...from, gitTag: record.gitTag, sourceUrl: recordSourceUrl(record) },
@@ -385,7 +376,10 @@ export async function compareUpdate(
         },
     floor: floorVerdict(manifest.requiresMixOS),
     claims,
-    declarations: before && after ? compareDeclarations(installed.kind, before, after) : null,
+    // A theme runs no code: nothing it declares is enforced as an app's or a
+    // connector's manifest is.
+    declarations:
+      installed.kind === "theme" ? [] : before && after ? compareDeclarations(installed.kind, before, after) : null,
     migrations:
       installed.kind === "app"
         ? compareMigrations(folderMigrations(installed.dir), releaseMigrations(written))
@@ -397,9 +391,10 @@ export async function compareUpdate(
       allowYanked: manifest.yanked === true,
     },
     blocker:
-      direction === "same" && !state.modified
+      unhashableProblem(installed.rel, state) ??
+      (direction === "same" && !state.modified
         ? `${installed.rel} already runs ${record.version}, and its files match it, so there is nothing to update.`
-        : null,
+        : null),
     reviewed: {
       installedCommit: record.commitSha,
       installedFilesHash: record.filesHash,
@@ -453,11 +448,13 @@ export async function compareForButton(input: unknown, ctx: UpdateContext): Prom
 /* -------------------------------------------------------------------------- */
 
 /**
- * Make the update the admin reviewed: install's update mode, which leaves the
- * release in `.mixos/pending/` and the folder in place as it is. Audited as
- * `<kind>.update`, with what it replaces and what it goes to, which way, and
- * whether local changes were discarded; refused, as `<kind>.update.rejected`
- * with the reason, the built-deployment refusal before any lock included.
+ * Make the update the admin reviewed: install's update mode, which leaves an
+ * app's or a connector's release in `.mixos/pending/` with the folder in place
+ * as it is, for Register to swap, and swaps a theme's there and then. Audited
+ * as `<kind>.update`, with what it replaces and what it goes to, which way,
+ * whether local changes were discarded, and for a theme that it was swapped;
+ * refused, as `<kind>.update.rejected` with the reason, the built-deployment
+ * refusal before any lock included.
  */
 export async function updateFromButton(input: unknown, ctx: UpdateContext): Promise<UpdateOutcome> {
   const actor = await ctx.admin();
@@ -510,7 +507,12 @@ export async function updateFromButton(input: unknown, ctx: UpdateContext): Prom
         },
         direction: replaces.direction,
         localChangesDiscarded: replaces.localChangesDiscarded,
-        pendingPath: result.installPath,
+        // An app or a connector waits in pending for Register; a theme was
+        // swapped into place, and its backup deleted once the generator
+        // accepted it.
+        ...(result.pending
+          ? { pendingPath: result.installPath }
+          : { installPath: result.installPath, swapped: true, registryValidated: result.registry?.ok ?? null }),
         verdict: "accepted",
         deferred: result.deferred.length,
         fileCount: result.fileCount,
@@ -524,15 +526,16 @@ export async function updateFromButton(input: unknown, ctx: UpdateContext): Prom
     return {
       ok: true,
       result: {
-        kind: result.kind as PendingKind,
+        kind: result.kind,
         slug,
         name: shownText(result.name) || slug,
         path: `${KIND_SEGMENT[kind]}/${slug}`,
-        pendingPath: result.installPath,
+        pendingPath: result.pending ? result.installPath : null,
         from: { version: replaces.version, gitTag: replaces.gitTag },
         to: { version: result.version, gitTag: result.gitTag, commitSha: result.commitSha },
         direction: replaces.direction,
         localChangesDiscarded: replaces.localChangesDiscarded,
+        handBack: result.pending ? null : result.handBack,
         nextStep: result.nextStep,
       },
     };

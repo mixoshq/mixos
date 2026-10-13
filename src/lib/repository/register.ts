@@ -46,12 +46,26 @@
  *    stays in the folder, to be committed with it.
  * 6. Audited: `<kind>.register`, or `<kind>.register.rejected` with the reason.
  *
- * A pending update (./update.ts), which would replace a folder already in
- * place, is refused at step 1, before anything moves, and says to discard it
- * (pendingUpdateProblem() in ./pending.ts).
+ * ── AN UPDATE ───────────────────────────────────────────────────────────────
+ *
+ * A pending update (./update.ts) replaces a folder already in place, so step 1
+ * checks that folder instead: it is there, its install record is the release
+ * the update replaces, and its files are as the update found them
+ * (replacesProblem() in ./pending.ts). Then, at step 3, the swap
+ * (swapIn() in ./backup.ts), fenced before each change: a backup record in
+ * `.mixos/backup/<kind dir>/<slug>.json`, with this registration's token and
+ * both releases; the folder in place renamed to its backup; the update renamed
+ * into its place. At step 5, refused, stopped or out of time: the update goes
+ * back to pending and the backup back into place, and the generator runs
+ * again; a Ctrl-C doesn't stop that. Accepted: the record says so, then the
+ * sidecar, the backup and the record are deleted. Activation, grants, settings
+ * and connector configuration are the database's, by slug, and nothing here
+ * touches them.
  *
  * The result hands back what to commit and how (./hand-back.ts): the folder's
- * files, a commit message built from the record, and the commands.
+ * files, a commit message built from the record, and the commands. For an
+ * update: the files the commit changes, a message naming both releases, and
+ * how to roll it back once it is deployed.
  *
  * ── A REGISTRATION THAT DIED MIDWAY ─────────────────────────────────────────
  *
@@ -64,10 +78,16 @@
  * Register can then be run again. It asks first, and checks under the locks
  * that the checkout is still as it was shown.
  *
- * Recovery also deals with a removal that died midway (./remove.ts), from what
- * it left in `.mixos/backup/` (./backup.ts): it puts back a folder the registry
- * generator never accepted the checkout without, and finishes deleting one it
- * did. `npm run remove -- --recover` is the same recovery.
+ * Recovery also deals with a removal or an update that died midway, from what
+ * it left in `.mixos/backup/` (./backup.ts). For a removal (./remove.ts) it puts
+ * back a folder the registry generator never accepted the checkout without, and
+ * finishes deleting one it did. For an update whose new release was in place
+ * but not yet accepted, it offers both ways: restore the backup, putting the
+ * update back in pending, or keep the new release, which runs the generator as
+ * Register would have and restores the backup if that refuses it. One the
+ * generator accepted is finished. Each acts only on a record whose token isn't
+ * the checkout lock's while its holder may still be running.
+ * `npm run remove -- --recover` is the same recovery.
  */
 
 import fs from "node:fs";
@@ -92,10 +112,17 @@ import {
   extensionFolder,
   isExtensionName,
   leftoverBackup,
+  leftoverBackupMessage,
   readBackupRecord,
+  swapBack,
+  swapDone,
+  swapIn,
+  type BackupLocation,
+  type UpdateRecord,
+  type UpdateSwap,
 } from "./backup";
 import { contentHashesMatch } from "./content-hash";
-import { handBackFor, type HandBack } from "./hand-back";
+import { handBackFor, updateHandBackFor, type HandBack } from "./hand-back";
 import {
   FolderReadError,
   INSTALL_RECORD_FILE,
@@ -122,16 +149,20 @@ import {
   liveLocation,
   pathExists,
   pendingLocation,
-  pendingUpdateProblem,
   readSidecar,
   recordProblem,
+  replacesProblem,
+  stagingLocation,
   writeSidecar,
   type PendingKind,
   type PendingSidecar,
   type Registering,
+  type Replaces,
+  type UpdateDirection,
 } from "./pending";
 import { installDisabledMessage, installEnabled } from "./policy";
 import { SlugSchema, type ExtensionKind } from "./types";
+import { compareMigrations, folderDifferences, folderMigrations, type FolderDifferences } from "./update";
 
 /** How a pending install was acted on, and by whom. */
 export interface PendingActionOptions {
@@ -172,7 +203,8 @@ export type RegisterFailureCode =
   | "lock-unconfirmed"
   | "stopped"
   | "changed-meanwhile"
-  | "update-pending";
+  /** An update's folder in place isn't what the update replaces any more. */
+  | "folder-changed";
 
 export class RegisterError extends Error {
   constructor(
@@ -286,13 +318,27 @@ export interface RegisterResult {
   registry: RegistryOutcome;
   /** What to commit, and how: it runs in this checkout now, and ships when it is committed. */
   handBack: HandBack;
+  /** For an update: the release it replaced, and what the swap changed. Null for an install. */
+  update: RegisteredUpdate | null;
   /** What to do next, in a paragraph. */
   nextStep: string;
 }
 
+/** What an update that Register put in place replaced, and what it changed. */
+export interface RegisteredUpdate {
+  from: { version: string; gitTag: string | null; commitSha: string };
+  direction: UpdateDirection;
+  localChangesDiscarded: boolean;
+  /** An app's new `migrations/*.sql`, which `npm run migrate:apps` and the release step apply. */
+  migrationsAdded: string[];
+  /** The files the update changed in the folder, against the release it replaced. */
+  changes: FolderDifferences;
+}
+
 /**
- * Register a pending app or connector. Throws RegisterError, or a lock's
- * error, when it refuses; either way it is audited.
+ * Register a pending app or connector, or put a pending update in place.
+ * Throws RegisterError, or a lock's error, when it refuses; either way it is
+ * audited.
  */
 export async function registerPending(
   kind: ExtensionKind,
@@ -319,6 +365,19 @@ export async function registerPending(
         installedAt: result.installedAt,
         fileCount: result.fileCount,
         byteCount: result.byteCount,
+        // An update: what it replaced, and that the folder was swapped, with
+        // the backup deleted once the generator accepted the new release.
+        ...(result.update
+          ? {
+              update: {
+                from: result.update.from,
+                direction: result.update.direction,
+                localChangesDiscarded: result.update.localChangesDiscarded,
+                swapped: true,
+                backupDeleted: true,
+              },
+            }
+          : {}),
       },
     });
     return result;
@@ -334,10 +393,44 @@ export async function registerPending(
         // Never the detail, which is the generator's output, nor the words of
         // an error nothing here expected, which can name this machine's paths.
         message: failure.code === "unknown" ? "An unexpected error stopped it." : failure.message,
+        ...updateDetails(kind, slug, options.root ?? checkoutRoot()),
       },
     });
     throw err;
   }
+}
+
+/**
+ * For a refused registration of a pending update, the releases it would have
+ * swapped, read from its records for the audit row; nothing for an install,
+ * or for records that can't be read. A swap that stopped midway has both in
+ * its backup's record, and may have moved the pending folder into place, so
+ * that record is read first.
+ */
+function updateDetails(kind: ExtensionKind, slug: string, root: string): Record<string, unknown> {
+  if (!isPendingKind(kind) || !SlugSchema.safeParse(slug).success) return {};
+  const leftover = leftoverBackup(root, kind, slug);
+  const backup = leftover ? readBackupRecord(leftover.record) : null;
+  if (backup?.state === "ok" && backup.record.operation === "update") {
+    const { from, to } = backup.record;
+    return {
+      update: {
+        from: { version: from.version, commitSha: from.commitSha },
+        to: { version: to.version, commitSha: to.commitSha },
+      },
+    };
+  }
+  const where = pendingLocation(root, kind, slug);
+  const read = readSidecar(where.sidecar);
+  const replaces = read.state === "ok" ? read.sidecar.replaces : undefined;
+  if (!replaces) return {};
+  const record = isRealDirectory(where.folder) ? readInstallRecord(where.folder) : null;
+  return {
+    update: {
+      from: { version: replaces.version, commitSha: replaces.commitSha },
+      to: record?.state === "ok" ? { version: record.record.version, commitSha: record.record.commitSha } : null,
+    },
+  };
 }
 
 async function registerUnderLocks(
@@ -408,7 +501,14 @@ async function runRegister(
   const fence = fencer(lease, "This registration", options.signal);
   const generator = { lockToken, root: options.root, generator: options.generator, signal: options.signal };
 
-  // 1. What is pending, its records, and nothing where it would go.
+  // 1. Nothing of this name left by a removal or an update that stopped
+  // midway: `.mixos/backup/` may hold the folder this would go into, or
+  // replace, for recovery to put back. Checked before the pending records,
+  // since an update that died after its swap left a record in both places,
+  // and the backup's says which releases are where.
+  const leftover = leftoverBackup(root, kind, slug);
+  if (leftover) throw new RegisterError(leftoverBackupMessage(leftover, slug), "interrupted");
+  // What is pending, its records, and nothing where it would go.
   const { sidecar, record } = pendingInstallFor(kind, slug, where);
   if (options.reviewedFilesHash !== undefined && !contentHashesMatch(options.reviewedFilesHash, record.filesHash)) {
     throw new RegisterError(
@@ -417,17 +517,14 @@ async function runRegister(
       "changed-meanwhile",
     );
   }
-  // A removal of the same name that stopped midway may have its folder in
-  // `.mixos/backup/`, for recovery to put back where this would go.
-  const leftover = leftoverBackup(root, kind, slug);
-  if (leftover) {
-    throw new RegisterError(
-      `A removal of ${slug} stopped before it finished, and left ${leftover.rel}. Run ` +
-        "`npm run remove -- --recover` to put things back, then try again.",
-      "interrupted",
-    );
-  }
-  if (pathExists(live.dir)) {
+
+  // An update replaces the folder in place, which has to be the one it was
+  // prepared against. Anything else is never registered over.
+  const replaces = sidecar.replaces ?? null;
+  if (replaces) {
+    const problem = replacesProblem(root, kind, slug, replaces);
+    if (problem) throw new RegisterError(`${where.rel}/ was not registered: nothing was moved. ${problem}`, "folder-changed");
+  } else if (pathExists(live.dir)) {
     throw new RegisterError(
       `${live.rel} already exists in this checkout, so ${slug} can't be registered over it. ` +
         `Discard the pending copy with \`npm run register -- ${kind}/${slug} --discard\`, or ` +
@@ -453,6 +550,10 @@ async function runRegister(
   const compat = satisfiesMinimum(record.requiresMixOS);
   if (!compat.allowed) throw new RegisterError(compat.reason!, "incompatible");
   if (compat.reason) console.warn(`[register] ${kind}/${slug}: ${compat.reason}`);
+
+  if (replaces) {
+    return registerUpdate({ kind, slug, root, lockToken, fence, generator, where, live, sidecar, record, replaces });
+  }
 
   // 3. Record this registration, then move it into place.
   await fence(`Nothing was moved: ${slug} is still waiting in ${where.rel}/.`);
@@ -522,6 +623,7 @@ async function runRegister(
     deferred: sidecar.check.deferred,
     registry,
     handBack: handBackFor(record, live.rel, files),
+    update: null,
     // The hand-back says how to ship it; this says what it is now.
     nextStep:
       `Registered to ${live.rel}: the registry generator loaded its code and accepted it. ` +
@@ -530,6 +632,208 @@ async function runRegister(
           "first if it has migrations)."
         : "Configure it in Admin > Connectors."),
   };
+}
+
+/** What registerUpdate() works with: runRegister()'s own, once its checks have passed. */
+interface UpdateContext {
+  kind: PendingKind;
+  slug: string;
+  root: string;
+  lockToken: string;
+  fence: ReturnType<typeof fencer>;
+  generator: { lockToken: string; root?: string; generator?: string; signal?: AbortSignal };
+  where: ReturnType<typeof pendingLocation>;
+  live: { dir: string; rel: string };
+  sidecar: PendingSidecar;
+  record: InstallRecord;
+  replaces: Replaces;
+}
+
+/**
+ * Steps 3 to 5 for a pending update: the swap, the generator's first run of
+ * the new release, and then the backup deleted, or everything put back.
+ */
+async function registerUpdate(c: UpdateContext): Promise<RegisterResult> {
+  const { kind, slug, root, lockToken, fence, generator, where, live, sidecar, record, replaces } = c;
+  const from = replaces.version;
+  const to = record.version;
+  const backup = backupLocation(root, kind, slug);
+  const swap: UpdateSwap = {
+    live,
+    backup,
+    incoming: { dir: where.folder, rel: where.rel },
+    record: updateRecordFor(kind, slug, lockToken, replaces, record),
+  };
+
+  // 3. Record this registration in the sidecar, then the swap, which fences
+  // before each of its own changes.
+  await fence(`Nothing was moved: ${to} is still waiting in ${where.rel}/, and ${live.rel} holds ${from}.`);
+  writeSidecar(where.sidecar, { ...sidecar, register: registeringNow(lockToken) });
+  try {
+    await swapIn(swap, (left) => fence(left), (message) => new RegisterError(message, "write-failed"));
+  } catch (err) {
+    // A rename that failed put back what it moved. A lost lock or a stop
+    // leaves everything as it was at that point, for recovery.
+    if (err instanceof RegisterError && err.code === "write-failed") writeSidecar(where.sidecar, sidecar);
+    throw err;
+  }
+
+  // 4. The new release's code runs for the first time.
+  const registry = await regenerateRegistry(kind, slug, generator);
+
+  if (!registry.ok) {
+    // 5. Refused, stopped or out of time: the update back to pending, the
+    // folder it replaced back in place, and the registry regenerated. A Ctrl-C
+    // doesn't stop this: it is what leaves the checkout as it was.
+    await fence(
+      `The registry generator didn't accept ${to}: ${live.rel} holds it, and ${from} waits in ${backup.rel}/. ` +
+        `Run \`npm run register -- --recover\` to restore ${from}.`,
+      registry.output,
+      { finishing: true },
+    );
+    swapBack(swap, { keepIncoming: true });
+    writeSidecar(where.sidecar, sidecar);
+    const restored = await runRegistryGenerator({ ...generator, signal: undefined });
+    throw updateRefusal(c, registry, restored.code === 0, generator.signal?.aborted === true);
+  }
+
+  // Accepted. What it changed, while both folders are here, then the backup
+  // goes: the record first says the generator accepted it, so recovery
+  // finishes deleting rather than putting it back.
+  await fence(
+    `${to} is registered in ${live.rel}, but ${from} is still in ${backup.rel}/. Run ` +
+      `\`npm run register -- --recover\` and keep ${to} to finish.`,
+    undefined,
+    { finishing: true },
+  );
+  const changes = folderDifferences(backup.folder, live.dir);
+  const migrationsAdded =
+    kind === "app" ? compareMigrations(folderMigrations(backup.folder), folderMigrations(live.dir)).added : [];
+  swapDone(swap, () => fs.rmSync(where.sidecar, { force: true }));
+
+  const files = folderFiles(live.dir);
+  const packaged = files.filter((f) => f.path !== INSTALL_RECORD_FILE);
+  return {
+    kind,
+    slug,
+    record,
+    source: record.source,
+    version: record.version,
+    gitTag: record.gitTag,
+    commitSha: record.commitSha,
+    contentHash: record.contentHash,
+    filesHash: record.filesHash,
+    installPath: live.rel,
+    installedBy: sidecar.installedBy,
+    installedAt: sidecar.installedAt,
+    fileCount: packaged.length,
+    byteCount: packaged.reduce((n, f) => n + f.bytes, 0),
+    leftOut: sidecar.leftOut ?? {},
+    deferred: sidecar.check.deferred,
+    registry,
+    handBack: updateHandBackFor(
+      record,
+      {
+        version: from,
+        commitSha: replaces.commitSha,
+        direction: replaces.direction,
+        localChangesDiscarded: replaces.localChangesDiscarded,
+      },
+      live.rel,
+      files,
+      changes,
+    ),
+    update: {
+      from: { version: from, gitTag: replaces.gitTag, commitSha: replaces.commitSha },
+      direction: replaces.direction,
+      localChangesDiscarded: replaces.localChangesDiscarded,
+      migrationsAdded,
+      changes,
+    },
+    nextStep: updateNextStep(kind, live.rel, from, to, migrationsAdded.length),
+  };
+}
+
+/** The backup record an update writes before it moves anything: both releases, and this registration. */
+export function updateRecordFor(
+  kind: ExtensionKind,
+  slug: string,
+  lockToken: string,
+  replaces: Pick<Replaces, "version" | "gitTag" | "commitSha" | "folderHash">,
+  to: Pick<InstallRecord, "version" | "gitTag" | "commitSha" | "filesHash">,
+): UpdateRecord {
+  return {
+    operation: "update",
+    kind,
+    slug,
+    ...registeringNow(lockToken),
+    from: { version: replaces.version, gitTag: replaces.gitTag, commitSha: replaces.commitSha, folderHash: replaces.folderHash },
+    to: { version: to.version, gitTag: to.gitTag, commitSha: to.commitSha, filesHash: to.filesHash },
+  };
+}
+
+/** This process, holding the checkout lock by `token`, as a record names it. */
+function registeringNow(token: string): Registering {
+  return { token, pid: process.pid, hostname: os.hostname(), startedAt: new Date().toISOString() };
+}
+
+/**
+ * What an update put in place is now, for a paragraph after Register. How to
+ * ship it, and to roll it back, is the hand-back's to say.
+ */
+export function updateNextStep(kind: ExtensionKind, rel: string, from: string, to: string, migrationsAdded: number): string {
+  const kept =
+    kind === "app"
+      ? "Its activation, grants and settings carry over: they belong to its slug, in the database."
+      : kind === "connector"
+        ? "Its credentials and its users' connections carry over: they belong to its name, in the database."
+        : "Whether it is the applied theme carries over.";
+  const migrate =
+    migrationsAdded > 0
+      ? ` Run \`npm run migrate:apps\` in this checkout to apply its ${migrationsAdded} new ` +
+        `${migrationsAdded === 1 ? "migration" : "migrations"}, which can't be undone.`
+      : "";
+  const restart =
+    kind === "theme"
+      ? ""
+      : " If `npm run dev` is running, restart it: until it does, it can keep serving the code it compiled " +
+        `from ${from}.`;
+  return (
+    `Updated ${rel} from ${from} to ${to}: the registry generator loaded the new code and accepted it, ` +
+    `and the backup of ${from} was deleted. ${kept}${migrate}${restart}`
+  );
+}
+
+/** Why an update the generator didn't accept was put back. */
+function updateRefusal(
+  c: Pick<UpdateContext, "slug" | "live" | "where" | "replaces" | "record">,
+  registry: RegistryOutcome,
+  restored: boolean,
+  stopped: boolean,
+): RegisterError {
+  const from = c.replaces.version;
+  const to = c.record.version;
+  const back = `${from} was put back in ${c.live.rel}, and ${to} waits in ${c.where.rel}/ again.`;
+  const after = restored
+    ? ""
+    : " Regenerating the registry afterwards failed too, so src/generated/ may still describe " +
+      `${to}: run \`npm run registry\`.`;
+  if (stopped) return new RegisterError(`Stopped before it finished. ${back}${after}`, "stopped", registry.output);
+  if (!registry.ran || registry.stopped) {
+    return new RegisterError(
+      `The registry generator ${registry.ran ? "stopped" : "didn't finish"} with ${to} in place, so ${back} ` +
+        `Registering loads its code for the first time, so the output below may be about that code or about ` +
+        `this checkout.${after}`,
+      "generator-failed",
+      registry.output,
+    );
+  }
+  return new RegisterError(
+    `The registry generator left ${c.slug} ${to} out once it loaded its code, so ${back} The output below ` +
+      `says why.${after}`,
+    "rejected-by-registry",
+    registry.output,
+  );
 }
 
 /**
@@ -584,16 +888,6 @@ function pendingInstallFor(
     );
   }
   const record = readInstallRecord(where.folder);
-  // An update replaces the folder in place, which Register doesn't do yet
-  // (pendingUpdateProblem() in ./pending.ts). Nothing has moved.
-  if (read.sidecar.replaces) {
-    const own = record.state === "ok" && recordProblem(where, kind, slug, record) === null;
-    const to = own && record.state === "ok" ? record.record.version : null;
-    throw new RegisterError(
-      pendingUpdateProblem(kind, slug, read.sidecar.replaces, to, `${where.rel}/`),
-      "update-pending",
-    );
-  }
   const problem = recordProblem(where, kind, slug, record);
   if (problem || record.state !== "ok") {
     throw new RegisterError(`${where.rel}/ can't be registered. ${problem} ${discard}`, "unregistrable");
@@ -764,15 +1058,52 @@ export type RecoveryAction =
   /** A removal stopped before moving the folder, or after moving it back: delete its record. */
   | "clear-backup-record"
   /** A backup's record that can't be read, with no backup beside it. */
-  | "drop-backup-record";
+  | "drop-backup-record"
+  /**
+   * An update stopped with the folder it replaces in `.mixos/backup/`, never
+   * accepted: put that back, and the new release back where it came from.
+   */
+  | "restore-update"
+  /**
+   * The same, the other way: keep the new release in place, if the registry
+   * generator accepts it now, and delete the backup. If it doesn't, restore.
+   */
+  | "keep-update"
+  /** An update the generator accepted stopped while deleting its backup: finish deleting it. */
+  | "finish-update"
+  /** An update stopped before moving anything, or after putting everything back: delete its record. */
+  | "clear-update-record";
 
-/** The actions about `.mixos/backup/`, which a removal leaves: audited as `<kind>.remove.recover`. */
-const BACKUP_ACTIONS: ReadonlySet<RecoveryAction> = new Set([
+/** What the audit row of each action about `.mixos/backup/` calls the operation: `<kind>.<verb>.recover`. */
+const BACKUP_VERB: Partial<Record<RecoveryAction, "remove" | "update">> = {
+  "restore-backup": "remove",
+  "finish-removal": "remove",
+  "clear-backup-record": "remove",
+  "drop-backup-record": "remove",
+  "restore-update": "update",
+  "keep-update": "update",
+  "finish-update": "update",
+  "clear-update-record": "update",
+};
+
+/** The actions after which the registry is regenerated, since what is in place changed, or may have. */
+const REGENERATES: ReadonlySet<RecoveryAction> = new Set([
+  "return-to-pending",
+  "clear-record",
   "restore-backup",
-  "finish-removal",
   "clear-backup-record",
-  "drop-backup-record",
+  "restore-update",
+  "clear-update-record",
 ]);
+
+/** One of two things recovery can do about an item, which a person picks. */
+export interface RecoveryChoice {
+  action: RecoveryAction;
+  /** A few words: "restore 1.2.0". */
+  label: string;
+  /** What it does, for a person. */
+  does: string;
+}
 
 export interface RecoveryItem {
   kind: ExtensionKind | null;
@@ -788,19 +1119,28 @@ export interface RecoveryItem {
   blocked: string | null;
   /** Something to read before agreeing. */
   warning: string | null;
+  /**
+   * When recovery can go either way, the two ways, `action` the first: an
+   * update stopped with its new release in place, which can be restored or
+   * kept. RecoverOptions.choose picks.
+   */
+  choices?: RecoveryChoice[];
 }
 
 /**
- * What a stopped install, registration, discard or removal left in the
+ * What a stopped install, registration, discard, removal or update left in the
  * checkout at `root`, and what recovery would do about each. Reads only.
  */
 export function planRecovery(root: string = checkoutRoot()): RecoveryItem[] {
   const items: RecoveryItem[] = [];
   const here = os.hostname();
   // Who holds the checkout lock now, unless its holder has certainly stopped: a
-  // removal's record with that holder's token belongs to a removal still running.
+  // backup's record with that holder's token belongs to an operation still running.
   const holder = readCheckoutLock(root).holder;
   const liveHolder = holder && !isStaleHolder(holder) ? holder : null;
+  // The pending installs an update's backup record speaks for: its item covers
+  // the pending folder and its sidecar too.
+  const updating = updatesUnderway(root);
 
   for (const kind of ["app", "connector"] as const) {
     const parent = path.join(/* turbopackIgnore: true */ root, MIXOS_DIR, "pending", kindDir(kind));
@@ -830,6 +1170,7 @@ export function planRecovery(root: string = checkoutRoot()): RecoveryItem[] {
     }
 
     for (const slug of [...slugs].sort()) {
+      if (updating.has(`${kind}/${slug}`)) continue;
       const item = pendingRecovery(root, kind, slug, here);
       if (item) items.push(item);
     }
@@ -912,6 +1253,27 @@ export function planRecovery(root: string = checkoutRoot()): RecoveryItem[] {
   return items;
 }
 
+/** `app/<slug>` and `connector/<slug>` for each readable update record in `.mixos/backup/`. */
+function updatesUnderway(root: string): Set<string> {
+  const out = new Set<string>();
+  for (const kind of ["app", "connector"] as const) {
+    let names: string[];
+    try {
+      names = fs.readdirSync(path.join(/* turbopackIgnore: true */ root, MIXOS_DIR, "backup", kindDir(kind)));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".json") || name.startsWith(".")) continue;
+      const slug = name.slice(0, -".json".length);
+      if (!SlugSchema.safeParse(slug).success || !isExtensionName(slug)) continue;
+      const read = readBackupRecord(backupLocation(root, kind, slug).record);
+      if (read.state === "ok" && read.record.operation === "update") out.add(`${kind}/${slug}`);
+    }
+  }
+  return out;
+}
+
 function pendingRecovery(root: string, kind: PendingKind, slug: string, here: string): RecoveryItem | null {
   const where = pendingLocation(root, kind, slug);
   const live = liveLocation(root, kind, slug);
@@ -933,6 +1295,30 @@ function pendingRecovery(root: string, kind: PendingKind, slug: string, here: st
           "can't check. Go ahead only if nothing is registering there."
         : null;
     const stopped = `A registration of ${slug} (${describeRegistering(r)}) stopped`;
+    // A pending update with no backup record: its swap never began, or was
+    // put back, so the folder in place is the one it replaces. With its
+    // folder gone from pending too, nothing says which release is in place.
+    if (read.sidecar.replaces && hasFolder) {
+      return {
+        ...base,
+        action: "clear-record",
+        found: `${stopped} before it moved anything: ${live.rel} still holds ${read.sidecar.replaces.version}.`,
+        does: "Clear the record of it and regenerate the registry. The update stays in pending.",
+        blocked,
+        warning,
+      };
+    }
+    if (read.sidecar.replaces && inPlace) {
+      return {
+        ...base,
+        action: "resolve-by-hand",
+        found: `${stopped}, ${where.rel}/ is gone, and no backup record says which release ${live.rel} holds.`,
+        does: "Nothing.",
+        blocked:
+          blocked ?? `Check ${live.rel} by hand, then delete ${where.rel}.json and run this again.`,
+        warning,
+      };
+    }
     if (!hasFolder && inPlace) {
       return {
         ...base,
@@ -1004,11 +1390,11 @@ function pendingRecovery(root: string, kind: PendingKind, slug: string, here: st
 }
 
 /**
- * What a removal of `kind`/`slug` left in `.mixos/backup/` (./backup.ts), and
- * what recovery would do about it. The record's token says whose it is: one the
- * checkout lock holds now, from a holder that may still be running, is a
- * removal under way, which is left alone. Any other has stopped, or has lost
- * its lock and stops at its next check of it.
+ * What a removal or an update of `kind`/`slug` left in `.mixos/backup/`
+ * (./backup.ts), and what recovery would do about it. The record's token says
+ * whose it is: one the checkout lock holds now, from a holder that may still
+ * be running, is an operation under way, which is left alone. Any other has
+ * stopped, or has lost its lock and stops at its next check of it.
  */
 function backupRecovery(
   root: string,
@@ -1025,15 +1411,18 @@ function backupRecovery(
 
   if (read.state === "ok") {
     const r = read.record;
+    const what = r.operation === "update" ? "update" : "removal";
     const blocked =
       liveHolder?.token !== r.token
         ? null
         : liveHolder.hostname === os.hostname()
-          ? `The removal that recorded it, pid ${r.pid} on this machine, is still running. Let it ` +
+          ? `The ${what} that recorded it, pid ${r.pid} on this machine, is still running. Let it ` +
             "finish, or stop it, then run this again."
-          : `The removal that recorded it holds this checkout's lock from another machine, ` +
+          : `The ${what} that recorded it holds this checkout's lock from another machine, ` +
             `${liveHolder.hostname.replace(/[^\x20-\x7e]/g, "?")}, which this can't check. If it has stopped, run ` +
             "`npm run register -- --break-lock`, then run this again.";
+    if (r.operation === "update") return updateRecovery(root, r, where, live, { hasBackup, inPlace, blocked });
+
     const stopped = `A removal of ${slug} (${describeRegistering(r)}) stopped`;
     if (r.accepted) {
       return {
@@ -1104,6 +1493,108 @@ function backupRecovery(
   };
 }
 
+/**
+ * Where the new release of an update waits until it is in place, and goes back
+ * to if it is restored: the pending folder for an app or a connector, or null
+ * for a theme, whose staged copy is deleted instead.
+ */
+function incomingFor(root: string, kind: ExtensionKind, slug: string): ReturnType<typeof pendingLocation> | null {
+  return isPendingKind(kind) && SlugSchema.safeParse(slug).success ? pendingLocation(root, kind, slug) : null;
+}
+
+/** The swap an update's record describes, for recovery to undo or finish. */
+function swapFor(root: string, record: UpdateRecord): UpdateSwap {
+  const { kind, slug } = record;
+  const incoming = incomingFor(root, kind, slug);
+  return {
+    live: extensionFolder(root, kind, slug),
+    backup: backupLocation(root, kind, slug),
+    incoming: incoming
+      ? { dir: incoming.folder, rel: incoming.rel }
+      : stagingLocation(root, kind, slug),
+    record,
+  };
+}
+
+/** An update's leftovers, from its record (backupRecovery()). */
+function updateRecovery(
+  root: string,
+  r: UpdateRecord,
+  where: BackupLocation,
+  live: { dir: string; rel: string },
+  { hasBackup, inPlace, blocked }: { hasBackup: boolean; inPlace: boolean; blocked: string | null },
+): RecoveryItem {
+  const { kind, slug, from, to } = r;
+  const base = { kind, slug, path: where.rel, blocked, warning: null };
+  const incoming = incomingFor(root, kind, slug);
+  const stopped = `An update of ${slug} from ${from.version} to ${to.version} (${describeRegistering(r)}) stopped`;
+  const waits = incoming ? ` ${to.version} stays in ${incoming.rel}/, to register again or discard.` : "";
+
+  if (r.accepted) {
+    return {
+      ...base,
+      action: "finish-update",
+      found:
+        `${stopped} after the registry generator accepted ${to.version} in ${live.rel}, while it was ` +
+        `deleting the backup of ${from.version}.`,
+      does: `Delete what is left of ${where.rel}/ and its record. The update is done.`,
+    };
+  }
+  if (!hasBackup) {
+    return {
+      ...base,
+      action: "clear-update-record",
+      found: inPlace
+        ? `${stopped} before it moved ${live.rel}, or after putting it back.`
+        : `${stopped}, and neither ${where.rel}/ nor ${live.rel} is there now.`,
+      does: `Delete its record, ${where.rel}.json, and regenerate the registry.${waits}`,
+    };
+  }
+  if (!inPlace) {
+    return {
+      ...base,
+      action: "restore-update",
+      found: `${stopped} with ${from.version} moved to ${where.rel}/, before ${to.version} was put in its place.`,
+      does: `Move ${from.version} back to ${live.rel} and regenerate the registry.${waits}`,
+    };
+  }
+  if (incoming && pathExists(incoming.folder)) {
+    return {
+      ...base,
+      action: "resolve-by-hand",
+      found: `${stopped}, and ${live.rel}, ${where.rel}/ and ${incoming.rel}/ are all there.`,
+      does: "Nothing.",
+      blocked:
+        blocked ??
+        "Recovery can't tell which copy is which. Move them by hand, or delete the ones you don't want, then run this again.",
+    };
+  }
+  const restore: RecoveryChoice = {
+    action: "restore-update",
+    label: `restore ${from.version}`,
+    does:
+      `Restore ${from.version}: ` +
+      (incoming ? `move ${to.version} back to ${incoming.rel}/` : `delete ${to.version} from ${live.rel}`) +
+      `, move ${from.version} back to ${live.rel}, and regenerate the registry.`,
+  };
+  const keep: RecoveryChoice = {
+    action: "keep-update",
+    label: `keep ${to.version}`,
+    does:
+      `Keep ${to.version}: run the registry generator with it in place, as the update would have, and if it ` +
+      `accepts it, delete the backup of ${from.version}. If it doesn't, ${from.version} is restored instead.`,
+  };
+  return {
+    ...base,
+    action: restore.action,
+    found:
+      `${stopped} with ${to.version} in ${live.rel} and ${from.version} in ${where.rel}/, before the registry ` +
+      `generator accepted ${to.version}.`,
+    does: restore.does,
+    choices: [restore, keep],
+  };
+}
+
 /** A plan's identity: two plans are the same when they would do the same things. */
 function planKey(items: readonly RecoveryItem[]): string {
   return items.map((i) => `${i.action}:${i.path}:${i.blocked ? "blocked" : ""}`).join("\n");
@@ -1112,12 +1603,17 @@ function planKey(items: readonly RecoveryItem[]): string {
 export interface RecoverOptions extends PendingActionOptions {
   /** Shown what recovery found and would do; resolves to whether to go ahead. */
   confirm: (items: RecoveryItem[]) => Promise<boolean>;
+  /**
+   * Asked first, for each item with `choices`: which to do, or null to leave it
+   * alone. Without it, the first choice is what recovery does.
+   */
+  choose?: (item: RecoveryItem) => Promise<RecoveryAction | null>;
   /** The command that asked, which the checkout lock names while recovery holds it. */
   command?: string;
 }
 
 export interface RecoverResult {
-  /** Everything found. */
+  /** Everything found, with what was chosen for each that offered a choice. */
   items: RecoveryItem[];
   /** What was done. */
   acted: RecoveryItem[];
@@ -1125,23 +1621,43 @@ export interface RecoverResult {
   cancelled: boolean;
   /** The registry generator's run, when recovery needed one. */
   regenerated: { ok: boolean; output: string } | null;
+  /** What a person should know about what was done: an update kept that the generator then refused. */
+  notes: string[];
 }
 
 /**
- * Deal with what a stopped install, registration, discard or removal left.
- * Shows the plan and asks without holding a lock, then takes both, checks the
- * checkout is still as shown, and acts. Each pending install it acts on is
- * audited as `<kind>.register.recover`, and each removal's backup as
- * `<kind>.remove.recover`.
+ * Deal with what a stopped install, registration, discard, removal or update
+ * left. Shows the plan and asks without holding a lock, then takes both,
+ * checks the checkout is still as shown, and acts. Each pending install it
+ * acts on is audited as `<kind>.register.recover`, each removal's backup as
+ * `<kind>.remove.recover`, and each update's as `<kind>.update.recover`.
  */
 export async function recoverCheckout(options: RecoverOptions): Promise<RecoverResult> {
   const root = options.root ?? checkoutRoot();
   const items = planRecovery(root);
-  if (!items.some((i) => !i.blocked)) return { items, acted: [], cancelled: false, regenerated: null };
-  if (!(await options.confirm(items))) return { items, acted: [], cancelled: true, regenerated: null };
+  const none = { acted: [], regenerated: null, notes: [] };
+  if (!items.some((i) => !i.blocked)) return { items, cancelled: false, ...none };
+
+  // Which way each update goes, before anything else is asked.
+  const planned: RecoveryItem[] = [];
+  for (const item of items) {
+    if (item.blocked || !item.choices) {
+      planned.push(item);
+      continue;
+    }
+    const picked = options.choose ? await options.choose(item) : item.action;
+    const choice = item.choices.find((c) => c.action === picked);
+    planned.push(
+      choice
+        ? { ...item, action: choice.action, does: choice.does }
+        : { ...item, blocked: "Left as it is: you chose neither." },
+    );
+  }
+  if (!planned.some((i) => !i.blocked)) return { items: planned, cancelled: true, ...none };
+  if (!(await options.confirm(planned))) return { items: planned, cancelled: true, ...none };
 
   const purpose = options.command ?? "npm run register -- --recover";
-  const { acted, regenerated } = await withPlatformLock("repository.register", (lease) =>
+  const { acted, regenerated, notes } = await withPlatformLock("repository.register", (lease) =>
     withCheckoutLock(root, purpose, async (lock) => {
       tellTakeover(lock, options);
       const fence = fencer(bothLocks(lease, lock), "This recovery", options.signal);
@@ -1151,46 +1667,117 @@ export async function recoverCheckout(options: RecoverOptions): Promise<RecoverR
           "changed-meanwhile",
         );
       }
+      const generator = {
+        lockToken: lock.token,
+        root: options.root,
+        generator: options.generator,
+        signal: options.signal,
+      };
 
       const done: RecoveryItem[] = [];
+      const notes: string[] = [];
       const soFar = () =>
         done.length === 0 ? "Nothing was changed." : `It had dealt with: ${done.map((d) => d.path).join(", ")}.`;
       let regenerate = false;
-      for (const item of items) {
+      for (const item of planned) {
         if (item.blocked) continue;
         await fence(`${soFar()} Run it again to finish.`);
-        actOn(root, item);
-        if (["return-to-pending", "clear-record", "restore-backup", "clear-backup-record"].includes(item.action)) {
-          regenerate = true;
+        if (item.action === "keep-update") {
+          const kept = await keepUpdate(root, item, generator, fence);
+          if (kept) {
+            done.push(item);
+          } else {
+            const restore = item.choices?.find((c) => c.action === "restore-update");
+            done.push({ ...item, action: "restore-update", does: restore?.does ?? item.does });
+            notes.push(
+              `The registry generator didn't accept what ${item.path} replaced, so recovery restored the backup ` +
+                "instead. Register the update again to see why, or discard it.",
+            );
+            regenerate = true;
+          }
+          continue;
         }
+        actOn(root, item);
+        if (REGENERATES.has(item.action)) regenerate = true;
         done.push(item);
       }
 
       let regenerated: RecoverResult["regenerated"] = null;
       if (regenerate) {
         await fence(`${soFar()} Run \`npm run registry\` to regenerate the registry.`);
-        const run = await runRegistryGenerator({
-          lockToken: lock.token,
-          root: options.root,
-          generator: options.generator,
-          signal: options.signal,
-        });
+        const run = await runRegistryGenerator(generator);
         regenerated = { ok: run.code === 0, output: run.output };
       }
-      return { acted: done, regenerated };
+      return { acted: done, regenerated, notes };
     }),
   );
 
   for (const item of acted) {
     if (!item.kind || !item.slug || item.action === "drop-staging" || item.action === "drop-temp") continue;
+    const verb = BACKUP_VERB[item.action] ?? "register";
     await recordAdminAction(options.actor, {
-      action: `${item.kind}.${BACKUP_ACTIONS.has(item.action) ? "remove" : "register"}.recover`,
+      action: `${item.kind}.${verb}.recover`,
       targetType: item.kind,
       targetId: item.slug,
       details: { via: options.via, action: item.action, path: item.path },
     });
   }
-  return { items, acted, cancelled: false, regenerated };
+  return { items: planned, acted, cancelled: false, regenerated, notes };
+}
+
+/**
+ * "Keep": the generator runs with the new release in place, as the update
+ * would have run it. Accepted, the backup is deleted and the update is done;
+ * refused, the backup is restored as "restore" would. Returns whether it kept
+ * it. The caller holds both locks and has checked them.
+ */
+async function keepUpdate(
+  root: string,
+  item: RecoveryItem,
+  generator: { lockToken: string; root?: string; generator?: string; signal?: AbortSignal },
+  fence: ReturnType<typeof fencer>,
+): Promise<boolean> {
+  const read = readBackupRecord(backupLocation(root, item.kind!, item.slug!).record);
+  if (read.state !== "ok" || read.record.operation !== "update") {
+    throw new RegisterError(
+      `${item.path}.json changed while recovery ran, so it was left as it is. Run it again.`,
+      "changed-meanwhile",
+    );
+  }
+  const record = read.record;
+  const swap = swapFor(root, record);
+  const registry = await regenerateRegistry(record.kind, record.slug, generator);
+  // Either way this finishes, so a Ctrl-C doesn't leave it half done.
+  await fence(
+    `${swap.live.rel} holds ${record.to.version}, and ${record.from.version} is still in ${swap.backup.rel}/. Run it again.`,
+    registry.output,
+    { finishing: true },
+  );
+  if (registry.ok) {
+    swapDone(swap, () => dropUpdateSidecar(root, record));
+    return true;
+  }
+  swapBack(swap, { keepIncoming: isPendingKind(record.kind) });
+  clearUpdateSidecar(root, record);
+  return false;
+}
+
+/** An update's pending sidecar, which recovery clears or deletes with its backup: none for a theme. */
+function updateSidecar(root: string, record: UpdateRecord): string | null {
+  const incoming = incomingFor(root, record.kind, record.slug);
+  return incoming ? incoming.sidecar : null;
+}
+
+/** The update is back in pending: its sidecar keeps what it replaces, without the registration. */
+function clearUpdateSidecar(root: string, record: UpdateRecord): void {
+  const sidecar = updateSidecar(root, record);
+  if (sidecar) clearRecord(sidecar);
+}
+
+/** The update is done: its sidecar goes, unless a pending folder of the same name is there again. */
+function dropUpdateSidecar(root: string, record: UpdateRecord): void {
+  const incoming = incomingFor(root, record.kind, record.slug);
+  if (incoming && !pathExists(incoming.folder)) fs.rmSync(incoming.sidecar, { force: true });
 }
 
 /** Carry out one item of a plan. The caller holds both locks and has checked them. */
@@ -1247,6 +1834,31 @@ function actOn(root: string, item: RecoveryItem): void {
     case "clear-backup-record":
     case "drop-backup-record":
       fs.rmSync(backupLocation(root, item.kind!, item.slug!).record, { force: true });
+      return;
+    case "restore-update":
+    case "finish-update":
+    case "clear-update-record": {
+      const where = backupLocation(root, item.kind!, item.slug!);
+      const read = readBackupRecord(where.record);
+      if (read.state !== "ok" || read.record.operation !== "update") return;
+      const record = read.record;
+      if (item.action === "restore-update") {
+        swapBack(swapFor(root, record), { keepIncoming: isPendingKind(record.kind) });
+        clearUpdateSidecar(root, record);
+      } else if (item.action === "finish-update") {
+        // As the update would have finished: the sidecar, then the backup,
+        // then the record.
+        dropUpdateSidecar(root, record);
+        fs.rmSync(where.folder, { recursive: true, force: true });
+        fs.rmSync(where.record, { force: true });
+      } else {
+        fs.rmSync(where.record, { force: true });
+        clearUpdateSidecar(root, record);
+      }
+      return;
+    }
+    case "keep-update":
+      // Run by recoverCheckout() itself, since it runs the generator.
       return;
   }
 }

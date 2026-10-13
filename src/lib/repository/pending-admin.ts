@@ -53,6 +53,7 @@ import {
   type ReviewOutcome,
 } from "./pending-outcomes";
 import { CONTENT_HASH_PATTERN, KIND_SEGMENT, SlugSchema } from "./types";
+import { reviewPendingUpdate } from "./update";
 
 /** What a lock held by someone else reads as, from the database's register lock. */
 export const LOCKED_MESSAGE =
@@ -164,23 +165,29 @@ export function activationFor(kind: PendingKind, database: DatabaseLocation, ser
 /*  Review                                                                      */
 /* -------------------------------------------------------------------------- */
 
-/** What will run, from the pending install, and what the catalogue claims for it. */
+/**
+ * What will run, from the pending install, and what the catalogue claims for
+ * it; for a pending update, also how it compares with the folder it replaces.
+ */
 export async function reviewForButton(input: unknown, ctx: ReviewContext): Promise<ReviewOutcome> {
   await ctx.admin();
   const target = TargetSchema.safeParse(input);
   if (!target.success) return notPending("review");
   if (ctx.builtDeployment()) return builtDeployment();
+  const { kind, slug } = target.data;
+  const root = ctx.root ?? checkoutRoot();
 
   let review: PendingReview;
   try {
-    review = reviewPendingInstall(ctx.root ?? checkoutRoot(), target.data.kind, target.data.slug);
+    review = reviewPendingInstall(root, kind, slug);
   } catch (err) {
     if (err instanceof ReviewError) {
       return { ok: false, code: "not-pending", message: err.message, tone: "warning" };
     }
     throw err;
   }
-  return { ok: true, review, listing: await ctx.listing(review) };
+  const update = review.replaces ? reviewPendingUpdate(root, kind, slug, review.replaces) : null;
+  return { ok: true, review, listing: await ctx.listing(review), update };
 }
 
 /**
@@ -292,8 +299,17 @@ export async function registerFromButton(input: unknown, ctx: RegisterContext): 
       migrations: kind === "app" ? migrationCount(liveLocation(root, kind, slug).dir) : 0,
       servesNow,
       database,
-      activation: activationFor(kind, database, servesNow),
+      // An update keeps the app's switch as it was: nothing to turn on.
+      activation: result.update ? "none" : activationFor(kind, database, servesNow),
       handBack: result.handBack,
+      update: result.update
+        ? {
+            from: { version: result.update.from.version, gitTag: result.update.from.gitTag },
+            direction: result.update.direction,
+            localChangesDiscarded: result.update.localChangesDiscarded,
+            migrationsAdded: result.update.migrationsAdded,
+          }
+        : null,
     },
   };
 }
