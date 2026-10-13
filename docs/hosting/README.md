@@ -538,6 +538,52 @@ release step after you reinstall one of those from the Registry switches it
 off once. Deleting an installed extension's `.registry.json` makes it local,
 which counts as a different extension too.
 
+### Updating an extension
+
+Updating an extension is a change to your repository, as installing one is.
+Once a day the instance asks mixos.org about the extensions it installed from
+there (see [What MixOS sends to mixos.org](#what-mixos-sends-to-mixosorg)), and
+a notice under the Apps, Connectors or Themes header says when a newer release
+is out, or when the installed one was withdrawn. To update:
+
+1. In a checkout of your repository, running `npm run dev`, press **Update**
+   on the notice, or on the extension's listing in Browse. The dialog lists the
+   releases with their dates, and for the one you pick shows what changes: the
+   publisher's claims, what the manifest declares, new migrations, and any
+   files you changed locally. Local changes, an older release and a withdrawn
+   one each need an explicit yes.
+2. For an app or a connector, the release is downloaded, verified and checked
+   as an install is, and waits in `.mixos/pending/`; the folder in place isn't
+   touched yet. Press **Review and register**, there or later under Waiting to
+   register, or run `npm run register -- <kind>/<slug>`. Register moves the
+   folder to `.mixos/backup/`, puts the new release in its place and runs the
+   registry generator. If the generator refuses the new release, the old one
+   is put back; if it accepts it, the backup is deleted. Register refuses to
+   go ahead if the folder changed after the update was prepared. A theme runs
+   no code, so the dialog swaps it in at once.
+3. An app's activation, grants and settings, and a connector's credentials,
+   belong to its name in the database, so they carry over. New migrations are
+   applied by `npm run migrate:apps` in the checkout and by the release step
+   on each instance, and can't be undone. If `npm run dev` was running,
+   restart it: it can keep serving the old code until it does.
+4. Commit the change and open a pull request. Register hands back the commands
+   and a commit message that names both releases; `/mixos deploy` does the
+   same.
+5. Merge it into the branch your host deploys.
+
+An update that stops midway leaves the old folder in `.mixos/backup/`, and
+`npm run register -- --recover` asks whether to put it back or keep the new
+release.
+
+**Rolling an update back.** Once it is deployed, roll it back as you would any
+change: revert the commit and deploy again, or redeploy the previous build on
+your host. Neither undoes a migration the new release ran; only restoring a
+backup of the database does, so back the database up before deploying an
+update that adds one. The release step treats a new release from the same
+repository as the same extension, so nothing is switched off or revoked; a
+release from another repository counts as a different extension (see
+[When a different extension takes a name](#when-a-different-extension-takes-a-name)).
+
 ### Removing an extension
 
 Removing an extension is a change to your repository, as installing one is:

@@ -16,9 +16,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { checkoutLockFile, readCheckoutLock, tryAcquireCheckoutLock } from "../src/lib/platform/checkout-lock";
+import { backupLocation, writeBackupRecord } from "../src/lib/repository/backup";
 import { filesHash, hashFileTree } from "../src/lib/repository/content-hash";
-import { INSTALL_RECORD_FILE, serializeInstallRecord } from "../src/lib/repository/install-record";
+import { INSTALL_RECORD_FILE, folderFilesHash, serializeInstallRecord } from "../src/lib/repository/install-record";
 import { pendingLocation, writeSidecar, type PendingKind, type PendingSidecar } from "../src/lib/repository/pending";
+import { updateRecordFor } from "../src/lib/repository/register";
 import type { TarEntry } from "../src/lib/repository/tar";
 import { cliActor, parseArgs, printable, resolveTarget, runCli } from "./register-cli";
 import { childEnv, type ChildRun, type SmokeSteps } from "./register-smoke";
@@ -65,7 +67,7 @@ beforeEach(() => {
 
 const TREE: TarEntry[] = [{ path: "app.json", mode: 0o644, data: Buffer.from('{"name":"Acme"}\n') }];
 
-function pend(kind: PendingKind, slug: string, tree: TarEntry[] = TREE, sidecar: Pick<PendingSidecar, "leftOut"> = {}) {
+function pend(kind: PendingKind, slug: string, tree: TarEntry[] = TREE, sidecar: Pick<PendingSidecar, "leftOut" | "replaces"> = {}) {
   const where = pendingLocation(root, kind, slug);
   fs.mkdirSync(where.folder, { recursive: true });
   for (const e of tree) fs.writeFileSync(path.join(where.folder, e.path), e.data);
@@ -96,8 +98,8 @@ function pend(kind: PendingKind, slug: string, tree: TarEntry[] = TREE, sidecar:
   return where;
 }
 
-/** A terminal: what was printed, and the answers to give, in order. */
-function terminal(answers: boolean[] = []) {
+/** A terminal: what was printed, and the answers to give, in order: yes or no, and which way when asked to choose. */
+function terminal(answers: boolean[] = [], choices: string[] = []) {
   const out: string[] = [];
   const err: string[] = [];
   const asked: string[] = [];
@@ -111,6 +113,10 @@ function terminal(answers: boolean[] = []) {
       ask: async (question: string) => {
         asked.push(question);
         return answers.shift() ?? false;
+      },
+      choose: async (question: string, keys: readonly string[]) => {
+        asked.push(`${question} [${keys.join("/")}]`);
+        return choices.shift() ?? null;
       },
     },
   };
@@ -307,6 +313,103 @@ describe("running it", () => {
     assert.equal(await cli(["--recover"], yes), 0);
     assert.match(yes.out.join("\n"), /Done: \.mixos\/pending\/apps\/acme\./);
     assert.equal(fs.existsSync(where.folder), false);
+  });
+
+  test("registers a pending update, saying what it replaces, and hands back the change and how to roll it back", async () => {
+    const OLD: TarEntry[] = [{ path: "app.json", mode: 0o644, data: Buffer.from('{"name":"Acme Old"}\n') }];
+    const live = path.join(root, "apps", "acme");
+    fs.mkdirSync(live, { recursive: true });
+    fs.writeFileSync(path.join(live, "app.json"), OLD[0].data);
+    fs.writeFileSync(
+      path.join(live, INSTALL_RECORD_FILE),
+      serializeInstallRecord({
+        source: "https://mixos.org",
+        kind: "app",
+        slug: "acme",
+        version: "1.1.0",
+        gitTag: null,
+        commitSha: "a".repeat(40),
+        contentHash: hashFileTree(OLD),
+        filesHash: filesHash(OLD),
+        repository: { owner: "acme", name: "mixos-acme", subpath: null },
+        requiresMixOS: null,
+      }),
+    );
+    pend("app", "acme", TREE, {
+      replaces: {
+        version: "1.1.0",
+        gitTag: null,
+        commitSha: "a".repeat(40),
+        filesHash: filesHash(OLD),
+        folderHash: folderFilesHash(live),
+        localChangesDiscarded: false,
+        direction: "newer",
+      },
+    });
+    const t = terminal();
+    assert.equal(await cli(["app/acme"], t), 0, t.err.join("\n"));
+    const out = t.out.join("\n");
+    assert.match(out, /^Updating app\/acme from 1\.1\.0\. This moves apps\/acme aside and runs the new release's code for the first time\.\.\.$/m);
+    assert.match(out, /^Updated app\/acme from 1\.1\.0 to 1\.2\.0 from commit dddddddddddd\.$/m);
+    assert.match(out, /^Updated apps\/acme from 1\.1\.0 to 1\.2\.0: the registry generator loaded the new code and accepted it/m);
+    assert.match(out, /^What the commit changes in apps\/acme\/ \(2 changed, 0 added, 0 deleted\):$/m);
+    assert.match(out, /^git switch -c update-app-acme\ngit add apps\/acme\ngit commit -F - -- apps\/acme <<'MSG'\nfeat\(acme\): update app acme from 1\.1\.0 to 1\.2\.0\n/m);
+    assert.match(out, /To roll it back once it is deployed, revert the commit and deploy again/);
+    assert.doesNotMatch(out, /arrives inactive/);
+    assert.equal(fs.readFileSync(path.join(live, "app.json"), "utf8"), '{"name":"Acme"}\n');
+    assert.equal(fs.existsSync(path.join(root, ".mixos/backup/apps/acme")), false);
+  });
+
+  test("--recover asks which way an update with its release in place goes, then whether to go ahead", async () => {
+    // What an update killed while the generator ran leaves: 1.2.0 in place,
+    // 1.1.0 in its backup, and the records of both.
+    const OLD: TarEntry[] = [{ path: "app.json", mode: 0o644, data: Buffer.from('{"name":"Acme Old"}\n') }];
+    const backup = backupLocation(root, "app", "acme");
+    fs.mkdirSync(backup.folder, { recursive: true });
+    fs.writeFileSync(path.join(backup.folder, "app.json"), OLD[0].data);
+    const where = pend("app", "acme", TREE);
+    const dead = { token: "an-update-that-stopped-0002", pid: 999999, hostname: os.hostname(), startedAt: new Date().toISOString() };
+    writeSidecar(where.sidecar, {
+      kind: "app",
+      slug: "acme",
+      yankedAccepted: false,
+      installedAt: "2026-10-11T09:00:00.000Z",
+      installedBy: "admin@example.com",
+      check: { verdict: "accepted", deferred: [] },
+      replaces: {
+        version: "1.1.0",
+        gitTag: null,
+        commitSha: "a".repeat(40),
+        filesHash: filesHash(OLD),
+        folderHash: filesHash(OLD),
+        localChangesDiscarded: false,
+        direction: "newer",
+      },
+      register: dead,
+    });
+    writeBackupRecord(backup.record, {
+      ...updateRecordFor(
+        "app",
+        "acme",
+        dead.token,
+        { version: "1.1.0", gitTag: null, commitSha: "a".repeat(40), folderHash: filesHash(OLD) },
+        { version: "1.2.0", gitTag: null, commitSha: "d".repeat(40), filesHash: filesHash(TREE) },
+      ),
+      pid: dead.pid,
+    });
+    fs.renameSync(where.folder, path.join(root, "apps", "acme"));
+
+    const t = terminal([true], ["k"]);
+    assert.equal(await cli(["--recover"], t), 0, t.err.join("\n"));
+    const out = t.out.join("\n");
+    assert.deepEqual(t.asked, ["Restore 1.1.0, or keep 1.2.0? [r/k]", "Go ahead?"]);
+    assert.match(out, /^It can go either way:\n {2}\.mixos\/backup\/apps\/acme\n {4}An update of acme from 1\.1\.0 to 1\.2\.0 \(pid 999999 on this machine, started [^)]+\) stopped with 1\.2\.0 in apps\/acme and 1\.1\.0 in \.mixos\/backup\/apps\/acme\/, before the registry generator accepted 1\.2\.0\.\n {4}r: Restore 1\.1\.0: move 1\.2\.0 back to \.mixos\/pending\/apps\/acme\/, move 1\.1\.0 back to apps\/acme, and regenerate the registry\.\n {4}k: Keep 1\.2\.0: /m);
+    assert.match(out, /Recovery will: Keep 1\.2\.0: run the registry generator with it in place/);
+    assert.match(out, /^Done: \.mixos\/backup\/apps\/acme\.$/m);
+    assert.equal(fs.readFileSync(path.join(root, "apps/acme/app.json"), "utf8"), '{"name":"Acme"}\n');
+    assert.equal(fs.existsSync(backup.folder), false);
+    assert.equal(fs.existsSync(where.sidecar), false);
+    assert.deepEqual(audit.map((r) => r.action), ["app.update.recover"]);
   });
 
   test("--recover in a tidy checkout says there is nothing to do", async () => {
