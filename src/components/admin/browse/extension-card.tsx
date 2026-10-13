@@ -56,9 +56,11 @@ import { KIND_SEGMENT, type ExtensionSummary } from "@/lib/repository/types";
  *
  * One installed from this catalogue can be updated from here: Update opens
  * the update dialog in a checkout ("Change release" when the catalogue's
- * current release is the one in place), and on a built deployment the card
- * links to how updating works. An update already waiting in pending offers its
- * review instead.
+ * current release is the one in place). On a built deployment with the App
+ * linked, "Propose update" ("Propose a different release") opens a pull
+ * request that replaces its folder instead (../github/propose-change-dialog.tsx);
+ * without the App, the card links to how updating works. An update already
+ * waiting in pending offers its review instead.
  *
  * ── ON A DEPLOYMENT WITH THE GITHUB APP LINKED ──────────────────────────────
  *
@@ -78,6 +80,7 @@ export default function ExtensionCard({
   onInstall,
   onReview,
   onUpdate,
+  onProposeUpdate,
   updateHelpUrl = null,
   onPropose,
 }: {
@@ -95,7 +98,9 @@ export default function ExtensionCard({
   onReview: (extension: ExtensionSummary) => void;
   /** Open the update dialog, for one installed from this catalogue. Absent where this deployment can't install. */
   onUpdate?: (extension: ExtensionSummary) => void;
-  /** Where a built deployment reads how updating works, in place of the button. */
+  /** On a built deployment with the App linked: propose an update of one installed from this catalogue, as a pull request. */
+  onProposeUpdate?: (extension: ExtensionSummary) => void;
+  /** Where a built deployment without the App reads how updating works, in place of the button. */
   updateHelpUrl?: string | null;
   onPropose?: (extension: ExtensionSummary) => void;
 }) {
@@ -183,6 +188,17 @@ export default function ExtensionCard({
               ) : onUpdate ? (
                 <Button variant={newer ? "primary" : "secondary"} size="sm" onClick={() => onUpdate(extension)}>
                   {newer ? "Update" : "Change release"}
+                </Button>
+              ) : onProposeUpdate ? (
+                <Button
+                  variant={newer ? "primary" : "secondary"}
+                  size="sm"
+                  className="max-w-full"
+                  icon={<GitPullRequest className="h-4 w-4 shrink-0" aria-hidden />}
+                  disabled={propose?.disabled}
+                  onClick={() => onProposeUpdate(extension)}
+                >
+                  <span className="truncate">{newer ? "Propose update" : "Propose a different release"}</span>
                 </Button>
               ) : updateHelpUrl ? (
                 <a

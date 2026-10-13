@@ -2145,7 +2145,10 @@ The GitHub link's rows (§32) are `github.app.create`, `github.link`,
 `github.previews.confirm.clear`, with `.rejected` rows for a refused
 creation, link, key replacement or unlink. A proposal through the App is
 `app.propose`, `connector.propose` or `theme.propose`, or
-`<kind>.propose.rejected` with the reason.
+`<kind>.propose.rejected` with the reason; `action` in `details` says what it
+proposed: `install`, `update` (with the release it replaces as `from`, the
+one it goes to, `direction`, and how many files the tree deletes as
+`deleted`) or `remove` (with the release the folder held).
 `connector.disable` and `connector.enable` name the apps that declare the
 connector, in `details` as `requiredBy` and `optionalFor`. An `app.activate`
 or `connector.enable` that answered a different extension under the name, with
@@ -3591,6 +3594,53 @@ Under the `github.app` lock:
    branch and the head commit the App made, or `<kind>.propose.rejected` with
    the reason. A branch left without a pull request is named in the refusal.
 
+### Proposing an update or a removal
+
+An extension this build runs, listed in `src/generated/registry-installs.ts`
+from this instance's catalogue, can be updated to another release or removed
+the same way (`src/lib/github/propose-change.ts`): "Propose update" on a
+withdrawn or newer notice and on its Browse card, "Propose removal" in the
+Remove dialog. The steps are an install's, with two checks in front of the
+writes:
+
+- **The folder on the default branch has to be what this build runs.** Its
+  `.registry.json`, read with the read token, must record the same version,
+  commit, catalogue and source repository as the build's install
+  (`recordDifferences()`), and the build's own copy must not be modified.
+  Then the release the record names is downloaded pinned to its commit and
+  checked against the record's content hash, its files hash is checked
+  against the record's, and git's id for the folder (those files and the
+  record, every one a plain file of mode 100644) must equal the id GitHub
+  holds (`heldRelease()`). Anything else is refused, naming what differs. So
+  the App never replaces or deletes a folder someone edited on GitHub, or a
+  release the build doesn't run.
+- **An update** goes to any release the admin picks, with the update dialog's
+  rules: a withdrawn one needs accepting, an older one, by version or else by
+  the catalogue's dates, needs "Propose an older release", the MixOS floor is
+  checked, and the same release is refused. The comparison the dialog shows is
+  computed between the two releases in memory. **A removal** first applies
+  removal's refusals from the manifests this build registered
+  (`dependentsOf()`, §31): a connector an app requires, an app whose services
+  or hooks another uses, the last theme.
+
+The tree is written on the head's tree with the new release's files, every one
+mode 100644, and a deletion (`sha: null`) for each file the folder loses; a
+removal's tree is deletions alone, `.registry.json` included. The check that
+the folder GitHub stored is the verified tree holds for an update; for a
+removal, that the folder is gone. The branch is `mixos/update/<kind>-<slug>`
+or `mixos/remove/<kind>-<slug>`, the title `Update <kind> <slug> to <version>
+from mixos.org [skip preview]` or `Remove <kind> <slug> [skip preview]`, and
+the commit message is the hand-back's for the same change
+(`updateCommitMessage()`, `removalCommitMessage()`, §31), with its sentence
+about the App. The body says what changes (files by count, the manifest's
+declarations by row, an app's migrations by count, which way it goes), what
+was verified, what runs and when, and that rolling back is reverting the
+merge; a removal's says the data stays on each instance until an admin
+deletes it there. The values a manifest declares are the publisher's, so they
+go in the fenced block with the claims. Audited as `<kind>.propose` with
+`action: "update"` (and `from`, `direction` and `deleted`) or
+`action: "remove"`, or `<kind>.propose.rejected`.
+
 ### What the App may write
 
 `LinkedRepository.post()` (`src/lib/github/repository.ts`) sends only what
@@ -3598,8 +3648,10 @@ Under the `github.app` lock:
 `git/trees`, `git/commits`, `git/refs` or `pulls`, with exactly the fields a
 proposal sends. Refs only under `refs/heads/mixos/`, never the default branch
 and never a tag. Tree paths only under the folder the operation's scope names,
-each a file of mode 100644, with no `..`, `.git` or control character. A
-commit with one parent, written by the App's bot, whose message skips no check.
+each a file of mode 100644, with no `..`, `.git` or control character; a
+deletion (`sha: null`) only in an update's or a removal's scope, and only
+under that folder, so an install can delete nothing. A commit with one parent,
+written by the App's bot, whose message skips no check.
 A pull request from a `mixos/` branch in the repository, into the default
 branch. The client sends no PUT or PATCH (`src/lib/github/api.ts`), so nothing
 can merge a pull request, move a branch or turn on auto-merge, which only
@@ -3672,9 +3724,11 @@ checks. A head commit nothing has checked ten minutes after the proposal shows
 its owner turns them on, so on many forks nothing runs at all. A head that
 isn't the commit in the `<kind>.propose` row shows "Changed since proposed":
 anyone with push access can add a commit to the branch after the App opens the
-pull request. A pull request on a `mixos/install/` branch with no such row is
-marked as not proposed from this instance. Links are built from the stored
-repository and the pull request's number. Admin > GitHub lists the open
+pull request. Each is listed as what its branch proposes: an install, an
+update to a release or a removal. A pull request on a `mixos/install/`,
+`mixos/update/` or `mixos/remove/` branch with no such row is marked as not
+proposed from this instance. Links are built from the stored repository and
+the pull request's number. Admin > GitHub lists the open
 `mixos/update-` pull requests the same way, joined to `mixos.update.propose`.
 
 ### MixOS update pull requests
