@@ -22,6 +22,10 @@
  *         GET|POST /git/commits, POST /git/blobs, GET|POST /git/trees
  *         GET|POST /pulls, GET /commits/{ref}/check-runs, GET /commits/{ref}/status
  *
+ * A control can merge a pull request as a person would on GitHub's page
+ * (`/__control/repositories/{id}/merge`), so a test can carry on from a merged
+ * proposal: the App never can, and no API endpoint here merges.
+ *
  * Each repository has a small git object store: blobs, trees and commits with
  * git's own ids, and its branches. Nothing merges: no endpoint here would, and
  * a test can look in `requests` for any attempt.
@@ -359,11 +363,27 @@ export class FakeGitHub {
     return repo;
   }
 
-  /** Commit files to a branch, as someone pushing would: each path to its text, or null to delete it. */
-  push(repositoryId: number, branch: string, changes: Record<string, string | null>, author = "someone"): string {
+  /**
+   * Commit files to a branch, as someone pushing would: each path to its text,
+   * to its bytes as `{ base64 }`, or to null to delete it.
+   */
+  push(
+    repositoryId: number,
+    branch: string,
+    changes: Record<string, string | null | { base64: string }>,
+    author = "someone",
+  ): string {
     const repo = this.repositories.get(repositoryId);
     if (!repo) throw new Error(`no repository ${repositoryId}`);
-    const sha = repo.git.commit(branch, changes, `Change ${Object.keys(changes).join(", ")}`, author, this.now());
+    const git = repo.git;
+    const head = git.branches.get(branch);
+    const files = head ? git.files(git.commits.get(head)!.tree) : new Map<string, FakeFile>();
+    for (const [path, value] of Object.entries(changes)) {
+      if (value === null) files.delete(path);
+      else files.set(path, { mode: "100644", sha: git.putBlob(typeof value === "string" ? Buffer.from(value, "utf8") : Buffer.from(value.base64, "base64")) });
+    }
+    const sha = git.putCommit(git.build(files), head ? [head] : [], `Change ${Object.keys(changes).join(", ")}`, author, this.now());
+    git.branches.set(branch, sha);
     for (const pull of repo.pulls) if (pull.head === branch && pull.state === "open") pull.updatedAt = this.now();
     return sha;
   }
@@ -1146,7 +1166,7 @@ export class FakeGitHub {
       const repo = this.repositories.get(Number(m[1]));
       if (!repo) return notFound();
       const branch = String(input.branch ?? repo.defaultBranch);
-      return json(200, { sha: this.push(repo.id, branch, input.files as Record<string, string | null>, String(input.author ?? "someone")) });
+      return json(200, { sha: this.push(repo.id, branch, input.files as Record<string, string | null | { base64: string }>, String(input.author ?? "someone")) });
     }
     if ((m = /^\/__control\/repositories\/(\d+)\/branches$/.exec(path)) && method === "POST") {
       this.branch(Number(m[1]), String(input.name), input.from ? String(input.from) : undefined);
@@ -1161,6 +1181,28 @@ export class FakeGitHub {
         statuses: (input.statuses as { context: string; state: string }[]) ?? [],
       });
       return json(200, { sha });
+    }
+    if ((m = /^\/__control\/repositories\/(\d+)\/merge$/.exec(path)) && method === "POST") {
+      // As a person merging on GitHub's page: a merge commit on the base with
+      // both parents and the head's tree (the head is on top of the base when
+      // the App made it), the pull request closed, and its branch deleted.
+      const repo = this.repositories.get(Number(m[1]));
+      const pull = repo?.pulls.find((p) => p.number === Number(input.number) && p.state === "open");
+      const head = pull ? repo!.git.branches.get(pull.head) : undefined;
+      const base = pull ? repo!.git.branches.get(pull.base) : undefined;
+      if (!repo || !pull || !head || !base) return notFound();
+      const sha = repo.git.putCommit(
+        repo.git.commits.get(head)!.tree,
+        [base, head],
+        `Merge pull request #${pull.number} from ${repo.owner}/${pull.head}`,
+        String(input.author ?? "someone"),
+        this.now(),
+      );
+      repo.git.branches.set(pull.base, sha);
+      repo.git.branches.delete(pull.head);
+      pull.state = "closed";
+      pull.updatedAt = this.now();
+      return json(200, { sha, base: pull.base });
     }
     if (path === "/__control/next-install" && method === "POST") {
       this.nextInstall = input as FakeGitHub["nextInstall"];
