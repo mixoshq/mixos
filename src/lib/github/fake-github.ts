@@ -17,6 +17,14 @@
  *         POST /app/installations/{id}/access_tokens
  *         GET  /installation/repositories, DELETE /installation/token
  *         GET  /repos/{owner}/{repo}, GET /repos/{owner}/{repo}/rules/branches/{branch}
+ *   and, for proposals and the Apps page, under /repos/{owner}/{repo}:
+ *         GET  /contents/{path}?ref=, GET /git/ref/heads/{branch}, POST /git/refs
+ *         GET|POST /git/commits, POST /git/blobs, GET|POST /git/trees
+ *         GET|POST /pulls, GET /commits/{ref}/check-runs, GET /commits/{ref}/status
+ *
+ * Each repository has a small git object store: blobs, trees and commits with
+ * git's own ids, and its branches. Nothing merges: no endpoint here would, and
+ * a test can look in `requests` for any attempt.
  *
  * JWTs are checked as GitHub checks them: RS256, signed by one of the App's
  * keys, `iss` the App's id, at most ten minutes long. Tokens carry the
@@ -58,6 +66,154 @@ export interface FakeRepository {
   rules: Record<string, string[]>;
   /** Earlier names, which answer with a redirect, as GitHub's do. */
   formerNames: string[];
+  /** Its objects and branches: made empty, with the default branch at a first commit. */
+  git: FakeGit;
+  pulls: FakePull[];
+}
+
+export interface FakePull {
+  number: number;
+  title: string;
+  body: string;
+  head: string;
+  base: string;
+  /** The App's bot, `<slug>[bot]`, or a person. */
+  author: { login: string; type: "Bot" | "User" };
+  state: "open" | "closed";
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A tree entry as git stores it. */
+interface FakeTreeEntry {
+  name: string;
+  mode: string;
+  type: "blob" | "tree";
+  sha: string;
+}
+
+/** A file at a path, flattened out of a tree. */
+interface FakeFile {
+  mode: string;
+  sha: string;
+}
+
+/**
+ * A repository's objects, with git's ids (blob and tree ids are exactly
+ * git's; a commit's is a hash of what it holds), and its branches.
+ */
+export class FakeGit {
+  readonly blobs = new Map<string, Buffer>();
+  readonly trees = new Map<string, FakeTreeEntry[]>();
+  readonly commits = new Map<
+    string,
+    { tree: string; parents: string[]; message: string; author: string; at: number }
+  >();
+  /** Branch name → commit. */
+  readonly branches = new Map<string, string>();
+  private counter = 0;
+
+  putBlob(data: Buffer): string {
+    const sha = createHash("sha1").update(`blob ${data.length}\0`).update(data).digest("hex");
+    this.blobs.set(sha, data);
+    return sha;
+  }
+
+  putTree(entries: FakeTreeEntry[]): string {
+    const sorted = [...entries].sort((a, b) =>
+      Buffer.compare(Buffer.from(a.type === "tree" ? `${a.name}/` : a.name), Buffer.from(b.type === "tree" ? `${b.name}/` : b.name)),
+    );
+    const body = Buffer.concat(
+      sorted.flatMap((e) => [Buffer.from(`${e.type === "tree" ? "40000" : e.mode} ${e.name}\0`), Buffer.from(e.sha, "hex")]),
+    );
+    const sha = createHash("sha1").update(`tree ${body.length}\0`).update(body).digest("hex");
+    this.trees.set(sha, sorted);
+    return sha;
+  }
+
+  putCommit(tree: string, parents: string[], message: string, author: string, at: number): string {
+    const sha = createHash("sha1")
+      .update(JSON.stringify({ tree, parents, message, author, at, n: this.counter++ }))
+      .digest("hex");
+    this.commits.set(sha, { tree, parents, message, author, at });
+    return sha;
+  }
+
+  /** Every file under a tree, by path. */
+  files(tree: string, prefix = ""): Map<string, FakeFile> {
+    const out = new Map<string, FakeFile>();
+    for (const entry of this.trees.get(tree) ?? []) {
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.type === "tree") for (const [p, f] of this.files(entry.sha, path)) out.set(p, f);
+      else out.set(path, { mode: entry.mode, sha: entry.sha });
+    }
+    return out;
+  }
+
+  /** The tree that holds `files`, folders made as their paths need them. */
+  build(files: Map<string, FakeFile>): string {
+    type Folder = Map<string, FakeFile | Folder>;
+    const root: Folder = new Map();
+    for (const [path, file] of files) {
+      const names = path.split("/");
+      let folder = root;
+      for (const name of names.slice(0, -1)) {
+        let next = folder.get(name);
+        if (!(next instanceof Map)) {
+          next = new Map();
+          folder.set(name, next);
+        }
+        folder = next;
+      }
+      folder.set(names[names.length - 1], file);
+    }
+    const write = (folder: Folder): string =>
+      this.putTree(
+        [...folder.entries()].map(([name, value]) =>
+          value instanceof Map
+            ? { name, mode: "040000", type: "tree" as const, sha: write(value) }
+            : { name, mode: value.mode, type: "blob" as const, sha: value.sha },
+        ),
+      );
+    return write(root);
+  }
+
+  /** The entry at `path` in a tree, or null. */
+  at(tree: string, path: string): FakeTreeEntry | { type: "tree"; sha: string; name: string; mode: string } | null {
+    if (path === "") return { type: "tree", sha: tree, name: "", mode: "040000" };
+    let current: string = tree;
+    const names = path.split("/");
+    for (let i = 0; i < names.length; i++) {
+      const entry = (this.trees.get(current) ?? []).find((e) => e.name === names[i]);
+      if (!entry) return null;
+      if (i === names.length - 1) return entry;
+      if (entry.type !== "tree") return null;
+      current = entry.sha;
+    }
+    return null;
+  }
+
+  /**
+   * Commit `changes` on `branch`, from its head or from nothing: each path to
+   * its text, or to null to delete it. Returns the new commit.
+   */
+  commit(branch: string, changes: Record<string, string | null>, message: string, author: string, at: number): string {
+    const head = this.branches.get(branch);
+    const files = head ? this.files(this.commits.get(head)!.tree) : new Map<string, FakeFile>();
+    for (const [path, text] of Object.entries(changes)) {
+      if (text === null) files.delete(path);
+      else files.set(path, { mode: "100644", sha: this.putBlob(Buffer.from(text, "utf8")) });
+    }
+    const sha = this.putCommit(this.build(files), head ? [head] : [], message, author, at);
+    this.branches.set(branch, sha);
+    return sha;
+  }
+
+  /** A branch name or a commit id, as a commit, or null. */
+  resolve(ref: string): string | null {
+    if (this.branches.has(ref)) return this.branches.get(ref)!;
+    return this.commits.has(ref) ? ref : null;
+  }
 }
 
 export interface FakeApp {
@@ -137,6 +293,8 @@ export class FakeGitHub {
     repositories: ["acme/mixos"],
   };
   now: () => number = () => Date.now();
+  /** Check runs and commit statuses, by commit. */
+  readonly checks = new Map<string, { runs: { name: string; status: string; conclusion: string | null }[]; statuses: { context: string; state: string }[] }>();
 
   private readonly codes = new Map<string, { manifest: Record<string, unknown>; owner: FakeAccount; at: number; used: boolean }>();
   private nextId = 7000;
@@ -191,10 +349,42 @@ export class FakeGitHub {
     this.accounts.set(account.login, account);
   }
 
-  addRepository(repository: Omit<FakeRepository, "formerNames"> & { formerNames?: string[] }): FakeRepository {
-    const repo = { formerNames: [], ...repository };
+  addRepository(
+    repository: Omit<FakeRepository, "formerNames" | "git" | "pulls"> & { formerNames?: string[]; files?: Record<string, string> },
+  ): FakeRepository {
+    const { files, ...rest } = repository;
+    const repo: FakeRepository = { formerNames: [], ...rest, git: new FakeGit(), pulls: [] };
+    repo.git.commit(repo.defaultBranch, files ?? { "README.md": `# ${repo.name}\n` }, "Initial commit", repo.owner, this.now());
     this.repositories.set(repo.id, repo);
     return repo;
+  }
+
+  /** Commit files to a branch, as someone pushing would: each path to its text, or null to delete it. */
+  push(repositoryId: number, branch: string, changes: Record<string, string | null>, author = "someone"): string {
+    const repo = this.repositories.get(repositoryId);
+    if (!repo) throw new Error(`no repository ${repositoryId}`);
+    const sha = repo.git.commit(branch, changes, `Change ${Object.keys(changes).join(", ")}`, author, this.now());
+    for (const pull of repo.pulls) if (pull.head === branch && pull.state === "open") pull.updatedAt = this.now();
+    return sha;
+  }
+
+  /** A branch at another branch's head, as a person might make one. */
+  branch(repositoryId: number, name: string, from?: string): void {
+    const repo = this.repositories.get(repositoryId);
+    if (!repo) throw new Error(`no repository ${repositoryId}`);
+    repo.git.branches.set(name, repo.git.resolve(from ?? repo.defaultBranch)!);
+  }
+
+  /** The files on a branch, as text, by path. */
+  filesOn(repositoryId: number, branch: string): Record<string, string> {
+    const repo = this.repositories.get(repositoryId);
+    const head = repo?.git.branches.get(branch);
+    if (!repo || !head) return {};
+    const out: Record<string, string> = {};
+    for (const [path, file] of repo.git.files(repo.git.commits.get(head)!.tree)) {
+      out[path] = repo.git.blobs.get(file.sha)!.toString("utf8");
+    }
+    return out;
   }
 
   repository(fullName: string): FakeRepository | undefined {
@@ -598,14 +788,14 @@ export class FakeGitHub {
       return new Response(null, { status: 204 });
     }
 
-    if ((m = /^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/.exec(path)) && method === "GET") {
+    if ((m = /^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/.exec(path))) {
       const token = this.tokenFor(authorization);
       if (token instanceof Response) return token;
       const fullName = `${decodeURIComponent(m[1])}/${decodeURIComponent(m[2])}`;
       const moved = [...this.repositories.values()].find((r) => r.formerNames.includes(fullName));
       if (moved) {
         return new Response(JSON.stringify({ message: "Moved Permanently", url: `https://api.github.com/repositories/${moved.id}` }), {
-          status: 301,
+          status: method === "GET" ? 301 : 307,
           headers: { location: `https://api.github.com/repositories/${moved.id}${m[3] ?? ""}` },
         });
       }
@@ -617,20 +807,281 @@ export class FakeGitHub {
         this.covered(installation).some((r) => r.id === repo.id) &&
         (token.repositoryIds === null || token.repositoryIds.includes(repo.id));
       if (!repo || !reachable) return notFound();
-      if (!m[3]) return json(200, this.repositoryJson(repo));
-      const rules = /^\/rules\/branches\/(.+)$/.exec(m[3]);
-      if (rules) {
-        const branch = decodeURIComponent(rules[1]);
+      return this.repositoryApi(method, repo, token, m[3] ?? "", url.searchParams, body);
+    }
+
+    return notFound();
+  }
+
+  /** A 403 unless the token holds `permission` at `level`, as GitHub answers an App. */
+  private needs(token: FakeToken, permission: string, level: "read" | "write"): Response | null {
+    const granted = token.permissions[permission];
+    if (!granted || (level === "write" && granted !== "write")) {
+      return json(403, { message: "Resource not accessible by integration" });
+    }
+    return null;
+  }
+
+  /** The App whose token this is, as its bot signs. */
+  private botFor(token: FakeToken): { login: string; type: "Bot" } {
+    const app = this.apps.get(this.installations.get(token.installationId)?.appId ?? -1);
+    return { login: `${app?.slug ?? "app"}[bot]`, type: "Bot" };
+  }
+
+  private pullJson(repo: FakeRepository, pull: FakePull) {
+    const head = repo.git.branches.get(pull.head) ?? "0".repeat(40);
+    const base = repo.git.branches.get(pull.base) ?? "0".repeat(40);
+    const repoJson = this.repositoryJson(repo);
+    return {
+      number: pull.number,
+      state: pull.state,
+      title: pull.title,
+      body: pull.body,
+      html_url: `https://github.com/${repo.owner}/${repo.name}/pull/${pull.number}`,
+      user: pull.author,
+      head: { ref: pull.head, sha: head, repo: repoJson, label: `${repo.owner}:${pull.head}` },
+      base: { ref: pull.base, sha: base, repo: repoJson, label: `${repo.owner}:${pull.base}` },
+      created_at: new Date(pull.createdAt).toISOString(),
+      updated_at: new Date(pull.updatedAt).toISOString(),
+      draft: false,
+    };
+  }
+
+  private commitJson(git: FakeGit, sha: string) {
+    const commit = git.commits.get(sha)!;
+    const person = { name: commit.author, email: `${commit.author}@users.noreply.github.com`, date: new Date(commit.at).toISOString() };
+    return {
+      sha,
+      tree: { sha: commit.tree },
+      parents: commit.parents.map((p) => ({ sha: p })),
+      message: commit.message,
+      author: person,
+      committer: person,
+    };
+  }
+
+  private treeJson(git: FakeGit, sha: string) {
+    return {
+      sha,
+      truncated: false,
+      tree: (git.trees.get(sha) ?? []).map((e) => ({
+        path: e.name,
+        mode: e.mode,
+        type: e.type,
+        sha: e.sha,
+        ...(e.type === "blob" ? { size: git.blobs.get(e.sha)?.length ?? 0 } : {}),
+      })),
+    };
+  }
+
+  /** Under /repos/{owner}/{repo}, for a token that reaches the repository. */
+  private repositoryApi(
+    method: string,
+    repo: FakeRepository,
+    token: FakeToken,
+    rest: string,
+    query: URLSearchParams,
+    body: unknown,
+  ): Response {
+    const git = repo.git;
+    const input = (body ?? {}) as Record<string, unknown>;
+    const unprocessable = (message: string) => json(422, { message });
+    let m: RegExpExecArray | null;
+
+    if (method === "GET" && rest === "") return json(200, this.repositoryJson(repo));
+
+    if (method === "GET" && (m = /^\/rules\/branches\/(.+)$/.exec(rest))) {
+      const branch = decodeURIComponent(m[1]);
+      return json(
+        200,
+        (repo.rules[branch] ?? []).map((type, i) => ({
+          type,
+          ruleset_source_type: "Repository",
+          ruleset_source: `${repo.owner}/${repo.name}`,
+          ruleset_id: 100 + i,
+        })),
+      );
+    }
+
+    if (method === "GET" && (m = /^\/contents(?:\/(.*))?$/.exec(rest))) {
+      const denied = this.needs(token, "contents", "read");
+      if (denied) return denied;
+      const path = (m[1] ?? "").split("/").filter(Boolean).map(decodeURIComponent).join("/");
+      const commit = git.resolve(query.get("ref") ?? repo.defaultBranch);
+      if (!commit) return json(404, { message: `No commit found for the ref ${query.get("ref")}` });
+      const entry = git.at(git.commits.get(commit)!.tree, path);
+      if (!entry) return notFound();
+      if (entry.type === "tree") {
         return json(
           200,
-          (repo.rules[branch] ?? []).map((type, i) => ({
-            type,
-            ruleset_source_type: "Repository",
-            ruleset_source: `${repo.owner}/${repo.name}`,
-            ruleset_id: 100 + i,
+          (git.trees.get(entry.sha) ?? []).map((e) => ({
+            name: e.name,
+            path: path ? `${path}/${e.name}` : e.name,
+            type: e.type === "tree" ? "dir" : e.mode === "120000" ? "symlink" : "file",
+            sha: e.sha,
+            size: e.type === "blob" ? (git.blobs.get(e.sha)?.length ?? 0) : 0,
           })),
         );
       }
+      const data = git.blobs.get(entry.sha) ?? Buffer.alloc(0);
+      if (entry.mode === "120000") return json(200, { type: "symlink", target: data.toString("utf8"), name: entry.name, path, sha: entry.sha, size: data.length });
+      return json(200, {
+        type: "file",
+        encoding: "base64",
+        // GitHub wraps the base64 at 60 characters.
+        content: (data.toString("base64").match(/.{1,60}/g) ?? []).join("\n"),
+        size: data.length,
+        name: entry.name,
+        path,
+        sha: entry.sha,
+      });
+    }
+
+    if (method === "GET" && (m = /^\/git\/ref\/(.+)$/.exec(rest))) {
+      const denied = this.needs(token, "contents", "read");
+      if (denied) return denied;
+      const ref = m[1].split("/").map(decodeURIComponent).join("/");
+      const branch = ref.startsWith("heads/") ? ref.slice("heads/".length) : null;
+      const sha = branch === null ? undefined : git.branches.get(branch);
+      if (!sha) return notFound();
+      return json(200, { ref: `refs/${ref}`, object: { sha, type: "commit" } });
+    }
+
+    if (method === "POST" && rest === "/git/refs") {
+      const denied = this.needs(token, "contents", "write");
+      if (denied) return denied;
+      const ref = String(input.ref ?? "");
+      const sha = String(input.sha ?? "");
+      if (!/^refs\/heads\/.+/.test(ref)) return unprocessable("Reference name must start with 'refs/' and have at least two slashes.");
+      const name = ref.slice("refs/heads/".length);
+      if (git.branches.has(name)) return unprocessable("Reference already exists");
+      if ([...git.branches.keys()].some((b) => b.startsWith(`${name}/`) || name.startsWith(`${b}/`))) {
+        return unprocessable(`Reference cannot be created: ${name} would collide with an existing reference`);
+      }
+      if (!git.commits.has(sha)) return unprocessable("Object does not exist");
+      git.branches.set(name, sha);
+      return json(201, { ref, object: { sha, type: "commit" } });
+    }
+
+    if (method === "GET" && (m = /^\/git\/commits\/([0-9a-f]{40})$/.exec(rest))) {
+      const denied = this.needs(token, "contents", "read");
+      if (denied) return denied;
+      return git.commits.has(m[1]) ? json(200, this.commitJson(git, m[1])) : notFound();
+    }
+
+    if (method === "POST" && rest === "/git/commits") {
+      const denied = this.needs(token, "contents", "write");
+      if (denied) return denied;
+      const tree = String(input.tree ?? "");
+      const parents = Array.isArray(input.parents) ? input.parents.map(String) : [];
+      if (!git.trees.has(tree)) return unprocessable("Tree SHA does not exist");
+      if (parents.some((p) => !git.commits.has(p))) return unprocessable("Parent SHA does not exist or is not a commit object");
+      const sha = git.putCommit(tree, parents, String(input.message ?? ""), this.botFor(token).login, this.now());
+      return json(201, this.commitJson(git, sha));
+    }
+
+    if (method === "POST" && rest === "/git/blobs") {
+      const denied = this.needs(token, "contents", "write");
+      if (denied) return denied;
+      const encoding = input.encoding === "base64" ? "base64" : "utf8";
+      const sha = git.putBlob(Buffer.from(String(input.content ?? ""), encoding));
+      return json(201, { sha, url: `https://api.github.com/repos/${repo.owner}/${repo.name}/git/blobs/${sha}` });
+    }
+
+    if (method === "GET" && (m = /^\/git\/trees\/([0-9a-f]{40})$/.exec(rest))) {
+      const denied = this.needs(token, "contents", "read");
+      if (denied) return denied;
+      return git.trees.has(m[1]) ? json(200, this.treeJson(git, m[1])) : notFound();
+    }
+
+    if (method === "POST" && rest === "/git/trees") {
+      const denied = this.needs(token, "contents", "write");
+      if (denied) return denied;
+      const files = input.base_tree === undefined ? new Map<string, FakeFile>() : null;
+      const base = typeof input.base_tree === "string" ? input.base_tree : null;
+      if (base !== null && !git.trees.has(base)) return unprocessable("base_tree is not a valid tree oid");
+      const tree = files ?? git.files(base!);
+      const entries = Array.isArray(input.tree) ? (input.tree as Record<string, unknown>[]) : [];
+      for (const entry of entries) {
+        const path = String(entry.path ?? "");
+        if (!path || path.startsWith("/") || path.split("/").some((s) => s === "" || s === "." || s === "..")) {
+          return unprocessable("tree.path contains a malformed path component");
+        }
+        const mode = String(entry.mode ?? "");
+        if (!["100644", "100755", "040000", "160000", "120000"].includes(mode)) return unprocessable("tree.mode is not valid");
+        if (entry.sha === null) {
+          tree.delete(path);
+        } else if (typeof entry.content === "string") {
+          tree.set(path, { mode, sha: git.putBlob(Buffer.from(entry.content, "utf8")) });
+        } else if (typeof entry.sha === "string" && git.blobs.has(entry.sha)) {
+          tree.set(path, { mode, sha: entry.sha });
+        } else {
+          return unprocessable("tree.sha is not a valid blob");
+        }
+      }
+      return json(201, this.treeJson(git, git.build(tree)));
+    }
+
+    if (method === "GET" && rest === "/pulls") {
+      const denied = this.needs(token, "pull_requests", "read");
+      if (denied) return denied;
+      const state = query.get("state") ?? "open";
+      const pulls = repo.pulls
+        .filter((p) => state === "all" || p.state === state)
+        .sort((a, b) => b.number - a.number)
+        .slice(0, Math.min(Number(query.get("per_page") ?? "30") || 30, 100));
+      return json(200, pulls.map((p) => this.pullJson(repo, p)));
+    }
+
+    if (method === "POST" && rest === "/pulls") {
+      const denied = this.needs(token, "pull_requests", "write");
+      if (denied) return denied;
+      const head = String(input.head ?? "");
+      const base = String(input.base ?? "");
+      if (!git.branches.has(head) || !git.branches.has(base)) return unprocessable("Validation Failed: head or base is not a branch");
+      if (git.branches.get(head) === git.branches.get(base)) return unprocessable(`No commits between ${base} and ${head}`);
+      if (repo.pulls.some((p) => p.state === "open" && p.head === head && p.base === base)) {
+        return unprocessable(`A pull request already exists for ${repo.owner}:${head}.`);
+      }
+      const pull: FakePull = {
+        number: repo.pulls.length + 1,
+        title: String(input.title ?? ""),
+        body: String(input.body ?? ""),
+        head,
+        base,
+        author: this.botFor(token),
+        state: "open",
+        createdAt: this.now(),
+        updatedAt: this.now(),
+      };
+      repo.pulls.push(pull);
+      return json(201, this.pullJson(repo, pull));
+    }
+
+    if (method === "GET" && (m = /^\/commits\/([^/]+)\/check-runs$/.exec(rest))) {
+      const denied = this.needs(token, "checks", "read");
+      if (denied) return denied;
+      const sha = git.resolve(decodeURIComponent(m[1]));
+      if (!sha) return notFound();
+      const runs = this.checks.get(sha)?.runs ?? [];
+      return json(200, {
+        total_count: runs.length,
+        check_runs: runs.map((r, i) => ({ id: i + 1, head_sha: sha, name: r.name, status: r.status, conclusion: r.conclusion })),
+      });
+    }
+
+    if (method === "GET" && (m = /^\/commits\/([^/]+)\/status$/.exec(rest))) {
+      const denied = this.needs(token, "statuses", "read");
+      if (denied) return denied;
+      const sha = git.resolve(decodeURIComponent(m[1]));
+      if (!sha) return notFound();
+      const statuses = this.checks.get(sha)?.statuses ?? [];
+      const state = statuses.some((s) => s.state === "failure" || s.state === "error")
+        ? "failure"
+        : statuses.length === 0 || statuses.some((s) => s.state === "pending")
+          ? "pending"
+          : "success";
+      return json(200, { sha, state, total_count: statuses.length, statuses });
     }
 
     return notFound();
@@ -680,7 +1131,36 @@ export class FakeGitHub {
         manifests: this.manifests,
         secrets: [...this.secrets],
         tokens: [...this.tokens.entries()].map(([token, t]) => ({ token, ...t })),
+        repositories: [...this.repositories.values()].map((r) => ({
+          id: r.id,
+          fullName: `${r.owner}/${r.name}`,
+          branches: Object.fromEntries(r.git.branches),
+          pulls: r.pulls.map((p) => this.pullJson(r, p)),
+        })),
       });
+    }
+    if ((m = /^\/__control\/repositories\/(\d+)\/read$/.exec(path)) && method === "POST") {
+      return json(200, this.filesOn(Number(m[1]), String(input.branch ?? "main")));
+    }
+    if ((m = /^\/__control\/repositories\/(\d+)\/files$/.exec(path)) && method === "POST") {
+      const repo = this.repositories.get(Number(m[1]));
+      if (!repo) return notFound();
+      const branch = String(input.branch ?? repo.defaultBranch);
+      return json(200, { sha: this.push(repo.id, branch, input.files as Record<string, string | null>, String(input.author ?? "someone")) });
+    }
+    if ((m = /^\/__control\/repositories\/(\d+)\/branches$/.exec(path)) && method === "POST") {
+      this.branch(Number(m[1]), String(input.name), input.from ? String(input.from) : undefined);
+      return json(200, { ok: true });
+    }
+    if ((m = /^\/__control\/repositories\/(\d+)\/checks$/.exec(path)) && method === "POST") {
+      const repo = this.repositories.get(Number(m[1]));
+      const sha = repo?.git.resolve(String(input.ref ?? ""));
+      if (!repo || !sha) return notFound();
+      this.checks.set(sha, {
+        runs: (input.runs as { name: string; status: string; conclusion: string | null }[]) ?? [],
+        statuses: (input.statuses as { context: string; state: string }[]) ?? [],
+      });
+      return json(200, { sha });
     }
     if (path === "/__control/next-install" && method === "POST") {
       this.nextInstall = input as FakeGitHub["nextInstall"];

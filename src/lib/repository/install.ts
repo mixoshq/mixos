@@ -1740,74 +1740,14 @@ async function runInstall(
   const local = installed ? folderState(installed.dir, installed.record) : null;
   if (installed && local && options.update) assertUpdatable(installed, local, options.update);
 
-  const manifest = await resolveInstall(kind, slug, options.version);
-
-  // What the install record will say about where this came from, checked
-  // before anything is downloaded: a release whose answer can't be recorded is
-  // refused here rather than after the download.
-  const origin = recordedOrigin(kind, slug, manifest);
-
-  // Which way it goes, and what that needs, now that the target is known.
-  let replaces: Replaces | null = null;
-  if (installed && local && options.update) {
-    replaces = await updateTarget(installed, local, manifest, options.update);
-  }
-
-  if (manifest.yanked && !options.allowYanked) {
-    throw new InstallError(
-      `Version ${manifest.version} has been withdrawn by its publisher` +
-        (manifest.yankedReason ? `: ${manifest.yankedReason}` : ".") +
-        ` Installing it is possible but has to be chosen explicitly.`,
-      "yanked",
-    );
-  }
-
-  /*
-    The publisher's floor, compared with this build's version: `package.json`'s,
-    which every build stamps into `src/generated/build-info.ts` (see
-    `src/lib/platform/version.ts`). Every checkout and every deployment has one,
-    so the floor the publisher declared holds wherever this runs. Register checks
-    it again, against the checkout it runs in, and every build checks it once
-    more, from the install record (scripts/generate-project-registry.ts).
-
-    Unlike `yanked`, this has no override. A withdrawn release is a risk an admin
-    is in a position to weigh; a release that needs platform features this build
-    does not have is not a judgement call, and the failure it produces lands on
-    users rather than on the admin who accepted it.
-
-    A floor that is not a version cannot be compared, and is allowed with a
-    reason rather than refused — see `satisfiesMinimum`. That path is logged,
-    because a floor that was declared and not enforced should never be silent.
-  */
-  const compat = satisfiesMinimum(manifest.requiresMixOS);
-  if (!compat.allowed) {
-    throw new InstallError(compat.reason!, "incompatible");
-  }
-  if (compat.reason) {
-    console.warn(`[repository] ${kind}/${slug}: ${compat.reason}`);
-  }
-
-  // Steps 3–5. Nothing has touched the filesystem yet, and nothing will until
-  // verifyContentHash returns.
-  const entries = await fetchExtensionTree({
-    tarballUrl: manifest.tarballUrl,
-    commitSha: manifest.commitSha,
-    // `?? undefined` rather than passing it through: the repository sends an
-    // absent subpath as an explicit `null`, and `rootAt` distinguishes "no
-    // subpath" from a subpath it cannot use.
-    subpath: manifest.subpath ?? undefined,
+  // Steps 1 to 6, in memory (verifyRelease()): nothing has touched the
+  // filesystem yet, and nothing will until the content hash has been checked.
+  // An update's checks of its target run as soon as the target is known,
+  // before the yank gate, the floor and the download.
+  let replaces = null as Replaces | null;
+  const { manifest, record, written, leftOut, tree } = await verifyRelease(kind, slug, options, async (target) => {
+    if (installed && local && options.update) replaces = await updateTarget(installed, local, target, options.update);
   });
-  const contentHash = verifyContentHash(entries, manifest.contentHash);
-
-  // Step 6: pre-flight, then what install leaves out, then the install record:
-  // what was verified, including the files hash Register and the generator
-  // check the folder against, which is over what is written. The record goes
-  // into the tree, so it waits in pending with the extension and is committed
-  // with it.
-  preflight(kind, slug, entries);
-  const { written, leftOut } = leaveOut(entries);
-  const record: InstallRecord = { ...origin, contentHash, filesHash: filesHash(written) };
-  const tree = [...written, installRecordEntry(record)];
 
   // Step 7, fenced by the locks (see stageTree).
   const staged = await stageTree(stagingLocation(PROJECT_ROOT, kind, slug).dir, tree, lease);
@@ -1929,6 +1869,110 @@ async function runInstall(
       : `Written to ${rel}, but the registry generator could not be run here. ` +
         `Run \`npm run registry\` in the checkout and restart the server before it is usable.`,
   };
+}
+
+/** What steps 1 to 6 verified, in memory. Nothing of it is on disk. */
+export interface VerifiedRelease {
+  /** The catalogue's answer: the release, the download and its hash. */
+  manifest: InstallManifest;
+  /** The install record, `.registry.json`, built from what was verified. */
+  record: InstallRecord;
+  /** The files install writes: the package, with `.gitignore` and `.gitattributes` left out. */
+  written: TarEntry[];
+  /** What it left out, by name. */
+  leftOut: LeftOut;
+  /** `written` and the install record: the extension's folder, as install writes it. */
+  tree: TarEntry[];
+}
+
+/**
+ * Steps 1 to 6, in memory: ask the catalogue, refuse a withdrawn release not
+ * accepted and one needing a newer MixOS, download it pinned to its commit,
+ * check the content hash, pre-flight it, leave out what install never writes,
+ * and work out the files hash and the install record. Nothing is written.
+ *
+ * Install writes the tree it returns (runInstall()), and so does an update,
+ * whose checks of its target run in `onResolved`, once the release is known
+ * and before anything else is checked or downloaded. A proposal commits the
+ * tree to the operator's repository through the GitHub App instead
+ * (src/lib/github/propose.ts): that runs on a built deployment, which never
+ * writes an extension to its own disk and never runs the check, and the
+ * repository's CI and the production build's generator check it there.
+ */
+export async function verifyRelease(
+  kind: ExtensionKind,
+  slug: string,
+  options: Pick<InstallOptions, "version" | "allowYanked"> = {},
+  onResolved?: (manifest: InstallManifest) => Promise<void>,
+): Promise<VerifiedRelease> {
+  if (!SlugSchema.safeParse(slug).success) {
+    throw new InstallError(`"${slug}" is not an extension slug.`, "invalid-package");
+  }
+  const manifest = await resolveInstall(kind, slug, options.version);
+
+  // What the install record will say about where this came from, checked
+  // before anything is downloaded: a release whose answer can't be recorded is
+  // refused here rather than after the download.
+  const origin = recordedOrigin(kind, slug, manifest);
+
+  if (onResolved) await onResolved(manifest);
+
+  if (manifest.yanked && !options.allowYanked) {
+    throw new InstallError(
+      `Version ${manifest.version} has been withdrawn by its publisher` +
+        (manifest.yankedReason ? `: ${manifest.yankedReason}` : ".") +
+        ` Installing it is possible but has to be chosen explicitly.`,
+      "yanked",
+    );
+  }
+
+  /*
+    The publisher's floor, compared with this build's version: `package.json`'s,
+    which every build stamps into `src/generated/build-info.ts` (see
+    `src/lib/platform/version.ts`). Every checkout and every deployment has one,
+    so the floor the publisher declared holds wherever this runs. Register checks
+    it again, against the checkout it runs in, and every build checks it once
+    more, from the install record (scripts/generate-project-registry.ts).
+
+    Unlike `yanked`, this has no override. A withdrawn release is a risk an admin
+    is in a position to weigh; a release that needs platform features this build
+    does not have is not a judgement call, and the failure it produces lands on
+    users rather than on the admin who accepted it.
+
+    A floor that is not a version cannot be compared, and is allowed with a
+    reason rather than refused — see `satisfiesMinimum`. That path is logged,
+    because a floor that was declared and not enforced should never be silent.
+  */
+  const compat = satisfiesMinimum(manifest.requiresMixOS);
+  if (!compat.allowed) {
+    throw new InstallError(compat.reason!, "incompatible");
+  }
+  if (compat.reason) {
+    console.warn(`[repository] ${kind}/${slug}: ${compat.reason}`);
+  }
+
+  // Steps 3–5. Nothing touches the filesystem here, and the caller writes
+  // nothing until verifyContentHash has returned.
+  const entries = await fetchExtensionTree({
+    tarballUrl: manifest.tarballUrl,
+    commitSha: manifest.commitSha,
+    // `?? undefined` rather than passing it through: the repository sends an
+    // absent subpath as an explicit `null`, and `rootAt` distinguishes "no
+    // subpath" from a subpath it cannot use.
+    subpath: manifest.subpath ?? undefined,
+  });
+  const contentHash = verifyContentHash(entries, manifest.contentHash);
+
+  // Step 6: pre-flight, then what install leaves out, then the install record:
+  // what was verified, including the files hash Register and the generator
+  // check the folder against, which is over what is written. The record goes
+  // into the tree, so it waits in pending with the extension and is committed
+  // with it.
+  preflight(kind, slug, entries);
+  const { written, leftOut } = leaveOut(entries);
+  const record: InstallRecord = { ...origin, contentHash, filesHash: filesHash(written) };
+  const tree = [...written, installRecordEntry(record)];
+  return { manifest, record, written, leftOut, tree };
 }
 
 /**

@@ -10,6 +10,12 @@ on:
 
 jobs:
   danger:
+    # Not for the GitHub App's pull requests, from branches under mixos/: this
+    # job runs `npm ci` on the pull request's code with write scopes, and the
+    # instance refuses to propose while any workflow would do that for them
+    # (docs/security-architecture.md §32). `branches-ignore` can't do this: on
+    # a pull_request trigger it filters the target branch, not the head.
+    if: ${{ !startsWith(github.head_ref, 'mixos/') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

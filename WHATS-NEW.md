@@ -335,6 +335,20 @@ just pulled.
   locally. The audit log records `<kind>.update`. No admin page opens the
   dialog yet, and Register refuses a pending update and says to discard it,
   until Register can put an update in place.
+- **Propose an extension as a pull request.** With the GitHub App linked, a
+  deployment's Browse pages offer **Propose to owner/repo**. The instance
+  verifies the release in memory and opens a pull request that adds its folder,
+  on `mixos/install/<kind>-<slug>`; merging it is the deploy. It refuses,
+  naming the file, while a workflow would run that pull request with a secret
+  or a write token, or `render.yaml` or, on Vercel, `vercel.json` would build a
+  preview of it. It also needs the pull request rule, and an admin's
+  confirmation on Admin > GitHub that no host builds previews of the App's
+  branches. Admin > Apps, Connectors and Themes list the App's open pull
+  requests with their checks, including "No CI ran" and "Changed since
+  proposed". `vercel.json` now turns off deployments of `mixos/**`,
+  `render.yaml` turns off the web service's previews, Danger skips App
+  branches, and CI checks out without keeping its token. See
+  `docs/hosting/README.md#proposing-an-extension`.
 
 ## 2026-10-07
 

@@ -51,8 +51,12 @@
  *   - The answer is a value, never a throw: what went wrong, said plainly, and
  *     never a token, a JWT or the key (./outcomes.ts).
  *   - Linking, unlinking, forgetting, replacing the key, switching the link off
- *     or on, and confirming another branch protection are audited (§28 of
- *     docs/security-architecture.md), as `github.*` against the App.
+ *     or on, confirming another branch protection and confirming the preview
+ *     checklist are audited (§28 of docs/security-architecture.md), as
+ *     `github.*` against the App.
+ *
+ * Proposing an extension as a pull request, which uses the link, is
+ * ./propose.ts.
  */
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -90,13 +94,16 @@ import {
   readRepository,
   type BranchRules,
   type LinkedRepository,
+  type WriteScope,
 } from "./repository";
 import { AppSchema, ManifestConversionSchema, parseAnswer } from "./schemas";
 import {
   CorruptRecordError,
   KeyUnavailableError,
   OVERRIDE_REASONS,
+  PREVIEW_CHECKLIST,
   clearOverride,
+  clearPreviewChecklist,
   consumeManifestState,
   encryptionKeyState,
   forgetEverything,
@@ -108,6 +115,7 @@ import {
   saveBranchRule,
   saveManifestState,
   saveOverride,
+  savePreviewChecklist,
   sealPrivateKey,
   updateLink,
   type AppRecord,
@@ -126,7 +134,10 @@ export const MANIFEST_STATE_COOKIE = "mos_github_manifest";
 /** The cookie's path: the route GitHub sends the admin back to. */
 export const MANIFEST_STATE_COOKIE_PATH = "/api/admin/github";
 
-/** The lease is a few GitHub requests long, each with a 10-second limit. */
+/**
+ * The lease is a few GitHub requests long, each with a 10-second limit. A
+ * proposal's is longer, and the lease renews itself every minute meanwhile.
+ */
 const LOCK_OPTIONS = { ttlSeconds: 120 };
 
 /** The audit rows' target. */
@@ -146,7 +157,7 @@ const nowOf = (ctx: { now?(): Date }) => (ctx.now ? ctx.now() : new Date());
 /*  Saying what happened                                                        */
 /* -------------------------------------------------------------------------- */
 
-function refused(
+export function refused(
   code: string,
   message: string,
   tone: OutcomeTone = "warning",
@@ -172,7 +183,7 @@ const BUSY = refused(
 );
 
 /** The feature's switch, as a refusal, or null when it is on. */
-function featureRefusal(): Extract<GitHubOutcome, { ok: false }> | null {
+export function featureRefusal(): Extract<GitHubOutcome, { ok: false }> | null {
   const state = encryptionKeyState();
   if (state.ok) return null;
   return state.problem === "off" ? OFF : MALFORMED;
@@ -194,7 +205,7 @@ function describeGitHubError(err: GitHubError): string {
 }
 
 /** Any failure as an answer. Unexpected ones are logged by name and message only. */
-function fromError(err: unknown): Extract<GitHubOutcome, { ok: false }> {
+export function fromError(err: unknown): Extract<GitHubOutcome, { ok: false }> {
   if (err instanceof LockUnavailableError) return BUSY;
   if (err instanceof KeyUnavailableError) return refused(`key-${err.problem}`, err.message, "danger");
   if (err instanceof CorruptRecordError) return refused("corrupt", err.message, "danger");
@@ -225,8 +236,8 @@ function fullName(record: Pick<RepositoryRecord, "owner" | "name">): string {
   return `${record.owner}/${record.name}`;
 }
 
-/** Run `fn` under the `github.app` lock. */
-function locked<T>(fn: (lease: PlatformLease) => Promise<T>): Promise<T> {
+/** Run `fn` under the `github.app` lock: every change to the link, and every proposal. */
+export function locked<T>(fn: (lease: PlatformLease) => Promise<T>): Promise<T> {
   return withPlatformLock("github.app", fn, LOCK_OPTIONS);
 }
 
@@ -495,7 +506,8 @@ function recordFrom(repository: {
   };
 }
 
-function ruleRecord(record: RepositoryRecord, rules: BranchRules, at: Date): BranchRuleRecord {
+/** What a read of the rules found, as it is stored. */
+export function ruleRecord(record: RepositoryRecord, rules: BranchRules, at: Date): BranchRuleRecord {
   return {
     repositoryId: record.id,
     branch: rules.branch,
@@ -731,17 +743,21 @@ async function recheck(
  * which can switch the link off. Throws GitHubLinkError when the link can't be
  * used, with what to tell the admin.
  *
- * This is how rank 30's proposals reach the repository: "write" for a
- * proposal's writes, "read" for everything that looks.
+ * This is how proposals reach the repository (./propose.ts): "write" for a
+ * proposal's writes, with `scope` naming the one folder they may touch
+ * (./repository.ts guardWrite()), and "read" for everything that looks.
  */
 export async function withLinkedRepository<T>(
   shape: TokenShape,
   actor: AdminActor,
   fn: (repo: LinkedRepository) => Promise<T>,
-  ctx: { now?(): Date } = {},
+  ctx: { now?(): Date; scope?: WriteScope } = {},
 ): Promise<T> {
   const off = featureRefusal();
   if (off) throw new GitHubLinkError(off);
+  if (shape === "write" && !ctx.scope) {
+    throw new GitHubError("A write token needs a write scope. This is a bug in the caller.", "path");
+  }
   const state = await readGitHubState();
   if (!state.app || !state.link) {
     throw new GitHubLinkError(refused("not-linked", "Link a repository on Admin > GitHub first.", "info"));
@@ -772,7 +788,7 @@ export async function withLinkedRepository<T>(
   }
   const token = await mintRepositoryToken(session, link.installationId, link.repository.id, shape);
   try {
-    return await fn(linkedRepository(link.repository, shape, token));
+    return await fn(linkedRepository(link.repository, shape, token, shape === "write" ? ctx.scope : undefined));
   } finally {
     await revokeToken(token);
   }
@@ -781,8 +797,8 @@ export async function withLinkedRepository<T>(
 /**
  * Whether a proposal may go ahead on the branch rule: a `pull_request` rule
  * was found on the default branch at the last read, or an admin confirmed
- * another protection. Rank 30 reads the rule again before every proposal
- * (`readBranchRulesOrNone()` through withLinkedRepository("read", …)).
+ * another protection. Browse reads it from what is stored; a proposal reads
+ * the rule again first (./propose.ts).
  */
 export function branchRuleSatisfied(
   state: Pick<GitHubState, "branchRule" | "override">,
@@ -1135,7 +1151,7 @@ const OverrideInputSchema = z.object({
  * An admin's confirmation that the default branch takes changes only through
  * pull requests by a protection the App can't see: classic branch protection,
  * or none possible on a private repository under GitHub Free. Needs the
- * repository's name typed. Rank 30's proposals read it (branchRuleSatisfied()).
+ * repository's name typed. Proposals read it (branchRuleSatisfied(), ./propose.ts).
  */
 export async function confirmBranchProtection(input: unknown, ctx: LinkContext): Promise<GitHubOutcome> {
   const actor = await ctx.admin();
@@ -1193,6 +1209,73 @@ export async function withdrawBranchProtection(ctx: LinkContext): Promise<GitHub
         repository: state.link ? fullName(state.link.repository) : null,
       });
       return { ok: true, message: "Withdrawn." };
+    });
+  } catch (err) {
+    return fromError(err);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  The preview checklist                                                       */
+/* -------------------------------------------------------------------------- */
+
+const ChecklistInputSchema = z.object({ items: z.array(z.string()).max(10) });
+
+/**
+ * An admin's confirmation of what the App can't read: that no host builds
+ * previews of the App's branches, and nothing else builds its pull requests
+ * with secrets (PREVIEW_CHECKLIST in ./store.ts). Every item has to be ticked.
+ * Proposals need it (./propose.ts). Audited.
+ */
+export async function confirmPreviewChecklist(input: unknown, ctx: LinkContext): Promise<GitHubOutcome> {
+  const actor = await ctx.admin();
+  const off = featureRefusal();
+  if (off) return off;
+  const parsed = ChecklistInputSchema.safeParse(input);
+  const items = parsed.success ? new Set(parsed.data.items) : new Set<string>();
+  if (!PREVIEW_CHECKLIST.every((item) => items.has(item))) {
+    return refused("input", "Tick every item: each one is something the App can't check for you.");
+  }
+  try {
+    return await locked(async (lease) => {
+      const state = await readGitHubState();
+      if (!state.app || !state.link) return refused("not-linked", "Nothing is linked yet.", "info");
+      const { app, link } = state;
+      if (link.disabled) return refused("disabled", "The link is off. Check again first.");
+      await lease.assertHeld();
+      await savePreviewChecklist({
+        repositoryId: link.repository.id,
+        items: [...PREVIEW_CHECKLIST],
+        at: nowOf(ctx).toISOString(),
+        by: actor.email,
+      });
+      await audit(actor, "github.previews.confirm", app, {
+        items: [...PREVIEW_CHECKLIST],
+        repositoryId: link.repository.id,
+        repository: fullName(link.repository),
+      });
+      return { ok: true, message: "Recorded: nothing else builds the App's branches." };
+    });
+  } catch (err) {
+    return fromError(err);
+  }
+}
+
+/** Withdraw that confirmation: proposals stop until it is confirmed again. */
+export async function withdrawPreviewChecklist(ctx: LinkContext): Promise<GitHubOutcome> {
+  const actor = await ctx.admin();
+  const off = featureRefusal();
+  if (off) return off;
+  try {
+    return await locked(async (lease) => {
+      const state = await readGitHubState();
+      if (!state.app) return refused("no-app", "Nothing is linked.", "info");
+      await lease.assertHeld();
+      if (!(await clearPreviewChecklist())) return refused("none", "There was no confirmation to withdraw.", "info");
+      await audit(actor, "github.previews.confirm.clear", state.app, {
+        repository: state.link ? fullName(state.link.repository) : null,
+      });
+      return { ok: true, message: "Withdrawn. Proposals stay off until it is confirmed again." };
     });
   } catch (err) {
     return fromError(err);
