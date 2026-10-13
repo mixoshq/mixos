@@ -117,6 +117,13 @@ export interface UpdateComparison {
 export type ComparisonOutcome = { ok: true; comparison: UpdateComparison } | Refusal;
 
 /**
+ * The comparison as the dialog's ComparisonView renders it: everything but
+ * what the update sends back. A proposal through the GitHub App shows the same
+ * view of the folder on the default branch (src/lib/github/outcomes.ts).
+ */
+export type ComparisonFacts = Omit<UpdateComparison, "localChanges" | "reviewed">;
+
+/**
  * What the update made: for an app or a connector, the release waiting in
  * pending for Register, and what it replaces; for a theme, which registers as
  * it installs, the release in place, and what to commit.
