@@ -21,14 +21,18 @@
  *         GET  /contents/{path}?ref=, GET /git/ref/heads/{branch}, POST /git/refs
  *         GET|POST /git/commits, POST /git/blobs, GET|POST /git/trees
  *         GET|POST /pulls, GET /commits/{ref}/check-runs, GET /commits/{ref}/status
+ *         GET  /compare/{base}...{head}, with `owner:ref` for a repository in
+ *              the same fork network (a 404 when the token can't see it)
  *
  * A control can merge a pull request as a person would on GitHub's page
  * (`/__control/repositories/{id}/merge`), so a test can carry on from a merged
  * proposal: the App never can, and no API endpoint here merges.
  *
  * Each repository has a small git object store: blobs, trees and commits with
- * git's own ids, and its branches. Nothing merges: no endpoint here would, and
- * a test can look in `requests` for any attempt.
+ * git's own ids, and its branches and tags. Objects are shared across a fork
+ * network, as GitHub shares them, so a fork's branch can be created at a
+ * commit only upstream has. Nothing merges: no endpoint here would, and a
+ * test can look in `requests` for any attempt.
  *
  * JWTs are checked as GitHub checks them: RS256, signed by one of the App's
  * keys, `iss` the App's id, at most ten minutes long. Tokens carry the
@@ -103,18 +107,52 @@ interface FakeFile {
 }
 
 /**
+ * One kind of object, stored here and found across a fork network: GitHub
+ * keeps a network's objects together, so a commit upstream made is reachable
+ * through any fork of it, and a fork's branch can point at it.
+ */
+class SharedObjects<V> {
+  private readonly own = new Map<string, V>();
+  constructor(private readonly peers: () => SharedObjects<V>[]) {}
+  get(sha: string): V | undefined {
+    if (this.own.has(sha)) return this.own.get(sha);
+    for (const peer of this.peers()) if (peer.own.has(sha)) return peer.own.get(sha);
+    return undefined;
+  }
+  has(sha: string): boolean {
+    return this.own.has(sha) || this.peers().some((peer) => peer.own.has(sha));
+  }
+  set(sha: string, value: V): this {
+    this.own.set(sha, value);
+    return this;
+  }
+}
+
+export interface FakeCommit {
+  tree: string;
+  parents: string[];
+  message: string;
+  author: string;
+  at: number;
+}
+
+/**
  * A repository's objects, with git's ids (blob and tree ids are exactly
- * git's; a commit's is a hash of what it holds), and its branches.
+ * git's; a commit's is a hash of what it holds), and its branches and tags.
+ * Objects are found across the repository's fork network (`network`, set by
+ * FakeGitHub), as GitHub finds them; branches and tags are its own.
  */
 export class FakeGit {
-  readonly blobs = new Map<string, Buffer>();
-  readonly trees = new Map<string, FakeTreeEntry[]>();
-  readonly commits = new Map<
-    string,
-    { tree: string; parents: string[]; message: string; author: string; at: number }
-  >();
+  /** Every repository's git in this one's fork network, itself included. */
+  network: FakeGit[] = [this];
+  private readonly others = () => this.network.filter((g) => g !== this);
+  readonly blobs: SharedObjects<Buffer> = new SharedObjects<Buffer>(() => this.others().map((g) => g.blobs));
+  readonly trees: SharedObjects<FakeTreeEntry[]> = new SharedObjects<FakeTreeEntry[]>(() => this.others().map((g) => g.trees));
+  readonly commits: SharedObjects<FakeCommit> = new SharedObjects<FakeCommit>(() => this.others().map((g) => g.commits));
   /** Branch name → commit. */
   readonly branches = new Map<string, string>();
+  /** Tag name → commit (peeled: what an annotated tag points at). */
+  readonly tags = new Map<string, string>();
   private counter = 0;
 
   putBlob(data: Buffer): string {
@@ -213,10 +251,26 @@ export class FakeGit {
     return sha;
   }
 
-  /** A branch name or a commit id, as a commit, or null. */
+  /** A branch name, a tag name or a commit id, as a commit, or null. */
   resolve(ref: string): string | null {
     if (this.branches.has(ref)) return this.branches.get(ref)!;
+    if (this.tags.has(ref)) return this.tags.get(ref)!;
     return this.commits.has(ref) ? ref : null;
+  }
+
+  /** Every commit reachable from `sha`, itself included, with when it was made. */
+  ancestors(sha: string): Map<string, number> {
+    const seen = new Map<string, number>();
+    const queue = [sha];
+    while (queue.length > 0) {
+      const next = queue.shift()!;
+      if (seen.has(next)) continue;
+      const commit = this.commits.get(next);
+      if (!commit) continue;
+      seen.set(next, commit.at);
+      queue.push(...commit.parents);
+    }
+    return seen;
   }
 }
 
@@ -317,16 +371,8 @@ export class FakeGitHub {
       parent: null,
       rules: { main: ["pull_request", "deletion"] },
     });
-    this.addRepository({
-      id: 501,
-      owner: "acme",
-      name: "mixos",
-      private: true,
-      fork: true,
-      defaultBranch: "main",
-      parent: { id: 1345491436, fullName: "mixoshq/mixos" },
-      rules: { main: ["deletion", "pull_request"] },
-    });
+    // The operator's fork of upstream: in its network, its main at upstream's.
+    this.fork(1345491436, { id: 501, owner: "acme", name: "mixos", private: true, rules: { main: ["deletion", "pull_request"] } });
     this.addRepository({
       id: 502,
       owner: "acme",
@@ -360,7 +406,69 @@ export class FakeGitHub {
     const repo: FakeRepository = { formerNames: [], ...rest, git: new FakeGit(), pulls: [] };
     repo.git.commit(repo.defaultBranch, files ?? { "README.md": `# ${repo.name}\n` }, "Initial commit", repo.owner, this.now());
     this.repositories.set(repo.id, repo);
+    this.relinkNetworks();
     return repo;
+  }
+
+  /**
+   * A fork of `parentId`, as GitHub makes one: in the parent's network, so
+   * every object the parent has is reachable through it, with the parent's
+   * branches at the same commits, and its default branch.
+   */
+  fork(
+    parentId: number,
+    repository: { id: number; owner: string; name: string; private: boolean; rules?: Record<string, string[]> },
+  ): FakeRepository {
+    const parent = this.repositories.get(parentId);
+    if (!parent) throw new Error(`no repository ${parentId}`);
+    const repo: FakeRepository = {
+      id: repository.id,
+      owner: repository.owner,
+      name: repository.name,
+      private: repository.private,
+      fork: true,
+      defaultBranch: parent.defaultBranch,
+      parent: { id: parent.id, fullName: `${parent.owner}/${parent.name}` },
+      rules: repository.rules ?? {},
+      formerNames: [],
+      git: new FakeGit(),
+      pulls: [],
+    };
+    this.repositories.set(repo.id, repo);
+    this.relinkNetworks();
+    for (const [branch, sha] of parent.git.branches) repo.git.branches.set(branch, sha);
+    return repo;
+  }
+
+  /** The repository at the root of `repo`'s fork network. */
+  private rootOf(repo: FakeRepository): FakeRepository {
+    let current = repo;
+    for (let hops = 0; current.parent && hops < 20; hops++) {
+      const parent = this.repositories.get(current.parent.id);
+      if (!parent) break;
+      current = parent;
+    }
+    return current;
+  }
+
+  /** Every repository in `repo`'s fork network, itself included. */
+  network(repo: FakeRepository): FakeRepository[] {
+    const root = this.rootOf(repo);
+    return [...this.repositories.values()].filter((r) => this.rootOf(r) === root);
+  }
+
+  /** Tell every repository's git which others share its objects. */
+  private relinkNetworks(): void {
+    for (const repo of this.repositories.values()) repo.git.network = this.network(repo).map((r) => r.git);
+  }
+
+  /** A tag at a commit, as pushing an annotated tag would leave it (peeled). */
+  tag(repositoryId: number, name: string, ref: string): void {
+    const repo = this.repositories.get(repositoryId);
+    if (!repo) throw new Error(`no repository ${repositoryId}`);
+    const sha = repo.git.resolve(ref);
+    if (!sha) throw new Error(`no commit ${ref} in ${repo.owner}/${repo.name}`);
+    repo.git.tags.set(name, sha);
   }
 
   /**
@@ -880,6 +988,78 @@ export class FakeGitHub {
     };
   }
 
+  /**
+   * One side of a compare, as a commit: a branch, a tag or a commit id in
+   * `repo`, or `owner:ref` or `owner:repo:ref` for a repository in the same
+   * fork network, which a token that can't see that repository (private, and
+   * not among the token's) gets a 404 for, as GitHub answers.
+   */
+  private resolveSide(repo: FakeRepository, token: FakeToken, side: string): string | null {
+    const colon = side.indexOf(":");
+    if (colon === -1) return repo.git.resolve(side);
+    const owner = side.slice(0, colon);
+    const rest = side.slice(colon + 1);
+    const again = rest.indexOf(":");
+    const name = again === -1 ? null : rest.slice(0, again);
+    const ref = again === -1 ? rest : rest.slice(again + 1);
+    const other = this.network(repo).find((r) => r.owner === owner && (name === null || r.name === name));
+    if (!other) return null;
+    if (other.id !== repo.id && other.private) {
+      const installation = this.installations.get(token.installationId);
+      const visible =
+        installation !== undefined &&
+        this.covered(installation).some((r) => r.id === other.id) &&
+        (token.repositoryIds === null || token.repositoryIds.includes(other.id));
+      if (!visible) return null;
+    }
+    return other.git.resolve(ref);
+  }
+
+  /** GET /repos/{owner}/{repo}/compare/{base}...{head}, over the network's objects. */
+  private compareJson(repo: FakeRepository, base: string, head: string): Response {
+    const git = repo.git;
+    const fromBase = git.ancestors(base);
+    const fromHead = git.ancestors(head);
+    const common = [...fromBase.keys()].filter((sha) => fromHead.has(sha));
+    if (common.length === 0) return json(404, { message: `No common ancestor between ${base} and ${head}.` });
+    // The merge base: a common ancestor no other common ancestor descends from.
+    const bases = common.filter((c) => !common.some((d) => d !== c && git.ancestors(d).has(c)));
+    const mergeBase = base === head ? head : bases.sort((a, b) => fromBase.get(b)! - fromBase.get(a)! || a.localeCompare(b))[0];
+    const ahead = [...fromHead.keys()].filter((sha) => !fromBase.has(sha)).sort((a, b) => fromHead.get(a)! - fromHead.get(b)!);
+    const behind = [...fromBase.keys()].filter((sha) => !fromHead.has(sha));
+    const status = base === head ? "identical" : behind.length === 0 ? "ahead" : ahead.length === 0 ? "behind" : "diverged";
+
+    const before = git.files(git.commits.get(mergeBase)!.tree);
+    const after = git.files(git.commits.get(head)!.tree);
+    const files: { filename: string; status: string; additions: number; deletions: number; changes: number }[] = [];
+    for (const [path, file] of after) {
+      const was = before.get(path);
+      if (!was) files.push({ filename: path, status: "added", additions: 1, deletions: 0, changes: 1 });
+      else if (was.sha !== file.sha || was.mode !== file.mode) files.push({ filename: path, status: "modified", additions: 1, deletions: 1, changes: 2 });
+    }
+    for (const path of before.keys()) {
+      if (!after.has(path)) files.push({ filename: path, status: "removed", additions: 0, deletions: 1, changes: 1 });
+    }
+    files.sort((a, b) => a.filename.localeCompare(b.filename));
+
+    const url = `https://api.github.com/repos/${repo.owner}/${repo.name}/compare/${base}...${head}`;
+    return json(200, {
+      url,
+      html_url: `https://github.com/${repo.owner}/${repo.name}/compare/${base}...${head}`,
+      permalink_url: `https://github.com/${repo.owner}/${repo.name}/compare/${repo.owner}:${base.slice(0, 12)}...${repo.owner}:${head.slice(0, 12)}`,
+      diff_url: `${url}.diff`,
+      patch_url: `${url}.patch`,
+      base_commit: this.commitJson(git, base),
+      merge_base_commit: this.commitJson(git, mergeBase),
+      status,
+      ahead_by: ahead.length,
+      behind_by: behind.length,
+      total_commits: ahead.length,
+      commits: ahead.slice(0, 250).map((sha) => ({ sha, commit: { message: git.commits.get(sha)!.message } })),
+      files: files.slice(0, 300),
+    });
+  }
+
   private treeJson(git: FakeGit, sha: string) {
     return {
       sha,
@@ -1078,6 +1258,17 @@ export class FakeGitHub {
       return json(201, this.pullJson(repo, pull));
     }
 
+    if (method === "GET" && (m = /^\/compare\/(.+)$/.exec(rest))) {
+      const denied = this.needs(token, "contents", "read");
+      if (denied) return denied;
+      const sides = decodeURIComponent(m[1]).split("...");
+      if (sides.length !== 2) return notFound();
+      const base = this.resolveSide(repo, token, sides[0]);
+      const head = this.resolveSide(repo, token, sides[1]);
+      if (!base || !head) return notFound();
+      return this.compareJson(repo, base, head);
+    }
+
     if (method === "GET" && (m = /^\/commits\/([^/]+)\/check-runs$/.exec(rest))) {
       const denied = this.needs(token, "checks", "read");
       if (denied) return denied;
@@ -1154,10 +1345,36 @@ export class FakeGitHub {
         repositories: [...this.repositories.values()].map((r) => ({
           id: r.id,
           fullName: `${r.owner}/${r.name}`,
+          private: r.private,
           branches: Object.fromEntries(r.git.branches),
+          tags: Object.fromEntries(r.git.tags),
           pulls: r.pulls.map((p) => this.pullJson(r, p)),
         })),
       });
+    }
+    if ((m = /^\/__control\/repositories\/(\d+)\/tags$/.exec(path)) && method === "POST") {
+      this.tag(Number(m[1]), String(input.name), String(input.ref));
+      return json(200, { ok: true });
+    }
+    if ((m = /^\/__control\/repositories\/(\d+)\/visibility$/.exec(path)) && method === "POST") {
+      const repo = this.repositories.get(Number(m[1]));
+      if (!repo) return notFound();
+      repo.private = Boolean(input.private);
+      return json(200, { private: repo.private });
+    }
+    if ((m = /^\/__control\/repositories\/(\d+)\/delete-branch$/.exec(path)) && method === "POST") {
+      const repo = this.repositories.get(Number(m[1]));
+      if (!repo) return notFound();
+      repo.git.branches.delete(String(input.name));
+      return json(200, { ok: true });
+    }
+    if ((m = /^\/__control\/repositories\/(\d+)\/pulls\/(\d+)\/close$/.exec(path)) && method === "POST") {
+      const repo = this.repositories.get(Number(m[1]));
+      const pull = repo?.pulls.find((p) => p.number === Number(m![2]));
+      if (!repo || !pull) return notFound();
+      pull.state = "closed";
+      pull.updatedAt = this.now();
+      return json(200, this.pullJson(repo, pull));
     }
     if ((m = /^\/__control\/repositories\/(\d+)\/read$/.exec(path)) && method === "POST") {
       return json(200, this.filesOn(Number(m[1]), String(input.branch ?? "main")));

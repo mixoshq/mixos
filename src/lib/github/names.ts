@@ -29,6 +29,7 @@
  * repository.
  */
 
+import { parseReleaseVersion } from "@/lib/platform/version-floor";
 import { ciSkipMarker, removalCommitMessage, updateCommitMessage, type ReplacedRelease } from "@/lib/repository/hand-back";
 import {
   InstallRecordSchema,
@@ -38,7 +39,7 @@ import {
 } from "@/lib/repository/install-record";
 import { kindDir } from "@/lib/repository/pending";
 import { sourceHost } from "@/lib/repository/provenance";
-import { CommitShaSchema, EXTENSION_KINDS, SlugSchema, type ExtensionKind } from "@/lib/repository/types";
+import { CORE_RELEASE_TAG, CommitShaSchema, EXTENSION_KINDS, SlugSchema, type ExtensionKind } from "@/lib/repository/types";
 
 /**
  * Every branch the App writes is under this. ./repository.ts refuses a ref
@@ -59,13 +60,44 @@ export function isExtensionAction(value: unknown): value is ExtensionAction {
 }
 
 /**
- * What a branch under `mixos/` proposes: an extension's install, update or
- * removal. Rank 32 adds an update of MixOS itself to a release.
+ * A MixOS update's branch is `mixos/update-<tag>`: a hyphen, so it can't
+ * collide with rank 31's `mixos/update/<kind>-<slug>` for an extension.
  */
-export type ProposalAction = ExtensionAction;
+export const UPDATE_BRANCH_PREFIX = "mixos/update-";
+
+/**
+ * What a branch under `mixos/` proposes: an extension's install, update or
+ * removal, or an update of MixOS itself to a release.
+ */
+export type ProposalAction = ExtensionAction | "mixos-update";
 
 /** What Render reads in a pull request's title, telling it to skip a preview in Automatic mode. */
 export const SKIP_PREVIEW = "[skip preview]";
+
+/**
+ * A MixOS release's tag, as the release list's schema accepts one
+ * (`CoreReleaseSchema`): `v0.5.0`, or `v0.5.0-rc.1`, a version in full. The
+ * only thing an update's branch and title are built from.
+ */
+export function isReleaseTag(value: unknown): value is string {
+  return typeof value === "string" && CORE_RELEASE_TAG.test(value) && parseReleaseVersion(value) !== null;
+}
+
+function assertReleaseTag(tag: string): void {
+  if (!isReleaseTag(tag)) throw new Error("An update's names are built from a release tag the list's schema validates.");
+}
+
+/** `mixos/update-v0.5.0`. A fixed name per release, so a second attempt fails cleanly. */
+export function updateBranch(tag: string): string {
+  assertReleaseTag(tag);
+  return `${UPDATE_BRANCH_PREFIX}${tag}`;
+}
+
+/** `Update MixOS to v0.5.0 [skip preview]`. */
+export function updateTitle(tag: string): string {
+  assertReleaseTag(tag);
+  return assertClean(`Update MixOS to ${tag} ${SKIP_PREVIEW}`, "title");
+}
 
 /** `apps/files`: the one folder a proposal for this extension writes. */
 export function extensionFolder(kind: ExtensionKind, slug: string): string {
@@ -84,13 +116,19 @@ export function proposalBranch(kind: ExtensionKind, slug: string, action: Extens
 }
 
 /** What a branch the App made proposes, read back from its name. */
-export type ParsedProposalBranch = { action: ExtensionAction; kind: ExtensionKind; slug: string };
+export type ParsedProposalBranch =
+  | { action: ExtensionAction; kind: ExtensionKind; slug: string }
+  | { action: "mixos-update"; tag: string };
 
 /** What a branch the App made proposes, from its name alone, or null for any other branch. */
 export function parseProposalBranch(ref: string): ParsedProposalBranch | null {
   const extension = /^mixos\/(install|update|remove)\/(app|connector|theme)-([a-z0-9-]+)$/.exec(ref);
   if (extension && SlugSchema.safeParse(extension[3]).success) {
     return { action: extension[1] as ExtensionAction, kind: extension[2] as ExtensionKind, slug: extension[3] };
+  }
+  if (ref.startsWith(UPDATE_BRANCH_PREFIX)) {
+    const tag = ref.slice(UPDATE_BRANCH_PREFIX.length);
+    if (isReleaseTag(tag)) return { action: "mixos-update", tag };
   }
   return null;
 }

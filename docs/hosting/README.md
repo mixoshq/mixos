@@ -279,6 +279,10 @@ User-Agent: MixOS
   the admin pages, a line says when mixos.org last answered.
 - **Never applied.** Nothing is merged, downloaded or deployed. Taking a release
   is up to you: merge its tag into your copy, as [Upgrading](#upgrading) says.
+  With the [GitHub App](#linking-your-github-repository) linked, the notice
+  can open that merge as a pull request for you
+  ([Updating MixOS through the App](#updating-mixos-through-the-app)); merging
+  it is still yours to do, on GitHub.
 
 The check keeps the update check's schedule: about once a day, and an hour
 after a failure, or later if mixos.org asks, but never more than a day later.
@@ -433,6 +437,43 @@ their checks:
   it. Read those commits before you merge.
 
 When the merge deploys, an app arrives inactive: activate it on Admin > Apps.
+
+### Updating MixOS through the App
+
+When a newer release of MixOS is out and the App is linked, the release notice
+at the top of the admin pages offers **Open an update pull request**, if your
+repository is a fork of `mixoshq/mixos`. It opens a pull request into your
+default branch from the branch `mixos/update-<tag>`, at the release's commit,
+with the release notes as text, GitHub's own numbers for the release against
+your branch, and the upgrade checklist. Nothing is merged: merge it on GitHub
+when its checks pass, and that is the deploy. An update pull request needs
+what a proposal needs: the pull request rule and **Previews elsewhere**
+confirmed.
+
+**What is verified first.** The notice knows the release's tag and commit from
+mixos.org. Before anything is written, the instance asks GitHub, with a
+read-only token, whether `mixoshq/mixos`'s tag is at that commit and whether
+the commit is on its `main`. If either isn't so, or GitHub can't answer (it
+answers 404 while `mixoshq/mixos` is private, which it is today), nothing is
+opened: the instance says so, records it in the audit log, and gives you the
+compare link on GitHub to merge the release by hand. The same happens when
+the release changes a file under `.github/workflows/`, which the App can't
+push because it has no workflows permission, when the release changes more
+files than GitHub lists in a compare (300), or when your default branch
+already has the release's commit.
+
+**A private copy** that isn't a fork can't take a pull request from upstream's
+commit. The notice shows the commands instead:
+
+```bash
+git fetch upstream --tags && git merge v0.5.0
+```
+
+**Once opened,** the notice names the pull request and offers nothing else.
+Admin > GitHub lists open update pull requests with their checks, as Admin >
+Apps lists proposed extensions: **No CI ran** and **Changed since proposed**
+mean the same there. If you close one without merging, delete its branch on
+GitHub; Admin > GitHub then offers to open another.
 
 ### The release step
 
@@ -782,6 +823,13 @@ between releases it holds work that hasn't been released yet.
    [Vercel](vercel.md#upgrades). When the deploy is done, the admin pages
    show the new version and its commit
    ([Which build is running](#which-build-is-running)).
+
+With the [GitHub App](#linking-your-github-repository) linked and your copy a
+fork of this repository, the release notice does steps 2 and 4 for you: it
+opens the pull request at the release's commit, after checking the tag with
+GitHub ([Updating MixOS through the App](#updating-mixos-through-the-app)).
+Step 1, reading the notes, checking it and merging stay yours. A private copy
+that isn't a fork follows the steps above.
 
 Skipping releases is fine. Merge the newest tag, and the release step applies
 every migration in between; read the notes of each release you skipped.

@@ -79,6 +79,16 @@ const MAX_CLAIMS = 40;
 export const MAX_BODY_CHARS = 60_000;
 
 /**
+ * `text` with `\`, `[`, `]`, `@` and `#` escaped: inert as Markdown even
+ * outside a fence, where they could open a link, a mention or an issue
+ * reference. The release notes of a MixOS update go through this too
+ * (./update-pull-body.ts).
+ */
+export function inert(text: string): string {
+  return text.replace(/\\/g, "\\\\").replace(/[[\]@#]/g, (c) => `\\${c}`);
+}
+
+/**
  * One claim as a line of the fenced block: `label: text`, flattened to one
  * line, capped, and escaped. Exported for its tests.
  */
@@ -88,8 +98,7 @@ export function claimLine(label: string, text: string): string {
     .replace(/\s+/g, " ")
     .trim();
   const capped = flat.length > MAX_CLAIM_CHARS ? `${flat.slice(0, MAX_CLAIM_CHARS - 1)}…` : flat;
-  const escaped = capped.replace(/\\/g, "\\\\").replace(/[[\]@#]/g, (c) => `\\${c}`);
-  return `${label}: ${escaped || "(empty)"}`;
+  return `${label}: ${inert(capped) || "(empty)"}`;
 }
 
 /** `lines` in a fenced block whose fence no run of backticks in them can close. */
@@ -115,7 +124,8 @@ function floorLine(floor: FloorVerdict): string | null {
   ).replace(/\s+/g, " ");
 }
 
-function mergeLine(host: Host, migrations: number): string {
+/** What merging does on `host`, with `migrations` to apply. Shared with the MixOS update's body. */
+export function mergeLine(host: Host, migrations: number): string {
   const first = migrations > 0 ? " Its release step applies the migrations first." : "";
   switch (host) {
     case "vercel":
