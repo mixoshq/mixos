@@ -16,7 +16,8 @@ import { cn } from "@/lib/utils";
 /**
  * The GitHub App's open pull requests for one kind, beside the installs
  * waiting on Admin > Apps, Connectors and Themes, with what their checks say
- * (src/lib/github/proposals.ts). Nothing when the App is off or nothing is
+ * (src/lib/github/proposals.ts): installs, and updates and removals of what
+ * the build runs, each said as such. Nothing when the App is off or nothing is
  * linked, or when none are open.
  *
  * Read from GitHub on every render, so the pages wrap it in Suspense: the rest
@@ -54,7 +55,7 @@ export default async function ProposedPullRequests({ kind }: { kind: ExtensionKi
         <a href={view.repositoryUrl} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2">
           {view.repository}
         </a>{" "}
-        to add {many}. Merging one is the deploy.
+        to add, update or remove {many}. Merging one is the deploy; reverting the merge is the way back.
       </p>
       <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {view.pulls.map((pull) => (
@@ -66,7 +67,13 @@ export default async function ProposedPullRequests({ kind }: { kind: ExtensionKi
               <StatusPill tone={pull.ci.tone}>{pull.ci.label}</StatusPill>
               {pull.changed && <StatusPill tone="warning">Changed since proposed</StatusPill>}
               {pull.unrecorded && <StatusPill tone="warning">Not proposed from here</StatusPill>}
-              {pull.version && <StatusPill tone="neutral">{pull.version}</StatusPill>}
+              {pull.action === "install" && pull.version && <StatusPill tone="neutral">Add {pull.version}</StatusPill>}
+              {pull.action === "update" && (
+                <StatusPill tone="neutral">Update{pull.version ? ` to ${pull.version}` : ""}</StatusPill>
+              )}
+              {pull.action === "remove" && (
+                <StatusPill tone="neutral">Remove{pull.version ? ` ${pull.version}` : ""}</StatusPill>
+              )}
             </div>
             {pull.proposedAt && pull.proposedBy && (
               <p className="mt-3 text-xs text-muted-foreground">

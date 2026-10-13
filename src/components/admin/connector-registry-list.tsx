@@ -21,6 +21,7 @@ import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import { describeIdentity } from "@/lib/repository/identity";
 import ConnectorTile from "./connector-tile";
 import ConnectorConfigureDialog from "./connector-configure-dialog";
+import type { ProposalTarget } from "@/lib/github/outcomes";
 import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
 import TypedConfirmDialog from "./typed-confirm-dialog";
 import { Button } from "@/components/ui/button";
@@ -88,6 +89,8 @@ interface Props {
   /** Returns whether the connector now holds a usable credential set. */
   configureAction: (formData: FormData) => Promise<boolean>;
   testAction: (connectorName: string) => Promise<ConnectorTestOutcome>;
+  /** On a built deployment with the GitHub App linked: where a removal can be proposed instead. */
+  proposal?: ProposalTarget | null;
   /**
    * Disable (`enabled: false`) or Enable a connector. Enabling one that
    * replaces a different connector passes its name as typed.
@@ -113,6 +116,7 @@ export default function ConnectorRegistryList({
   configureAction,
   testAction,
   switchAction,
+  proposal = null,
 }: Props) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -437,7 +441,7 @@ export default function ConnectorRegistryList({
         </TypedConfirmDialog>
       )}
 
-      {removing && <RemoveDialog target={removing} onClose={() => setRemoving(null)} />}
+      {removing && <RemoveDialog target={removing} propose={proposal} onClose={() => setRemoving(null)} />}
     </>
   );
 }

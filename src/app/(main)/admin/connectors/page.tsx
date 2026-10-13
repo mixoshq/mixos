@@ -32,6 +32,7 @@ import ConnectorRegistryList from "@/components/admin/connector-registry-list";
 import ConnectorsNotInBuild from "@/components/admin/connectors-not-in-build";
 import PendingInstalls from "@/components/admin/pending/pending-installs";
 import ProposedPullRequests from "@/components/admin/github/proposed-pull-requests";
+import { proposalTarget } from "@/lib/github/propose";
 import RegistryNotices from "@/components/admin/registry-notices";
 import { recordAdminAction, redactedKeys } from "@/lib/apps/admin-audit";
 
@@ -89,6 +90,9 @@ export default async function ConnectorsAdminPage({
 }) {
   const session = await requireReadOnlySession();
   const adminUser = await requireAdmin(session);
+  // On a built deployment with the GitHub App linked, Remove offers a pull
+  // request instead; from what is stored, without asking GitHub on every render.
+  const proposal = await proposalTarget("connector");
 
   const params = await searchParams;
   const oauthStatus = typeof params.oauth === "string" ? params.oauth : null;
@@ -365,6 +369,7 @@ export default async function ConnectorsAdminPage({
       </Suspense>
       <ConnectorRegistryList
         connectors={statuses}
+        proposal={proposal}
         initialOpen={openConnector}
         configureAction={configureConnector}
         testAction={testConnector}
