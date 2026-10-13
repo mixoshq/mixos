@@ -30,7 +30,7 @@ of the MixOS platform. It is intended for security reviewers and auditors.
 | Connector switch     | `src/lib/connectors/switch.ts`                |
 | Registry update check | `src/lib/repository/update-check.ts`, `src/lib/repository/updates.ts` |
 | MixOS release check  | `src/lib/platform/release-check.ts`, `src/lib/platform/releases.ts`, `src/components/admin/release-notes.tsx` |
-| GitHub App link      | `src/lib/github/` (§32)                        |
+| GitHub App link      | `src/lib/github/` (§32), with MixOS update pull requests in `update-pull.ts` |
 | Encryption module    | `src/lib/connectors/encryption.ts`            |
 | Rate limiter         | `src/lib/rate-limit.ts`                       |
 | Sign-in limit        | `src/lib/auth/sign-in-limit.ts`               |
@@ -2796,10 +2796,14 @@ release's page on mixos.org, `https://mixos.org/docs/releases/<tag>`, and
 `https://mixos.org/docs/operating/upgrading`. No address in the answer is ever
 fetched or made a link.
 
-**Never applied.** There is no button to apply a release. The check writes one
-row, its own, and takes its lock while it runs; it starts no process and writes
-no file. Taking a release is merging its tag into the operator's repository and
-deploying it.
+**Never applied.** No button applies a release. The check writes one row, its
+own, and takes its lock while it runs; it starts no process and writes no
+file. Taking a release is merging its tag into the operator's repository and
+deploying it. With the GitHub App linked on a fork of upstream, the notice
+offers one thing: to open a pull request for that merge, at a commit GitHub
+has confirmed is upstream's tag ([MixOS update pull requests](#mixos-update-pull-requests)).
+Merging it stays with the operator, on GitHub; `src/components/admin/release-notice.test.ts`
+holds the notice to that one button, and that button to that one action.
 
 **Turning it off.** `MIXOS_UPDATE_CHECK=false`, the update check's switch,
 sends nothing for this check either, and the admin pages say the checks are off.
@@ -3346,8 +3350,9 @@ Admin > GitHub links the instance to the one repository it is built from,
 through a private GitHub App the operator owns
 ([`src/lib/github/`](../src/lib/github/)). It is off while
 `GITHUB_APP_ENCRYPTION_KEY` is unset (§5). On a built deployment, Browse uses it
-to propose an extension as a pull request on that repository. That is the only
-thing the App writes.
+to propose an extension as a pull request on that repository, and the release
+notice uses it to propose an update of MixOS the same way. Those are the only
+things the App writes.
 
 ### What the App may do
 
@@ -3511,6 +3516,11 @@ branch. The client sends no PUT or PATCH (`src/lib/github/api.ts`), so nothing
 can merge a pull request, move a branch or turn on auto-merge, which only
 GraphQL can.
 
+A MixOS update's scope is narrower still: no folder, one branch
+`mixos/update-<tag>` at the one commit the scope names, created once, and one
+pull request from it. Every blob, tree and commit is refused: the commit is
+upstream's, and the App adds nothing to it (`src/lib/github/repository.test.ts`).
+
 ### Names and the pull request's body
 
 The branch, the commit message and the title are built only from validated
@@ -3575,16 +3585,76 @@ isn't the commit in the `<kind>.propose` row shows "Changed since proposed":
 anyone with push access can add a commit to the branch after the App opens the
 pull request. A pull request on a `mixos/install/` branch with no such row is
 marked as not proposed from this instance. Links are built from the stored
-repository and the pull request's number.
+repository and the pull request's number. Admin > GitHub lists the open
+`mixos/update-` pull requests the same way, joined to `mixos.update.propose`.
+
+### MixOS update pull requests
+
+When the release check finds a newer release (**The release check**, §31) and
+the App is linked, the release notice offers to open a pull request for it
+(`src/lib/github/update-pull.ts`), on a built deployment whose linked
+repository is a fork of upstream by its recorded parent's id. Any other
+repository gets the merge by hand and a compare link, since its commits aren't
+upstream's. What the notice offers is read from this instance alone (the link
+record, and this instance's own `mixos.update.propose` row for the release):
+the notice is on every admin page, and never asks GitHub.
+
+**Why GitHub is asked before anything is written.** The release list gives a
+tag and a commit. GitHub resolves any commit in a fork network through any
+repository in it, a stranger's fork included, so a branch created at the
+list's commit would put whatever that commit is into an "Update MixOS to
+v0.5.0" pull request in every linked repository: a wrong local tag on
+mixos.org's side, an edited feed, or a compromised deploy of mixos.org would
+do it. So the instance first asks the linked repository, with a read token:
+
+- `GET /repos/{fork}/compare/{commit}...mixoshq:{tag}` must answer
+  `identical`, so upstream's tag is at that commit;
+- `GET /repos/{fork}/compare/mixoshq:main...{commit}` must answer `behind` or
+  `identical`, so the commit is on upstream's `main`.
+
+Upstream's name comes from `UPSTREAM_REPOSITORY` in
+`src/lib/github/identifiers.ts`, never from input or an answer, and both
+answers' merge base must be the commit itself. A mismatch, or an answer GitHub
+won't give (a 404 while upstream is private, which it is today, or any error),
+refuses, is audited as `mixos.update.propose.rejected` with the reason, and
+gives the admin the compare link. The commit itself comes from the release on
+record, read under the lock, never from the request, which carries only the
+tag.
+
+**Then, with the same token:** the default branch as a proposal reads it (the
+rule, the workflows, `render.yaml`, `vercel.json`: an update is a proposal,
+with the same checks), and a third compare, of the default branch with the
+commit. That one gives the body its numbers and lists the files the release
+changes. A file under `.github/workflows/` refuses it: the App has no
+`workflows` permission, so GitHub would refuse the push, and the compare link
+is the fallback (D20). So does a list at GitHub's cap of 300 files, which may
+be short, and a default branch that already has the commit. If the branch
+`mixos/update-<tag>` exists, nothing is written: its open pull request is
+named, or the branch is.
+
+**The write** is the ref-only scope above: `POST git/refs` at that commit,
+then `POST pulls`, under the `github.app` lock, through a write token narrowed
+to the repository. The title is `Update MixOS to <tag> [skip preview]`, built
+from the validated tag. The body (`src/lib/github/update-pull-body.ts`) states
+what GitHub confirmed, the numbers, the platform migrations the release adds
+and what merging does on this host, with the release notes in a fenced block
+as plain text: images and HTML dropped, every link shown as its text and then
+its address, and `\`, `[`, `]`, `@` and `#` escaped, as a proposal's claims
+are. The only addresses outside the fence are the release's page and the
+upgrade guide, built from the tag. Audited as `mixos.update.propose` with the
+pull request's number and URL, the branch and the commit, against target type
+`mixos` and the tag.
 
 ### Authorization and audit
 
 The page, its server actions (`src/lib/github/actions.ts`,
-`src/lib/github/propose-actions.ts`) and its three routes, under
-`/api/admin/github/`, require an admin before anything else (§9). Creating,
-linking, switching the link off or on, recording a rename, replacing or
-re-encrypting the key, unlinking, forgetting, confirming a branch protection
-and confirming the preview checklist are audited (§28), against target type
-`github-app` and the App's id. Refusals of a creation, a link, a key or an
-unlink are audited as `.rejected`, with the reason. A proposal is audited
-against the extension, as `<kind>.propose` or `<kind>.propose.rejected`.
+`src/lib/github/propose-actions.ts`, `src/lib/github/update-pull-actions.ts`)
+and its three routes, under `/api/admin/github/`, require an admin before
+anything else (§9). Creating, linking, switching the link off or on, recording
+a rename, replacing or re-encrypting the key, unlinking, forgetting,
+confirming a branch protection and confirming the preview checklist are
+audited (§28), against target type `github-app` and the App's id. Refusals of
+a creation, a link, a key or an unlink are audited as `.rejected`, with the
+reason. A proposal is audited against the extension, as `<kind>.propose` or
+`<kind>.propose.rejected`; a MixOS update against the tag, as
+`mixos.update.propose` or `mixos.update.propose.rejected`.
