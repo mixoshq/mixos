@@ -11,7 +11,9 @@
 // (src/lib/repository/hand-back.ts): what to commit and how. It also asks git,
 // read-only, whether the checkout's ignore rules would leave any of the new
 // files out of the commit (ignoredByGit()), which the admin pages can't,
-// because the server never runs git.
+// because the server never runs git. Registering a pending update swaps it for
+// the folder in place, and the hand-back is the change to that folder and how
+// to roll it back.
 //
 // `--smoke` adds a smoke test of an app: checks before Register, and after it
 // the app's migrations, its activation and a grant, then the smoke script, in
@@ -39,6 +41,7 @@ import {
   listPendingInstalls,
   pathExists,
   pendingLocation,
+  readSidecar,
   type PendingKind,
 } from "../src/lib/repository/pending";
 import {
@@ -67,7 +70,7 @@ export const USAGE = `Usage:
   npm run register -- app/<slug> --smoke           register it, then migrate, activate, grant and smoke-test it
                                                    in this checkout's database, which has to be on this machine
   npm run register -- <kind>/<slug> --discard      delete it from ${MIXOS_DIR}/pending/
-  npm run register -- --recover                    tidy up after an install, registration or removal that stopped midway
+  npm run register -- --recover                    tidy up after an install, registration, removal or update that stopped midway
   npm run register -- --break-lock                 show who holds this checkout's lock, and ask before removing it
 
 With --smoke:
@@ -263,6 +266,11 @@ export interface CliIo {
   err(line: string): void;
   /** A yes-or-no question; anything but yes is no, and so is no answer at all. */
   ask(question: string): Promise<boolean>;
+  /**
+   * One of `keys`, or null for anything else, and for no answer at all. Without
+   * it, a choice goes the first way offered, which puts things back.
+   */
+  choose?(question: string, keys: readonly string[]): Promise<string | null>;
 }
 
 export interface CliOptions {
@@ -348,10 +356,20 @@ export async function runCli(args: readonly string[], options: CliOptions): Prom
           plan = before.plan;
         }
 
-        say(`Registering ${target.kind}/${target.slug}. This runs its code for the first time...`);
+        const waiting = readSidecar(pendingLocation(options.root, target.kind, target.slug).sidecar);
+        const replaces = waiting.state === "ok" ? waiting.sidecar.replaces : undefined;
+        say(
+          replaces
+            ? `Updating ${target.kind}/${target.slug} from ${replaces.version}. This moves ` +
+                `${liveLocation(options.root, target.kind, target.slug).rel} aside and runs the new release's code for ` +
+                "the first time..."
+            : `Registering ${target.kind}/${target.slug}. This runs its code for the first time...`,
+        );
         const result = await registerPending(target.kind, target.slug, shared);
         say(
-          `Registered ${result.kind}/${result.slug} ${result.version}` +
+          (result.update
+            ? `Updated ${result.kind}/${result.slug} from ${result.update.from.version} to ${result.version}`
+            : `Registered ${result.kind}/${result.slug} ${result.version}`) +
             (result.gitTag ? ` (${result.gitTag})` : "") +
             ` from commit ${result.commitSha.slice(0, 12)}.`,
         );
@@ -445,12 +463,13 @@ export async function breakLock(root: string, say: (line: string) => void, io: C
 }
 
 /**
- * `--recover`: what a stopped install, registration, discard or removal left,
- * and, once a person agrees, deal with it. `npm run remove -- --recover` is the
- * same (scripts/remove-cli.ts).
+ * `--recover`: what a stopped install, registration, discard, removal or
+ * update left, and, once a person agrees, deal with it. An update stopped with
+ * its new release in place can go either way, so it asks which first.
+ * `npm run remove -- --recover` is the same (scripts/remove-cli.ts).
  */
 export async function recover(
-  shared: Omit<RecoverOptions, "confirm">,
+  shared: Omit<RecoverOptions, "confirm" | "choose">,
   say: (line: string) => void,
   io: CliIo,
 ): Promise<number> {
@@ -464,6 +483,17 @@ export async function recover(
   };
   const result = await recoverCheckout({
     ...shared,
+    choose: async (item) => {
+      const choices = item.choices ?? [];
+      const keys = choices.map((c) => c.label.charAt(0).toLowerCase());
+      say("It can go either way:");
+      say(`  ${item.path}`);
+      say(`    ${item.found}`);
+      choices.forEach((c, i) => say(`    ${keys[i]}: ${c.does}`));
+      const question = choices.map((c, i) => (i === 0 ? capitalized(c.label) : c.label)).join(", or ");
+      const key = io.choose ? await io.choose(`${question}?`, keys) : keys[0];
+      return choices[keys.indexOf(key ?? "")]?.action ?? null;
+    },
     confirm: async (items) => {
       say("Found:");
       show(items);
@@ -472,7 +502,7 @@ export async function recover(
   });
 
   if (result.items.length === 0) {
-    say("Nothing to recover: no install, registration, discard or removal was left unfinished.");
+    say("Nothing to recover: no install, registration, discard, removal or update was left unfinished.");
     return 0;
   }
   if (result.cancelled) {
@@ -485,6 +515,7 @@ export async function recover(
     return 1;
   }
   say(`Done: ${result.acted.map((i) => i.path).join(", ")}.`);
+  for (const note of result.notes) say(note);
   if (result.regenerated) {
     say(
       result.regenerated.ok
@@ -500,4 +531,9 @@ export async function recover(
     return 1;
   }
   return result.regenerated && !result.regenerated.ok ? 1 : 0;
+}
+
+/** "Restore 1.2.0", from "restore 1.2.0". */
+function capitalized(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
