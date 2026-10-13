@@ -4,8 +4,9 @@
 
 /**
  * The registry generator's copies in public/: each recorded before it is made,
- * and at the end of a full run, the ones it no longer makes deleted. Nothing
- * else in public/ is ever touched. Each test works in a public/ of its own.
+ * emptied before a later run copies into it again, and at the end of a full
+ * run, the ones it no longer makes deleted. Nothing else in public/ is ever
+ * touched. Each test works in a public/ of its own.
  */
 
 import { after, test } from "node:test";
@@ -121,4 +122,22 @@ test("a record that isn't one, or names somewhere else, deletes nothing", () => 
     assert.equal(c.has("themes/x/a.txt"), true);
   }
   assert.throws(() => new PublicCopies(c.pub, c.record).folder("themes", "../elsewhere"));
+});
+
+test("a copy made again starts empty: a file the extension no longer publishes goes, as after an update", () => {
+  const c = checkout();
+  c.run(["themes/dusk"]);
+  c.put("themes/dusk/old-font.woff2");
+  // The next run copies dusk again, and only file.png this time.
+  assert.deepEqual(c.run(["themes/dusk"]), []);
+  assert.equal(c.has("themes/dusk/file.png"), true);
+  assert.equal(c.has("themes/dusk/old-font.woff2"), false);
+});
+
+test("a folder it never recorded isn't emptied, even when a run copies into it", () => {
+  const c = checkout();
+  c.put("themes/hand-made/logo.svg");
+  c.run(["themes/hand-made"]);
+  assert.equal(c.has("themes/hand-made/logo.svg"), true);
+  assert.equal(c.has("themes/hand-made/file.png"), true);
 });
