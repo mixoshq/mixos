@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/input";
 import Notice from "@/components/ui/notice";
 import { checkProposalAction, proposeInstallAction } from "@/lib/github/propose-actions";
-import type { ProposalCheckOutcome, ProposalFinding, ProposeOutcome } from "@/lib/github/outcomes";
+import type { ProposalCheckLine, ProposalCheckOutcome, ProposalFinding, ProposeOutcome } from "@/lib/github/outcomes";
 import { KIND_LABEL, type ExtensionSummary } from "@/lib/repository/types";
 import WithCode from "../pending/with-code";
 import FloorNotice from "./floor-notice";
@@ -27,7 +27,9 @@ import FloorNotice from "./floor-notice";
  * already. Proposing does all of that again, and downloads and verifies the
  * release, before it writes anything (src/lib/github/propose.ts).
  *
- * The parent keys it on the extension, so each choice starts fresh.
+ * The parent keys it on the extension, so each choice starts fresh. The
+ * check lines, the outcome and the rows are shared with the dialog that
+ * proposes an update or a removal (../github/propose-change-dialog.tsx).
  */
 export default function ProposeDialog({
   extension,
@@ -187,44 +189,7 @@ export default function ProposeDialog({
             </dl>
           </section>
 
-          <section>
-            <h3 className="text-sm font-semibold text-foreground">Before it can be proposed</h3>
-            <ul className="mt-3 space-y-3">
-              {check.lines.map((line) => (
-                <li key={line.id} className="flex gap-2 text-sm">
-                  {line.ok ? (
-                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-label="Holds" />
-                  ) : (
-                    <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-label="Doesn't hold" />
-                  )}
-                  <div className="min-w-0">
-                    {line.findings ? (
-                      <>
-                        <p className="font-medium text-foreground">{line.label}.</p>
-                        <Findings findings={line.findings} />
-                        <p className="mt-1 break-words text-muted-foreground">
-                          <WithCode text={line.detail} />
-                        </p>
-                      </>
-                    ) : (
-                      <p className="text-foreground">
-                        <span className="font-medium">{line.label}.</span>{" "}
-                        <span className="break-words">
-                          <WithCode text={line.detail} />
-                        </span>
-                      </p>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-            {!check.ready && (
-              <p className="mt-3 text-sm text-muted-foreground">
-                Fix what doesn&apos;t hold, then open this again. Admin &gt; GitHub has the branch rule and the
-                checklist.
-              </p>
-            )}
-          </section>
+          <CheckLines lines={check.lines} ready={check.ready} />
 
           <FloorNotice floor={check.floor} installable={false} />
 
@@ -252,12 +217,55 @@ export default function ProposeDialog({
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+export function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0 text-foreground">{children}</dd>
     </>
+  );
+}
+
+/** "Before it can be proposed": each check, holding or not, and what to do when one doesn't. */
+export function CheckLines({ lines, ready }: { lines: ProposalCheckLine[]; ready: boolean }) {
+  return (
+    <section>
+      <h3 className="text-sm font-semibold text-foreground">Before it can be proposed</h3>
+      <ul className="mt-3 space-y-3">
+        {lines.map((line) => (
+          <li key={line.id} className="flex gap-2 text-sm">
+            {line.ok ? (
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-label="Holds" />
+            ) : (
+              <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-label="Doesn't hold" />
+            )}
+            <div className="min-w-0">
+              {line.findings ? (
+                <>
+                  <p className="font-medium text-foreground">{line.label}.</p>
+                  <Findings findings={line.findings} />
+                  <p className="mt-1 break-words text-muted-foreground">
+                    <WithCode text={line.detail} />
+                  </p>
+                </>
+              ) : (
+                <p className="text-foreground">
+                  <span className="font-medium">{line.label}.</span>{" "}
+                  <span className="break-words">
+                    <WithCode text={line.detail} />
+                  </span>
+                </p>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {!ready && (
+        <p className="mt-3 text-sm text-muted-foreground">
+          Fix what doesn&apos;t hold, then open this again. Admin &gt; GitHub has the branch rule and the checklist.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -273,7 +281,8 @@ function Findings({ findings }: { findings: ProposalFinding[] }) {
   );
 }
 
-function OutcomePanel({ outcome, page }: { outcome: ProposeOutcome; page: string }) {
+/** What proposing did: the pull request, or why not. */
+export function OutcomePanel({ outcome, page }: { outcome: ProposeOutcome; page: string }) {
   if (outcome.ok) {
     return (
       <div className="space-y-4">

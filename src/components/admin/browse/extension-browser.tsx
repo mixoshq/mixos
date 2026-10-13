@@ -27,13 +27,14 @@ import {
 } from "@/lib/repository/types";
 import Notice from "@/components/ui/notice";
 import type { ProposalTarget } from "@/lib/github/outcomes";
+import ProposeChangeDialog, { type ChangeTarget } from "../github/propose-change-dialog";
 import ReviewDialog, { type PendingTarget } from "../pending/review-dialog";
 import UpdateDialog, { type UpdateTarget } from "../update/update-dialog";
 import ExtensionCard from "./extension-card";
 import ProposeDialog from "./propose-dialog";
 import RegisterDialog from "./register-dialog";
 
-/** How to update an extension where this deployment can't: in a checkout, then commit and deploy. */
+/** How to update an extension where this deployment can't, and has no App to propose with: in a checkout, then commit and deploy. */
 const HOW_TO_UPDATE = docsUrl("operating/hosting#updating-an-extension");
 
 /**
@@ -108,6 +109,8 @@ export default function ExtensionBrowser({
   // An installed one to update to another release.
   const [updating, setUpdating] = useState<UpdateTarget | null>(null);
   const [proposing, setProposing] = useState<ExtensionSummary | null>(null);
+  // An installed one to update through the App, as a pull request.
+  const [proposingChange, setProposingChange] = useState<ChangeTarget | null>(null);
   const [installed, setInstalled] = useState(() => new Map(Object.entries(installedAtLoad)));
   const [pendingNow, setPendingNow] = useState(() => new Set(pendingSlugs));
 
@@ -271,14 +274,21 @@ export default function ExtensionBrowser({
                     name: extension.name,
                   })
                 }
-                // In a checkout that can install; a built deployment links
-                // to how updating works instead.
+                // In a checkout that can install; a built deployment with the
+                // App proposes an update instead, and one without it links to
+                // how updating works.
                 onUpdate={
                   installable === null
                     ? (extension) => setUpdating({ kind: extension.kind, slug: extension.slug, name: extension.name })
                     : undefined
                 }
-                updateHelpUrl={installable !== null && installableTone === "info" ? HOW_TO_UPDATE : null}
+                onProposeUpdate={
+                  proposal
+                    ? (extension) =>
+                        setProposingChange({ action: "update", kind: extension.kind, slug: extension.slug, name: extension.name })
+                    : undefined
+                }
+                updateHelpUrl={installable !== null && installableTone === "info" && !proposal ? HOW_TO_UPDATE : null}
               />
             ))}
           </div>
@@ -351,6 +361,15 @@ export default function ExtensionBrowser({
           extension={proposing}
           repository={proposal.repository}
           onClose={() => setProposing(null)}
+        />
+      )}
+      {/* An installed one, on a deployment with the App linked: a pull request that replaces its folder. */}
+      {proposal && proposingChange && (
+        <ProposeChangeDialog
+          key={`propose-change:${proposingChange.kind}/${proposingChange.slug}`}
+          target={proposingChange}
+          repository={proposal.repository}
+          onClose={() => setProposingChange(null)}
         />
       )}
       {/* An app or a connector installed into pending: review, then Register. */}

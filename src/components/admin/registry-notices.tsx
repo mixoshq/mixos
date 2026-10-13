@@ -10,6 +10,8 @@ import { themeRegistry } from "@/generated/theme-registry";
 import Notice from "@/components/ui/notice";
 import { getAppActiveMap } from "@/lib/apps/access";
 import { docsUrl } from "@/lib/docs";
+import type { ProposalTarget } from "@/lib/github/outcomes";
+import { proposalTarget } from "@/lib/github/propose";
 import { isBuiltDeployment } from "@/lib/platform/build";
 import { repositoryBaseUrl } from "@/lib/repository/client";
 import { checkoutRoot } from "@/lib/repository/install";
@@ -19,21 +21,21 @@ import type { ExtensionKind } from "@/lib/repository/types";
 import { readUpdateCheckState } from "@/lib/repository/update-check";
 import { registryNotices, type RegistryNotice, type UpdateCheckState } from "@/lib/repository/updates";
 import RegistryNoticeDeactivate from "./registry-notice-deactivate";
-import RegistryNoticeUpdate, { RegistryNoticeUpdates } from "./registry-notice-update";
+import RegistryNoticeUpdate, { RegistryNoticePropose, RegistryNoticeUpdates } from "./registry-notice-update";
 
 /** The docs section that says exactly what the update check sends, and how to turn it off. */
 const WHAT_IS_SENT = docsUrl("security/surface#the-update-check");
 
-/** How to update an extension: in a checkout, then commit and deploy. */
+/** How to update an extension where there is no App to propose with: in a checkout, then commit and deploy. */
 const HOW_TO_UPDATE = docsUrl("operating/hosting#updating-an-extension");
 
 /**
  * What a withdrawn or newer notice offers for updating: the Update button in a
- * checkout; a link to how updating works on a built deployment; a note when an
- * update of it already waits in pending; nothing when installing that kind is
- * off.
+ * checkout; on a built deployment, Propose update when the GitHub App is
+ * linked, or else a link to how updating works; a note when an update of it
+ * already waits in pending; nothing when installing that kind is off.
  */
-type UpdateOffer = "button" | "docs" | "pending" | null;
+type UpdateOffer = "button" | "docs" | "pending" | { propose: ProposalTarget } | null;
 
 /** An extension's name as this build has it, for the notices' text. */
 function nameOf(kind: ExtensionKind, slug: string): string {
@@ -60,10 +62,11 @@ function nameOf(kind: ExtensionKind, slug: string): string {
  * can't be read costs the answer, not the page.
  *
  * Update opens the update dialog, in a checkout. A built deployment has no
- * checkout to change, so its notice links to how updating works instead. The
- * dialog is owned by the wrapper around the list (./registry-notice-update.tsx),
- * because the update's actions revalidate this page and the notice that opened
- * it changes, or goes, while it is open.
+ * checkout to change, so its notice offers Propose update when the GitHub App
+ * is linked, which opens a pull request, and links to how updating works
+ * otherwise. The dialogs are owned by the wrapper around the list
+ * (./registry-notice-update.tsx), because the update's actions revalidate this
+ * page and the notice that opened it changes, or goes, while it is open.
  */
 export default async function RegistryNotices({ kind }: { kind: ExtensionKind }) {
   if (registryInstalls.length === 0) return null;
@@ -117,10 +120,23 @@ export default async function RegistryNotices({ kind }: { kind: ExtensionKind })
       console.error("[update-check] could not read what is pending:", err);
     }
   }
+  // On a built deployment with the App linked, a notice offers a pull request
+  // in the docs link's place: read from what is stored, once per kind.
+  const proposals = new Map<ExtensionKind, ProposalTarget | null>();
+  if (built) {
+    for (const notice of notices) {
+      if ((notice.type === "withdrawn" || notice.type === "newer") && !proposals.has(notice.kind)) {
+        proposals.set(notice.kind, await proposalTarget(notice.kind));
+      }
+    }
+  }
   const offerFor = (notice: RegistryNotice): UpdateOffer => {
     if (notice.type !== "withdrawn" && notice.type !== "newer") return null;
     if (!installEnabled(notice.kind)) return null;
-    if (built) return "docs";
+    if (built) {
+      const propose = proposals.get(notice.kind) ?? null;
+      return propose ? { propose } : "docs";
+    }
     return pending.has(`${notice.kind}/${notice.slug}`) ? "pending" : "button";
   };
 
@@ -205,6 +221,23 @@ function UpdateLine({ notice, offer }: { notice: RegistryNotice; offer: UpdateOf
       <p className="mt-2 text-xs">
         An update of it is waiting to be registered{notice.kind === "theme" ? "" : ", under Waiting to register"}.
       </p>
+    );
+  }
+  if (typeof offer === "object") {
+    return (
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <RegistryNoticePropose
+          kind={notice.kind}
+          slug={notice.slug}
+          name={name}
+          repository={offer.propose.repository}
+          off={offer.propose.off}
+        />
+        <span className="text-xs text-muted-foreground">
+          {offer.propose.off ??
+            `It opens a pull request on ${offer.propose.repository} after showing what the new release changes.`}
+        </span>
+      </div>
     );
   }
   if (offer === "docs") {

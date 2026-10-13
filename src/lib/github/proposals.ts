@@ -7,11 +7,12 @@
  * Connectors and Themes, beside the installs waiting there.
  *
  * Read with a read token, on every render of the page: the pull requests open
- * from a branch the App names (`mixos/install/<kind>-<slug>`, or for a MixOS
- * update `mixos/update-<tag>`, ./names.ts), in the linked repository, into its
- * default branch. Each is joined to the `<kind>.propose` audit row (for a
- * MixOS update, `mixos.update.propose`) that recorded the commit the App made,
- * and two things are said plainly:
+ * from a branch the App names (`mixos/install/<kind>-<slug>`, `mixos/update/…`
+ * or `mixos/remove/…`, or for a MixOS update `mixos/update-<tag>`, ./names.ts),
+ * in the linked repository, into its default branch. Each is joined to the
+ * `<kind>.propose` audit row (for a MixOS update, `mixos.update.propose`) that
+ * recorded the commit the App made and what it proposed, and two things are
+ * said plainly:
  *
  *   - "No CI ran", in the danger tone, when nothing has checked the head
  *     commit ten minutes after it arrived. GitHub turns workflows off on a new
@@ -31,7 +32,7 @@ import { sql } from "@/lib/db/client";
 import { GitHubError } from "./api";
 import { GitHubLinkError, featureRefusal, withLinkedRepository } from "./link";
 import { repositoryUrl } from "./manifest";
-import { parseProposalBranch } from "./names";
+import { parseProposalBranch, type ProposalAction } from "./names";
 import type { ProposalKind, ProposalsView, ProposedPullRequest } from "./outcomes";
 import {
   CheckRunsSchema,
@@ -140,12 +141,12 @@ async function proposedRows(kind: ProposalKind, repositoryId: number, numbers: n
   return found;
 }
 
-/** The branch's slug, or for a MixOS update its tag, when the branch proposes `kind`. */
-function slugFor(kind: ProposalKind, ref: string): string | null {
+/** The branch's slug, or for a MixOS update its tag, and what it proposes, when the branch proposes `kind`. */
+function proposalOf(kind: ProposalKind, ref: string): { slug: string; action: ProposalAction } | null {
   const branch = parseProposalBranch(ref);
   if (!branch) return null;
-  if (kind === "mixos") return branch.action === "mixos-update" ? branch.tag : null;
-  return branch.action === "install" && branch.kind === kind ? branch.slug : null;
+  if (kind === "mixos") return branch.action === "mixos-update" ? { slug: branch.tag, action: branch.action } : null;
+  return branch.action !== "mixos-update" && branch.kind === kind ? { slug: branch.slug, action: branch.action } : null;
 }
 
 /**
@@ -176,22 +177,23 @@ export async function readProposals(actor: AdminActor, kind: ProposalKind, now: 
         "GET /repos/{owner}/{repo}/pulls",
       );
       const ours = pulls.flatMap((pull) => {
-        const slug = slugFor(kind, pull.head.ref);
+        const branch = proposalOf(kind, pull.head.ref);
         const sameRepository = pull.head.repo?.id === repo.record.id;
-        if (slug === null || !sameRepository || pull.base.ref !== repo.record.defaultBranch) return [];
-        return [{ pull, slug }];
+        if (!branch || !sameRepository || pull.base.ref !== repo.record.defaultBranch) return [];
+        return [{ pull, ...branch }];
       });
       const listed = ours.slice(0, MAX_LISTED);
       const proposed = await proposedRows(kind, repo.record.id, listed.map((o) => o.pull.number));
 
       const items: ProposedPullRequest[] = [];
-      for (const { pull, slug } of listed) {
+      for (const { pull, slug, action } of listed) {
         const sha = pull.head.sha;
         const [runs, status] = await Promise.all([
           repo.get(`/commits/${sha}/check-runs`, new URLSearchParams({ per_page: "100" })),
           repo.get(`/commits/${sha}/status`),
         ]);
         const row = proposed.get(pull.number);
+        // The branch's name says what it proposes, so a row for it does too.
         const recorded = row !== undefined && row.branch === pull.head.ref && row.slug === slug;
         const changed = recorded && row.head !== sha;
         const since = recorded && !changed ? new Date(row.at) : new Date(pull.updated_at);
@@ -200,6 +202,7 @@ export async function readProposals(actor: AdminActor, kind: ProposalKind, now: 
           url: `${base}/pull/${pull.number}`,
           kind,
           slug,
+          action,
           branch: pull.head.ref,
           version: recorded ? row.version : null,
           proposedAt: recorded ? row.at : null,
