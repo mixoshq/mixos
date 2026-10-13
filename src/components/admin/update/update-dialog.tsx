@@ -20,12 +20,12 @@ import {
   updateOverviewAction,
 } from "@/lib/repository/update-actions";
 import type {
+  ComparisonFacts,
   ComparisonOutcome,
   OverviewOutcome,
   PickableRelease,
   PreparedUpdate,
   ReleaseView,
-  UpdateComparison,
   UpdateOutcome,
   UpdateOverview,
 } from "@/lib/repository/update-outcomes";
@@ -379,18 +379,24 @@ export function ReleasePicker({
 /*  The comparison                                                              */
 /* -------------------------------------------------------------------------- */
 
+/** The two choices the comparison asks for, as this dialog words them: a proposal says "Propose" instead. */
+const INSTALL_CHOICES = { older: "Install an older release.", yanked: "Install it anyway." };
+
 export function ComparisonView({
   comparison: c,
   older,
   onOlder,
   withdrawn,
   onWithdrawn,
+  choices = INSTALL_CHOICES,
 }: {
-  comparison: UpdateComparison;
+  comparison: ComparisonFacts;
   older: boolean;
   onOlder: (yes: boolean) => void;
   withdrawn: boolean;
   onWithdrawn: (yes: boolean) => void;
+  /** The checkbox labels for an older and a withdrawn release. */
+  choices?: { older: string; yanked: string };
 }) {
   return (
     <div className="space-y-6">
@@ -435,7 +441,7 @@ export function ComparisonView({
               ? "Installing it goes back to an earlier release."
               : `Their versions aren't both dotted, and ${c.host} doesn't give a date for both, so it may be an older release.`}
           </p>
-          <Checkbox className="mt-3" label="Install an older release." checked={older} onChange={(e) => onOlder(e.target.checked)} />
+          <Checkbox className="mt-3" label={choices.older} checked={older} onChange={(e) => onOlder(e.target.checked)} />
         </Notice>
       )}
 
@@ -444,7 +450,7 @@ export function ComparisonView({
           {c.to.yankedReason && <p>{c.to.yankedReason}</p>}
           <Checkbox
             className="mt-3"
-            label="Install it anyway."
+            label={choices.yanked}
             checked={withdrawn}
             onChange={(e) => onWithdrawn(e.target.checked)}
           />
@@ -522,7 +528,7 @@ function ReleaseCard({ title, release, withdrawn = false }: { title: string; rel
   );
 }
 
-function Claims({ claims }: { claims: UpdateComparison["claims"] }) {
+function Claims({ claims }: { claims: ComparisonFacts["claims"] }) {
   if (claims.state === "unavailable") {
     return <p className="mt-2 text-sm text-muted-foreground">{claims.message}</p>;
   }

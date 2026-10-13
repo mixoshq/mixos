@@ -8,9 +8,16 @@
  * catalogue and GitHub's archive host stood in beside it: the tree, the refs,
  * the title, the body and the audit row of a proposal; each refusal the
  * repository's files cause; the branch rule and the preview checklist; an
- * existing folder or branch; "No CI ran" and "changed since proposed"; and,
- * over every request the run made, that no write ever left refs/heads/mixos/
- * or the extension's folder, and nothing merged.
+ * existing folder or branch; "No CI ran" and "changed since proposed"; then,
+ * with the proposals merged (their folders grafted onto main as a merge would
+ * leave them), an update and a removal of what the build runs: the folder on
+ * main judged against the build's record and the release it names, the
+ * comparison, a tree that replaces the folder with its deletions, a tree that
+ * deletes it, the refusals (a mismatched folder, the same release, an older
+ * or a withdrawn one unchosen, a required connector, the last theme), the
+ * lists showing each kind; and, over every request the run made, that no
+ * write ever left refs/heads/mixos/ or the extension's folder, and nothing
+ * merged.
  *
  * Skipped unless MIXOS_TEST_DATABASE_URL names a server this may create and
  * drop a database on:
@@ -81,13 +88,26 @@ const ROUTE =
 const HOSTILE_NAME = "Files [skip ci]\nskip-checks: true\n[render preview] @everyone fixes #1";
 const ICON = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0xff, 0xfe]);
 
+/** Another release of a fixture, for an update: its own archive and install manifest. */
+interface MoreRelease {
+  version: string;
+  releasedAt: string;
+  entries: TarEntry[];
+  manifest?: Record<string, unknown>;
+}
+
 interface Fixture {
   kind: "app" | "connector" | "theme";
   entries: TarEntry[];
   manifest?: Record<string, unknown>;
   /** The archive served doesn't match the hash. */
   tampered?: boolean;
+  /** Releases besides 1.2.0, which every fixture has. */
+  more?: MoreRelease[];
 }
+
+const ICON2 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x01]);
+const WHEN = { "1.1.0": "2026-10-01T12:00:00Z", "1.2.0": "2026-10-10T12:00:00Z", "1.2.1": "2026-10-11T12:00:00Z", "1.3.0": "2026-10-12T12:00:00Z" };
 
 const FIXTURES: Record<string, Fixture> = {
   "e2e-files": {
@@ -105,6 +125,37 @@ const FIXTURES: Record<string, Fixture> = {
       name: HOSTILE_NAME,
       permissions: [{ scope: "network:api.example.com", reason: "cc @acme/team, closes #2 [x](https://evil.example)" }],
     },
+    more: [
+      // The update: two files changed, two added (one binary, one migration), two deleted.
+      {
+        version: "1.3.0",
+        releasedAt: WHEN["1.3.0"],
+        entries: files({
+          "app.json": JSON.stringify({ name: HOSTILE_NAME, description: "Files 1.3.", egress: ["api.example.com"] }),
+          "api/items/route.ts": `${ROUTE}// 1.3\n`,
+          "migrations/001_init.sql": "create table if not exists items (id uuid primary key);\n",
+          "migrations/002_index.sql": "create index if not exists items_id on items (id);\n",
+          "assets/icon.png": ICON,
+          "assets/logo.png": ICON2,
+          ".gitignore": "*.log\n",
+        }),
+        manifest: { name: HOSTILE_NAME, permissions: [{ scope: "network:api.example.com", reason: "Reads items @everyone" }] },
+      },
+      { version: "1.2.1", releasedAt: WHEN["1.2.1"], entries: files({ "app.json": '{"name":"Files 1.2.1"}\n' }), manifest: { yanked: true, yankedReason: "Broken @maintainer" } },
+      { version: "1.1.0", releasedAt: WHEN["1.1.0"], entries: files({ "app.json": '{"name":"Files 1.1"}\n' }) },
+    ],
+  },
+  "e2e-conn": {
+    kind: "connector",
+    entries: files({ "connector.json": '{"name":"e2e-conn","displayName":"Conn"}\n', "index.ts": "export default {};\n" }),
+    more: [
+      {
+        version: "1.2.1",
+        releasedAt: WHEN["1.2.1"],
+        entries: files({ "connector.json": '{"name":"e2e-conn","displayName":"Conn 1.2.1"}\n', "index.ts": "export default { v: 2 };\n" }),
+        manifest: { yanked: true, yankedReason: "Leaks keys" },
+      },
+    ],
   },
   "e2e-board": { kind: "app", entries: files({ "app.json": '{"name":"Board"}\n' }) },
   "e2e-yanked": {
@@ -120,14 +171,26 @@ const FIXTURES: Record<string, Fixture> = {
       "theme.json": JSON.stringify({ name: "Paper", description: "A theme." }),
       "theme.css": ":root { --background: #fff; }\n",
     }),
+    more: [
+      {
+        version: "1.1.0",
+        releasedAt: WHEN["1.1.0"],
+        entries: files({ "theme.json": JSON.stringify({ name: "Paper 1.1", description: "An earlier theme." }), "theme.css": ":root { --background: #eee; }\n" }),
+      },
+    ],
   },
 };
+
+/** The commit a fixture's release is published at: 1.2.0 is named by the slug alone. */
+const shaOf = (slug: string, version = "1.2.0") =>
+  crypto.createHash("sha1").update(version === "1.2.0" ? `lc30-${slug}` : `lc30-${slug}-${version}`).digest("hex");
 
 const SEGMENT = { app: "apps", connector: "connectors", theme: "themes" } as const;
 
 async function loadModules() {
   return {
     ...(await import("./propose")),
+    ...(await import("./propose-change")),
     ...(await import("./proposals")),
     ...(await import("./link")),
     ...(await import("./store")),
@@ -198,36 +261,57 @@ describe("proposing an install as a pull request", { skip }, () => {
       returning id, email`;
     ADMIN = { id: a.id, email: a.email };
 
-    // The catalogue and the archives.
+    // The catalogue and the archives: 1.2.0 of each fixture, which `/install`
+    // answers with, and the other releases by version.
     for (const [slug, f] of Object.entries(FIXTURES)) {
-      const sha = crypto.createHash("sha1").update(`lc30-${slug}`).digest("hex");
-      const archivePath = `/acme/extensions/tar.gz/${sha}`;
-      const served = f.tampered ? [...f.entries, ...files({ "extra.ts": "export const x = 1;\n" })] : f.entries;
-      archives.set(archivePath, tarball(`acme-extensions-${sha.slice(0, 7)}`, served.map((e) => ({ ...e, path: `${SEGMENT[f.kind]}/${slug}/${e.path}` }))));
-      const install = {
-        kind: f.kind,
-        slug,
-        name: slug,
-        version: "1.2.0",
-        commitSha: sha,
-        gitTag: "v1.2.0",
-        tarballUrl: `https://codeload.github.com${archivePath}`,
-        contentHash: p.hashFileTree(f.entries),
-        subpath: `${SEGMENT[f.kind]}/${slug}`,
-        permissions: [],
-        requiresMixOS: "0.1.0",
-        yanked: false,
-        ...f.manifest,
-      };
-      catalogue.set(`/api/v1/${SEGMENT[f.kind]}/${slug}/install`, install);
+      const releases: MoreRelease[] = [{ version: "1.2.0", releasedAt: WHEN["1.2.0"], entries: f.entries, manifest: f.manifest }, ...(f.more ?? [])];
+      const subpath = `${SEGMENT[f.kind]}/${slug}`;
+      const listed: Record<string, unknown>[] = [];
+      for (const r of releases) {
+        const sha = shaOf(slug, r.version);
+        const archivePath = `/acme/extensions/tar.gz/${sha}`;
+        const served = f.tampered ? [...r.entries, ...files({ "extra.ts": "export const x = 1;\n" })] : r.entries;
+        archives.set(archivePath, tarball(`acme-extensions-${sha.slice(0, 7)}`, served.map((e) => ({ ...e, path: `${subpath}/${e.path}` }))));
+        const install = {
+          kind: f.kind,
+          slug,
+          name: slug,
+          version: r.version,
+          commitSha: sha,
+          gitTag: `v${r.version}`,
+          tarballUrl: `https://codeload.github.com${archivePath}`,
+          contentHash: p.hashFileTree(r.entries),
+          subpath,
+          permissions: [],
+          requiresMixOS: "0.1.0",
+          yanked: false,
+          yankedReason: null as string | null,
+          ...r.manifest,
+        };
+        const path = `/api/v1/${SEGMENT[f.kind]}/${slug}/install`;
+        if (r.version === "1.2.0") catalogue.set(path, install);
+        catalogue.set(`${path}?version=${r.version}`, install);
+        listed.push({
+          version: r.version,
+          gitTag: `v${r.version}`,
+          commitSha: sha,
+          contentHash: install.contentHash,
+          releasedAt: r.releasedAt,
+          requiresMixOS: "0.1.0",
+          yanked: install.yanked === true,
+          yankedReason: install.yanked ? (install.yankedReason ?? null) : null,
+        });
+      }
+      const dotted = releases.map((r) => r.version).filter((v) => /^\d+\.\d+\.\d+$/.test(v)).sort().reverse();
       catalogue.set(`/api/v1/${SEGMENT[f.kind]}/${slug}`, {
         slug,
         kind: f.kind,
-        name: install.name,
+        name: slug,
         tagline: "",
+        latestVersion: dotted[0],
         author: { handle: "acme @everyone", verified: false },
-        sourceRepo: { host: "github", owner: "acme", name: "extensions", url: "https://github.com/acme/extensions", subpath: install.subpath },
-        releases: [],
+        sourceRepo: { host: "github", owner: "acme", name: "extensions", url: "https://github.com/acme/extensions", subpath },
+        releases: listed,
       });
     }
 
@@ -266,7 +350,8 @@ describe("proposing an install as a pull request", { skip }, () => {
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
       if (url.origin === CATALOGUE) {
-        const body = catalogue.get(url.pathname);
+        const version = url.searchParams.get("version");
+        const body = catalogue.get(version ? `${url.pathname}?version=${version}` : url.pathname);
         return new Response(JSON.stringify(body ?? { error: "not found" }), {
           status: body ? 200 : 404,
           headers: { "content-type": "application/json" },
@@ -596,6 +681,380 @@ describe("proposing an install as a pull request", { skip }, () => {
     assert.deepEqual(themes.state === "ok" ? themes.pulls.map((pr) => pr.slug) : null, ["e2e-paper"]);
   });
 
+  /* ── updates and removals of what the build runs (rank 31) ───────────── */
+
+  /** The folder `folder` as the commit `from` holds it, put on main as a merge would leave it. */
+  const graft = (from: string, folder: string): string => {
+    const git = repo().git;
+    const main = git.branches.get("main")!;
+    const files = git.files(git.commits.get(main)!.tree);
+    for (const [path, file] of git.files(git.commits.get(from)!.tree)) if (path.startsWith(`${folder}/`)) files.set(path, file);
+    const sha = git.putCommit(git.build(files), [main], `Merge ${folder}`, "acme", Date.now());
+    git.branches.set("main", sha);
+    return sha;
+  };
+  /** What this build runs: the install record's values, less the hashes, as the generator writes them. */
+  const installOf = (slug: string, kind: "app" | "connector" | "theme", over: Record<string, unknown> = {}) => ({
+    kind,
+    slug,
+    version: "1.2.0",
+    gitTag: "v1.2.0",
+    commitSha: shaOf(slug),
+    source: CATALOGUE,
+    repository: { owner: "acme", name: "extensions", subpath: `${SEGMENT[kind]}/${slug}` },
+    requiresMixOS: "0.1.0",
+    modified: false,
+    ...over,
+  });
+  const NAMES: Record<string, string> = { "e2e-files": "Files", "e2e-conn": "Conn", "e2e-paper": "Paper" };
+  type Facts = Parameters<typeof p.proposeUpdate>[1]["build"];
+  const build = (over: Partial<NonNullable<Facts>> = {}): NonNullable<Facts> => ({
+    installs: [installOf("e2e-files", "app"), installOf("e2e-conn", "connector"), installOf("e2e-paper", "theme")],
+    apps: [
+      { slug: "e2e-files", name: "Files", connectors: ["e2e-conn"], optionalConnectors: [], consumes: [], listensTo: [] },
+      { slug: "wall-e", name: "Wall-E", connectors: [], optionalConnectors: ["e2e-conn"], consumes: [], listensTo: [] },
+    ],
+    themes: [{ slug: "e2e-paper", name: "Paper" }],
+    nameOf: (_kind, slug) => NAMES[slug] ?? null,
+    ...over,
+  });
+  const ctxB = (over: Partial<NonNullable<Facts>> = {}) => ({ ...ctx, build: build(over), storedTheme: async () => "e2e-paper" });
+  const change = async (action: "update" | "remove", kind: "app" | "connector" | "theme", slug: string, extra: Partial<NonNullable<Facts>> = {}) =>
+    kept(await p.checkChangeProposal({ action, kind, slug }, ctxB(extra)));
+  const update = async (kind: "app" | "connector" | "theme", slug: string, extra: Record<string, unknown> = {}) =>
+    kept(await p.proposeUpdate({ kind, slug, ...extra }, ctxB()));
+  const folderLine = (check: Awaited<ReturnType<typeof change>>) => (check.ok ? check.lines.find((l) => l.id === "folder")! : null!);
+  const onMain = (folder: string) => Object.keys(fake.filesOn(501, "main")).filter((f) => f.startsWith(`${folder}/`)).sort();
+
+  test("an update: the folder on main has to be what the build runs, and the releases are listed", async () => {
+    // As if the operator had merged the proposals: each folder on main, byte for byte.
+    const conn = await propose("e2e-conn");
+    assert.ok(conn.ok, JSON.stringify(conn));
+    graft(repo().git.branches.get("mixos/install/connector-e2e-conn")!, "connectors/e2e-conn");
+    graft(head, "apps/e2e-files");
+    graft(repo().git.branches.get("mixos/install/theme-e2e-paper")!, "themes/e2e-paper");
+    assert.equal(onMain("apps/e2e-files").length, 7);
+
+    const before = posts().length;
+    const check = await change("update", "app", "e2e-files");
+    assert.ok(check.ok, JSON.stringify(check));
+    if (!check.ok) return;
+    assert.equal(check.ready, true, JSON.stringify(check.lines));
+    assert.deepEqual(check.lines.map((l) => l.id), ["rule", "checklist", "workflows", "render", "vercel", "folder", "branch"]);
+    assert.match(folderLine(check).detail, /^apps\/e2e-files on main holds 1\.2\.0 at [0-9a-f]{12}, which this build runs\./);
+    assert.deepEqual(check.names, { branch: "mixos/update/app-e2e-files", title: null });
+    assert.deepEqual(check.releases.map((r) => [r.version, r.direction, r.current, r.yanked]), [
+      ["1.3.0", "newer", true, false],
+      ["1.2.1", "newer", false, true],
+      ["1.2.0", "same", false, false],
+      ["1.1.0", "older", false, false],
+    ]);
+    assert.equal(check.suggested, "1.3.0");
+    assert.equal(check.installed.version, "1.2.0");
+    assert.equal(check.installed.yanked, false);
+    assert.deepEqual(check.onBranch, { files: 7 });
+    assert.equal(check.removal, null);
+    assert.equal(posts().length - before, 0, "the check writes nothing");
+    assert.equal(fake.requests.some((r) => r.path.includes("codeload")), false, "and downloads nothing");
+
+    // Not in the build, or from another catalogue: said as information.
+    const stranger = await change("update", "app", "e2e-board");
+    assert.equal(!stranger.ok && stranger.code, "not-installed");
+    const elsewhere = await change("update", "app", "e2e-files", { installs: [installOf("e2e-files", "app", { source: "https://mixos.org" })] });
+    assert.equal(!elsewhere.ok && elsewhere.code, "not-updatable");
+    assert.match(!elsewhere.ok ? elsewhere.message : "", /installed from mixos\.org, and this instance installs from 127\.0\.0\.1:4430/);
+  });
+
+  test("the comparison: both releases verified in memory, the folder proven, and what the tree would change", async () => {
+    const c = kept(await p.compareUpdateProposal({ kind: "app", slug: "e2e-files", version: "1.3.0" }, ctxB()));
+    assert.ok(c.ok, JSON.stringify(c));
+    if (!c.ok) return;
+    assert.equal(c.direction, "newer");
+    assert.deepEqual(c.files, {
+      changed: ["api/items/route.ts", "app.json"],
+      added: ["assets/logo.png", "migrations/002_index.sql"],
+      removed: ["README.md", "api/[id]/route.ts"],
+      more: { changed: 0, added: 0, removed: 0 },
+      incomplete: false,
+    });
+    assert.deepEqual(c.migrations, { added: ["002_index.sql"], changed: [], lacking: [] });
+    assert.deepEqual(c.declarations?.find((d) => d.label === "Egress"), { label: "Egress", added: ["api.example.com"], removed: [] });
+    assert.deepEqual(c.needs, { discardLocalChanges: false, allowOlder: false, allowYanked: false });
+    assert.equal(c.blocker, null);
+    assert.equal(c.floor.met, true);
+    assert.equal(c.claims.state, "ok");
+    assert.deepEqual(c.names, { branch: "mixos/update/app-e2e-files", title: "Update app e2e-files to 1.3.0 from 127.0.0.1:4430 [skip preview]" });
+    assert.equal(c.compareUrl, `https://github.com/acme/extensions/compare/${shaOf("e2e-files")}...${shaOf("e2e-files", "1.3.0")}`);
+    assert.equal(c.from.version, "1.2.0");
+    assert.equal(c.to.version, "1.3.0");
+
+    const same = await p.compareUpdateProposal({ kind: "app", slug: "e2e-files", version: "1.2.0" }, ctxB());
+    assert.match(same.ok ? (same.blocker ?? "") : "", /apps\/e2e-files on main already holds 1\.2\.0/);
+    const withdrawn = await p.compareUpdateProposal({ kind: "app", slug: "e2e-files", version: "1.2.1" }, ctxB());
+    assert.ok(withdrawn.ok && withdrawn.to.yanked && withdrawn.needs.allowYanked, JSON.stringify(withdrawn));
+    const older = await p.compareUpdateProposal({ kind: "app", slug: "e2e-files", version: "1.1.0" }, ctxB());
+    assert.ok(older.ok && older.direction === "older" && older.needs.allowOlder, JSON.stringify(older));
+    assert.equal(posts().filter((r) => r.path.startsWith("/repos/")).length, posts().length, "the comparison writes nothing");
+  });
+
+  test("a folder on main that isn't what the build runs is refused, naming the difference", async () => {
+    const was = fake.filesOn(501, "main");
+    const before = posts().length;
+
+    // A file edited on GitHub: the record matches, the files don't.
+    fake.push(501, "main", { "apps/e2e-files/README.md": "# Edited on GitHub\n" });
+    const edited = await p.compareUpdateProposal({ kind: "app", slug: "e2e-files", version: "1.3.0" }, ctxB());
+    assert.equal(!edited.ok && edited.code, "folder-mismatch", JSON.stringify(edited));
+    assert.match(!edited.ok ? edited.message : "", /isn't release 1\.2\.0 as its record says: 1 changed \(`README\.md`\)/);
+    const proposed = await update("app", "e2e-files", { version: "1.3.0" });
+    assert.equal(!proposed.ok && proposed.code, "folder-mismatch", JSON.stringify(proposed));
+    const row = (await audited("app.propose.rejected")).at(-1)!;
+    assert.equal(row.details.reason, "folder-mismatch");
+    assert.equal(row.details.action, "update");
+    fake.push(501, "main", { "apps/e2e-files/README.md": was["apps/e2e-files/README.md"] });
+
+    // A record on main that names another release than the build runs.
+    const record = was["apps/e2e-files/.registry.json"];
+    fake.push(501, "main", { "apps/e2e-files/.registry.json": record.replace('"version": "1.2.0"', '"version": "1.9.0"') });
+    const other = await change("update", "app", "e2e-files");
+    assert.ok(other.ok && !other.ready, JSON.stringify(other));
+    assert.equal(folderLine(other).ok, false);
+    assert.equal(folderLine(other).code, "folder-mismatch");
+    assert.match(folderLine(other).detail, /records version 1\.9\.0, and this build runs 1\.2\.0/);
+    const refusedToo = await update("app", "e2e-files", { version: "1.3.0" });
+    assert.equal(!refusedToo.ok && refusedToo.code, "folder-mismatch");
+    fake.push(501, "main", { "apps/e2e-files/.registry.json": record });
+
+    // A build whose own copy is modified, and a folder that isn't on main at all.
+    const modified = await change("update", "app", "e2e-files", { installs: [installOf("e2e-files", "app", { modified: true })] });
+    assert.equal(modified.ok && folderLine(modified).code, "folder-modified");
+    const missing = await change("update", "app", "e2e-yanked", { installs: [installOf("e2e-yanked", "app")] });
+    assert.equal(missing.ok && folderLine(missing).code, "folder-missing");
+    assert.match(missing.ok ? folderLine(missing).detail : "", /apps\/e2e-yanked isn't on main, so there is nothing to update there/);
+    const gone = await p.proposeRemoval({ kind: "app", slug: "e2e-yanked" }, ctxB({ installs: [installOf("e2e-yanked", "app")] }));
+    assert.equal(!gone.ok && gone.code, "folder-missing");
+    assert.equal(posts().length - before, 0, "nothing written for any of them");
+  });
+
+  test("the same release is nothing to update; an older or a withdrawn one has to be chosen as such", async () => {
+    const before = posts().length;
+    const same = await update("app", "e2e-files", { version: "1.2.0" });
+    assert.equal(!same.ok && same.code, "same-release", JSON.stringify(same));
+    const older = await update("app", "e2e-files", { version: "1.1.0" });
+    assert.equal(!older.ok && older.code, "older-release", JSON.stringify(older));
+    assert.match(!older.ok ? older.message : "", /1\.1\.0 is older than 1\.2\.0, which apps\/e2e-files holds\. Choose "Propose an older release"/);
+    const yanked = await update("app", "e2e-files", { version: "1.2.1" });
+    assert.equal(!yanked.ok && yanked.code, "yanked", JSON.stringify(yanked));
+    assert.equal(posts().length - before, 0, "nothing written");
+    const reasons = (await audited("app.propose.rejected")).slice(-3).map((r) => [r.details.reason, r.details.action, r.details.version]);
+    assert.deepEqual(reasons, [["same-release", "update", "1.2.0"], ["older-release", "update", "1.1.0"], ["yanked", "update", "1.2.1"]]);
+  });
+
+  let updateHead = "";
+  test("an update proposed: the tree replaces the folder, deletions included; the title, the body and the audit row", async () => {
+    const base = repo().git.branches.get("main")!;
+    const before = fake.requests.length;
+    const outcome = await update("app", "e2e-files", { version: "1.3.0" });
+    assert.ok(outcome.ok, JSON.stringify(outcome));
+    if (!outcome.ok) return;
+    assert.equal(outcome.pullRequest.branch, "mixos/update/app-e2e-files");
+    assert.match(outcome.message, /apps\/e2e-files from 1\.2\.0 to 1\.3\.0.*reverting the merge is the way back/);
+    updateHead = outcome.pullRequest.head;
+
+    const writes = fake.requests.slice(before).filter((r) => r.method !== "GET" && r.path.startsWith("/repos/"));
+    assert.deepEqual(
+      writes.map((w) => `${w.method} ${w.path}`),
+      [
+        "POST /repos/acme/mixos/git/blobs",
+        "POST /repos/acme/mixos/git/blobs",
+        "POST /repos/acme/mixos/git/trees",
+        "POST /repos/acme/mixos/git/commits",
+        "POST /repos/acme/mixos/git/refs",
+        "POST /repos/acme/mixos/pulls",
+      ],
+    );
+    const tree = writes[2].body as { base_tree: string; tree: { path: string; mode: string; type: string; content?: string; sha?: string | null }[] };
+    assert.equal(tree.base_tree, repo().git.commits.get(base)!.tree);
+    assert.ok(tree.tree.every((e) => e.mode === "100644" && e.type === "blob" && e.path.startsWith("apps/e2e-files/")));
+    assert.deepEqual(tree.tree.filter((e) => e.sha === null).map((e) => e.path), ["apps/e2e-files/README.md", "apps/e2e-files/api/[id]/route.ts"]);
+    assert.deepEqual(tree.tree.filter((e) => e.sha && e.sha !== null).map((e) => e.path).sort(), ["apps/e2e-files/assets/icon.png", "apps/e2e-files/assets/logo.png"]);
+
+    // The branch: main with the folder replaced, nothing else touched.
+    const git = repo().git;
+    const commit = git.commits.get(updateHead)!;
+    assert.deepEqual(commit.parents, [base]);
+    const onBranch = git.files(commit.tree);
+    const mainFiles = git.files(git.commits.get(base)!.tree);
+    for (const [file, entry] of mainFiles) if (!file.startsWith("apps/e2e-files/")) assert.deepEqual(onBranch.get(file), entry, file);
+    assert.deepEqual([...onBranch.keys()].filter((f) => f.startsWith("apps/e2e-files/")).sort(), [
+      "apps/e2e-files/.registry.json",
+      "apps/e2e-files/api/items/route.ts",
+      "apps/e2e-files/app.json",
+      "apps/e2e-files/assets/icon.png",
+      "apps/e2e-files/assets/logo.png",
+      "apps/e2e-files/migrations/001_init.sql",
+      "apps/e2e-files/migrations/002_index.sql",
+    ]);
+    const release = FIXTURES["e2e-files"].more!.find((r) => r.version === "1.3.0")!;
+    for (const entry of release.entries.filter((e) => e.path !== ".gitignore")) {
+      assert.equal(onBranch.get(`apps/e2e-files/${entry.path}`)?.sha, p.gitBlobSha(entry.data), entry.path);
+    }
+    const record = JSON.parse(git.blobs.get(onBranch.get("apps/e2e-files/.registry.json")!.sha)!.toString("utf8"));
+    assert.equal(record.version, "1.3.0");
+    assert.equal(record.commitSha, shaOf("e2e-files", "1.3.0"));
+    assert.equal(git.branches.get("main"), base, "the default branch didn't move");
+
+    // The names and the body.
+    const pull = repo().pulls.find((pr) => pr.head === "mixos/update/app-e2e-files")!;
+    assert.equal(pull.title, "Update app e2e-files to 1.3.0 from 127.0.0.1:4430 [skip preview]");
+    assert.equal(pull.base, "main");
+    assert.match(commit.message, /^feat\(e2e-files\): update app e2e-files from 1\.2\.0 to 1\.3\.0\n/);
+    assert.match(commit.message, /verified by an instance and proposed\s+through the GitHub App/);
+    assert.match(commit.message, /^Registry-Replaces-Version: 1\.2\.0$/m);
+    for (const text of [commit.message, pull.title]) assert.ok(!/skip ci|skip-checks|render preview|@everyone|Files \[/i.test(text), text);
+    assert.match(pull.body, /### What changes\n\n- \*\*Files in `apps\/e2e-files\/`:\*\* 2 changed, 2 added, 2 deleted\./);
+    assert.match(pull.body, /\*\*Manifest:\*\* changes to Egress \(1 added, 0 dropped\)/);
+    assert.match(pull.body, /\*\*Migrations:\*\* 1 new migration in `1\.3\.0`\. The release step applies them, and they are forward-only: back up the database before you merge\./);
+    assert.match(pull.body, /\*\*The folder it replaces\*\* was checked first/);
+    assert.match(pull.body, /### Rolling back\n\nRevert the merge and deploy again/);
+    const fence = /(`{3,})text\n([\s\S]*?)\n\1/.exec(pull.body)!;
+    assert.ok(fence, pull.body);
+    assert.ok(!/@|#\d|skip ci|render preview|api\.example\.com/i.test(pull.body.replace(fence[0], "")));
+    assert.match(fence[2], /^egress adds: api\.example\.com$/m);
+    assert.match(fence[2], /^permission: network:api\.example\.com - Reads items \\@everyone$/m);
+
+    const row = (await audited("app.propose")).at(-1)!;
+    assert.equal(row.details.action, "update");
+    assert.equal(row.details.pullRequest, pull.number);
+    assert.equal(row.details.branch, "mixos/update/app-e2e-files");
+    assert.equal(row.details.head, updateHead);
+    assert.equal(row.details.version, "1.3.0");
+    assert.deepEqual(row.details.from, { version: "1.2.0", gitTag: "v1.2.0", commitSha: shaOf("e2e-files"), filesHash: record.filesHash === undefined ? null : (await audited("app.propose"))[0].details.filesHash });
+    assert.equal(row.details.direction, "newer");
+    assert.equal(row.details.deleted, 2);
+    assert.equal(row.details.binaryFiles, 2);
+    assert.equal(row.details.olderAccepted, false);
+
+    const again = await update("app", "e2e-files", { version: "1.3.0" });
+    assert.equal(!again.ok && again.code, "branch-exists");
+  });
+
+  test("an older release chosen, and a withdrawn one accepted, each said in the body and the audit row", async () => {
+    const older = await kept(p.proposeUpdate({ kind: "theme", slug: "e2e-paper", version: "1.1.0", allowOlder: true }, ctxB()));
+    assert.ok(older.ok, JSON.stringify(older));
+    const paper = repo().pulls.find((pr) => pr.head === "mixos/update/theme-e2e-paper")!;
+    assert.equal(paper.title, "Update theme e2e-paper to 1.1.0 from 127.0.0.1:4430 [skip preview]");
+    assert.match(paper.body, /\*\*An older release\.\*\* An admin chose to go back from `1\.2\.0` to `1\.1\.0`\./);
+    assert.match(paper.body, /\*\*Code:\*\* none\. A theme is CSS and assets\./);
+    assert.match(repo().git.commits.get(older.ok ? older.pullRequest.head : "")!.message, /It replaces 1\.2\.0, a newer release\./);
+    const olderRow = (await audited("theme.propose")).at(-1)!;
+    assert.equal(olderRow.details.action, "update");
+    assert.equal(olderRow.details.direction, "older");
+    assert.equal(olderRow.details.olderAccepted, true);
+
+    const refused = await kept(p.proposeUpdate({ kind: "connector", slug: "e2e-conn", version: "1.2.1" }, ctxB()));
+    assert.equal(!refused.ok && refused.code, "yanked");
+    const accepted = await kept(p.proposeUpdate({ kind: "connector", slug: "e2e-conn", version: "1.2.1", allowYanked: true }, ctxB()));
+    assert.ok(accepted.ok, JSON.stringify(accepted));
+    const conn = repo().pulls.find((pr) => pr.head === "mixos/update/connector-e2e-conn")!;
+    assert.match(conn.body, /\*\*Withdrawn by its publisher\.\*\* An admin proposed it anyway\./);
+    assert.match(conn.body, /^withdrawn: Leaks keys$/m);
+    assert.match(conn.body, /\*\*Then:\*\* its credentials, and its users' connections, belong to its name in each database/);
+    assert.equal((await audited("connector.propose")).at(-1)?.details.yankedAccepted, true);
+  });
+
+  test("a removal: refused for a required connector and the last theme; otherwise the tree deletes the folder", async () => {
+    const before = posts().length;
+    const conn = await kept(p.proposeRemoval({ kind: "connector", slug: "e2e-conn" }, ctxB()));
+    assert.equal(!conn.ok && conn.code, "depended-on", JSON.stringify(conn));
+    assert.match(!conn.ok ? conn.message : "", /^Not proposed\. Required by Files \(apps\/e2e-files\), which can't work without it\./);
+    assert.deepEqual((await audited("connector.propose.rejected")).at(-1)?.details.blockers, ["required-by"]);
+    const connCheck = await change("remove", "connector", "e2e-conn");
+    assert.ok(connCheck.ok && !connCheck.ready && connCheck.removal?.blockers[0].code === "required-by", JSON.stringify(connCheck));
+    assert.deepEqual(connCheck.ok ? connCheck.names : null, { branch: "mixos/remove/connector-e2e-conn", title: "Remove connector e2e-conn [skip preview]" });
+
+    const last = await kept(p.proposeRemoval({ kind: "theme", slug: "e2e-paper" }, ctxB()));
+    assert.equal(!last.ok && last.code, "last-theme", JSON.stringify(last));
+    assert.match(!last.ok ? last.message : "", /only theme in the build, and the build needs one/);
+    assert.equal(posts().length - before, 0, "nothing written");
+
+    // With another theme in the build: allowed, warning that it is the applied one.
+    const two = { themes: [{ slug: "e2e-paper", name: "Paper" }, { slug: "mixos", name: "MixOS" }] };
+    const check = await change("remove", "theme", "e2e-paper", two);
+    assert.ok(check.ok && check.ready, JSON.stringify(check));
+    assert.deepEqual(check.ok ? check.removal?.warnings.map((w) => w.code) : null, ["applied-theme"]);
+    assert.match(check.ok ? (check.removal?.warnings[0].message ?? "") : "", /applied theme in this instance's database, so pages here use MixOS/);
+    assert.deepEqual(check.ok ? check.onBranch : null, { files: 3 });
+
+    const base = repo().git.branches.get("main")!;
+    const start = fake.requests.length;
+    const outcome = await kept(p.proposeRemoval({ kind: "theme", slug: "e2e-paper" }, ctxB(two)));
+    assert.ok(outcome.ok, JSON.stringify(outcome));
+    if (!outcome.ok) return;
+    const writes = fake.requests.slice(start).filter((r) => r.method !== "GET" && r.path.startsWith("/repos/"));
+    assert.deepEqual(
+      writes.map((w) => `${w.method} ${w.path}`),
+      ["POST /repos/acme/mixos/git/trees", "POST /repos/acme/mixos/git/commits", "POST /repos/acme/mixos/git/refs", "POST /repos/acme/mixos/pulls"],
+    );
+    const tree = writes[0].body as { tree: { path: string; sha: string | null }[] };
+    assert.deepEqual(tree.tree.map((e) => [e.path, e.sha]), [
+      ["themes/e2e-paper/.registry.json", null],
+      ["themes/e2e-paper/theme.css", null],
+      ["themes/e2e-paper/theme.json", null],
+    ]);
+    const git = repo().git;
+    const commit = git.commits.get(outcome.pullRequest.head)!;
+    assert.deepEqual(commit.parents, [base]);
+    const onBranch = git.files(commit.tree);
+    assert.ok(![...onBranch.keys()].some((f) => f.startsWith("themes/e2e-paper/")), "the folder is gone");
+    for (const [file, entry] of git.files(git.commits.get(base)!.tree)) {
+      if (!file.startsWith("themes/e2e-paper/")) assert.deepEqual(onBranch.get(file), entry, file);
+    }
+    assert.equal(git.branches.get("main"), base);
+    const pull = repo().pulls.find((pr) => pr.head === "mixos/remove/theme-e2e-paper")!;
+    assert.equal(pull.title, "Remove theme e2e-paper [skip preview]");
+    assert.match(commit.message, /^feat\(e2e-paper\): remove theme e2e-paper 1\.2\.0 from 127\.0\.0\.1:4430\n/);
+    assert.match(commit.message, /Removal proposed through the GitHub App\. A theme holds no data\./);
+    assert.match(pull.body, /### What goes\n\n- \*\*The folder:\*\* `themes\/e2e-paper\/`, 3 files, `\.registry\.json` included\./);
+    assert.match(pull.body, /\*\*The applied theme\.\*\*/);
+    assert.match(pull.body, /- A theme holds no data\./);
+    assert.match(pull.body, /### Rolling back\n\nRevert the merge and deploy again/);
+    assert.match(pull.body, /^name: Paper$/m);
+    const row = (await audited("theme.propose")).at(-1)!;
+    assert.equal(row.details.action, "remove");
+    assert.equal(row.details.version, "1.2.0");
+    assert.equal(row.details.deleted, 3);
+    assert.deepEqual(row.details.warnings, ["applied-theme"]);
+
+    // An app's removal says its data stays.
+    const app = await kept(p.proposeRemoval({ kind: "app", slug: "e2e-files" }, ctxB(two)));
+    assert.ok(app.ok, JSON.stringify(app));
+    const files = repo().pulls.find((pr) => pr.head === "mixos/remove/app-e2e-files")!;
+    assert.match(files.body, /Each instance keeps the app's data until an admin deletes it there\. After the merge deploys, Admin > Apps lists it under Not in this build, with Delete data\./);
+    assert.match(app.ok ? app.message : "", /each instance keeps its data until an admin deletes it there/);
+  });
+
+  test("the lists show installs, updates and removals, each as such, with their checks", async () => {
+    const now = new Date();
+    const apps = await p.readProposals(ADMIN, "app", now);
+    assert.equal(apps.state, "ok", JSON.stringify(apps));
+    if (apps.state !== "ok") return;
+    const files = apps.pulls.filter((pr) => pr.slug === "e2e-files").sort((a, b) => a.action.localeCompare(b.action));
+    assert.deepEqual(files.map((pr) => [pr.action, pr.branch, pr.version, pr.unrecorded, pr.changed]), [
+      ["install", "mixos/install/app-e2e-files", "1.2.0", false, true],
+      ["remove", "mixos/remove/app-e2e-files", "1.2.0", false, false],
+      ["update", "mixos/update/app-e2e-files", "1.3.0", false, false],
+    ]);
+    assert.ok(files.every((pr) => pr.ci.state === "waiting"));
+    const themes = await p.readProposals(ADMIN, "theme", now);
+    assert.deepEqual(
+      themes.state === "ok" ? themes.pulls.map((pr) => [pr.action, pr.version]).sort() : null,
+      [["install", "1.2.0"], ["remove", "1.2.0"], ["update", "1.1.0"]],
+    );
+    const connectors = await p.readProposals(ADMIN, "connector", now);
+    assert.deepEqual(connectors.state === "ok" ? connectors.pulls.map((pr) => [pr.action, pr.version]).sort() : null, [["install", "1.2.0"], ["update", "1.2.1"]]);
+  });
+
   test("over the whole run: no write outside refs/heads/mixos/ or the folder, no merge, and no secret anywhere", async () => {
     const writes = fake.requests.filter((r) => r.host === "api" && r.method !== "GET");
     for (const w of writes) {
@@ -609,9 +1068,10 @@ describe("proposing an install as a pull request", { skip }, () => {
       const body = w.body as Record<string, unknown>;
       if (pathOnly.endsWith("/git/refs")) assert.match(String(body.ref), /^refs\/heads\/mixos\//);
       if (pathOnly.endsWith("/git/trees")) {
-        const entries = body.tree as { path: string }[];
+        const entries = body.tree as { path: string; sha?: string | null }[];
         const folder = entries[0].path.split("/").slice(0, 2).join("/");
-        assert.ok(entries.every((e) => e.path.startsWith(`${folder}/`)), "one folder per tree");
+        assert.ok(entries.every((e) => e.path.startsWith(`${folder}/`)), "one folder per tree, deletions included");
+        assert.ok(entries.filter((e) => e.sha === null).every((e) => e.path.startsWith(`${folder}/`)), "no deletion outside it");
       }
       if (pathOnly.endsWith("/pulls")) assert.equal(body.base, "main");
     }

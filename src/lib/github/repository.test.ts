@@ -26,7 +26,7 @@ const record: RepositoryRecord = {
   fork: true,
   parent: null,
 };
-const scope: WriteScope = { folder: "apps/files" };
+const scope: WriteScope = { folder: "apps/files", action: "install" };
 const SHA = "a".repeat(40);
 const SHA2 = "b".repeat(40);
 
@@ -62,7 +62,8 @@ describe("what a write token may write", () => {
   test("only a write token with a scope writes", async () => {
     await refused("/git/blobs", { content: "eA==", encoding: "base64" }, /bug in the caller/, linkedRepository(record, "read", "t"));
     await refused("/git/blobs", { content: "eA==", encoding: "base64" }, /bug in the caller/, linkedRepository(record, "write", "t"));
-    await refused("/git/blobs", { content: "eA==", encoding: "base64" }, /extension's folder/, linkedRepository(record, "write", "t", { folder: "src/lib" }));
+    await refused("/git/blobs", { content: "eA==", encoding: "base64" }, /extension's folder/, linkedRepository(record, "write", "t", { folder: "src/lib", action: "install" }));
+    await refused("/git/blobs", { content: "eA==", encoding: "base64" }, /what the operation does/, linkedRepository(record, "write", "t", { folder: "apps/files", action: "merge" as "install" }));
     for (const folder of ["apps/Files", "apps/files/sub", "apps/", "apps/../x", "plugins/files", "apps/a"]) {
       assert.equal(isExtensionFolder(folder), false, folder);
     }
@@ -134,14 +135,39 @@ describe("what a write token may write", () => {
     await refused("/git/trees", tree([{ path: "apps/files/a", mode: "040000", type: "tree", sha: SHA }]), /isn't a tree/);
     await refused("/git/trees", tree([file("apps/files/a", { content: "x", sha: SHA })]), /one of the two/);
     await refused("/git/trees", tree([file("apps/files/a", {})]), /one of the two/);
-    // A deletion: rank 31's, not this one's.
-    await refused("/git/trees", tree([file("apps/files/a", { sha: null })]), /isn't a tree/);
+    // An install deletes nothing.
+    await refused("/git/trees", tree([file("apps/files/a", { sha: null })]), /an install deletes nothing/);
     await refused("/git/trees", tree([file("apps/files/a"), file("apps/files/A")]), /twice/);
     await refused("/git/trees", { base_tree: "main", tree: [file("apps/files/a")] }, /isn't a tree/);
     await refused("/git/trees", { tree: [file("apps/files/a")] }, /isn't a tree/);
 
     await write().post("/git/trees", tree([file("apps/files/app.json"), file("apps/files/api/[id]/route.ts", { sha: SHA2 })]));
     assert.equal(sent.length, 1);
+  });
+
+  test("a deletion only in an update's or a removal's scope, and only inside the folder", async () => {
+    const update = () => linkedRepository(record, "write", "ghs_test", { folder: "apps/files", action: "update" });
+    const removal = () => linkedRepository(record, "write", "ghs_test", { folder: "apps/files", action: "remove" });
+    for (const path of ["apps/other/x.ts", "apps/filesx/a", "connectors/files/a", "apps/files/../x", "apps/files/.git/config", "src/lib/x.ts", "apps/files"]) {
+      await refused("/git/trees", tree([file(path, { sha: null })]), undefined, update());
+      await refused("/git/trees", tree([file(path, { sha: null })]), undefined, removal());
+    }
+    await refused("/git/trees", tree([file("apps/files/a", { sha: null, content: "x" })]), /deleted and written at once/, update());
+    await refused("/git/trees", tree([file("apps/files/a", { sha: null }), file("apps/files/A", { content: "x" })]), /twice/, update());
+    await refused("/git/trees", tree([file("apps/files/a", { sha: "x" })]), /isn't a tree/, update());
+    // Everything else holds for them as for an install.
+    await refused("/git/refs", { ref: "refs/heads/main", sha: SHA }, /branches under mixos\//, update());
+    await refused("/pulls", { title: "Update app files to 1.3.0 [skip preview]", head: "mixos/update/app-files", base: "release", body: "x" }, /default branch only/, update());
+    await refused("/merges", { base: "main", head: "mixos/remove/app-files" }, /doesn't POST/, removal());
+
+    // An update: new files, and deletions, in one tree. A removal: deletions alone.
+    await update().post("/git/trees", tree([file("apps/files/app.json"), file("apps/files/old.ts", { sha: null }), file("apps/files/assets/a.png", { sha: SHA2 })]));
+    await removal().post("/git/trees", tree([file("apps/files/app.json", { sha: null }), file("apps/files/.registry.json", { sha: null })]));
+    assert.equal(sent.length, 2);
+    assert.deepEqual((sent[1].body as { tree: unknown[] }).tree, [
+      { path: "apps/files/app.json", mode: "100644", type: "blob", sha: null },
+      { path: "apps/files/.registry.json", mode: "100644", type: "blob", sha: null },
+    ]);
   });
 
   test("a commit with one parent, the App's own author, and no skip marker", async () => {

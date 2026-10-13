@@ -13,8 +13,12 @@ import {
   proposalBranch,
   proposalCommitMessage,
   proposalTitle,
+  removalProposalCommitMessage,
+  removalProposalTitle,
   renderPreviewMarker,
   updateBranch,
+  updateProposalCommitMessage,
+  updateProposalTitle,
   updateTitle,
 } from "./names";
 
@@ -58,6 +62,42 @@ describe("a proposal's names", () => {
     });
     for (const ref of ["main", "mixos/install/plugin-x", "mixos/install/app-Files", "mixos/install/app-x/y", "mixos/install/app-"]) {
       assert.equal(parseProposalBranch(ref), null, ref);
+    }
+  });
+
+  test("an update's and a removal's branch, title and commit message, from identifiers", () => {
+    assert.equal(proposalBranch("app", "files", "update"), "mixos/update/app-files");
+    assert.equal(proposalBranch("theme", "paper", "remove"), "mixos/remove/theme-paper");
+    assert.throws(() => proposalBranch("app", "files", "merge" as "install"));
+    assert.deepEqual(parseProposalBranch("mixos/update/app-files"), { action: "update", kind: "app", slug: "files" });
+    assert.deepEqual(parseProposalBranch("mixos/remove/theme-paper"), { action: "remove", kind: "theme", slug: "paper" });
+    for (const ref of ["mixos/update/app-Files", "mixos/delete/app-files", "mixos/remove/app-"]) {
+      assert.equal(parseProposalBranch(ref), null, ref);
+    }
+
+    assert.equal(updateProposalTitle(record), "Update app files to 1.2.0 from mixos.org [skip preview]");
+    assert.equal(removalProposalTitle("connector", "stripe-billing"), "Remove connector stripe-billing [skip preview]");
+    assert.throws(() => removalProposalTitle("app", "files [skip ci]"));
+
+    const from = { version: "1.1.0", commitSha: "f".repeat(40), direction: "newer" as const };
+    const update = updateProposalCommitMessage(record, from);
+    assert.equal(update.split("\n")[0], "feat(files): update app files from 1.1.0 to 1.2.0");
+    assert.match(update, /proposed through the\s+GitHub App/);
+    assert.ok(!update.includes("registered in a checkout"));
+    assert.match(update, /^Registry-Replaces-Version: 1\.1\.0$/m);
+    assert.match(update, /^Registry-Replaces-Commit: f{40}$/m);
+    assert.match(update, /^Registry-Files-Hash: sha256-B{43}=$/m);
+    assert.throws(() => updateProposalCommitMessage(record, { ...from, version: "1.1.0 [skip ci]" }));
+    assert.throws(() => updateProposalCommitMessage(record, { ...from, commitSha: "main" }));
+
+    const removal = removalProposalCommitMessage(record);
+    assert.equal(removal.split("\n")[0], "feat(files): remove app files 1.2.0 from mixos.org");
+    assert.match(removal, /^Removal proposed through the GitHub App\. A theme holds no data\.|^Removal proposed through the GitHub App\. Each instance keeps/m);
+    assert.match(removal, /^Registry-Version: 1\.2\.0$/m);
+    assert.ok(!removal.includes("Removed in a checkout"));
+    for (const message of [update, removal]) {
+      assert.equal(ciSkipMarker(message), null);
+      assert.equal(renderPreviewMarker(message), null);
     }
   });
 
@@ -128,7 +168,7 @@ describe("a MixOS update's names", () => {
   test("an update branch is read back, and told from an install's and from rank 31's", () => {
     assert.deepEqual(parseProposalBranch("mixos/update-v0.5.0"), { action: "mixos-update", tag: "v0.5.0" });
     assert.deepEqual(parseProposalBranch("mixos/update-v0.5.0-rc.1"), { action: "mixos-update", tag: "v0.5.0-rc.1" });
-    for (const ref of ["mixos/update/app-files", "mixos/update-0.5.0", "mixos/update-v0.5", "mixos/update-", "mixos/update-v0.5.0/x", "mixos/updates-v0.5.0"]) {
+    for (const ref of ["mixos/update-0.5.0", "mixos/update-v0.5", "mixos/update-", "mixos/update-v0.5.0/x", "mixos/updates-v0.5.0"]) {
       assert.equal(parseProposalBranch(ref), null, ref);
     }
   });

@@ -399,6 +399,32 @@ filters the target branch. MixOS's own workflows pass as they are. The instance
 also refuses when the extension's folder is already on the default branch, or
 the branch exists.
 
+**Updating and removing through the App.** An extension this build installed
+from mixos.org can be changed the same way. A withdrawn or newer notice offers
+**Propose update**, and so does its card in Browse (**Propose a different
+release** when it runs the current one); **Remove** on its tile offers
+**Propose removal**. Each opens a dialog with the same checks, and for an
+update the update dialog's comparison: the releases with their dates, what the
+one you pick changes (the publisher's claims, what the manifest declares, new
+migrations, the files), and the same explicit yes for an older or a withdrawn
+release. The pull request replaces the folder on
+`mixos/update/<kind>-<slug>`, deleting what the new release lacks, or deletes
+it on `mixos/remove/<kind>-<slug>`, `.registry.json` included.
+
+Before either, the instance checks that the folder on your default branch is
+what this build runs: its `.registry.json` records the same release, and its
+files are that release, file for file. A folder someone edited on GitHub, or a
+default branch that has moved to another release, is refused, naming the
+difference: sort it out in a checkout, or deploy the branch first. A removal
+is refused while an app in the build requires the connector or uses the app's
+services or hooks, and for the last theme, as in a checkout. The data stays
+on each instance until an admin deletes it there
+([Deleting an extension's data](#deleting-an-extensions-data)).
+
+**Rolling back** an update or a removal once it is merged is reverting the
+merge and deploying again. Neither undoes a migration the new release ran;
+only restoring a backup of the database does.
+
 **Merging is the deploy.** Your repository's CI checks the pull request: the
 build runs the registry generator, and `extensions.yml` smoke-tests a changed
 app. Admin > Apps, Connectors and Themes list the App's open pull requests with
@@ -612,6 +638,10 @@ is out, or when the installed one was withdrawn. To update:
    same.
 5. Merge it into the branch your host deploys.
 
+On a deployment with the [GitHub App](#linking-your-github-repository) linked,
+**Propose update** on the notice or the listing does steps 1 to 5 as a pull
+request; see [Proposing an extension](#proposing-an-extension).
+
 An update that stops midway leaves the old folder in `.mixos/backup/`, and
 `npm run register -- --recover` asks whether to put it back or keep the new
 release.
@@ -638,6 +668,10 @@ Removing an extension is a change to your repository, as installing one is:
    commands and a commit message; `/mixos deploy` does the same. An extension
    installed from the Registry takes its `.registry.json` with it.
 3. Merge it into the branch your host deploys.
+
+On a deployment with the [GitHub App](#linking-your-github-repository) linked,
+**Propose removal** in the Remove dialog does all three as a pull request; see
+[Proposing an extension](#proposing-an-extension).
 
 Its data stays in each database: an app's tables, settings, API keys, grants
 and scheduled jobs, and a connector's credentials. The release step marks a

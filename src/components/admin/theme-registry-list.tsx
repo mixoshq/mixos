@@ -14,6 +14,7 @@ import { renderAuthors, formatLastUpdated } from "@/lib/apps/display";
 import type { ThemeManifest } from "@/lib/themes/types";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import type { ProposalTarget } from "@/lib/github/outcomes";
 import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
 
 /**
@@ -40,10 +41,13 @@ export default function ThemeRegistryList({
   themes,
   activeSlug,
   action,
+  proposal = null,
 }: {
   themes: ThemeManifest[];
   activeSlug: string;
   action: (slug: string) => Promise<void>;
+  /** On a built deployment with the GitHub App linked: where a removal can be proposed instead. */
+  proposal?: ProposalTarget | null;
 }) {
   const [pending, startTransition] = useTransition();
   /** The theme awaiting confirmation, or null when the dialog is closed. */
@@ -245,7 +249,7 @@ export default function ThemeRegistryList({
         </p>
       </Dialog>
 
-      {removing && <RemoveDialog target={removing} onClose={() => setRemoving(null)} />}
+      {removing && <RemoveDialog target={removing} propose={proposal} onClose={() => setRemoving(null)} />}
     </>
   );
 }
