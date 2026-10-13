@@ -21,10 +21,16 @@
  *
  * Each name is checked for both before it is returned, and
  * ./repository.ts checks again before anything is sent.
+ *
+ * An update's and a removal's commit messages are the hand-back's
+ * (src/lib/repository/hand-back.ts), which a checkout commits for the same
+ * change, with one sentence saying the change came through the App: the
+ * same subject and the same trailers, whichever way the change reaches the
+ * repository.
  */
 
 import { parseReleaseVersion } from "@/lib/platform/version-floor";
-import { ciSkipMarker } from "@/lib/repository/hand-back";
+import { ciSkipMarker, removalCommitMessage, updateCommitMessage, type ReplacedRelease } from "@/lib/repository/hand-back";
 import {
   InstallRecordSchema,
   recordListingUrl,
@@ -33,7 +39,7 @@ import {
 } from "@/lib/repository/install-record";
 import { kindDir } from "@/lib/repository/pending";
 import { sourceHost } from "@/lib/repository/provenance";
-import { CORE_RELEASE_TAG, EXTENSION_KINDS, SlugSchema, type ExtensionKind } from "@/lib/repository/types";
+import { CORE_RELEASE_TAG, CommitShaSchema, EXTENSION_KINDS, SlugSchema, type ExtensionKind } from "@/lib/repository/types";
 
 /**
  * Every branch the App writes is under this. ./repository.ts refuses a ref
@@ -42,17 +48,28 @@ import { CORE_RELEASE_TAG, EXTENSION_KINDS, SlugSchema, type ExtensionKind } fro
 export const APP_BRANCH_PREFIX = "mixos/";
 
 /**
+ * What the App does to an extension: installs it (`mixos/install/…`), updates
+ * it (`mixos/update/…`) or removes it (`mixos/remove/…`). The slash after the
+ * action keeps these apart from a MixOS update's own branch, `mixos/update-<tag>`.
+ */
+export const EXTENSION_ACTIONS = ["install", "update", "remove"] as const;
+export type ExtensionAction = (typeof EXTENSION_ACTIONS)[number];
+
+export function isExtensionAction(value: unknown): value is ExtensionAction {
+  return typeof value === "string" && (EXTENSION_ACTIONS as readonly string[]).includes(value);
+}
+
+/**
  * A MixOS update's branch is `mixos/update-<tag>`: a hyphen, so it can't
  * collide with rank 31's `mixos/update/<kind>-<slug>` for an extension.
  */
 export const UPDATE_BRANCH_PREFIX = "mixos/update-";
 
 /**
- * What a branch under `mixos/` proposes: an extension's install, or an update
- * of MixOS itself to a release. Rank 31 adds updating and removing an
- * extension (`mixos/update/…`, `mixos/remove/…`).
+ * What a branch under `mixos/` proposes: an extension's install, update or
+ * removal, or an update of MixOS itself to a release.
  */
-export type ProposalAction = "install" | "mixos-update";
+export type ProposalAction = ExtensionAction | "mixos-update";
 
 /** What Render reads in a pull request's title, telling it to skip a preview in Automatic mode. */
 export const SKIP_PREVIEW = "[skip preview]";
@@ -88,22 +105,26 @@ export function extensionFolder(kind: ExtensionKind, slug: string): string {
   return `${kindDir(kind)}/${slug}`;
 }
 
-/** `mixos/install/app-files`. A fixed name, so a second proposal of the same extension fails cleanly. */
-export function proposalBranch(kind: ExtensionKind, slug: string): string {
+/**
+ * `mixos/install/app-files`, `mixos/update/app-files` or `mixos/remove/app-files`.
+ * A fixed name, so a second proposal of the same change fails cleanly.
+ */
+export function proposalBranch(kind: ExtensionKind, slug: string, action: ExtensionAction = "install"): string {
   assertIdentifiers(kind, slug);
-  return `${APP_BRANCH_PREFIX}install/${kind}-${slug}`;
+  if (!isExtensionAction(action)) throw new Error("A proposal's branch names one of the App's actions.");
+  return `${APP_BRANCH_PREFIX}${action}/${kind}-${slug}`;
 }
 
 /** What a branch the App made proposes, read back from its name. */
 export type ParsedProposalBranch =
-  | { action: "install"; kind: ExtensionKind; slug: string }
+  | { action: ExtensionAction; kind: ExtensionKind; slug: string }
   | { action: "mixos-update"; tag: string };
 
 /** What a branch the App made proposes, from its name alone, or null for any other branch. */
 export function parseProposalBranch(ref: string): ParsedProposalBranch | null {
-  const install = /^mixos\/install\/(app|connector|theme)-([a-z0-9-]+)$/.exec(ref);
-  if (install && SlugSchema.safeParse(install[2]).success) {
-    return { action: "install", kind: install[1] as ExtensionKind, slug: install[2] };
+  const extension = /^mixos\/(install|update|remove)\/(app|connector|theme)-([a-z0-9-]+)$/.exec(ref);
+  if (extension && SlugSchema.safeParse(extension[3]).success) {
+    return { action: extension[1] as ExtensionAction, kind: extension[2] as ExtensionKind, slug: extension[3] };
   }
   if (ref.startsWith(UPDATE_BRANCH_PREFIX)) {
     const tag = ref.slice(UPDATE_BRANCH_PREFIX.length);
@@ -135,12 +156,21 @@ function assertClean(text: string, what: string): string {
   return text;
 }
 
+/** Throws unless `title` is one line. */
+function assertOneLine(title: string): string {
+  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(title)) throw new Error("A proposal's title is one line.");
+  return assertClean(title, "title");
+}
+
 /** The record, checked: every value in it is an identifier. */
 function checked(record: InstallRecord): InstallRecord {
   return InstallRecordSchema.parse(record);
 }
 
 const TitleFields = InstallRecordSchema.pick({ source: true, kind: true, slug: true, version: true });
+
+/** The release an update replaces, as the build records it: a version and a commit, both checked. */
+const ReplacedFields = InstallRecordSchema.pick({ version: true }).extend({ commitSha: CommitShaSchema });
 
 /**
  * `Add app files 1.2.0 from mixos.org [skip preview]`. It needs only the
@@ -149,9 +179,19 @@ const TitleFields = InstallRecordSchema.pick({ source: true, kind: true, slug: t
  */
 export function proposalTitle(release: Pick<InstallRecord, "source" | "kind" | "slug" | "version">): string {
   const r = TitleFields.parse({ source: release.source, kind: release.kind, slug: release.slug, version: release.version });
-  const title = `Add ${r.kind} ${r.slug} ${r.version} from ${sourceHost(r.source)} ${SKIP_PREVIEW}`;
-  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(title)) throw new Error("A proposal's title is one line.");
-  return assertClean(title, "title");
+  return assertOneLine(`Add ${r.kind} ${r.slug} ${r.version} from ${sourceHost(r.source)} ${SKIP_PREVIEW}`);
+}
+
+/** `Update app files to 1.3.0 from mixos.org [skip preview]`: the release it goes to. */
+export function updateProposalTitle(release: Pick<InstallRecord, "source" | "kind" | "slug" | "version">): string {
+  const r = TitleFields.parse({ source: release.source, kind: release.kind, slug: release.slug, version: release.version });
+  return assertOneLine(`Update ${r.kind} ${r.slug} to ${r.version} from ${sourceHost(r.source)} ${SKIP_PREVIEW}`);
+}
+
+/** `Remove app files [skip preview]`. */
+export function removalProposalTitle(kind: ExtensionKind, slug: string): string {
+  assertIdentifiers(kind, slug);
+  return assertOneLine(`Remove ${kind} ${slug} ${SKIP_PREVIEW}`);
 }
 
 /**
@@ -179,5 +219,38 @@ export function proposalCommitMessage(record: InstallRecord): string {
     `Registry-Files-Hash: ${r.filesHash}`,
     `Registry-Listing: ${recordListingUrl(r)}`,
   ].join("\n");
+  return assertClean(message, "commit message");
+}
+
+/**
+ * An update's commit message: the hand-back's, for the release `record` in
+ * place of `from`, with its sentence about the App. Both releases' values are
+ * checked here.
+ */
+export function updateProposalCommitMessage(
+  record: InstallRecord,
+  from: Pick<ReplacedRelease, "version" | "commitSha" | "direction">,
+): string {
+  const r = checked(record);
+  const replaced = ReplacedFields.parse({ version: from.version, commitSha: from.commitSha });
+  const message = updateCommitMessage(
+    r,
+    { version: replaced.version, commitSha: replaced.commitSha, direction: from.direction, localChangesDiscarded: false },
+    extensionFolder(r.kind, r.slug),
+    "app",
+  );
+  return assertClean(message, "commit message");
+}
+
+/** A removal's commit message: the hand-back's for the release the folder held, with its sentence about the App. */
+export function removalProposalCommitMessage(
+  record: Pick<InstallRecord, "source" | "kind" | "slug" | "version">,
+): string {
+  const r = TitleFields.parse({ source: record.source, kind: record.kind, slug: record.slug, version: record.version });
+  const message = removalCommitMessage(
+    { kind: r.kind, slug: r.slug, installed: { source: r.source, version: r.version } },
+    extensionFolder(r.kind, r.slug),
+    "app",
+  );
   return assertClean(message, "commit message");
 }

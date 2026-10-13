@@ -15,6 +15,7 @@ import { getActiveTheme, setActiveTheme } from "@/lib/themes/active";
 import ThemeRegistryList from "@/components/admin/theme-registry-list";
 import RegistryNotices from "@/components/admin/registry-notices";
 import ProposedPullRequests from "@/components/admin/github/proposed-pull-requests";
+import { proposalTarget } from "@/lib/github/propose";
 
 export const metadata = { title: "Themes" };
 
@@ -22,6 +23,9 @@ export default async function ThemesAdminPage() {
   const session = await requireReadOnlySession();
   await requireAdmin(session);
   const { theme } = await getActiveTheme();
+  // On a built deployment with the GitHub App linked, Remove offers a pull
+  // request instead; from what is stored, without asking GitHub on every render.
+  const proposal = await proposalTarget("theme");
 
   async function apply(slug: string) {
     "use server";
@@ -93,6 +97,7 @@ export default async function ThemesAdminPage() {
         themes={themeRegistry}
         activeSlug={theme.slug}
         action={apply}
+        proposal={proposal}
       />
     </div>
   );

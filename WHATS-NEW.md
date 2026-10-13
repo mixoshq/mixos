@@ -377,6 +377,21 @@ just pulled.
   git merge <tag>` steps instead. Admin > GitHub lists open update pull
   requests with their checks. Audited as `mixos.update.propose`. See
   `docs/hosting/README.md#updating-mixos-through-the-app`.
+- **Propose an update or a removal as a pull request.** With the GitHub App
+  linked, a deployment's withdrawn and newer notices and its Browse cards
+  offer **Propose update**, and the Remove dialog offers **Propose removal**,
+  for an extension the build installed from mixos.org. The dialog shows the
+  update dialog's comparison and the same checks as a proposal, then opens a
+  pull request that replaces the folder on `mixos/update/<kind>-<slug>`,
+  deleting what the new release lacks, or deletes it on
+  `mixos/remove/<kind>-<slug>`. First the folder on the default branch has to
+  be what this build runs, file for file; a removal is refused while an app
+  requires the connector or uses the app's services or hooks, and for the
+  last theme. The data stays on each instance until an admin deletes it
+  there. Rolling back is reverting the merge. Admin > Apps, Connectors and
+  Themes list these pull requests with their checks beside the installs.
+  Audited as `<kind>.propose` with `action: "update"` or `"remove"`. See
+  `docs/hosting/README.md#proposing-an-extension`.
 
 ## 2026-10-07
 

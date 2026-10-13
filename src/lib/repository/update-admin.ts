@@ -170,7 +170,7 @@ async function notInstallable(kind: ExtensionKind): Promise<Refusal | null> {
 }
 
 /** An ISO date from the catalogue's text, or null. */
-function isoOrNull(value: string | null | undefined): string | null {
+export function isoOrNull(value: string | null | undefined): string | null {
   if (!value) return null;
   const at = Date.parse(value);
   return Number.isNaN(at) ? null : new Date(at).toISOString();
@@ -235,8 +235,12 @@ export async function updateOverview(kind: ExtensionKind, slug: string, root: st
   };
 }
 
-/** The listing's releases a record could hold, newest first, each with which way it is from `from`. */
-function pickable(listing: Extension, from: ReleaseRef): PickableRelease[] {
+/**
+ * The listing's releases a record could hold, newest first, each with which
+ * way it is from `from`. A proposal through the GitHub App offers the same
+ * list (src/lib/github/propose-change.ts).
+ */
+export function pickable(listing: Extension, from: ReleaseRef): PickableRelease[] {
   const releases = listing.releases
     .filter((r) => isRecordedVersion(r.version))
     .map((r): PickableRelease => {
