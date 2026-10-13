@@ -61,14 +61,17 @@
  *
  * ── AN UPDATE ───────────────────────────────────────────────────────────────
  *
- * The same steps, for another release of an app or a connector that is in
- * place, installed from this catalogue (`UpdateRequest`, ./update.ts). Before
- * step 1 it finds that folder's own install record, and whether the folder
- * still matches it, from the files hash with nothing downloaded; after step 1,
- * which way the release goes. Local changes, an older release, and a release
- * whose order can't be told each need the admin's explicit say. At step 9 the
- * release goes to pending like any app or connector, and its sidecar records
- * what it replaces. The folder in place isn't touched.
+ * The same steps, for another release of an extension that is in place,
+ * installed from this catalogue (`UpdateRequest`, ./update.ts). Before step 1
+ * it finds that folder's own install record, and whether the folder still
+ * matches it, from the files hash with nothing downloaded; after step 1, which
+ * way the release goes. Local changes, an older release, and a release whose
+ * order can't be told each need the admin's explicit say. At step 9 an app or
+ * a connector goes to pending, its sidecar recording what it replaces, and the
+ * folder in place isn't touched until Register (./register.ts). A theme is put
+ * in place there and then, by the same swap Register uses (./backup.ts): the
+ * folder in place to `.mixos/backup/themes/<slug>/`, the new release into its
+ * place, the generator, then the backup deleted or put back.
  *
  * ── WHAT THIS CANNOT DO, AND SAYS SO ────────────────────────────────────────
  *
@@ -94,14 +97,23 @@ import {
   parseCheckVerdict,
   type CheckVerdict,
 } from "./check-verdict";
-import { leftoverBackup } from "./backup";
+import {
+  backupLocation,
+  leftoverBackup,
+  leftoverBackupMessage,
+  swapBack,
+  swapDone,
+  swapIn,
+  type UpdateSwap,
+} from "./backup";
 import { RepositoryError, fetchExtension, fetchInstallManifest, repositoryBaseUrl } from "./client";
 import { SourceFetchError, fetchExtensionTree } from "./fetch-source";
 import { ContentHashMismatch, contentHashesMatch, filesHash, verifyContentHash } from "./content-hash";
-import { handBackFor, type HandBack } from "./hand-back";
+import { handBackFor, updateHandBackFor, type HandBack } from "./hand-back";
 import {
   INSTALL_RECORD_FILE,
   InstallRecordSchema,
+  folderFiles,
   installRecordEntry,
   readInstallRecord,
   recordMismatch,
@@ -111,7 +123,14 @@ import {
 } from "./install-record";
 import { LEFT_OUT_NAMES, type LeftOut } from "./left-out";
 import { sourceHost } from "./provenance";
-import { folderState, needsOlderConsent, updateDirection, type UpdateDirection } from "./update";
+import {
+  folderDifferences,
+  folderState,
+  needsOlderConsent,
+  unhashableProblem,
+  updateDirection,
+  type UpdateDirection,
+} from "./update";
 import { BUILT_DEPLOYMENT_NOTICE, isBuiltDeployment } from "../platform/build";
 import {
   CheckoutLockHeldError,
@@ -124,7 +143,6 @@ import { LockLostError, LockUnavailableError, withPlatformLock, type PlatformLea
 import { satisfiesMinimum } from "../platform/version";
 import { safeErrorMessage } from "../safe-error";
 import {
-  isPendingKind,
   isRealDirectory,
   kindDir,
   liveLocation,
@@ -133,7 +151,6 @@ import {
   readSidecar,
   stagingLocation,
   writeSidecar,
-  type PendingKind,
   type PendingLocation,
   type PendingSidecar,
   type Replaces,
@@ -417,7 +434,8 @@ export interface InstallResult {
   registry: RegistryOutcome | null;
   /**
    * For a theme, which registers as it installs: what to commit, and how
-   * (./hand-back.ts). Null for a pending install, whose Register hands back.
+   * (./hand-back.ts), and for a theme's update, how to roll it back. Null for
+   * a pending install, whose Register hands back.
    */
   handBack: HandBack | null;
   /** For an update, what it replaces, as its pending sidecar records it. Null for an install. */
@@ -1445,9 +1463,9 @@ export interface ReviewedUpdate {
   targetContentHash: string;
 }
 
-/** The app or connector an update replaces: its folder and its own install record. */
+/** The extension an update replaces: its folder and its own install record. */
 export interface InstalledExtension {
-  kind: PendingKind;
+  kind: ExtensionKind;
   slug: string;
   /** Absolute: `<root>/apps/<slug>`. */
   dir: string;
@@ -1457,9 +1475,9 @@ export interface InstalledExtension {
 }
 
 /**
- * The app or connector `kind`/`slug` in the checkout at `root`, as an update
- * would replace it: a real folder, with an install record of its own whose
- * `source` is the catalogue this instance installs from. Throws InstallError
+ * The extension `kind`/`slug` in the checkout at `root`, as an update would
+ * replace it: a real folder, with an install record of its own whose `source`
+ * is the catalogue this instance installs from. Throws InstallError
  * `not-updatable`, saying why, for anything else. Reads only.
  */
 export function installedForUpdate(
@@ -1467,7 +1485,6 @@ export function installedForUpdate(
   slug: string,
   root: string = PROJECT_ROOT,
 ): InstalledExtension {
-  if (!isPendingKind(kind)) throw themeNotUpdatable(slug);
   const live = liveLocation(root, kind, slug);
   if (!isRealDirectory(live.dir)) {
     throw new InstallError(
@@ -1503,17 +1520,6 @@ export function installedForUpdate(
     );
   }
   return { kind, slug, dir: live.dir, rel: live.rel, record: read.record };
-}
-
-/**
- * Why a theme isn't updated: it registers as it installs, so an update would
- * replace it there and then, and only apps and connectors wait in pending.
- */
-function themeNotUpdatable(slug: string): InstallError {
-  return new InstallError(
-    `Updating a theme isn't supported yet. Remove themes/${slug}, then install it again from Browse.`,
-    "not-updatable",
-  );
 }
 
 /**
@@ -1681,8 +1687,15 @@ export async function installExtension(
   if (!SlugSchema.safeParse(slug).success) {
     throw new InstallError(`"${slug}" is not an extension slug.`, "invalid-package");
   }
-  // Before the locks too: a theme can't be updated (see themeNotUpdatable()).
-  if (options.update && !isPendingKind(kind)) throw themeNotUpdatable(slug);
+  // A theme's update puts the folder in place aside in `.mixos/backup/`, so
+  // that has to be writable too.
+  if (options.update && kind === "theme" && !(await canWrite(MIXOS_DIR))) {
+    throw new InstallError(
+      "This server can't write to .mixos/ in its checkout, and updating a theme keeps a backup of it there. " +
+        "Update it in a checkout where it can, commit, and deploy.",
+      "unsupported-environment",
+    );
+  }
 
   const what = options.update ? "an update" : "an install";
   return withPlatformLock("repository.register", (lease) =>
@@ -1721,16 +1734,10 @@ async function runInstall(
       "already-installed",
     );
   }
-  // Nor over a removal that stopped midway, whose folder may be waiting in
-  // `.mixos/backup/` for recovery to put it back.
+  // Nor over a removal or an update that stopped midway, whose folder may be
+  // waiting in `.mixos/backup/` for recovery to put it back.
   const leftover = leftoverBackup(PROJECT_ROOT, kind, slug);
-  if (leftover) {
-    throw new InstallError(
-      `A removal of ${slug} stopped before it finished, and left ${leftover.rel}. Run ` +
-        "`npm run remove -- --recover` in this checkout to put things back, then try again.",
-      "already-installed",
-    );
-  }
+  if (leftover) throw new InstallError(leftoverBackupMessage(leftover, slug, { here: true }), "already-installed");
   // Nor one already waiting for Register: discarding it is a choice, and
   // installing again over it would make it for the admin.
   const where = kind === "theme" ? null : pendingLocation(PROJECT_ROOT, kind, slug);
@@ -1861,12 +1868,21 @@ async function runInstall(
       handBack: null,
       replaces,
       nextStep: replaces
-        ? `This version of MixOS can't register updates yet. Discard it in Admin > ` +
-          `${kind === "app" ? "Apps" : "Connectors"}, or with \`npm run register -- ${kind}/${slug} --discard\`.`
+        ? `Downloaded ${record.version} to ${where.rel}/, where nothing runs it yet, and ${rel} still holds ` +
+          `${replaces.version}. Review it and register it: Review and register in Admin > ` +
+          `${kind === "app" ? "Apps" : "Connectors"}, or \`npm run register -- ${kind}/${slug}\` in this checkout. ` +
+          `That moves ${rel} aside, puts ${record.version} in its place and runs its code for the first time, ` +
+          `and puts ${replaces.version} back if the registry generator refuses it.`
         : `Installed to ${where.rel}/, where nothing runs it yet. Read its code there, then ` +
           `register it in this checkout with \`npm run register -- ${kind}/${slug}\`, which runs ` +
           `its code for the first time. Then commit ${INSTALL_SEGMENT[kind]}/${slug} and deploy it.`,
     };
+  }
+
+  // Step 9, for a theme's update: the swap, fenced by the locks, then the
+  // registry generator, then the backup deleted or put back.
+  if (installed && local && replaces) {
+    return updateTheme({ slug, staged, rel, lease, lockToken, installed, local, record, replaces, verified });
   }
 
   // Step 9, for a theme, fenced by the locks (see placeTree), then the
@@ -1928,6 +1944,128 @@ async function runInstall(
         : `Registered to ${rel} and validated. Commit ${rel} and redeploy: the registries are generated at build time, so this instance serves it after the next build.`
       : `Written to ${rel}, but the registry generator could not be run here. ` +
         `Run \`npm run registry\` in the checkout and restart the server before it is usable.`,
+  };
+}
+
+/** What updateTheme() works with: runInstall()'s own, once the staged copy has passed its check. */
+interface ThemeUpdate {
+  slug: string;
+  /** Absolute: the staged copy, `.mixos/staging/themes/<slug>`. */
+  staged: string;
+  /** Repo-relative: `themes/<slug>`. */
+  rel: string;
+  lease: PlatformLease;
+  lockToken: string;
+  installed: InstalledExtension;
+  /** The folder in place as the update found it, under the locks. */
+  local: FolderState;
+  record: InstallRecord;
+  replaces: Replaces;
+  verified: Omit<InstallResult, "installPath" | "pending" | "registry" | "handBack" | "replaces" | "nextStep">;
+}
+
+/**
+ * Step 9 for a theme's update, which registers as it installs: the folder in
+ * place checked once more, then the swap Register makes for an app or a
+ * connector (./backup.ts), the generator, and the backup deleted, or the new
+ * release deleted and the backup put back.
+ */
+async function updateTheme(t: ThemeUpdate): Promise<InstallResult> {
+  const { slug, staged, rel, lease, lockToken, installed, local, record, replaces, verified } = t;
+  const from = replaces.version;
+  const to = record.version;
+
+  // What was found before the download is what is swapped: an edit since
+  // would be discarded without anyone having seen it.
+  await fence(lease, `Nothing was moved: ${rel} is as it was, and ${to} is in .mixos/staging/, where nothing reads it.`);
+  const now = folderState(installed.dir, installed.record);
+  if (now.folderHash === null || !contentHashesMatch(now.folderHash, local.folderHash ?? "")) {
+    await fs.rm(staged, { recursive: true, force: true }).catch(() => {});
+    throw new InstallError(
+      `${rel} changed while ${to} was being downloaded and checked, so nothing was moved. Review the update again.`,
+      "changed-meanwhile",
+    );
+  }
+
+  const swap: UpdateSwap = {
+    live: { dir: installed.dir, rel },
+    backup: backupLocation(PROJECT_ROOT, "theme", slug),
+    incoming: { dir: staged, rel: stagingLocation(PROJECT_ROOT, "theme", slug).rel },
+    record: {
+      operation: "update",
+      kind: "theme",
+      slug,
+      token: lockToken,
+      pid: process.pid,
+      hostname: os.hostname(),
+      startedAt: new Date().toISOString(),
+      from: { version: from, gitTag: replaces.gitTag, commitSha: replaces.commitSha, folderHash: replaces.folderHash },
+      to: { version: to, gitTag: record.gitTag, commitSha: record.commitSha, filesHash: record.filesHash },
+    },
+  };
+  await swapIn(swap, (left) => fence(lease, left), (message) => new InstallError(message, "write-failed"));
+
+  const registry = await regenerateRegistry("theme", slug, { lockToken });
+  if (!registry.ok) {
+    // Undo: the new release deleted, the backup back in place, and the
+    // registry regenerated, since the run that refused it may have rewritten
+    // it. Only while the locks are still this update's.
+    await fence(
+      lease,
+      `The registry generator didn't accept ${to}: ${rel} holds it, and ${from} waits in ${swap.backup.rel}/. ` +
+        `Run \`npm run register -- --recover\` to restore ${from}.`,
+      registry.output,
+    );
+    swapBack(swap, { keepIncoming: false });
+    await regenerateRegistry("theme", slug, { lockToken }).catch(() => {});
+    throw !registry.ran || registry.stopped
+      ? new InstallError(
+          `The registry generator ${registry.ran ? "stopped" : "didn't finish"} with ${to} in place, after its ` +
+            `check had passed, so ${from} was put back in ${rel}. The output below may be about the theme or ` +
+            "about this checkout.",
+          "generator-failed",
+          registry.output,
+        )
+      : new InstallError(
+          `${slug} ${to} passed this instance's registry check, but the registry generator left it out, so ` +
+            `${from} was put back in ${rel}.`,
+          "rejected-by-registry",
+          registry.output,
+        );
+  }
+
+  await fence(
+    lease,
+    `${to} is registered in ${rel}, but ${from} is still in ${swap.backup.rel}/. Run ` +
+      `\`npm run register -- --recover\` and keep ${to} to finish.`,
+  );
+  const changes = folderDifferences(swap.backup.folder, installed.dir);
+  swapDone(swap);
+
+  return {
+    ...verified,
+    installPath: rel,
+    pending: false,
+    registry,
+    replaces,
+    handBack: updateHandBackFor(
+      record,
+      {
+        version: from,
+        commitSha: replaces.commitSha,
+        direction: replaces.direction,
+        localChangesDiscarded: replaces.localChangesDiscarded,
+      },
+      rel,
+      folderFiles(installed.dir),
+      changes,
+    ),
+    nextStep:
+      `Updated ${rel} from ${from} to ${to}: the registry generator accepted it, and the backup of ${from} ` +
+      "was deleted. " +
+      (process.env.NODE_ENV === "development"
+        ? "The dev server picks it up on its next compile: reload the page."
+        : "This instance serves it after the next build: commit the change and deploy it."),
   };
 }
 
@@ -1998,7 +2136,7 @@ function assertNotPending(kind: ExtensionKind, slug: string, where: PendingLocat
 }
 
 /** The folder an update replaces, as folderState() in ./update.ts found it. */
-type FolderState = { modified: boolean; folderHash: string | null };
+type FolderState = { modified: boolean; folderHash: string | null; unhashable: string | null };
 
 /**
  * An update's checks before anything is downloaded: what the admin reviewed is
@@ -2018,6 +2156,10 @@ function assertUpdatable(installed: InstalledExtension, local: FolderState, upda
       "changed-meanwhile",
     );
   }
+  // A folder no files hash covers can't be pinned, so the swap couldn't tell
+  // whether it changed after the update was prepared.
+  const unhashable = unhashableProblem(rel, local);
+  if (unhashable) throw new InstallError(unhashable, "not-updatable");
   if (local.modified && !update.discardLocalChanges) {
     throw new InstallError(
       `${rel} has changed since ${record.version} was installed: its files no longer match its install ` +

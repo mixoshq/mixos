@@ -8,6 +8,7 @@ import { useState } from "react";
 import { Check, Copy, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { HandBack } from "@/lib/repository/hand-back";
+import { FileChanges } from "../update/update-parts";
 
 /**
  * What to do once an extension runs in this checkout: commit it, push it, and
@@ -22,34 +23,52 @@ import type { HandBack } from "@/lib/repository/hand-back";
  * `git status`: a rule in .gitignore can leave a file out of `git add`, and the
  * commit would then not hold the folder that was verified. `npm run register`
  * checks for that itself.
+ *
+ * For an update it lists the files the commit changes instead of the files it
+ * adds, and ends with how to roll the update back once it is deployed.
  */
 export default function HandBackPanel({ handBack, isApp }: { handBack: HandBack; isApp: boolean }) {
+  const update = handBack.update;
   return (
     <div className="space-y-4 text-sm text-foreground">
       <p>
-        It runs only in this checkout until you commit{" "}
+        It runs only in this checkout until you commit {update ? "the change to " : ""}
         <code className="font-mono text-xs">{handBack.folder}</code> and deploy it.
       </p>
 
-      <div>
-        <p className="text-muted-foreground">
-          Files added in <code className="font-mono text-xs">{`${handBack.folder}/`}</code>{" "}
-          {`(${handBack.fileCount} ${handBack.fileCount === 1 ? "file" : "files"}, ${handBack.totalSize})`}
-        </p>
-        <ul className="mt-2 max-h-48 space-y-0.5 overflow-y-auto rounded-lg border border-border p-3">
-          {handBack.files.map((file) => (
-            <li key={file.path} className="flex min-w-0 items-baseline justify-between gap-4">
-              <code className="min-w-0 break-all font-mono text-xs">{file.path}</code>
-              <span className="shrink-0 text-xs text-muted-foreground">{file.size}</span>
-            </li>
-          ))}
-          {handBack.more > 0 && <li className="text-xs text-muted-foreground">and {handBack.more} more</li>}
-        </ul>
-      </div>
+      {update ? (
+        <div>
+          <p className="text-muted-foreground">
+            What the commit changes in <code className="font-mono text-xs">{`${handBack.folder}/`}</code>
+          </p>
+          <div className="mt-2 max-h-48 overflow-y-auto rounded-lg border border-border p-3">
+            <FileChanges changes={update.changes} />
+          </div>
+        </div>
+      ) : (
+        <div>
+          <p className="text-muted-foreground">
+            Files added in <code className="font-mono text-xs">{`${handBack.folder}/`}</code>{" "}
+            {`(${handBack.fileCount} ${handBack.fileCount === 1 ? "file" : "files"}, ${handBack.totalSize})`}
+          </p>
+          <ul className="mt-2 max-h-48 space-y-0.5 overflow-y-auto rounded-lg border border-border p-3">
+            {handBack.files.map((file) => (
+              <li key={file.path} className="flex min-w-0 items-baseline justify-between gap-4">
+                <code className="min-w-0 break-all font-mono text-xs">{file.path}</code>
+                <span className="shrink-0 text-xs text-muted-foreground">{file.size}</span>
+              </li>
+            ))}
+            {handBack.more > 0 && <li className="text-xs text-muted-foreground">and {handBack.more} more</li>}
+          </ul>
+        </div>
+      )}
 
       <div>
         <div className="flex items-center justify-between gap-2">
-          <p>Commit it on a branch of its own, and push. The message records where it came from.</p>
+          <p>
+            Commit it on a branch of its own, and push. The message records{" "}
+            {update ? "both releases and where they came from." : "where it came from."}
+          </p>
           <CopyButton text={handBack.commands} label="Copy" />
         </div>
         <pre className="mt-2 overflow-x-auto whitespace-pre rounded-lg border border-border bg-muted p-3 font-mono text-xs text-foreground">
@@ -82,8 +101,9 @@ export default function HandBackPanel({ handBack, isApp }: { handBack: HandBack;
         Merging it into the branch your host deploys ships it on Coolify, Dokploy, Render, Railway
         and Vercel. With Docker Compose on your own server, pull it there, then build, migrate and
         start.
-        {isApp && " It arrives inactive on each instance: activate it there, in Admin > Apps."}
+        {!update && isApp && " It arrives inactive on each instance: activate it there, in Admin > Apps."}
       </p>
+      {update && <p className="text-muted-foreground">{update.rollback}</p>}
     </div>
   );
 }

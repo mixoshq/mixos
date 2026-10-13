@@ -15,6 +15,10 @@
  * installed from a Registry takes its install record with it, so the same
  * commit deletes both.
  *
+ * An update hands back the change to the folder (updateHandBackFor()): the
+ * files it changes, a message that names both releases, the commands, and how
+ * to roll it back once it is deployed.
+ *
  * The server never runs git. A web process committing to its own checkout
  * would commit whatever else is in it, and a developer's checkout usually has
  * other work on the branch, so the commands are for a person, or for
@@ -44,9 +48,11 @@ import {
   type FolderFile,
   type InstallRecord,
 } from "./install-record";
+import type { UpdateDirection } from "./pending";
 import { sourceHost } from "./provenance";
 import { KEPT_DATA } from "./remove-outcomes";
 import type { ExtensionKind } from "./types";
+import type { FolderDifferences } from "./update";
 
 /** Files listed by name; the rest are counted. */
 const MAX_LISTED = 100;
@@ -74,6 +80,19 @@ export interface HandBack {
   listingUrl: string;
   /** The catalogue's host: `mixos.org`. */
   host: string;
+  /** For an update: the release it replaced, and the files the commit changes. Absent for an install. */
+  update?: UpdateHandBack;
+}
+
+/** What an update's hand-back adds: what the commit replaces, and how to undo it once deployed. */
+export interface UpdateHandBack {
+  /** The release the folder held: `1.2.0`. */
+  from: string;
+  direction: UpdateDirection;
+  /** The files the commit changes, against the folder it replaced. */
+  changes: FolderDifferences;
+  /** How to roll it back once it is deployed, in a sentence or two. */
+  rollback: string;
 }
 
 /** `612 B`, `1.2 KB`, `38 KB`, `3.4 MB`. */
@@ -187,6 +206,102 @@ export function handBackFor(record: InstallRecord, folder: string, files: readon
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/*  An update                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** What an update's commit is built from, besides the new release's record: the release it replaces. */
+export interface ReplacedRelease {
+  version: string;
+  commitSha: string;
+  direction: UpdateDirection;
+  localChangesDiscarded: boolean;
+}
+
+/** `feat(files): update app files from 1.2.0 to 1.3.0`. Identifiers only. */
+export function updateSubject(record: InstallRecord, from: Pick<ReplacedRelease, "version">): string {
+  return `feat(${record.slug}): update ${record.kind} ${record.slug} from ${from.version} to ${record.version}`;
+}
+
+/**
+ * The commit message for an update of the folder `folder` (repo-relative) to
+ * `record`'s release: subject, body and trailers, the record's and the release
+ * it replaces, each a validated value.
+ */
+export function updateCommitMessage(record: InstallRecord, from: ReplacedRelease, folder: string): string {
+  const source = recordSourceUrl(record);
+  const body = [
+    ...wrap(
+      `Updated from ${sourceHost(record.source)} and registered in a checkout. It replaces ${from.version}` +
+        `${from.direction === "older" ? ", a newer release" : ""}. ${folder}/${INSTALL_RECORD_FILE} records the ` +
+        "release and the hashes that were verified.",
+    ),
+    ...(from.localChangesDiscarded ? ["", ...wrap(`Local changes to ${folder} were discarded.`)] : []),
+    ...(source ? ["", `The source at that commit: ${source}`] : []),
+  ];
+  const trailers = [
+    `Registry-Source: ${record.source}`,
+    `Registry-Version: ${record.version}`,
+    `Registry-Commit: ${record.commitSha}`,
+    `Registry-Content-Hash: ${record.contentHash}`,
+    `Registry-Files-Hash: ${record.filesHash}`,
+    `Registry-Listing: ${recordListingUrl(record)}`,
+    `Registry-Replaces-Version: ${from.version}`,
+    `Registry-Replaces-Commit: ${from.commitSha}`,
+  ];
+  const message = [updateSubject(record, from), "", ...body, "", ...trailers].join("\n");
+  const marker = ciSkipMarker(message);
+  // Unreachable while the record's schema holds: every value above is an
+  // identifier. Checked anyway, as the last thing before a person commits it.
+  if (marker) throw new Error(`A prepared commit message would hold ${JSON.stringify(marker)}.`);
+  return message;
+}
+
+/** `update-app-files`: a branch name from the kind and the slug. */
+export function updateBranchName(record: Pick<InstallRecord, "kind" | "slug">): string {
+  return `update-${record.kind}-${record.slug}`;
+}
+
+/** How to undo an update once it is deployed. An app's migrations aren't undone by either way. */
+export function rollbackFor(kind: ExtensionKind): string {
+  return (
+    "To roll it back once it is deployed, revert the commit and deploy again, or redeploy the previous build " +
+    "on your host." +
+    (kind === "app" ? " Neither undoes a migration it ran: only restoring a backup of the database does." : "")
+  );
+}
+
+/**
+ * The hand-back for an update of `folder` (repo-relative), which now holds
+ * `files` as `record`'s release, in place of `from`: the change to commit, its
+ * message and commands, and how to roll it back.
+ */
+export function updateHandBackFor(
+  record: InstallRecord,
+  from: ReplacedRelease,
+  folder: string,
+  files: readonly FolderFile[],
+  changes: FolderDifferences,
+): HandBack {
+  const listed = files.slice(0, MAX_LISTED);
+  const message = updateCommitMessage(record, from, folder);
+  const branch = updateBranchName(record);
+  return {
+    folder,
+    files: listed.map((f) => ({ path: f.path, size: formatSize(f.bytes) })),
+    more: Math.max(0, files.length - listed.length),
+    fileCount: files.length,
+    totalSize: formatSize(files.reduce((n, f) => n + f.bytes, 0)),
+    commitMessage: message,
+    branch,
+    commands: commandsFor({ branch, folder, commitMessage: message }),
+    sourceUrl: recordSourceUrl(record),
+    listingUrl: recordListingUrl(record),
+    host: sourceHost(record.source),
+    update: { from: from.version, direction: from.direction, changes, rollback: rollbackFor(record.kind) },
+  };
+}
+
 /** What shipping it means on each host, a sentence each. */
 export const SHIPPING = {
   hosted:
@@ -215,14 +330,22 @@ export function handBackLines(
   { isApp, ignored = [] }: { isApp: boolean; ignored?: readonly IgnoredPath[] },
 ): string[] {
   const width = Math.max(0, ...handBack.files.map((f) => f.path.length));
-  const lines = [
-    "",
-    `It runs in this checkout now, and nowhere else until you commit ${handBack.folder} and deploy it.`,
-    "",
-    `Files added in ${handBack.folder}/ (${handBack.fileCount} ${handBack.fileCount === 1 ? "file" : "files"}, ${handBack.totalSize}):`,
-    ...handBack.files.map((f) => `    ${f.path.padEnd(width)}  ${f.size}`),
-    ...(handBack.more > 0 ? [`    and ${handBack.more} more`] : []),
-  ];
+  const update = handBack.update;
+  const lines = update
+    ? [
+        "",
+        `It runs in this checkout now, and nowhere else until you commit the change to ${handBack.folder} and deploy it.`,
+        "",
+        ...changeLines(handBack.folder, update.changes),
+      ]
+    : [
+        "",
+        `It runs in this checkout now, and nowhere else until you commit ${handBack.folder} and deploy it.`,
+        "",
+        `Files added in ${handBack.folder}/ (${handBack.fileCount} ${handBack.fileCount === 1 ? "file" : "files"}, ${handBack.totalSize}):`,
+        ...handBack.files.map((f) => `    ${f.path.padEnd(width)}  ${f.size}`),
+        ...(handBack.more > 0 ? [`    and ${handBack.more} more`] : []),
+      ];
   if (ignored.length > 0) {
     lines.push(
       "",
@@ -234,7 +357,9 @@ export function handBackLines(
   }
   lines.push(
     "",
-    "Commit it on a branch of its own, and push. The message records where it came from:",
+    update
+      ? "Commit it on a branch of its own, and push. The message records both releases and where they came from:"
+      : "Commit it on a branch of its own, and push. The message records where it came from:",
     "",
     commandsFor(handBack, ignored.map((i) => i.path)),
     "",
@@ -244,7 +369,26 @@ export function handBackLines(
     SHIPPING.hosted,
     SHIPPING.compose,
   );
-  if (isApp) lines.push("It arrives inactive on each instance: activate it there, in Admin > Apps.");
+  if (update) lines.push(update.rollback);
+  else if (isApp) lines.push("It arrives inactive on each instance: activate it there, in Admin > Apps.");
+  return lines;
+}
+
+/** An update's changed, added and deleted files, for a terminal. */
+function changeLines(folder: string, changes: FolderDifferences): string[] {
+  const count = (n: number, more: number) => n + more;
+  const changed = count(changes.changed.length, changes.more.changed);
+  const added = count(changes.added.length, changes.more.added);
+  const removed = count(changes.removed.length, changes.more.removed);
+  const lines = [`What the commit changes in ${folder}/ (${changed} changed, ${added} added, ${removed} deleted):`];
+  const group = (word: string, names: string[], more: number) => {
+    for (const name of names) lines.push(`    ${word.padEnd(7)}  ${name}`);
+    if (more > 0) lines.push(`    and ${more} more ${word}`);
+  };
+  group("changed", changes.changed, changes.more.changed);
+  group("added", changes.added, changes.more.added);
+  group("deleted", changes.removed, changes.more.removed);
+  if (changes.incomplete) lines.push("    The folder holds too many files to list them all.");
   return lines;
 }
 

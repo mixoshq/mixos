@@ -42,17 +42,22 @@
  * An update of an extension already in `apps/` or `connectors/` waits here too
  * (./update.ts). Its sidecar also records what it replaces: the installed
  * release, from that folder's install record, and the folder as the update
- * found it. Register refuses a pending update for now, with
- * pendingUpdateProblem(); Discard deletes one as it deletes any.
+ * found it. Register puts it in place only while that folder is still as the
+ * update found it (replacesProblem()), with the folder's backup in
+ * `.mixos/backup/` until the registry generator accepts the new release
+ * (./backup.ts). Discard deletes one as it deletes any.
  */
 
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { contentHashesMatch } from "./content-hash";
 import {
+  FolderReadError,
   INSTALL_RECORD_FILE,
   InstallRecordSchema,
+  folderFilesHash,
   readInstallRecord,
   recordMismatch,
   type InstallRecord,
@@ -353,9 +358,7 @@ export function listPendingInstalls(root: string): PendingInstall[] {
         problem:
           pendingProblem(where, hasFolder, read) ??
           withRemedy(recordProblem(where, kind, slug, record)) ??
-          (replaces
-            ? pendingUpdateProblem(kind, slug, replaces, record.state === "ok" ? record.record.version : null)
-            : null),
+          (replaces ? replacesProblem(root, kind, slug, replaces) : null),
       });
     }
   }
@@ -408,27 +411,53 @@ function withRemedy(problem: string | null): string | null {
 }
 
 /**
- * What the pending list, the review and Register say of a pending update:
- * Register can't put one in place yet, and what to do with it instead. `to` is
- * the version waiting, when its record can be read. `subject` names it, "It"
- * where the reader is already looking at it.
- *
- * The one place a pending update is turned away. The swap that puts one in
- * place, with a backup of the folder it replaces, is the rest of the update
- * (docs/plans/20261008_2300-extension-lifecycle.md §1.7), and replaces this.
+ * Why a pending update can't replace the folder in place, or null when it can:
+ * the folder is there, its install record is the release the update replaces,
+ * and its files are as the update found them. Otherwise registering it would
+ * discard changes nobody reviewed, or replace a release nobody chose to
+ * replace. The pending list and the review say it; Register checks it again
+ * under its locks, before anything moves.
  */
-export function pendingUpdateProblem(
-  kind: PendingKind,
-  slug: string,
-  replaces: Replaces,
-  to: string | null,
-  subject = "It",
-): string {
-  return (
-    `${subject} is an update of ${kindDir(kind)}/${slug} from ${replaces.version}${to ? ` to ${to}` : ""}, ` +
-    "and this version of MixOS can't register updates yet. Discard it with " +
-    `\`npm run register -- ${kind}/${slug} --discard\`.`
-  );
+export function replacesProblem(root: string, kind: PendingKind, slug: string, replaces: Replaces): string | null {
+  const live = liveLocation(root, kind, slug);
+  const discard = `\`npm run register -- ${kind}/${slug} --discard\``;
+  const again = `Discard the update with ${discard} and prepare it again.`;
+  if (!isRealDirectory(live.dir)) {
+    return pathExists(live.dir)
+      ? `${live.rel} is a link, not the folder this update replaces. ${again}`
+      : `${live.rel} is gone, so there is nothing for this update to replace. ${again}`;
+  }
+  const read = readInstallRecord(live.dir);
+  if (
+    read.state !== "ok" ||
+    recordMismatch(read.record, kind, slug) !== null ||
+    read.record.version !== replaces.version ||
+    read.record.commitSha !== replaces.commitSha ||
+    !contentHashesMatch(read.record.filesHash, replaces.filesHash)
+  ) {
+    return (
+      `${live.rel}/${INSTALL_RECORD_FILE} no longer records ${replaces.version}, the release this update ` +
+      `replaces: it was updated, installed again or edited since the update was prepared. ${again}`
+    );
+  }
+  let found: string;
+  try {
+    found = folderFilesHash(live.dir);
+  } catch (err) {
+    if (!(err instanceof FolderReadError)) throw err;
+    return (
+      `${live.rel} holds something no files hash covers (${err.message.replace(/\.$/, "")}), so whether it ` +
+      `changed since the update was prepared can't be told. Take that out, then discard the update with ` +
+      `${discard} and prepare it again.`
+    );
+  }
+  if (replaces.folderHash === null || !contentHashesMatch(found, replaces.folderHash)) {
+    return (
+      `${live.rel} has changed since this update was prepared, so registering it would discard changes ` +
+      `nobody reviewed. ${again}`
+    );
+  }
+  return null;
 }
 
 /** A directory at `p` itself, not a link to one. */

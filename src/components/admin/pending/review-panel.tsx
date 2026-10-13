@@ -7,7 +7,9 @@ import { ExternalLink } from "lucide-react";
 import { describeFloor } from "@/lib/platform/version-floor";
 import type { ListingFacts } from "@/lib/repository/pending-outcomes";
 import type { PendingReview } from "@/lib/repository/review";
+import type { PendingUpdateReview } from "@/lib/repository/update";
 import Notice from "@/components/ui/notice";
+import { DeclarationChanges, FileChanges, MigrationNotes } from "../update/update-parts";
 import WithCode from "./with-code";
 
 /**
@@ -23,30 +25,50 @@ import WithCode from "./with-code";
  * The manifest's declarations are what this instance enforces. The
  * publisher's claims are their own words on the listing, shown beside them
  * so a difference is visible, never as a guarantee.
+ *
+ * A pending update also says what it replaces, and what registering it
+ * changes in the folder in place, from both folders on disk (`update`).
  */
 export default function ReviewPanel({
   review,
   listing,
+  update = null,
 }: {
   review: PendingReview;
   listing: ListingFacts;
+  /** For a pending update: how it compares with the folder it replaces. */
+  update?: PendingUpdateReview | null;
 }) {
   const { release, sourceUrl } = review;
   return (
     <div className="space-y-6">
-      <p className="text-sm text-foreground">
-        It is waiting in <Path>{review.folder}/</Path>, where none of its code
-        has run. Registering moves it to <Path>{review.target}/</Path> and runs
-        the registry generator, which loads its code for the first time, as
-        the user this server runs as. From then on the dev server runs it with
-        the server&apos;s full environment.
-      </p>
+      {update ? (
+        <p className="text-sm text-foreground">
+          It is an update of <Path>{update.path}/</Path> from {update.from.version} to {update.to.version}
+          {update.direction === "older" ? ", an older release" : ""}, waiting in <Path>{review.folder}/</Path>,
+          where none of its code has run. Registering moves <Path>{update.path}/</Path> to{" "}
+          <Path>{`.mixos/backup/${update.path}/`}</Path>, puts this in its place and runs the registry
+          generator, which loads its code for the first time, as the user this server runs as. If the generator
+          refuses it, {update.from.version} is put back; if it accepts it, the backup is deleted. From then on the
+          dev server runs it with the server&apos;s full environment.
+        </p>
+      ) : (
+        <p className="text-sm text-foreground">
+          It is waiting in <Path>{review.folder}/</Path>, where none of its code
+          has run. Registering moves it to <Path>{review.target}/</Path> and runs
+          the registry generator, which loads its code for the first time, as
+          the user this server runs as. From then on the dev server runs it with
+          the server&apos;s full environment.
+        </p>
+      )}
 
       {review.problem && (
         <Notice tone="warning" title="It can't be registered as it is">
           <WithCode text={review.problem} />
         </Notice>
       )}
+
+      {update && <UpdateSection update={update} kind={review.kind} />}
 
       <dl className="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-2 text-sm">
         <Row label="Version">
@@ -219,6 +241,58 @@ export default function ReviewPanel({
         )}
       </Section>
     </div>
+  );
+}
+
+/** What a pending update changes in the folder it replaces. */
+function UpdateSection({ update, kind }: { update: PendingUpdateReview; kind: PendingReview["kind"] }) {
+  return (
+    <Section title="What the update changes">
+      <div className="space-y-4">
+        {update.localChangesDiscarded && (
+          <Notice tone="warning" title="Your changes are discarded">
+            <Path>{update.path}/</Path> no longer matched {update.from.version} when the update was prepared, and
+            you chose to discard its changes. Registering replaces the whole folder.
+          </Notice>
+        )}
+        {update.otherRepository && (
+          <Notice tone="warning" title="It comes from another repository">
+            {update.to.version} is published from {update.otherRepository.to}, and {update.from.version} came from{" "}
+            {update.otherRepository.from}. Once this is deployed, each instance treats it as a different extension:
+            it is switched off until an admin types its slug to turn it on.
+          </Notice>
+        )}
+        {update.compareUrl && (
+          <p className="text-sm">
+            <a href={update.compareUrl} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2">
+              Compare {update.from.version} and {update.to.version} on GitHub
+              <ExternalLink className="ml-1 inline h-3.5 w-3.5 align-[-0.125em]" aria-hidden />
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          </p>
+        )}
+        {update.files ? (
+          <div>
+            <p className="text-sm text-muted-foreground">
+              The files registering it changes in <Path>{update.path}/</Path>:
+            </p>
+            <div className="mt-2">
+              <FileChanges changes={update.files} />
+            </div>
+          </div>
+        ) : null}
+        <div>
+          <p className="text-sm font-medium text-foreground">What the package declares</p>
+          <DeclarationChanges declarations={update.declarations} kind={kind} />
+        </div>
+        {kind === "app" && (
+          <div>
+            <p className="mb-2 text-sm font-medium text-foreground">Migrations</p>
+            <MigrationNotes migrations={update.migrations} to={update.to.version} path={update.path} />
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }
 

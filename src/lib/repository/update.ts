@@ -6,17 +6,21 @@
  * Updating an extension installed from a Registry: which way an update goes,
  * what changed in its folder since it was installed, and what the release it
  * goes to changes. Rules and comparisons, with no network. The update dialog's
- * server work (./update-admin.ts) downloads what they compare, and install's
- * update mode (./install.ts) applies the rules again under its locks.
+ * server work (./update-admin.ts) downloads what they compare, install's
+ * update mode (./install.ts) applies the rules again under its locks, and the
+ * review before Register compares a pending update with the folder it replaces
+ * (reviewPendingUpdate()), with nothing downloaded.
  *
  * ── WHAT AN UPDATE IS ───────────────────────────────────────────────────────
  *
- * Another release of an app or a connector installed from this instance's
- * catalogue, for the same folder. Install downloads, verifies and checks it as
- * it does any release, and leaves it in `.mixos/pending/` with a sidecar that
- * records what it replaces (./pending.ts). Register is what will put it in
- * place, with a backup of the folder it replaces. Until it can, Register
- * refuses a pending update, and Discard deletes one.
+ * Another release of an extension installed from this instance's catalogue,
+ * for the same folder. Install downloads, verifies and checks it as it does any
+ * release. An app or a connector then waits in `.mixos/pending/` with a
+ * sidecar that records what it replaces (./pending.ts), and Register puts it in
+ * place, with a backup of the folder it replaces until the registry generator
+ * accepts it (./register.ts, ./backup.ts). A theme runs no code, so install
+ * puts it in place there and then, the same way. Discard deletes a pending
+ * update.
  *
  * ── WHICH WAY ───────────────────────────────────────────────────────────────
  *
@@ -42,11 +46,28 @@ import fs from "node:fs";
 import path from "node:path";
 import { compareReleaseVersions, parseReleaseVersion, parseVersion } from "../platform/version-floor";
 import { contentHashesMatch } from "./content-hash";
-import { FolderReadError, INSTALL_RECORD_FILE, folderFilesHash, type InstallRecord } from "./install-record";
+import {
+  FolderReadError,
+  INSTALL_RECORD_FILE,
+  folderFilesHash,
+  githubCompareUrl,
+  readInstallRecord,
+  recordMismatch,
+  recordSourceUrl,
+  type InstallRecord,
+} from "./install-record";
 import { isLeftOutName } from "./left-out";
-import type { PendingKind, UpdateDirection } from "./pending";
-import { MAX_LINE_CHARS, declaredValues, shownText } from "./review";
+import {
+  isRealDirectory,
+  liveLocation,
+  pendingLocation,
+  type PendingKind,
+  type Replaces,
+  type UpdateDirection,
+} from "./pending";
+import { MAX_LINE_CHARS, declaredValues, readManifest, shownText } from "./review";
 import type { TarEntry } from "./tar";
+import type { ExtensionKind } from "./types";
 import { isDotted } from "./updates";
 
 export type { UpdateDirection } from "./pending";
@@ -57,8 +78,8 @@ export const MAX_LISTED = 50;
 /** Where a walk of a folder stops: install's archive limits keep a real package well inside it. */
 const MAX_WALKED = 20_000;
 
-/** The manifest each kind that can be updated is read from. */
-const MANIFEST_FILE: Record<PendingKind, string> = { app: "app.json", connector: "connector.json" };
+/** The manifest each kind is read from. */
+const MANIFEST_FILE: Record<ExtensionKind, string> = { app: "app.json", connector: "connector.json", theme: "theme.json" };
 
 /* -------------------------------------------------------------------------- */
 /*  Which way                                                                  */
@@ -155,19 +176,32 @@ export type LocalChanges =
  * Whether the folder `dir` still matches its install record, from its files
  * hash alone, with nothing downloaded; and that hash, or null when the folder
  * holds something no files hash covers, such as a link, which install never
- * writes.
+ * writes, with what that is (`unhashable`).
  */
 export function folderState(dir: string, record: Pick<InstallRecord, "filesHash">): {
   modified: boolean;
   folderHash: string | null;
+  unhashable: string | null;
 } {
   try {
     const folderHash = folderFilesHash(dir);
-    return { modified: !contentHashesMatch(folderHash, record.filesHash), folderHash };
+    return { modified: !contentHashesMatch(folderHash, record.filesHash), folderHash, unhashable: null };
   } catch (err) {
-    if (err instanceof FolderReadError) return { modified: true, folderHash: null };
+    if (err instanceof FolderReadError) return { modified: true, folderHash: null, unhashable: err.message };
     throw err;
   }
+}
+
+/**
+ * Why an update can't be made over a folder whose files no files hash covers:
+ * Register couldn't tell whether it changed after the update was prepared. Null
+ * when it isn't so.
+ */
+export function unhashableProblem(rel: string, state: { unhashable: string | null }): string | null {
+  return state.unhashable
+    ? `${rel} holds something no files hash covers (${state.unhashable.replace(/\.$/, "")}), so an update couldn't ` +
+        "tell later whether the folder changed. Take that out of the folder first."
+    : null;
 }
 
 /** A list sorted, then cut to MAX_LISTED, with how many it left out. */
@@ -182,7 +216,7 @@ function cut(list: string[]): { names: string[]; more: number } {
  * already left out (leaveOut() in ./install.ts). Reads the folder, never
  * through a link.
  */
-export function localChangesBetween(dir: string, kind: PendingKind, release: readonly TarEntry[]): LocalChangeList {
+export function localChangesBetween(dir: string, kind: ExtensionKind, release: readonly TarEntry[]): LocalChangeList {
   const expected = new Map(release.map((e) => [e.path, e.data]));
   const seen = new Set<string>();
   const changed: string[] = [];
@@ -438,10 +472,14 @@ export function folderMigrations(dir: string): Map<string, Buffer | null> {
   return out;
 }
 
-/** What an update does to an app's migrations. Each list sorted, and in full: a migration is worth naming. */
+/**
+ * What an update does to an app's migrations. Each list sorted, and in full: a
+ * migration is worth naming. A file with no bytes to compare (too large, or not
+ * a regular file) counts as changed.
+ */
 export function compareMigrations(
   before: ReadonlyMap<string, Buffer | null>,
-  after: ReadonlyMap<string, Buffer>,
+  after: ReadonlyMap<string, Buffer | null>,
 ): MigrationChanges {
   const sorted = (names: string[]) => names.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   return {
@@ -451,7 +489,7 @@ export function compareMigrations(
         .filter(([name, data]) => {
           if (!before.has(name)) return false;
           const was = before.get(name);
-          return !was || !was.equals(data);
+          return !was || !data || !was.equals(data);
         })
         .map(([name]) => name),
     ),
@@ -460,7 +498,177 @@ export function compareMigrations(
 }
 
 /** A release's manifest, from its files, as a JSON object, or null. */
-export function releaseManifest(entries: readonly TarEntry[], kind: PendingKind): Record<string, unknown> | null {
+export function releaseManifest(entries: readonly TarEntry[], kind: ExtensionKind): Record<string, unknown> | null {
   const entry = entries.find((e) => e.path === MANIFEST_FILE[kind]);
   return entry ? jsonObject(entry.data) : null;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  One folder against another                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Two repositories are one when GitHub would say so: owner and name, in any case. */
+export function sameRepository(a: { owner: string; name: string }, b: { owner: string; name: string }): boolean {
+  return a.owner.toLowerCase() === b.owner.toLowerCase() && a.name.toLowerCase() === b.name.toLowerCase();
+}
+
+/** The files that differ from one folder to another, by path in the folder. */
+export interface FolderDifferences {
+  /** In both, with different contents. A link in a file's place counts. */
+  changed: string[];
+  /** In the second and not in the first. */
+  added: string[];
+  /** In the first and not in the second. */
+  removed: string[];
+  /** How many more of each there are than the lists name. */
+  more: { changed: number; added: number; removed: number };
+  /** A folder held more than a walk reads, so the lists may be short. */
+  incomplete: boolean;
+}
+
+/** Everything under `dir` that isn't a folder, by POSIX path, and whether the walk stopped short. */
+function entriesUnder(dir: string): { paths: Set<string>; incomplete: boolean } {
+  const paths = new Set<string>();
+  let incomplete = false;
+  const walk = (relative: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(path.join(/* turbopackIgnore: true */ dir, relative), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (paths.size >= MAX_WALKED) {
+        incomplete = true;
+        return;
+      }
+      const rel = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(rel);
+        if (incomplete) return;
+      } else {
+        paths.add(rel);
+      }
+    }
+  };
+  walk("");
+  return { paths, incomplete };
+}
+
+/**
+ * What changes, file by file, from the folder `before` to the folder `after`:
+ * what a commit of `after` in `before`'s place changes, the install record
+ * included. Reads both, never through a link; a link, or anything else that
+ * isn't a regular file, counts as changed.
+ */
+export function folderDifferences(before: string, after: string): FolderDifferences {
+  const was = entriesUnder(before);
+  const now = entriesUnder(after);
+  const changed: string[] = [];
+  const added: string[] = [];
+  for (const rel of now.paths) {
+    if (!was.paths.has(rel)) {
+      added.push(rel);
+      continue;
+    }
+    const a = path.join(/* turbopackIgnore: true */ before, rel);
+    const b = path.join(/* turbopackIgnore: true */ after, rel);
+    const left = readRegular(a, () => true);
+    const right = left === null ? null : readRegular(b, (size) => size === left.length);
+    if (left === null || right === null || !left.equals(right)) changed.push(rel);
+  }
+  const removed = [...was.paths].filter((rel) => !now.paths.has(rel));
+  const c = cut(changed);
+  const a = cut(added);
+  const r = cut(removed);
+  return {
+    changed: c.names,
+    added: a.names,
+    removed: r.names,
+    more: { changed: c.more, added: a.more, removed: r.more },
+    incomplete: was.incomplete || now.incomplete,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  A pending update, against the folder it replaces                            */
+/* -------------------------------------------------------------------------- */
+
+/** What the review before Register says about a pending update. */
+export interface PendingUpdateReview {
+  /** Repo-relative: the folder it replaces, `apps/<slug>`. */
+  path: string;
+  /** The release in place, as the sidecar records it, with its source when the folder's record still names it. */
+  from: { version: string; gitTag: string | null; commitSha: string; sourceUrl: string | null };
+  /** The release waiting, from its own install record. */
+  to: { version: string; gitTag: string | null; commitSha: string; sourceUrl: string | null };
+  direction: UpdateDirection;
+  /** The admin chose to discard the folder's local changes when the update was prepared. */
+  localChangesDiscarded: boolean;
+  /** GitHub's view of what changed between the two commits, older first. Null across repositories. */
+  compareUrl: string | null;
+  /** The release comes from another GitHub repository than the one in place: both, as `owner/name`. */
+  otherRepository: { from: string; to: string } | null;
+  /** What the package's manifest declares, the rows that change. Null when either manifest can't be read. */
+  declarations: DeclarationChange[] | null;
+  /** An app's migrations, from the folder in place to the release waiting. Empty for a connector. */
+  migrations: MigrationChanges;
+  /** The files registering it changes in the folder. Null when the folder in place is gone. */
+  files: FolderDifferences | null;
+}
+
+/**
+ * The pending update of `kind`/`slug` in the checkout at `root`, compared with
+ * the folder it replaces: both are on disk, so nothing is downloaded.
+ * `replaces` is from its sidecar. Null when its own install record can't be
+ * read, which the review says already. Reads only; whether the folder is still
+ * what the update replaces is replacesProblem()'s to say (./pending.ts).
+ */
+export function reviewPendingUpdate(
+  root: string,
+  kind: PendingKind,
+  slug: string,
+  replaces: Replaces,
+): PendingUpdateReview | null {
+  const live = liveLocation(root, kind, slug);
+  const pending = pendingLocation(root, kind, slug);
+  const own = isRealDirectory(pending.folder) ? readInstallRecord(pending.folder) : null;
+  if (own?.state !== "ok" || recordMismatch(own.record, kind, slug) !== null) return null;
+  const to = own.record;
+  const here = isRealDirectory(live.dir);
+  const read = here ? readInstallRecord(live.dir) : null;
+  const from =
+    read?.state === "ok" && recordMismatch(read.record, kind, slug) === null && read.record.commitSha === replaces.commitSha
+      ? read.record
+      : null;
+  const same = from ? sameRepository(from.repository, to.repository) : true;
+  const [base, head] = replaces.direction === "older" ? [to.commitSha, replaces.commitSha] : [replaces.commitSha, to.commitSha];
+  const before = here ? readManifest(live.dir, kind) : null;
+  const after = readManifest(pending.folder, kind);
+  return {
+    path: live.rel,
+    from: {
+      version: replaces.version,
+      gitTag: replaces.gitTag,
+      commitSha: replaces.commitSha,
+      sourceUrl: from ? recordSourceUrl(from) : null,
+    },
+    to: { version: to.version, gitTag: to.gitTag, commitSha: to.commitSha, sourceUrl: recordSourceUrl(to) },
+    direction: replaces.direction,
+    localChangesDiscarded: replaces.localChangesDiscarded,
+    compareUrl: from && same && replaces.commitSha !== to.commitSha ? githubCompareUrl(to.repository, base, head) : null,
+    otherRepository:
+      from && !same
+        ? {
+            from: `${from.repository.owner}/${from.repository.name}`,
+            to: `${to.repository.owner}/${to.repository.name}`,
+          }
+        : null,
+    declarations: before && after ? compareDeclarations(kind, before, after) : null,
+    migrations:
+      kind === "app" && here
+        ? compareMigrations(folderMigrations(live.dir), folderMigrations(pending.folder))
+        : { added: [], changed: [], lacking: [] },
+    files: here ? folderDifferences(live.dir, pending.folder) : null,
+  };
 }
