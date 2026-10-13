@@ -5,8 +5,11 @@
 import type { ReactNode } from "react";
 import { ArrowUpCircle } from "lucide-react";
 import Notice from "@/components/ui/notice";
+import { formatLastUpdated } from "@/lib/apps/display";
+import type { UpdateOffer } from "@/lib/github/outcomes";
 import { WHAT_THE_RELEASE_CHECK_SENDS, type ReleaseNotice as ReleaseNoticeData } from "@/lib/platform/releases";
 import ReleaseNotes from "./release-notes";
+import UpdatePullRequestButton from "./update-pull-request";
 
 /** A link out of MixOS, in a new tab, saying so to a screen reader. */
 function Outbound({ href, children }: { href: string; children: ReactNode }) {
@@ -39,9 +42,14 @@ function Outbound({ href, children }: { href: string; children: ReactNode }) {
  *
  * Nothing here applies anything. Taking a release is merging its tag into the
  * repository this instance is built from and deploying it, which an admin
- * page can't do and doesn't offer to.
+ * page can't do and doesn't offer to. With the GitHub App linked, `offer`
+ * (src/lib/github/update-pull.ts) adds one thing under the links: on a fork
+ * of upstream, a button that opens a pull request for the release, which an
+ * admin then merges or not on GitHub; on any other repository, the merge by
+ * hand; and once a pull request was opened from here, a link to it. Without
+ * the App, the notice is as above.
  */
-export default function ReleaseNotice({ notice }: { notice: ReleaseNoticeData }) {
+export default function ReleaseNotice({ notice, offer = null }: { notice: ReleaseNoticeData; offer?: UpdateOffer | null }) {
   return (
     <section aria-label="A new release of MixOS" className="mb-6">
       <Notice tone="neutral" icon={<ArrowUpCircle className="h-4 w-4" aria-hidden />}>
@@ -56,9 +64,47 @@ export default function ReleaseNotice({ notice }: { notice: ReleaseNoticeData })
           <Outbound href={notice.releaseUrl}>{notice.tag} on mixos.org</Outbound>
           <Outbound href={notice.upgradeUrl}>How to upgrade</Outbound>
         </p>
+        {offer && <Offer offer={offer} />}
       </Notice>
     </section>
   );
+}
+
+/** What the GitHub App offers for the release, under the links. */
+function Offer({ offer }: { offer: UpdateOffer }) {
+  switch (offer.kind) {
+    case "fork":
+      return (
+        <div className="mt-3" data-update-offer="fork">
+          <UpdatePullRequestButton offer={offer} />
+        </div>
+      );
+    case "copy":
+      return (
+        <div className="mt-3 space-y-2" data-update-offer="copy">
+          <p>
+            {offer.repository} isn&apos;t a fork of mixoshq/mixos, so the GitHub App can&apos;t open an update pull
+            request there. Merge the release by hand, on a branch:
+          </p>
+          <pre className="overflow-x-auto rounded-md border border-border bg-background px-3 py-2 font-mono text-xs">
+            {offer.command}
+          </pre>
+          {offer.compareUrl && (
+            <p>
+              <Outbound href={offer.compareUrl}>What changed, on GitHub</Outbound>
+            </p>
+          )}
+        </div>
+      );
+    case "proposed":
+      return (
+        <p className="mt-3" data-update-offer="proposed">
+          <Outbound href={offer.url}>Pull request #{offer.number}</Outbound> for {offer.tag} was opened on{" "}
+          {offer.repository} {formatLastUpdated(Date.parse(offer.at), "earlier")} by {offer.by}. Admin &gt; GitHub lists
+          it with its checks. Merging it is the deploy.
+        </p>
+      );
+  }
 }
 
 /**

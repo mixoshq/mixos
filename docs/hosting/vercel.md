@@ -120,7 +120,8 @@ deployment doesn't rebuild: its release step ran when it was built.
 ## Previews of the GitHub App's branches
 
 `vercel.json` turns off deployments of branches under `mixos/`, which are the
-ones the [GitHub App](README.md#proposing-an-extension) proposes extensions on:
+ones the [GitHub App](README.md#proposing-an-extension) proposes extensions
+and [MixOS updates](README.md#updating-mixos-through-the-app) on:
 
 ```json
 "git": { "deploymentEnabled": { "mixos/**": false } }

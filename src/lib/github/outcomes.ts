@@ -104,9 +104,12 @@ export interface GitHubPageState {
 /*  Proposals                                                                   */
 /* -------------------------------------------------------------------------- */
 
-/** One thing that has to hold before a proposal, as the propose dialog lists it. */
+/**
+ * One thing that has to hold before a proposal, as the propose dialog lists
+ * it. The last four are a MixOS update's own (./update-pull.ts).
+ */
 export interface ProposalCheckLine {
-  id: "rule" | "checklist" | "workflows" | "render" | "vercel" | "folder" | "branch";
+  id: "rule" | "checklist" | "workflows" | "render" | "vercel" | "folder" | "branch" | "tag" | "main" | "changes";
   ok: boolean;
   label: string;
   detail: string;
@@ -238,11 +241,15 @@ export interface UpdateProposalComparison extends ComparisonFacts {
 
 export type UpdateProposalCompareOutcome = UpdateProposalComparison | Extract<GitHubOutcome, { ok: false }>;
 
-/** An open pull request the App opened, as the Apps page lists it. */
+/** What a listed pull request proposes: an extension of a kind, or an update of MixOS itself. */
+export type ProposalKind = "app" | "connector" | "theme" | "mixos";
+
+/** An open pull request the App opened, as the Apps page and Admin > GitHub list it. */
 export interface ProposedPullRequest {
   number: number;
   url: string;
-  kind: "app" | "connector" | "theme";
+  kind: ProposalKind;
+  /** The extension's slug, or for a MixOS update the release's tag. */
   slug: string;
   branch: string;
   /** What it proposes, from its branch's name. */
@@ -275,3 +282,53 @@ export type ProposalsView =
       /** Open App pull requests of this kind not listed. */
       more: number;
     };
+
+/* -------------------------------------------------------------------------- */
+/*  MixOS updates                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What the release notice offers under a newer release, from what this
+ * instance stores alone (./update-pull.ts mixosUpdateOffer()): never a request
+ * to GitHub, since the notice is on every admin page. Null, and the notice
+ * stays as it was, when the App is off, nothing is linked, the link is off,
+ * or this is a checkout.
+ */
+export type UpdateOffer =
+  /** A fork of upstream, with no pull request recorded for this release: the button. */
+  | {
+      kind: "fork";
+      tag: string;
+      commitSha: string;
+      /** `owner/name`. */
+      repository: string;
+      defaultBranch: string;
+      branch: string;
+      title: string;
+      /** Why the button is off for now (the rule, the checklist), as Browse says it, or null. */
+      off: string | null;
+      /** What changed between this build and the release, on GitHub; null when this build's commit isn't known. */
+      compareUrl: string | null;
+    }
+  /** Not a fork of upstream: no button. The merge by hand, and what changed. */
+  | { kind: "copy"; tag: string; repository: string; compareUrl: string | null; command: string }
+  /** This instance opened a pull request for this release: say so, and nothing else. */
+  | { kind: "proposed"; tag: string; repository: string; number: number; url: string; at: string; by: string };
+
+/** GitHub's numbers for the release against the default branch, from its compare answer. */
+export interface UpdateCompare {
+  ahead: number;
+  behind: number;
+  commits: number;
+  files: number;
+}
+
+export type UpdateOutcome =
+  | {
+      ok: true;
+      message: string;
+      links: OutcomeLink[];
+      pullRequest: { number: number; url: string; branch: string; head: string };
+      compare: UpdateCompare;
+    }
+  | Extract<ProposeOutcome, { ok: false }>;

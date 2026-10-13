@@ -7,11 +7,12 @@
  * Connectors and Themes, beside the installs waiting there.
  *
  * Read with a read token, on every render of the page: the pull requests open
- * from a branch the App names (`mixos/install/<kind>-<slug>`,
- * `mixos/update/…` or `mixos/remove/…`, ./names.ts), in the linked
- * repository, into its default branch. Each is joined to the `<kind>.propose`
- * audit row that recorded the commit the App made and what it proposed, and
- * two things are said plainly:
+ * from a branch the App names (`mixos/install/<kind>-<slug>`, `mixos/update/…`
+ * or `mixos/remove/…`, or for a MixOS update `mixos/update-<tag>`, ./names.ts),
+ * in the linked repository, into its default branch. Each is joined to the
+ * `<kind>.propose` audit row (for a MixOS update, `mixos.update.propose`) that
+ * recorded the commit the App made and what it proposed, and two things are
+ * said plainly:
  *
  *   - "No CI ran", in the danger tone, when nothing has checked the head
  *     commit ten minutes after it arrived. GitHub turns workflows off on a new
@@ -28,12 +29,11 @@
 
 import type { AdminActor } from "@/lib/apps/admin-audit";
 import { sql } from "@/lib/db/client";
-import type { ExtensionKind } from "@/lib/repository/types";
 import { GitHubError } from "./api";
 import { GitHubLinkError, featureRefusal, withLinkedRepository } from "./link";
 import { repositoryUrl } from "./manifest";
 import { parseProposalBranch, type ProposalAction } from "./names";
-import type { ProposalsView, ProposedPullRequest } from "./outcomes";
+import type { ProposalKind, ProposalsView, ProposedPullRequest } from "./outcomes";
 import {
   CheckRunsSchema,
   CombinedStatusSchema,
@@ -104,17 +104,22 @@ interface Proposed {
   by: string;
 }
 
+/** The audit action that records a proposal of `kind`. */
+export function proposeAction(kind: ProposalKind): string {
+  return kind === "mixos" ? "mixos.update.propose" : `${kind}.propose`;
+}
+
 /**
  * The latest `<kind>.propose` row for each of `numbers` in the repository with
  * id `repositoryId`, by pull request number.
  */
-async function proposedRows(kind: ExtensionKind, repositoryId: number, numbers: number[]): Promise<Map<number, Proposed>> {
+async function proposedRows(kind: ProposalKind, repositoryId: number, numbers: number[]): Promise<Map<number, Proposed>> {
   const found = new Map<number, Proposed>();
   if (numbers.length === 0) return found;
   const rows = (await sql`
     select target_id, actor_email, created_at, details
     from public.admin_audit_log
-    where action = ${`${kind}.propose`}
+    where action = ${proposeAction(kind)}
       and details->>'repositoryId' = ${String(repositoryId)}
       and details->>'pullRequest' = any(${numbers.map(String)})
     order by created_at desc
@@ -136,11 +141,12 @@ async function proposedRows(kind: ExtensionKind, repositoryId: number, numbers: 
   return found;
 }
 
-/** The branch's slug and what it proposes, when the branch proposes `kind`. */
-function proposalOf(kind: ExtensionKind, ref: string): { slug: string; action: ProposalAction } | null {
+/** The branch's slug, or for a MixOS update its tag, and what it proposes, when the branch proposes `kind`. */
+function proposalOf(kind: ProposalKind, ref: string): { slug: string; action: ProposalAction } | null {
   const branch = parseProposalBranch(ref);
-  if (!branch || branch.kind !== kind) return null;
-  return { slug: branch.slug, action: branch.action };
+  if (!branch) return null;
+  if (kind === "mixos") return branch.action === "mixos-update" ? { slug: branch.tag, action: branch.action } : null;
+  return branch.action !== "mixos-update" && branch.kind === kind ? { slug: branch.slug, action: branch.action } : null;
 }
 
 /**
@@ -148,7 +154,7 @@ function proposalOf(kind: ExtensionKind, ref: string): { slug: string; action: P
  * admin looking: a check that finds the installation widened switches the
  * link off, audited against them (./link.ts).
  */
-export async function readProposals(actor: AdminActor, kind: ExtensionKind, now: Date = new Date()): Promise<ProposalsView> {
+export async function readProposals(actor: AdminActor, kind: ProposalKind, now: Date = new Date()): Promise<ProposalsView> {
   if (featureRefusal()) return { state: "off" };
   let record;
   try {

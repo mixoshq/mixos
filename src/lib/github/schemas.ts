@@ -174,6 +174,30 @@ export const PullRequestSchema = z.object({
 export type PullRequest = z.infer<typeof PullRequestSchema>;
 export const PullRequestListSchema = z.array(PullRequestSchema);
 
+/**
+ * GET /repos/{owner}/{repo}/compare/{base}...{head}: how `head` stands to
+ * `base`, the commits between them (at most 250 are listed), and the files
+ * that differ from their merge base (at most 300 are listed, which is why the
+ * count is checked against that cap before it is trusted).
+ */
+export const CompareSchema = z.object({
+  status: z.enum(["identical", "ahead", "behind", "diverged"]),
+  ahead_by: z.number().int().min(0),
+  behind_by: z.number().int().min(0),
+  total_commits: z.number().int().min(0),
+  merge_base_commit: z.object({ sha: Sha }),
+  files: z
+    .array(
+      z.object({
+        filename: z.string(),
+        status: z.string(),
+        previous_filename: z.string().optional(),
+      }),
+    )
+    .optional(),
+});
+export type Compare = z.infer<typeof CompareSchema>;
+
 /** GET /repos/{owner}/{repo}/commits/{ref}/check-runs. */
 export const CheckRunsSchema = z.object({
   total_count: z.number().int().min(0),
