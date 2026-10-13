@@ -27,12 +27,16 @@
  * Each copy is recorded in src/generated/public-copies.json before it is made.
  * At the end of a full run, a folder an earlier run recorded and this run
  * didn't copy is deleted: its extension was removed or renamed, the build left
- * it out, or it no longer publishes those files. Only a folder in that record
- * is ever deleted, only at one of the five places, and only when it is a real
- * folder rather than a link. Nothing else in public/ is touched.
+ * it out, or it no longer publishes those files. A folder an earlier run
+ * recorded and this run copies into again is emptied first, so a file an
+ * updated extension no longer publishes goes with the release that had it.
+ * Only a folder in that record is ever deleted or emptied, only at one of the
+ * five places, and only when it is a real folder rather than a link. Nothing
+ * else in public/ is touched.
  *
- * A run that stops partway deletes nothing, and its record keeps every copy it
- * made, so the next full run prunes what this one would have.
+ * A run that stops partway deletes no folder it didn't copy into, and its
+ * record keeps every copy it made, so the next full run prunes what this one
+ * would have, and copies again what it emptied.
  *
  * Node built-ins only.
  */
@@ -104,7 +108,9 @@ export class PublicCopies {
     const entry = `${place}/${name}`;
     if (!this.made.has(entry)) {
       this.made.add(entry);
-      if (!this.earlier.has(entry)) this.write(new Set([...this.earlier, ...this.made]));
+      // An earlier run's copy is emptied, so what this run copies is all there is.
+      if (this.earlier.has(entry)) this.remove(place, name);
+      else this.write(new Set([...this.earlier, ...this.made]));
     }
     return path.join(this.publicDir, place, name);
   }
@@ -119,24 +125,31 @@ export class PublicCopies {
     for (const entry of [...this.earlier].sort()) {
       if (this.made.has(entry)) continue;
       const parsed = parseEntry(entry);
-      if (!parsed) continue;
-      const parent = path.join(this.publicDir, parsed.place);
-      const dir = path.join(parent, parsed.name);
-      if (path.dirname(dir) !== parent) continue;
-      let stat: fs.Stats;
-      try {
-        stat = fs.lstatSync(dir);
-      } catch {
-        continue; // Already gone.
-      }
-      // The generator only ever makes folders here. Anything else, a link
-      // included, was put there by someone else, and is left alone.
-      if (!stat.isDirectory()) continue;
-      fs.rmSync(dir, { recursive: true, force: true });
-      deleted.push(entry);
+      if (parsed && this.remove(parsed.place, parsed.name)) deleted.push(entry);
     }
     this.write(this.made);
     return deleted;
+  }
+
+  /**
+   * Delete the folder `name` at `place`, when it is a real folder there.
+   * Returns whether it deleted one. The generator only ever makes folders
+   * here: anything else, a link included, was put there by someone else, and
+   * is left alone.
+   */
+  private remove(place: CopyPlace, name: string): boolean {
+    const parent = path.join(this.publicDir, place);
+    const dir = path.join(parent, name);
+    if (path.dirname(dir) !== parent) return false;
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(dir);
+    } catch {
+      return false; // Already gone.
+    }
+    if (!stat.isDirectory()) return false;
+    fs.rmSync(dir, { recursive: true, force: true });
+    return true;
   }
 
   private write(entries: ReadonlySet<string>): void {

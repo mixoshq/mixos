@@ -18,6 +18,7 @@ import {
   type AppRouterInstance,
 } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import type { FloorVerdict } from "@/lib/platform/version-floor";
+import { updateHandBackFor } from "@/lib/repository/hand-back";
 import type { LocalChanges } from "@/lib/repository/update";
 import type { PreparedUpdate, UpdateComparison, UpdateOverview } from "@/lib/repository/update-outcomes";
 import UpdateDialog, { ComparisonView, LocalChangesView, PreparedView, ReleasePicker } from "./update-dialog";
@@ -235,7 +236,7 @@ test("the picker lists each release with its date and which way it goes", () => 
   assert.match(tagged, /1\.3\.0 \(release-2026-10\) · 8 Oct 2026 · newer · current/);
 });
 
-test("the result says where the release waits, and what comes next", () => {
+test("the result says where the release waits, and offers its review before Register", () => {
   const result: PreparedUpdate = {
     kind: "app",
     slug: "board",
@@ -246,14 +247,61 @@ test("the result says where the release waits, and what comes next", () => {
     to: { version: "1.0.0", gitTag: "v1.0.0", commitSha: B },
     direction: "older",
     localChangesDiscarded: true,
-    nextStep: "This version of MixOS can't register updates yet. Discard it in Admin > Apps, or with `npm run register -- app/board --discard`.",
+    handBack: null,
+    nextStep:
+      "Downloaded 1.0.0 to .mixos/pending/apps/board/, where nothing runs it yet, and apps/board still holds 1.2.0. " +
+      "Review it and register it: Review and register in Admin > Apps, or `npm run register -- app/board` in this checkout.",
   };
-  const html = render(createElement(PreparedView, { result }));
+  const html = render(createElement(PreparedView, { result, onReview: () => {} }));
   const seen = text(html);
   assert.match(seen, /1\.0\.0 downloaded and checked It waits in \.mixos\/pending\/apps\/board\/ , where none of its code runs, and apps\/board\/ is as it was\./);
   assert.match(seen, /From 1\.2\.0 To 1\.0\.0 · an older release/);
   assert.match(seen, /Your changes To be discarded when it is registered/);
-  assert.ok(html.includes("<code class=\"font-mono text-xs\">npm run register -- app/board --discard</code>"));
+  assert.ok(html.includes("<code class=\"font-mono text-xs\">npm run register -- app/board</code>"));
+  // The button that opens the review before Register, after what comes next.
+  assert.match(html, /<button[^>]*>Review and register<\/button>/);
+  assert.match(seen, /in this checkout\. Review and register $/);
+  // Without a way to open the review, no button.
+  assert.doesNotMatch(render(createElement(PreparedView, { result })), /<button[^>]*>Review and register/);
+});
+
+test("a theme's result says it is in place, and hands back the commit and how to roll it back", () => {
+  const result: PreparedUpdate = {
+    kind: "theme",
+    slug: "dusk",
+    name: "Dusk",
+    path: "themes/dusk",
+    pendingPath: null,
+    from: { version: "1.0.0", gitTag: "v1.0.0" },
+    to: { version: "1.1.0", gitTag: "v1.1.0", commitSha: B },
+    direction: "newer",
+    localChangesDiscarded: false,
+    handBack: updateHandBackFor(
+      {
+        source: "https://mixos.org",
+        kind: "theme",
+        slug: "dusk",
+        version: "1.1.0",
+        gitTag: "v1.1.0",
+        commitSha: B,
+        contentHash: `sha256-${"0".repeat(64)}`,
+        filesHash: `sha256-${"1".repeat(64)}`,
+        repository: { owner: "acme", name: "dusk", subpath: null },
+        requiresMixOS: null,
+      },
+      { version: "1.0.0", commitSha: A, direction: "newer", localChangesDiscarded: false },
+      "themes/dusk",
+      [{ path: "theme.css", bytes: 900 }],
+      { changed: ["theme.css", ".registry.json"], added: [], removed: ["assets/old.woff2"], more: { changed: 0, added: 0, removed: 0 }, incomplete: false },
+    ),
+    nextStep: "Updated themes/dusk from 1.0.0 to 1.1.0: the registry generator accepted it, and the backup of 1.0.0 was deleted.",
+  };
+  const seen = text(render(createElement(PreparedView, { result, onReview: () => {} })));
+  assert.match(seen, /Updated themes\/dusk\/ to 1\.1\.0 Updated themes\/dusk from 1\.0\.0 to 1\.1\.0/);
+  assert.match(seen, /What the commit changes in themes\/dusk\/ Changed theme\.css \.registry\.json Deleted assets\/old\.woff2/);
+  assert.match(seen, /git switch -c update-theme-dusk/);
+  assert.match(seen, /To roll it back once it is deployed, revert the commit and deploy again, or redeploy the previous build on your host\./);
+  assert.doesNotMatch(seen, /Review and register|migration/);
 });
 
 test("the dialog starts by reading what is installed", () => {

@@ -10,6 +10,7 @@ import { Search, ServerCrash } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CARD_SHELL } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
+import { docsUrl } from "@/lib/docs";
 import { cn } from "@/lib/utils";
 import {
   searchRepositoryAction,
@@ -27,9 +28,13 @@ import {
 import Notice from "@/components/ui/notice";
 import type { ProposalTarget } from "@/lib/github/outcomes";
 import ReviewDialog, { type PendingTarget } from "../pending/review-dialog";
+import UpdateDialog, { type UpdateTarget } from "../update/update-dialog";
 import ExtensionCard from "./extension-card";
 import ProposeDialog from "./propose-dialog";
 import RegisterDialog from "./register-dialog";
+
+/** How to update an extension where this deployment can't: in a checkout, then commit and deploy. */
+const HOW_TO_UPDATE = docsUrl("operating/hosting#updating-an-extension");
 
 /**
  * Browse one kind of extension in the mixos.org repository.
@@ -100,6 +105,8 @@ export default function ExtensionBrowser({
   // The extension to install, then the pending install to review and register.
   const [chosen, setChosen] = useState<ExtensionSummary | null>(null);
   const [reviewing, setReviewing] = useState<PendingTarget | null>(null);
+  // An installed one to update to another release.
+  const [updating, setUpdating] = useState<UpdateTarget | null>(null);
   const [proposing, setProposing] = useState<ExtensionSummary | null>(null);
   const [installed, setInstalled] = useState(() => new Map(Object.entries(installedAtLoad)));
   const [pendingNow, setPendingNow] = useState(() => new Set(pendingSlugs));
@@ -264,6 +271,14 @@ export default function ExtensionBrowser({
                     name: extension.name,
                   })
                 }
+                // In a checkout that can install; a built deployment links
+                // to how updating works instead.
+                onUpdate={
+                  installable === null
+                    ? (extension) => setUpdating({ kind: extension.kind, slug: extension.slug, name: extension.name })
+                    : undefined
+                }
+                updateHelpUrl={installable !== null && installableTone === "info" ? HOW_TO_UPDATE : null}
               />
             ))}
           </div>
@@ -308,6 +323,27 @@ export default function ExtensionBrowser({
           setReviewing(target);
         }}
       />
+      {/* An installed one to another release: an app's or a connector's waits
+          in pending for its review, and a theme's is in place at once. */}
+      {updating && (
+        <UpdateDialog
+          key={`update:${updating.kind}/${updating.slug}`}
+          target={updating}
+          onClose={() => setUpdating(null)}
+          onUpdated={(result) => {
+            if (result.pendingPath) setPendingNow((s) => new Set(s).add(result.slug));
+            else installedNow(result.slug, result.to.version);
+          }}
+          onRegistered={(slug, version) => {
+            setPendingNow((s) => {
+              const next = new Set(s);
+              next.delete(slug);
+              return next;
+            });
+            installedNow(slug, version);
+          }}
+        />
+      )}
       {/* On a deployment with the GitHub App linked: a pull request instead of an install. */}
       {proposal && (
         <ProposeDialog

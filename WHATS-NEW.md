@@ -332,9 +332,7 @@ just pulled.
   dialog lists the releases with their dates and shows what the chosen one
   changes: the publisher's claims, what its manifest declares, new migrations,
   or for an older release the ones it lacks, and which files were changed
-  locally. The audit log records `<kind>.update`. No admin page opens the
-  dialog yet, and Register refuses a pending update and says to discard it,
-  until Register can put an update in place.
+  locally. The audit log records `<kind>.update`.
 - **Propose an extension as a pull request.** With the GitHub App linked, a
   deployment's Browse pages offer **Propose to owner/repo**. The instance
   verifies the release in memory and opens a pull request that adds its folder,
@@ -349,6 +347,23 @@ just pulled.
   `render.yaml` turns off the web service's previews, Danger skips App
   branches, and CI checks out without keeping its token. See
   `docs/hosting/README.md#proposing-an-extension`.
+- **Updating an extension, in place.** Register puts a pending update in
+  place: it moves the folder to `.mixos/backup/`, puts the new release there,
+  runs the registry generator, and deletes the backup once the generator
+  accepts the new release, or puts the old one back if it doesn't. It refuses
+  a folder that changed after the update was prepared. A theme is swapped the
+  same way as it installs. The review before Register shows what the update
+  changes, from the two folders on disk; the result says what carries over
+  (an app's activation, grants and settings, a connector's credentials), to
+  run new migrations, and that `npm run dev` may need a restart, and hands
+  back the change to commit and how to roll it back. **Update** is on each
+  withdrawn or newer notice on Admin > Apps, Connectors and Themes, and on a
+  Browse listing of an installed extension; a built deployment links to the
+  hosting guide. `npm run register -- --recover` deals with an update that
+  stopped midway, asking whether to restore the old release or keep the new
+  one. The audit log records the swap on `<kind>.register`, a theme's as
+  `theme.update`, and recovery as `<kind>.update.recover`. See
+  `docs/hosting/README.md#updating-an-extension`.
 
 ## 2026-10-07
 

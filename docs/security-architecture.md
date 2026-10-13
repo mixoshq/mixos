@@ -2125,12 +2125,18 @@ what a stopped one left as `app.register.recover` or
 refused; recovery after a removal that stopped midway as
 `<kind>.remove.recover`; deleting what the database kept for an app or a
 connector as `app.data.delete` or `connector.data.delete`, with how much went,
-or `<kind>.data.delete.rejected` with the reason when it is refused; and an
-update of an app or a connector to another release, which waits in pending, as
-`app.update` or `connector.update`, with the release it replaces (`from`), the
-one it goes to (`to`), which way (`direction`: `newer`, `older`, `same` or
-`unknown`) and whether local changes are to be discarded
-(`localChangesDiscarded`), or `<kind>.update.rejected` with the reason (§31).
+or `<kind>.data.delete.rejected` with the reason when it is refused; an
+update of an extension to another release as `app.update`, `connector.update`
+or `theme.update`, with the release it replaces (`from`), the one it goes to
+(`to`), which way (`direction`: `newer`, `older`, `same` or `unknown`) and
+whether local changes are to be discarded (`localChangesDiscarded`), or
+`<kind>.update.rejected` with the reason; a theme's row adds `swapped: true`,
+since a theme is put in place as it installs, while an app's or a connector's
+update is put in place by Register, whose `<kind>.register` row then carries
+`update` with the release it replaced, `swapped: true` and
+`backupDeleted: true`, and whose `<kind>.register.rejected` row names both
+releases; and recovery after an update that stopped midway as
+`<kind>.update.recover` (§31).
 The GitHub link's rows (§32) are `github.app.create`, `github.link`,
 `github.link.disable`, `github.link.enable`, `github.link.refresh`,
 `github.app.key.replace`, `github.app.key.reencrypt`, `github.unlink`,
@@ -2404,7 +2410,7 @@ database. Once registered, an app runs in the dev server with the server's
 environment, as every app does.
 
 **Staged and pending copies are never scanned,** and nor is the backup a
-removal makes. All are under `.mixos/`,
+removal or an update makes. All are under `.mixos/`,
 outside every folder the generator reads, and the generator also skips every
 dot-prefixed folder in `apps/`, `connectors/` and `themes/`, as it skips
 `_template`. `.mixos/` is git-ignored, Docker-ignored and ESLint-ignored, `tsc`'s
@@ -2430,8 +2436,11 @@ a review of what will run (see **The review before Register**), and
 pending. Either way, in the checkout:
 
 1. The pending folder, its install record and its sidecar exist, and nothing
-   is where it would go. A pending update (see **Updating an extension**) is
-   refused here, before anything moves. The **files hash**, recomputed from
+   is where it would go. For a pending update (see **Updating an extension**)
+   the folder in place is checked instead: it is there, its install record is
+   the release the update replaces, and its files are as the update found
+   them, so nothing is replaced that nobody reviewed. The **files hash**,
+   recomputed from
    the folder with the record left out, matches the record's. It is the
    content hash's serialisation over the files install wrote, with every mode
    read as 644: install writes every file 0644 and leaves out any `.gitignore`
@@ -2444,14 +2453,18 @@ pending. Either way, in the checkout:
 2. The release's `requiresMixOS`, from the record, holds for the version this
    checkout builds.
 3. The sidecar records the registration (the checkout lock's token, the pid and
-   the host), and the folder is renamed into `apps/` or `connectors/`.
+   the host), and the folder is renamed into `apps/` or `connectors/`. For an
+   update, the swap (see **Updating an extension**): a backup record, the
+   folder in place renamed to `.mixos/backup/`, then the pending folder into
+   its place, both locks confirmed before each rename.
 4. The registry generator runs. This is the first time any of the extension's
    code runs, as the checkout's OS user.
 5. If the generator leaves it out, stops or runs out of time, the folder is
    renamed back to pending, the sidecar's registration cleared, and the
    generator run again so `src/generated/` matches the disk. If the generator
    registers it, the sidecar is deleted. The install record moves with the
-   folder.
+   folder. For an update, the backup goes back into place before that run, and
+   is deleted once the generator accepts the new release.
 6. It is audited as `<kind>.register`, or `<kind>.register.rejected` with the
    reason (§28), with `via: "button"` and the admin, or `via: "cli"`.
 
@@ -2470,7 +2483,9 @@ about one from another machine, which it can't check. An extension that a
 registration moved into place is put back into pending and the registry
 regenerated, so it can be registered again; a record with no folder, a folder
 with no record, and copies an install staged are deleted. Each pending install
-it acts on is audited as `<kind>.register.recover`.
+it acts on is audited as `<kind>.register.recover`. The same recovery deals
+with a removal or an update that stopped midway, from the backup each leaves
+(see **Removing an extension's code** and **Updating an extension**).
 
 The files hash guards against a change after install by an editor, a tool or
 another process in the checkout. It is no defence against someone who can write
@@ -2935,17 +2950,21 @@ there. A refusal keeps the data, and the removal stands.
 
 ### Updating an extension
 
-An update is another release of an app or a connector installed from this
-instance's catalogue, for the folder it is in. Install makes it, in an update
-mode ([`src/lib/repository/install.ts`](../src/lib/repository/install.ts),
+An update is another release of an extension installed from this instance's
+catalogue, for the folder it is in. Install makes it, in an update mode
+([`src/lib/repository/install.ts`](../src/lib/repository/install.ts),
 [`src/lib/repository/update.ts`](../src/lib/repository/update.ts)), with every
-step of **The order of operations is the control**, and leaves the release in
-`.mixos/pending/`. The folder in place isn't touched. Under both locks, before
-anything is downloaded:
+step of **The order of operations is the control**. An app's or a connector's
+release then waits in `.mixos/pending/`, and the folder in place isn't touched
+until Register puts the release there (below). A theme runs no code, so install
+puts its release in place there and then, by the same swap. Under both locks,
+before anything is downloaded:
 
 1. The folder is there, with an install record of its own whose `source` is the
-   catalogue this instance installs from. A local extension, one installed from
-   another catalogue, and a theme are refused.
+   catalogue this instance installs from. A local extension and one installed
+   from another catalogue are refused, and so is a folder holding something no
+   files hash covers, such as a link, since the swap couldn't tell later
+   whether it had changed.
 2. Nothing of the slug waits in pending, and no removal of it stopped midway.
 3. The folder's files hash is recomputed, with nothing downloaded, and compared
    with its record's. A folder that no longer matches needs the admin to
@@ -2965,10 +2984,11 @@ Then, once the catalogue has named the release:
 6. What the admin reviewed is pinned: the installed release, the folder's files
    hash, and the target's commit and content hash. A change to any of them
    since is refused.
-7. The download, the check and the rest are an install's. The sidecar records
-   what the update replaces: the installed version, commit and files hash, the
-   folder's own files hash as found, whether its changes are to be discarded,
-   and which way the update goes.
+7. The download, the check and the rest are an install's. An app's or a
+   connector's sidecar records what the update replaces: the installed version,
+   commit and files hash, the folder's own files hash as found, whether its
+   changes are to be discarded, and which way the update goes. A theme is
+   swapped in at once (below).
 
 It is audited as `<kind>.update`, with `from`, `to`, `direction` and
 `localChangesDiscarded`, or `<kind>.update.rejected` with the reason (§28).
@@ -2989,10 +3009,77 @@ no longer serves the installed release, the dialog says the folder differs
 without naming the files. The link to GitHub's compare view is built from the
 record's values and the catalogue's validated answer.
 
-**Register doesn't put an update in place yet.** It refuses a pending update,
-before anything moves, and says to discard it. Discard deletes a pending update
-as it deletes any pending install. Nothing on the admin pages opens the update
-dialog yet.
+**The swap, at Register.** A pending update is registered as any pending
+install is, with the Register button after its review, or `npm run register`,
+under both locks. The review shows what registering it changes, compared
+between the pending folder and the folder in place with nothing downloaded: the
+files changed, added and deleted, what the manifest declares, an app's
+migrations, and a link to GitHub's compare view. Register first checks the
+folder in place: it is there, its install record is the release the update
+replaces, and its files hash is the one the sidecar recorded when the update
+was prepared (`replacesProblem()` in `src/lib/repository/pending.ts`). A folder
+that changed since is refused before anything moves, as `folder-changed`:
+registering it would discard changes nobody reviewed. Then, with both locks
+confirmed before each change (`swapIn()` in
+[`src/lib/repository/backup.ts`](../src/lib/repository/backup.ts)):
+
+1. A record goes to `.mixos/backup/<kind dir>/<slug>.json`, with the checkout
+   lock's token, the process and both releases.
+2. The folder in place is renamed to `.mixos/backup/<kind dir>/<slug>/`, then
+   the pending folder into its place. A rename on one filesystem is atomic, so
+   each folder is whole wherever it is.
+3. The registry generator runs, with `PATH` and `TMPDIR` only. This is the
+   first time the new release's code runs.
+4. Refused, stopped or out of time: the new release goes back to pending, the
+   backup back into place, and the generator runs again so `src/generated/`
+   matches the disk; a Ctrl-C doesn't stop that. Accepted: the record says so,
+   then the sidecar, the backup and its record are deleted.
+
+Activation, grants, settings and connector configuration are rows keyed by the
+slug, and the swap writes nothing to the database but the lock and its audit
+row, so they carry over; a test holds Register to that. The release step treats
+a new release from the same repository as the same extension (see **The install
+record**), so an update changes nothing there either, and one from another
+repository is flagged at the next release step, as the dialog warns. App
+migrations are forward-only: the result says to run `npm run migrate:apps` for
+new ones, and that nothing undoes them. It hands back the change to commit
+(`updateHandBackFor()` in `src/lib/repository/hand-back.ts`): the files
+changed, added and deleted, a message whose subject is
+`feat(<slug>): update <kind> <slug> from <old> to <new>`, with the record's
+trailers and `Registry-Replaces-Version` and `Registry-Replaces-Commit`, all
+identifiers, and the commands; and it says to roll the update back, once it is
+deployed, by reverting the commit or redeploying the previous build. `next dev`
+can keep serving the code it compiled from the old release until it restarts,
+and the result says so. The Register row carries `update` (§28).
+
+**A theme's update** is the same swap, made by install once the check has
+accepted the staged copy, and the folder in place is checked once more under
+the locks before it moves, since the download took time: `themes/<slug>/` to
+`.mixos/backup/themes/<slug>/`, the staged copy into its place, the generator,
+and the backup deleted, or put back with the staged copy deleted. The
+generator's copies in `public/` of an updated theme's or connector's assets are
+emptied before they are made again, so a file the new release no longer ships
+stops being served (`scripts/public-copies.ts`).
+
+**An update that stops midway** (a crash, a Ctrl-C between renames, a lock
+lost) leaves its backup record, and install, Register and removal refuse the
+slug until `npm run register -- --recover` has dealt with it. Recovery acts only
+under both locks, and only on a record whose token isn't the checkout lock's
+while that holder may still be running: a holder that was suspended and comes
+back finds its lock taken or replaced and stops at its next check, without
+touching the disk. A swap the generator never accepted can go either way, and
+recovery asks which: restore the backup, putting the new release back in
+pending (or, for a theme, deleting it), or keep the new release, which runs the
+generator as Register would have and restores the backup if that refuses it.
+One the generator accepted is finished by deleting the backup. Each is audited
+as `<kind>.update.recover`.
+
+**Where it is offered.** In a checkout, a withdrawn or newer notice on
+Admin > Apps, Connectors and Themes has an Update button, and so does a Browse
+listing of an extension installed from this catalogue. On a built deployment
+both link to the hosting guide instead, and the update's actions refuse there.
+Discard deletes a pending update as it deletes any pending install, and leaves
+the folder in place as it is.
 
 ### Two locks: the register lease and the checkout lock
 
@@ -3173,8 +3260,10 @@ below), so on those the flags decide only whether the catalogue can be browsed.
 - **Overwrite.** An existing directory, or an install of the same slug already
   waiting in pending, is refused rather than replaced. An update (see
   **Updating an extension**) is the one way to another release of an extension
-  in place, and it doesn't write there either: the release waits in pending, and
-  only Register will replace the folder.
+  in place: the release waits in pending, and Register replaces the folder only
+  while it is still the one the update was prepared against, keeping a backup
+  until the generator accepts the new release. A theme's update does the same
+  as it installs.
 - **Run from a built artifact.** `checkInstallable()` refuses up front when
   `VERCEL` is set or a `server.js` sits at `process.cwd()` — the root of a Next
   `output: "standalone"` tree, which its server `chdir`s to before listening

@@ -13,8 +13,9 @@
 
 import type { DatabaseLocation } from "../db/locality";
 import type { HandBack } from "./hand-back";
-import type { PendingKind } from "./pending";
+import type { PendingKind, UpdateDirection } from "./pending";
 import type { PendingReview } from "./review";
+import type { PendingUpdateReview } from "./update";
 
 /**
  * How a refusal reads. `info` is the design (a built deployment); `neutral`
@@ -49,7 +50,15 @@ export type ListingFacts =
     }
   | { state: "unavailable"; origin: string; message: string };
 
-export type ReviewOutcome = { ok: true; review: PendingReview; listing: ListingFacts } | Refusal;
+export type ReviewOutcome =
+  | {
+      ok: true;
+      review: PendingReview;
+      listing: ListingFacts;
+      /** For a pending update: how it compares with the folder it replaces, from both on disk. */
+      update: PendingUpdateReview | null;
+    }
+  | Refusal;
 
 /**
  * Who may turn the app on after Register, and where:
@@ -83,6 +92,14 @@ export interface Registered {
   activation: Activation;
   /** What to commit, and how: the files, the prepared message, the commands and the source. */
   handBack: HandBack;
+  /** For an update: the release it replaced. Null for an install. */
+  update: {
+    from: { version: string; gitTag: string | null };
+    direction: UpdateDirection;
+    localChangesDiscarded: boolean;
+    /** An app's new migrations, which `npm run migrate:apps` applies here. */
+    migrationsAdded: string[];
+  } | null;
 }
 
 export type RegisterOutcome = { ok: true; result: Registered } | Refusal;

@@ -20,12 +20,13 @@ import {
   type AppRouterInstance,
 } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { filesHash, hashFileTree } from "@/lib/repository/content-hash";
-import { handBackFor } from "@/lib/repository/hand-back";
+import { handBackFor, updateHandBackFor } from "@/lib/repository/hand-back";
 import { INSTALL_RECORD_FILE, serializeInstallRecord, type InstallRecord } from "@/lib/repository/install-record";
 import { pendingLocation, writeSidecar } from "@/lib/repository/pending";
 import type { Registered } from "@/lib/repository/pending-outcomes";
 import { reviewPendingInstall } from "@/lib/repository/review";
 import type { TarEntry } from "@/lib/repository/tar";
+import type { PendingUpdateReview } from "@/lib/repository/update";
 import DiscardDialog from "./discard-dialog";
 import PendingInstallsList, { type PendingItem } from "./pending-installs-list";
 import RegisterResult from "./register-result";
@@ -107,21 +108,30 @@ test("a pending install with a problem says it, and offers only what still works
   assert.equal(seen.match(/\bDiscard\b(?! it)/g)?.length, 1);
 });
 
-test("a pending update says Register can't put it in place yet, offers only Discard, and Discard keeps the release in place", () => {
+test("a pending update offers Review and register and Discard, and Discard keeps the release in place", () => {
   const update = item({
     version: "1.3.0",
     installed: "Update from 1.2.0, downloaded 3 mins ago by admin@example.com",
     updateFrom: "1.2.0",
-    problem:
-      "It is an update of apps/acme from 1.2.0 to 1.3.0, and this version of MixOS can't register updates yet. " +
-      "Discard it with `npm run register -- app/acme --discard`.",
-    canRegister: false,
   });
   const seen = text(render(createElement(PendingInstallsList, { kind: "app", items: [update] })));
-  assert.match(seen, /Needs attention 1\.3\.0 Update from 1\.2\.0, downloaded 3 mins ago by admin@example\.com/);
-  assert.match(seen, /can't register updates yet\. Discard it with npm run register -- app\/acme --discard \./);
-  assert.doesNotMatch(seen, /Review and register/);
-  assert.match(seen, /--discard \. Discard $/);
+  assert.match(seen, /Not registered 1\.3\.0 Update from 1\.2\.0, downloaded 3 mins ago by admin@example\.com/);
+  assert.match(seen, /Review and register Discard $/);
+
+  // The folder in place changed since it was prepared: Register would refuse it.
+  const changed = item({
+    version: "1.3.0",
+    installed: "Update from 1.2.0, downloaded 3 mins ago by admin@example.com",
+    updateFrom: "1.2.0",
+    problem:
+      "apps/acme has changed since this update was prepared, so registering it would discard changes nobody " +
+      "reviewed. Discard the update with `npm run register -- app/acme --discard` and prepare it again.",
+    canRegister: false,
+  });
+  const refused = text(render(createElement(PendingInstallsList, { kind: "app", items: [changed] })));
+  assert.match(refused, /Needs attention 1\.3\.0/);
+  assert.match(refused, /apps\/acme has changed since this update was prepared/);
+  assert.doesNotMatch(refused, /Review and register/);
 
   const asking = text(
     render(
@@ -305,6 +315,7 @@ const registered = (fields: Partial<Registered> = {}): Registered => ({
     { path: "api/boards/route.ts", bytes: 245 },
     { path: "app.json", bytes: 1260 },
   ]),
+  update: null,
   ...fields,
 });
 
@@ -373,4 +384,73 @@ test("a production build of the checkout says to rebuild first; a connector has 
   assert.doesNotMatch(connector, /Turn it on/);
   assert.doesNotMatch(connector, /arrives inactive/);
   assert.match(connector, /feat\(acme-crm\): add connector acme-crm 1\.2\.0 from mixos\.org/);
+});
+
+// ── an update ───────────────────────────────────────────────────────────────
+
+const UPDATE: PendingUpdateReview = {
+  path: "apps/acme",
+  from: { version: "1.1.0", gitTag: "v1.1.0", commitSha: "a".repeat(40), sourceUrl: null },
+  to: { version: "1.2.0", gitTag: "v1.2.0", commitSha: "c".repeat(40), sourceUrl: null },
+  direction: "newer",
+  localChangesDiscarded: true,
+  compareUrl: `https://github.com/acme/mixos-apps/compare/${"a".repeat(40)}...${"c".repeat(40)}`,
+  otherRepository: null,
+  declarations: [{ label: "Egress", added: ["files.acme.example"], removed: [] }],
+  migrations: { added: ["0002_tags.sql"], changed: [], lacking: [] },
+  files: {
+    changed: [".registry.json", "app.json"],
+    added: ["migrations/0002_tags.sql"],
+    removed: ["lib/old.ts"],
+    more: { changed: 0, added: 0, removed: 0 },
+    incomplete: false,
+  },
+};
+
+test("the review of a pending update says what it replaces, what registering it changes, and asks for the swap", () => {
+  const review = pendingReview();
+  const listing = { state: "ok" as const, origin: "https://mixos.org", claims: [], note: null };
+  const html = render(createElement(ReviewPrompt, { review, listing, update: UPDATE, read: false, onRead: () => {} }));
+  const seen = text(html);
+  assert.match(
+    seen,
+    /It is an update of apps\/acme\/ from 1\.1\.0 to 1\.2\.0, waiting in \.mixos\/pending\/apps\/acme\/ , where none of its code has run\. Registering moves apps\/acme\/ to \.mixos\/backup\/apps\/acme\/ , puts this in its place and runs the registry generator/,
+  );
+  assert.match(seen, /If the generator refuses it, 1\.1\.0 is put back; if it accepts it, the backup is deleted\./);
+  assert.match(seen, /What the update changes Your changes are discarded apps\/acme\/ no longer matched 1\.1\.0 when the update was prepared/);
+  assert.ok(html.includes(`href="${UPDATE.compareUrl}"`));
+  assert.match(seen, /Changed \.registry\.json app\.json Added migrations\/0002_tags\.sql Deleted lib\/old\.ts/);
+  assert.match(seen, /What the package declares Egress Adds files\.acme\.example/);
+  assert.match(seen, /New in 1\.2\.0 migrations\/0002_tags\.sql The release step applies them, and they are forward-only: back up the database first\./);
+  assert.match(seen, /I've read what will run, and I want to run it in this checkout in place of 1\.1\.0\./);
+  // From another repository, it says each instance will treat it as a different extension.
+  const other = text(
+    render(createElement(ReviewPanel, { review, listing, update: { ...UPDATE, compareUrl: null, otherRepository: { from: "acme/mixos-apps", to: "mallory/mixos-apps" } } })),
+  );
+  assert.match(other, /It comes from another repository 1\.2\.0 is published from mallory\/mixos-apps, and 1\.1\.0 came from acme\/mixos-apps\./);
+});
+
+test("an update's result says what carries over, to restart the dev server, what to commit and how to roll it back", () => {
+  const handBack = updateHandBackFor(
+    RECORD,
+    { version: "1.1.0", commitSha: "a".repeat(40), direction: "newer", localChangesDiscarded: false },
+    "apps/acme",
+    [{ path: "app.json", bytes: 1260 }],
+    UPDATE.files!,
+  );
+  const result = registered({
+    activation: "none",
+    handBack,
+    update: { from: { version: "1.1.0", gitTag: "v1.1.0" }, direction: "newer", localChangesDiscarded: false, migrationsAdded: ["0002_tags.sql"] },
+  });
+  const seen = text(render(createElement(RegisterResult, { result, name: "Acme Board" })));
+  assert.match(seen, /Updated apps\/acme to 1\.2\.0 The registry generator loaded the new code and accepted it, and the backup of 1\.1\.0 was deleted\./);
+  assert.match(seen, /The dev server can keep serving the code it compiled from 1\.1\.0 until it restarts: restart npm run dev before you try it\./);
+  assert.match(seen, /From 1\.1\.0 To 1\.2\.0 \(v1\.2\.0\)/);
+  assert.match(seen, /What carries over Its activation, grants and settings belong to its slug, in the database, so they carry over\. It has 1 new migration: run npm run migrate:apps in this checkout to apply it\./);
+  assert.match(seen, /It runs only in this checkout until you commit the change to apps\/acme and deploy it\./);
+  assert.match(seen, /What the commit changes in apps\/acme\/ Changed \.registry\.json app\.json Added migrations\/0002_tags\.sql Deleted lib\/old\.ts/);
+  assert.match(seen, /git switch -c update-app-acme/);
+  assert.match(seen, /To roll it back once it is deployed, revert the commit and deploy again, or redeploy the previous build on your host\. Neither undoes a migration it ran/);
+  assert.doesNotMatch(seen, /Activate in this checkout|arrives inactive/);
 });

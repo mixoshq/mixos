@@ -12,8 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Checkbox, Select } from "@/components/ui/input";
 import Notice from "@/components/ui/notice";
-import type { PendingKind } from "@/lib/repository/pending";
-import type { DeclarationChange, LocalChanges, UpdateDirection } from "@/lib/repository/update";
+import type { ExtensionKind } from "@/lib/repository/types";
+import type { LocalChanges, UpdateDirection } from "@/lib/repository/update";
 import {
   compareUpdateAction,
   updateExtensionAction,
@@ -31,19 +31,23 @@ import type {
 } from "@/lib/repository/update-outcomes";
 import { KIND_LABEL } from "@/lib/repository/types";
 import FloorNotice from "../browse/floor-notice";
+import HandBackPanel from "../pending/hand-back";
+import ReviewDialog from "../pending/review-dialog";
 import WithCode from "../pending/with-code";
+import { DeclarationChanges, FileGroup, MigrationNotes } from "./update-parts";
 
 /** An extension to update, as whatever opens the dialog names it. */
 export interface UpdateTarget {
-  kind: PendingKind;
+  kind: ExtensionKind;
   slug: string;
   /** For the title. The overview reads the manifest's own. */
   name: string;
 }
 
 /**
- * Update an app or a connector installed from a Registry to another release.
- * Mounted while it is open, so each one starts fresh.
+ * Update an extension installed from a Registry to another release. Mounted
+ * while it is open, so each one starts fresh. The notices on Admin > Apps,
+ * Connectors and Themes open it, and so do the listings on Browse.
  *
  * It says first what is installed and whether the folder still matches it,
  * naming the files that changed when they can be named. The admin picks a
@@ -55,10 +59,24 @@ export interface UpdateTarget {
  * button does anything.
  *
  * The update downloads, verifies and checks the release again, under the
- * locks, and leaves it in `.mixos/pending/`. The folder in place is replaced
- * only when that is registered.
+ * locks. An app's or a connector's then waits in `.mixos/pending/`, and the
+ * result leads to the review before Register, which swaps it for the folder in
+ * place. A theme runs no code, so the update swaps it there and then, and the
+ * result hands back the commit.
  */
-export default function UpdateDialog({ target, onClose }: { target: UpdateTarget; onClose: () => void }) {
+export default function UpdateDialog({
+  target,
+  onClose,
+  onUpdated,
+  onRegistered,
+}: {
+  target: UpdateTarget;
+  onClose: () => void;
+  /** Told once the update is made: waiting in pending, or for a theme, in place. */
+  onUpdated?: (result: PreparedUpdate) => void;
+  /** Told once the update waiting in pending is registered from here, with its version. */
+  onRegistered?: (slug: string, version: string) => void;
+}) {
   const router = useRouter();
   const [overview, setOverview] = useState<OverviewOutcome | null>(null);
   const [version, setVersion] = useState("");
@@ -68,6 +86,7 @@ export default function UpdateDialog({ target, onClose }: { target: UpdateTarget
   const [withdrawn, setWithdrawn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<UpdateOutcome | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const asked = useRef("");
   const lockedNotice = useRef<HTMLDivElement>(null);
 
@@ -118,27 +137,39 @@ export default function UpdateDialog({ target, onClose }: { target: UpdateTarget
     const c = comparison.comparison;
     setBusy(true);
     try {
-      setOutcome(
-        await updateExtensionAction({
-          kind,
-          slug,
-          version: c.to.version,
-          allowYanked: c.needs.allowYanked ? withdrawn : undefined,
-          allowOlder: c.needs.allowOlder ? older : undefined,
-          discardLocalChanges: c.needs.discardLocalChanges ? discard : undefined,
-          reviewed: c.reviewed,
-        }),
-      );
+      const res = await updateExtensionAction({
+        kind,
+        slug,
+        version: c.to.version,
+        allowYanked: c.needs.allowYanked ? withdrawn : undefined,
+        allowOlder: c.needs.allowOlder ? older : undefined,
+        discardLocalChanges: c.needs.discardLocalChanges ? discard : undefined,
+        reviewed: c.reviewed,
+      });
+      setOutcome(res);
+      if (res.ok) onUpdated?.(res.result);
     } finally {
       setBusy(false);
     }
-  }, [comparison, kind, slug, withdrawn, older, discard]);
+  }, [comparison, kind, slug, withdrawn, older, discard, onUpdated]);
 
   const close = useCallback(() => {
-    // The pending list on the page behind gains the update.
+    // The pending list on the page behind gains the update, or for a theme,
+    // the page shows the new release.
     if (outcome?.ok) router.refresh();
     onClose();
   }, [outcome, onClose, router]);
+
+  // The review before Register, in this dialog's place.
+  if (reviewing && outcome?.ok && kind !== "theme") {
+    return (
+      <ReviewDialog
+        target={{ kind, slug, name: target.name }}
+        onClose={close}
+        onRegistered={onRegistered}
+      />
+    );
+  }
 
   const done = outcome?.ok === true;
   const refused = outcome?.ok === false && !locked;
@@ -151,33 +182,40 @@ export default function UpdateDialog({ target, onClose }: { target: UpdateTarget
     (!c.needs.allowOlder || older) &&
     (!c.needs.allowYanked || withdrawn);
   const nothingToPick = overview !== null && (!overview.ok || overview.overview.releases.length === 0);
+  const theme = kind === "theme";
 
   return (
     <Dialog
       open
       onClose={busy ? () => {} : close}
-      title={done ? `${target.name}: update downloaded` : `Update ${target.name}`}
+      title={done ? (theme ? `${target.name} updated` : `${target.name}: update downloaded`) : `Update ${target.name}`}
       subtitle={`${KIND_LABEL[kind].one} · ${slug}`}
       size="lg"
       footer={
         done || refused || nothingToPick ? (
-          <Button variant="primary" onClick={close}>
-            {done ? "Done" : "Close"}
+          <Button variant={done && !theme ? "ghost" : "primary"} onClick={close}>
+            {done ? (theme ? "Done" : "Later") : "Close"}
           </Button>
         ) : (
           <>
             <Button variant="ghost" onClick={close} disabled={busy}>
               Cancel
             </Button>
-            <Button variant="primary" busy={busy} busyLabel="Downloading and checking…" disabled={!ready} onClick={update}>
-              {locked ? "Try again" : "Download update"}
+            <Button
+              variant="primary"
+              busy={busy}
+              busyLabel={theme ? "Checking and updating…" : "Downloading and checking…"}
+              disabled={!ready}
+              onClick={update}
+            >
+              {locked ? "Try again" : theme ? "Update" : "Download update"}
             </Button>
           </>
         )
       }
     >
       {outcome?.ok ? (
-        <PreparedView result={outcome.result} />
+        <PreparedView result={outcome.result} onReview={theme ? undefined : () => setReviewing(true)} />
       ) : refused && outcome && !outcome.ok ? (
         <div className="space-y-4">
           <Notice tone={outcome.tone} title="Not updated">
@@ -230,11 +268,19 @@ export default function UpdateDialog({ target, onClose }: { target: UpdateTarget
           />
           {c && c.blocker === null && (
             <Section title="Then">
-              <p className="text-sm text-foreground">
-                Downloading checks {c.to.version} again, as an install does, and leaves it in{" "}
-                <Path>{`.mixos/pending/${c.kind === "app" ? "apps" : "connectors"}/${c.slug}/`}</Path>, where
-                none of its code runs. <Path>{`${c.path}/`}</Path> stays as it is until the update is registered.
-              </p>
+              {c.kind === "theme" ? (
+                <p className="text-sm text-foreground">
+                  Updating checks {c.to.version} again, as an install does, then moves <Path>{`${c.path}/`}</Path>{" "}
+                  to <Path>{`.mixos/backup/themes/${c.slug}/`}</Path>, puts {c.to.version} in its place and runs
+                  the registry generator. If the generator refuses it, {c.from.version} is put back.
+                </p>
+              ) : (
+                <p className="text-sm text-foreground">
+                  Downloading checks {c.to.version} again, as an install does, and leaves it in{" "}
+                  <Path>{`.mixos/pending/${c.kind === "app" ? "apps" : "connectors"}/${c.slug}/`}</Path>, where
+                  none of its code runs. <Path>{`${c.path}/`}</Path> stays as it is until the update is registered.
+                </p>
+              )}
             </Section>
           )}
           {/* Beside the button that was pressed, where the admin is looking. */}
@@ -412,16 +458,24 @@ export function ComparisonView({
         <Claims claims={c.claims} />
       </Section>
 
-      <Section title="What the package declares">
-        <p className="text-xs text-muted-foreground">
-          From the manifest in <Path>{`${c.path}/`}</Path> to the one in {c.to.version}: what this instance enforces.
-        </p>
-        <Declarations declarations={c.declarations} kind={c.kind} />
-      </Section>
+      {c.kind === "theme" ? (
+        <Section title="What the package declares">
+          <p className="text-sm text-muted-foreground">
+            A theme runs no code. The registry generator checks its tokens, fonts and assets when it is updated.
+          </p>
+        </Section>
+      ) : (
+        <Section title="What the package declares">
+          <p className="text-xs text-muted-foreground">
+            From the manifest in <Path>{`${c.path}/`}</Path> to the one in {c.to.version}: what this instance enforces.
+          </p>
+          <DeclarationChanges declarations={c.declarations} kind={c.kind} />
+        </Section>
+      )}
 
       {c.kind === "app" && (
         <Section title="Migrations">
-          <Migrations comparison={c} />
+          <MigrationNotes migrations={c.migrations} to={c.to.version} path={c.path} />
         </Section>
       )}
     </div>
@@ -510,93 +564,6 @@ function Claims({ claims }: { claims: UpdateComparison["claims"] }) {
   );
 }
 
-/** What carries over for each row whose values an admin saves. */
-const SAVED: Record<string, string> = {
-  Env:
-    "Saved settings carry over. A new one is empty until an admin fills it in on Admin > Apps, and one it " +
-    "no longer declares stays saved but isn't read.",
-  "Credentials an admin enters":
-    "Saved credentials carry over. A new field is empty until an admin fills it in on Admin > Connectors.",
-};
-
-function Declarations({ declarations, kind }: { declarations: DeclarationChange[] | null; kind: PendingKind }) {
-  if (declarations === null) {
-    return (
-      <p className="mt-2 text-sm text-muted-foreground">
-        One of the two manifests can&apos;t be read, so they can&apos;t be compared.
-      </p>
-    );
-  }
-  if (declarations.length === 0) {
-    return (
-      <p className="mt-2 text-sm text-muted-foreground">
-        No change to its {kind === "app" ? "egress, env, database, connectors, services, hooks or MCP tools" : "hosts, credentials, accounts or webhooks"}.
-      </p>
-    );
-  }
-  return (
-    <dl className="mt-2 space-y-3 text-sm">
-      {declarations.map((row) => (
-        <div key={row.label}>
-          <dt className="font-medium text-foreground">{row.label}</dt>
-          <dd className="mt-0.5 space-y-0.5">
-            {row.added.length > 0 && (
-              <p className="break-words text-foreground">
-                <span className="text-muted-foreground">Adds </span>
-                {row.added.join(", ")}
-              </p>
-            )}
-            {row.removed.length > 0 && (
-              <p className="break-words text-foreground">
-                <span className="text-muted-foreground">Drops </span>
-                {row.removed.join(", ")}
-              </p>
-            )}
-            {SAVED[row.label] && <p className="text-xs text-muted-foreground">{SAVED[row.label]}</p>}
-          </dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
-function Migrations({ comparison: c }: { comparison: UpdateComparison }) {
-  const { added, changed, lacking } = c.migrations;
-  if (added.length + changed.length + lacking.length === 0) {
-    return <p className="text-sm text-muted-foreground">No change to its migrations.</p>;
-  }
-  return (
-    <div className="space-y-3">
-      {added.length > 0 && (
-        <Notice tone="warning" title={`New in ${c.to.version}`}>
-          <Files names={added} folder="migrations/" />
-          <p className="mt-2">
-            The release step applies them, and they are forward-only: back up the database first.
-          </p>
-        </Notice>
-      )}
-      {lacking.length > 0 && (
-        <Notice tone="warning" title={`In ${c.path}/ and not in ${c.to.version}`}>
-          <Files names={lacking} folder="migrations/" />
-          <p className="mt-2">
-            A database that ran them stays at the newer schema: going back doesn&apos;t undo them. The older code
-            has to cope with it, and restoring a backup of the database may be the better way back.
-          </p>
-        </Notice>
-      )}
-      {changed.length > 0 && (
-        <div className="text-sm">
-          <p className="font-medium text-foreground">Changed in {c.to.version}</p>
-          <Files names={changed} folder="migrations/" />
-          <p className="mt-1 text-muted-foreground">
-            Each runs once, so a database that already ran one keeps what it did.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* -------------------------------------------------------------------------- */
 /*  Local changes                                                               */
 /* -------------------------------------------------------------------------- */
@@ -662,22 +629,49 @@ export function LocalChangesView({
   );
 }
 
-function FileGroup({ title, names, more }: { title: string; names: string[]; more: number }) {
-  if (names.length === 0) return null;
-  return (
-    <div className="min-w-0">
-      <p className="font-medium text-foreground">{title}</p>
-      <Files names={names} />
-      {more > 0 && <p className="text-xs text-muted-foreground">and {more} more</p>}
-    </div>
-  );
-}
-
 /* -------------------------------------------------------------------------- */
 /*  The result                                                                  */
 /* -------------------------------------------------------------------------- */
 
-export function PreparedView({ result }: { result: PreparedUpdate }) {
+export function PreparedView({ result, onReview }: { result: PreparedUpdate; onReview?: () => void }) {
+  const facts = (
+    <dl className="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-2 text-sm">
+      <dt className="text-muted-foreground">From</dt>
+      <dd className="text-foreground">{result.from.version}</dd>
+      <dt className="text-muted-foreground">To</dt>
+      <dd className="min-w-0 text-foreground">
+        {result.to.version}
+        {result.direction === "older" && <span className="text-muted-foreground"> · an older release</span>}
+        <span className="block break-all font-mono text-xs text-muted-foreground">{result.to.commitSha}</span>
+      </dd>
+      {result.localChangesDiscarded && (
+        <>
+          <dt className="text-muted-foreground">Your changes</dt>
+          <dd className="text-foreground">
+            {result.pendingPath ? "To be discarded when it is registered" : "Discarded"}
+          </dd>
+        </>
+      )}
+    </dl>
+  );
+
+  // A theme registers as it installs: it is in place now, and ready to commit.
+  if (!result.pendingPath) {
+    return (
+      <div className="space-y-5">
+        <Notice tone="success" title={`Updated ${result.path}/ to ${result.to.version}`}>
+          <WithCode text={result.nextStep} />
+        </Notice>
+        {facts}
+        {result.handBack && (
+          <Section title="Ship it">
+            <HandBackPanel handBack={result.handBack} isApp={false} />
+          </Section>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <Notice tone="success" title={`${result.to.version} downloaded and checked`}>
@@ -686,26 +680,16 @@ export function PreparedView({ result }: { result: PreparedUpdate }) {
           <Path>{`${result.path}/`}</Path> is as it was.
         </p>
       </Notice>
-      <dl className="grid grid-cols-[7rem_1fr] gap-x-4 gap-y-2 text-sm">
-        <dt className="text-muted-foreground">From</dt>
-        <dd className="text-foreground">{result.from.version}</dd>
-        <dt className="text-muted-foreground">To</dt>
-        <dd className="min-w-0 text-foreground">
-          {result.to.version}
-          {result.direction === "older" && <span className="text-muted-foreground"> · an older release</span>}
-          <span className="block break-all font-mono text-xs text-muted-foreground">{result.to.commitSha}</span>
-        </dd>
-        {result.localChangesDiscarded && (
-          <>
-            <dt className="text-muted-foreground">Your changes</dt>
-            <dd className="text-foreground">To be discarded when it is registered</dd>
-          </>
-        )}
-      </dl>
+      {facts}
       <Section title="Next">
         <p className="text-sm text-foreground">
           <WithCode text={result.nextStep} />
         </p>
+        {onReview && (
+          <Button className="mt-3" variant="primary" onClick={onReview}>
+            Review and register
+          </Button>
+        )}
       </Section>
     </div>
   );
@@ -720,18 +704,6 @@ function formatDay(iso: string): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return iso;
   return at.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
-
-function Files({ names, folder = "" }: { names: string[]; folder?: string }) {
-  return (
-    <ul className="mt-1 space-y-0.5">
-      {names.map((name) => (
-        <li key={name}>
-          <code className="break-all font-mono text-xs text-foreground">{`${folder}${name}`}</code>
-        </li>
-      ))}
-    </ul>
-  );
 }
 
 function Loading({ children }: { children: ReactNode }) {
