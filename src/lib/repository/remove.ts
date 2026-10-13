@@ -71,8 +71,9 @@ import {
   extensionFolder,
   isExtensionName,
   leftoverBackup,
+  leftoverBackupMessage,
   writeBackupRecord,
-  type BackupRecord,
+  type RemovalRecord,
 } from "./backup";
 import { removalHandBackFor, type RemovalHandBack } from "./hand-back";
 import { folderFiles, readInstallRecord, recordMismatch, type InstallRecord } from "./install-record";
@@ -407,13 +408,7 @@ export async function planRemoval(kind: ExtensionKind, slug: string, root: strin
   const waiting = pending && (pathExists(pending.folder) || pathExists(pending.sidecar)) ? pending : null;
 
   const leftover = leftoverBackup(root, kind, slug);
-  if (leftover) {
-    throw new RemoveError(
-      `A removal of ${slug} stopped before it finished, and left ${leftover.rel}. Run ` +
-        "`npm run remove -- --recover` to put things back, then try again.",
-      "interrupted",
-    );
-  }
+  if (leftover) throw new RemoveError(leftoverBackupMessage(leftover, slug), "interrupted");
   const sidecar = waiting ? readSidecar(waiting.sidecar) : null;
   if (sidecar?.state === "ok" && sidecar.sidecar.register) {
     throw new RemoveError(
@@ -650,7 +645,7 @@ async function runRemove(
 
   // 2. Its record, then the folder out of the build.
   await fence(`Nothing was moved: ${live.rel} is where it was.`);
-  const record: BackupRecord = {
+  const record: RemovalRecord = {
     operation: "remove",
     kind,
     slug,
