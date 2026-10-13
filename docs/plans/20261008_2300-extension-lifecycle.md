@@ -1,8 +1,7 @@
 # Extension lifecycle and MixOS updates: what WordPress teaches, built for a vendored platform
 
 **Status:** approved on 10 October 2026, with every recommendation in Owner decisions (D1 to D36)
-accepted. Partly built. Merged in the core: ranks 1
-([#15](https://github.com/mixoshq/mixos/pull/15)), 2
+accepted. Built. Merged in the core: ranks 1 ([#15](https://github.com/mixoshq/mixos/pull/15)), 2
 ([#14](https://github.com/mixoshq/mixos/pull/14)), 3
 ([#16](https://github.com/mixoshq/mixos/pull/16)), 4
 ([#17](https://github.com/mixoshq/mixos/pull/17)), 5
@@ -21,15 +20,22 @@ accepted. Partly built. Merged in the core: ranks 1
 ([#47](https://github.com/mixoshq/mixos/pull/47)), 20
 ([#46](https://github.com/mixoshq/mixos/pull/46)), 22
 ([#48](https://github.com/mixoshq/mixos/pull/48)), 23
-([#49](https://github.com/mixoshq/mixos/pull/49)), 25
+([#49](https://github.com/mixoshq/mixos/pull/49)), 24
+([#51](https://github.com/mixoshq/mixos/pull/51)), 25
 ([#22](https://github.com/mixoshq/mixos/pull/22)), 26
-([#24](https://github.com/mixoshq/mixos/pull/24)) and 33
+([#24](https://github.com/mixoshq/mixos/pull/24)), 27
+([#53](https://github.com/mixoshq/mixos/pull/53)), 28
+([#55](https://github.com/mixoshq/mixos/pull/55)), 29
+([#52](https://github.com/mixoshq/mixos/pull/52)), 30
+([#54](https://github.com/mixoshq/mixos/pull/54)), 31
+([#57](https://github.com/mixoshq/mixos/pull/57)), 32
+([#56](https://github.com/mixoshq/mixos/pull/56)) and 33
 ([#26](https://github.com/mixoshq/mixos/pull/26)). The first release, v0.1.0, is out
 ([#25](https://github.com/mixoshq/mixos/pull/25)). Merged on mixos.org: ranks 16 (#15), 19 (#11), 21
-(#14) and 34 (#12 and #13). Ranks 24, 27 and 29 are in progress, and ranks 28 and 30 to 32 are not
-started; the queue's State column has each. Revised on 9 October 2026 after a security review and a
-consistency review (see Review notes, at the end). Replaces two approved plans and keeps every owner
-decision in them, except where an owner decision below changes one and says so.
+(#14) and 34 (#12 and #13). The queue's State column has each rank's pull request. Revised on 9
+October 2026 after a security review and a consistency review (see Review notes, at the end).
+Replaces two approved plans and keeps every owner decision in them, except where an owner decision
+below changes one and says so.
 **Scope:** platform (`src/lib/repository/`, the registry generator, `scripts/`, `/api/cron`,
 `src/proxy.ts`, the admin pages, the release step, host configs) and mixos.org (Registry API,
 site docs).
@@ -1545,15 +1551,15 @@ ranks whose base is ready go ahead without changing rank. "State" is as of 11 Oc
 | 21 | mixos.org: the core release list from the GitHub remote's annotated tags on `main`, a page per release, and under D28 B or C, `GET /api/v1/mixos/releases` | §07 option 1 (the source, per D28) | mixos-org `main` | 4 (a first release) | S | After rank 4's first release | Merged, mixos.org #14 |
 | 22 | MixOS release notices: the source per D28, semver tiers, the channel (D29), notes with links as text, no apply button | §08 #7; §06 pieces 2 to 4; §07 option 1 | rank 20 | 3, 4, 20; 21 under D28 B or C | S | After the stack | Merged, [#48](https://github.com/mixoshq/mixos/pull/48) |
 | 23 | Remove code: `removeExtension`, dependency refusals, the Remove button and `npm run remove`, the generator pruning `public/` copies | §08 #8 (code half); lesson 08 | rank 9 | 7, 9 | M | After the stack | Merged, [#49](https://github.com/mixoshq/mixos/pull/49) |
-| 24 | Delete data on each instance: the release step's connector marks, the record of builds seen, the "removed from this build" lists, Delete data per kind | §08 #8 (data half); lesson 08; D10 | `main`, after ranks 2 and 23 | 2, 23, contain-app-migrations | M | After the stack | In progress |
+| 24 | Delete data on each instance: the release step's connector marks, the record of builds seen, the "removed from this build" lists, Delete data per kind | §08 #8 (data half); lesson 08; D10 | `main`, after ranks 2 and 23 | 2, 23, contain-app-migrations | M | After the stack | Merged, [#51](https://github.com/mixoshq/mixos/pull/51) |
 | 25 | Close the activation bypasses: one app gate before the route import (gateway, `callAppRoute`, job imports), Run now, `audience: "app"` services, `hooks.ts` only for active apps, scheduled-job audits, activation docs | §08 #9 (apps); lesson 01; D7, D16 | `fix/app-isolation` (#6) | none | S | Now | Merged, [#22](https://github.com/mixoshq/mixos/pull/22) |
 | 26 | Connector on/off switch, with dependents named and audited; `theme.apply` audited. The refusal to activate an app whose connector is off waits for admin-dialog | §08 #9 (connectors, themes); lesson 01; D8, D16; SB-15 | `fix/connectors` (#9) | none | M | Now | Merged, [#24](https://github.com/mixoshq/mixos/pull/24). The refusal to activate an app whose connector is off still waits for admin-dialog |
-| 27 | Update, part 1: update mode, local edits from `filesHash`, the target picker with dates and an explicit downgrade, the update dialog | §08 #10; lesson 02 (headline); D12 | `main`, after ranks 20 and 23 | 9, 20, 23 | M | After the stack | In progress |
-| 28 | Update, part 2: the swap at Register with backup and restore under both locks, crash recovery that checks the backup's holder, the theme swap at install | §08 #10; lesson 04 | rank 27 | 1, 7, 27 | M | After the stack | Not started |
-| 29 | GitHub App, part 1: link the operator's repository (manifest flow, encrypted key, installation checks on every operation, two token shapes, unlink that uninstalls, key replacement and rotation, the branch rule read, audit) | §05 option 2; §07 option 2; D18, D19, D20 | `main`, after ranks 9 and 18 | 9, 18 | M | After the stack | In progress |
-| 30 | GitHub App, part 2: propose an install as a pull request (names from identifiers, workflow and preview checks, the branch-rule precondition); App pull requests on the Apps page ("No CI ran", "changed since proposed"); previews off in `vercel.json` and `render.yaml`; Danger and CI hardened for App branches | §05 option 2; D20, D22 | rank 29 | 29 | M | After the stack | Not started |
-| 31 | GitHub App, part 3: propose updates and removals | §05 option 2; lessons 04, 08 | rank 30 | 23, 28, 30 | S | After the stack | Not started |
-| 32 | MixOS update pull requests, with upstream's tag verified on GitHub and the compare-link fallback | §07 option 2 (second half); D21 | rank 30, with rank 22 merged | 22, 30 | M | After the stack | Not started |
+| 27 | Update, part 1: update mode, local edits from `filesHash`, the target picker with dates and an explicit downgrade, the update dialog | §08 #10; lesson 02 (headline); D12 | `main`, after ranks 20 and 23 | 9, 20, 23 | M | After the stack | Merged, [#53](https://github.com/mixoshq/mixos/pull/53) |
+| 28 | Update, part 2: the swap at Register with backup and restore under both locks, crash recovery that checks the backup's holder, the theme swap at install | §08 #10; lesson 04 | rank 27 | 1, 7, 27 | M | After the stack | Merged, [#55](https://github.com/mixoshq/mixos/pull/55) |
+| 29 | GitHub App, part 1: link the operator's repository (manifest flow, encrypted key, installation checks on every operation, two token shapes, unlink that uninstalls, key replacement and rotation, the branch rule read, audit) | §05 option 2; §07 option 2; D18, D19, D20 | `main`, after ranks 9 and 18 | 9, 18 | M | After the stack | Merged, [#52](https://github.com/mixoshq/mixos/pull/52) |
+| 30 | GitHub App, part 2: propose an install as a pull request (names from identifiers, workflow and preview checks, the branch-rule precondition); App pull requests on the Apps page ("No CI ran", "changed since proposed"); previews off in `vercel.json` and `render.yaml`; Danger and CI hardened for App branches | §05 option 2; D20, D22 | rank 29 | 29 | M | After the stack | Merged, [#54](https://github.com/mixoshq/mixos/pull/54) |
+| 31 | GitHub App, part 3: propose updates and removals | §05 option 2; lessons 04, 08 | rank 30 | 23, 28, 30 | S | After the stack | Merged, [#57](https://github.com/mixoshq/mixos/pull/57) |
+| 32 | MixOS update pull requests, with upstream's tag verified on GitHub and the compare-link fallback | §07 option 2 (second half); D21 | rank 30, with rank 22 merged | 22, 30 | M | After the stack | Merged, [#56](https://github.com/mixoshq/mixos/pull/56) |
 | 33 | Read-only image: root-owned files, only `.next/cache` writable; `read_only` with `tmpfs` in `deploy/docker-compose.yml` | lesson 09 (the hazard); D17 | rank 3 | 3 | S | Now, if D17 is yes | Merged, [#26](https://github.com/mixoshq/mixos/pull/26) |
 | 34 | mixos.org: honest listing and hub copy; no `mixos install` command | §05 option 1 (copy); D23 | mixos-org `main`, after its docs restructure is committed | none | XS | Now | Merged, mixos.org #12 and #13 |
 
