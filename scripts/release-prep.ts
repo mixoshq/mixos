@@ -5,7 +5,8 @@
 /**
  * Prepares a version release of MixOS: works out the next version from the
  * commits since the last release, writes the release PR's files, and prints a
- * release's notes for its GitHub Release.
+ * release's notes for its GitHub Release. It also tells Danger whether a pull
+ * request's change to the version is a release PR's.
  *
  * Not the release step. `npm run release` (scripts/release.ts) migrates a
  * deployment's database. This script has nothing to do with databases, and the
@@ -62,11 +63,21 @@ import path from "node:path";
 /** The core repository. Release notes link into it at the release's own tag. */
 export const REPOSITORY = "https://github.com/mixoshq/mixos";
 
+/** Whether `owner/repo` is the core repository, where releases are cut. A fork takes its versions from its tags. */
+export function isCoreRepository(owner: string, repo: string): boolean {
+  return `https://github.com/${owner}/${repo}`.toLowerCase() === REPOSITORY.toLowerCase();
+}
+
 /** The subject of a release PR's commit. Never counted in a later release. */
 export function releaseSubject(version: string): string {
   return `chore(os): release v${version}`;
 }
 const RELEASE_SUBJECT = /^chore\(os\): release v\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
+
+/** The branch a release PR is opened from, as `/mixos deploy release` names it. */
+export function releaseBranch(version: string): string {
+  return `release/v${version}`;
+}
 
 // ── Versions ────────────────────────────────────────────────────────────────
 
@@ -757,6 +768,58 @@ function today(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// ── The version in a pull request ───────────────────────────────────────────
+
+/** A pull request's change to one of the version fields setVersion() writes. */
+export interface VersionChange {
+  file: string;
+  /** `version`, or in package-lock.json also `packages[""].version`. */
+  field: string;
+  /** Null where the file has no such field, or isn't JSON. */
+  from: string | null;
+  to: string | null;
+}
+
+/** What `text` holds at each version field, by the name a VersionChange gives it. */
+function versionFields(text: string): Map<string, string> {
+  const fields = new Map<string, string>();
+  let data: { version?: unknown; packages?: Record<string, { version?: unknown } | undefined> } | null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return fields;
+  }
+  if (typeof data?.version === "string") fields.set("version", data.version);
+  const root = data?.packages?.[""]?.version;
+  if (typeof root === "string") fields.set('packages[""].version', root);
+  return fields;
+}
+
+/** The version fields at which `after`, the file as a pull request leaves it, differs from `before`. */
+export function versionChanges(file: string, before: string, after: string): VersionChange[] {
+  const was = versionFields(before);
+  const is = versionFields(after);
+  return ["version", 'packages[""].version']
+    .filter((field) => was.get(field) !== is.get(field))
+    .map((field) => ({ file, field, from: was.get(field) ?? null, to: is.get(field) ?? null }));
+}
+
+/**
+ * Whether a pull request from `branch` that makes `changes` is a release PR:
+ * every field set to one version, from the branch `/mixos deploy release`
+ * names after it. Danger fails any other pull request that changes the
+ * version (dangerfile.ts).
+ */
+export function isReleasePR(branch: string, changes: VersionChange[]): boolean {
+  const version = changes[0]?.to;
+  return (
+    typeof version === "string" &&
+    parseVersion(version) !== null &&
+    changes.every((c) => c.to === version) &&
+    branch === releaseBranch(version)
+  );
 }
 
 // ── The command ─────────────────────────────────────────────────────────────
