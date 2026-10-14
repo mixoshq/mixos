@@ -521,9 +521,11 @@ npm run verify:connectors   # connector manifests match their implementations
 ```
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) gates every pull request
-with lint, `npm audit --audit-level=high`, typecheck, and build — no database is
-involved. `verify:connectors` is a local check; run it after touching a
-connector manifest.
+with lint, `npm audit --audit-level=high`, typecheck, the tests and build. The
+tests include the database suites, against a throwaway Postgres the job starts.
+Locally those skip unless `MIXOS_TEST_DATABASE_URL` names a throwaway server;
+each suite's header shows how to start one. `verify:connectors` is a local
+check; run it after touching a connector manifest.
 
 There is no publish step. `.githooks/pre-commit` runs
 [`scripts/stamp-updated.ts`](scripts/stamp-updated.ts), which stamps `lastUpdated`

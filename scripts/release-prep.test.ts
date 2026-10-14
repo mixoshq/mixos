@@ -22,14 +22,18 @@ import {
   escapeMarkdown,
   formatVersion,
   insertSection,
+  isCoreRepository,
+  isReleasePR,
   minorBecause,
   notesFor,
   parseVersion,
   planRelease,
+  releaseBranch,
   releaseSubject,
   renderSection,
   tagCommands,
   toChange,
+  versionChanges,
   writeRelease,
   type Plan,
   type RawCommit,
@@ -365,5 +369,96 @@ describe("a release cycle", () => {
 
     r.write("package.json", '{\n    "name": "mixos",\n    "version": "0.1.0"\n}\n');
     assert.throws(() => writeRelease(r.root, "0.2.0"), /isn't formatted the way npm writes it/);
+  });
+});
+
+// ── The version in a pull request, which Danger holds to a release PR ───────
+
+describe("the version in a pull request", () => {
+  const pkg = (version: string, extra: object = {}) => npmJson({ name: "mixos", version, private: true, ...extra });
+  const lock = (version: string, root = version, zod = "4.4.3") =>
+    npmJson({
+      name: "mixos",
+      version,
+      lockfileVersion: 3,
+      requires: true,
+      packages: { "": { name: "mixos", version: root }, "node_modules/zod": { version: zod } },
+    });
+
+  test("a change is named by file and field: package.json's version, and both of the lockfile's", () => {
+    assert.deepEqual(versionChanges("package.json", pkg("0.1.0"), pkg("0.2.0")), [
+      { file: "package.json", field: "version", from: "0.1.0", to: "0.2.0" },
+    ]);
+    assert.deepEqual(versionChanges("package-lock.json", lock("0.1.0"), lock("0.2.0")), [
+      { file: "package-lock.json", field: "version", from: "0.1.0", to: "0.2.0" },
+      { file: "package-lock.json", field: 'packages[""].version', from: "0.1.0", to: "0.2.0" },
+    ]);
+    assert.deepEqual(versionChanges("package-lock.json", lock("0.1.0"), lock("0.1.0", "0.2.0")), [
+      { file: "package-lock.json", field: 'packages[""].version', from: "0.1.0", to: "0.2.0" },
+    ]);
+  });
+
+  test("any other change to the two files is not one", () => {
+    assert.deepEqual(versionChanges("package.json", pkg("0.1.0"), pkg("0.1.0", { scripts: { x: "y" } })), []);
+    assert.deepEqual(versionChanges("package-lock.json", lock("0.1.0"), lock("0.1.0", "0.1.0", "4.5.0")), []);
+    assert.deepEqual(versionChanges("package.json", pkg("0.1.0"), JSON.stringify(JSON.parse(pkg("0.1.0")))), []);
+  });
+
+  test("a field that is missing, or a file that isn't JSON, reads as none", () => {
+    assert.deepEqual(versionChanges("package.json", pkg("0.1.0"), npmJson({ name: "mixos" })), [
+      { file: "package.json", field: "version", from: "0.1.0", to: null },
+    ]);
+    assert.deepEqual(versionChanges("package.json", "<<<<<<< HEAD\n", pkg("0.2.0")), [
+      { file: "package.json", field: "version", from: null, to: "0.2.0" },
+    ]);
+  });
+
+  // What the v0.2.0 release PR changed: from release/v0.2.0, titled
+  // "chore(os): release v0.2.0".
+  const v020 = [
+    ...versionChanges("package.json", pkg("0.1.0"), pkg("0.2.0")),
+    ...versionChanges("package-lock.json", lock("0.1.0"), lock("0.2.0")),
+  ];
+
+  test("a release PR sets every field to one version, from the branch named after it", () => {
+    assert.equal(v020.length, 3);
+    assert.equal(releaseBranch("0.2.0"), "release/v0.2.0");
+    assert.equal(isReleasePR("release/v0.2.0", v020), true);
+    const rc = versionChanges("package.json", pkg("0.1.0"), pkg("0.2.0-rc.1"));
+    assert.equal(isReleasePR("release/v0.2.0-rc.1", rc), true);
+  });
+
+  test("any other pull request that changes the version is not a release PR", () => {
+    for (const branch of ["feat/try-an-extension", "release/v0.3.0", "release/0.2.0", "release/v0.2", "main"]) {
+      assert.equal(isReleasePR(branch, v020), false, branch);
+    }
+    const split = [
+      ...versionChanges("package.json", pkg("0.1.0"), pkg("0.2.0")),
+      ...versionChanges("package-lock.json", lock("0.1.0"), lock("0.3.0")),
+    ];
+    assert.equal(isReleasePR("release/v0.2.0", split), false);
+    const removed = versionChanges("package.json", pkg("0.1.0"), npmJson({ name: "mixos" }));
+    assert.equal(isReleasePR("release/v0.2.0", removed), false);
+    assert.equal(isReleasePR("release/v0.2.0", []), false);
+  });
+
+  test("only the core repository is held to it: a fork takes its version from the tags it merges", () => {
+    assert.equal(isCoreRepository("mixoshq", "mixos"), true);
+    assert.equal(isCoreRepository("MixOSHQ", "MixOS"), true);
+    assert.equal(isCoreRepository("someone", "mixos"), false);
+    assert.equal(isCoreRepository("mixoshq", "mixos-site"), false);
+  });
+
+  test("what --write sets is a release PR's change, from its branch only", () => {
+    const r = repository();
+    r.tag("v0.1.0");
+    r.commit("feat(os): a feature", ["src/a.ts"]);
+    writeRelease(r.root, "0.2.0", { today: TODAY });
+    const changes = ["package.json", "package-lock.json"].flatMap((file) =>
+      versionChanges(file, r.git("show", `HEAD:${file}`), fs.readFileSync(path.join(r.root, file), "utf8")),
+    );
+    assert.equal(changes.length, 3);
+    assert.equal(isReleasePR(releaseBranch("0.2.0"), changes), true);
+    assert.equal(isReleasePR("feat/a-feature", changes), false);
   });
 });
