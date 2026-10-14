@@ -10,6 +10,12 @@ import {
   nextMigrationNumber,
   platformMigrations,
 } from "./scripts/platform-migration-files";
+import {
+  isCoreRepository,
+  isReleasePR,
+  versionChanges,
+  type VersionChange,
+} from "./scripts/release-prep";
 
 const ALLOWED_DIRS = ["apps/", "connectors/", "themes/"];
 const OS_CHANGE_LABEL = "os-change";
@@ -293,6 +299,91 @@ if (addedMigrations.length > 0) {
           : `Renumber this PR's files from \`${next}\`, the next free number, and set ` +
             `\`platform_schema_version\` in each to its new number.`) +
         ` See OS-UPDATES.md.`
+    );
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Only a release PR changes the version                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `fail`. Between releases package.json holds the last release's version, and
+ * scripts/release-prep.ts refuses the next release while it holds another. A
+ * developer may bump it locally to try an extension that needs a newer MixOS;
+ * `/mixos deploy` leaves that bump out of its commits, and this catches one
+ * committed another way. A release PR is told apart by its branch, which
+ * `/mixos deploy release` names after the version it sets: release/vX.Y.Z.
+ *
+ * Only in the core repository, where releases are cut. A fork changes its
+ * version by merging a release tag, which is how it upgrades
+ * (docs/hosting/README.md#upgrading).
+ *
+ * The change is measured from where the branch left its base, as GitHub's
+ * Files changed tab measures it. Danger's own diff starts from the base's
+ * current tip, where a branch cut before a release would look as if it set
+ * the version back.
+ */
+const VERSION_FILES = ["package.json", "package-lock.json"];
+
+const versionFiles = isCoreRepository(danger.github.thisPR.owner, danger.github.thisPR.repo)
+  ? VERSION_FILES.filter((f) => danger.git.modified_files.includes(f))
+  : [];
+
+/** The commit this PR's branch left its base at; null, with a warning, when GitHub can't say. */
+async function branchPoint(): Promise<string | null> {
+  const { base, head } = danger.github.pr;
+  try {
+    const { data } = await danger.github.api.repos.compareCommitsWithBasehead({
+      owner: danger.github.thisPR.owner,
+      repo: danger.github.thisPR.repo,
+      basehead: `${base.sha}...${head.sha}`,
+      per_page: 1,
+    });
+    return data.merge_base_commit.sha;
+  } catch (err) {
+    warn(
+      `Could not find where this branch left \`${base.ref}\` ` +
+        `(${err instanceof Error ? err.message : String(err)}), so the version in ` +
+        `\`package.json\` and \`package-lock.json\` was not checked.`
+    );
+    return null;
+  }
+}
+
+if (versionFiles.length > 0) {
+  schedule(async () => {
+    const from = await branchPoint();
+    if (from === null) return;
+    const repoSlug = `${danger.github.thisPR.owner}/${danger.github.thisPR.repo}`;
+    const changes: VersionChange[] = [];
+    for (const file of versionFiles) {
+      const diff = await danger.git.diffForFile(file);
+      if (!diff) continue;
+      const before = await danger.github.utils.fileContents(file, repoSlug, from);
+      changes.push(...versionChanges(file, before, diff.after));
+    }
+    if (changes.length === 0 || isReleasePR(danger.github.pr.head.ref, changes)) return;
+
+    const list = changes
+      .map((c) => `- \`${c.file}\`: \`${c.field}\` ${c.from ?? "(none)"} → ${c.to ?? "(none)"}`)
+      .join("\n");
+    const was = changes.find((c) => c.from !== null)?.from;
+
+    fail(
+      `## This PR changes the version\n\n` +
+        `${list}\n\n` +
+        `Only a release PR changes the version, from the \`release/vX.Y.Z\` branch ` +
+        `\`/mixos deploy release\` makes. Between releases \`package.json\` holds the last ` +
+        `release's version, and \`scripts/release-prep.ts\` refuses the next release while ` +
+        `it holds another.\n\n` +
+        `Drop the bump from the commit` +
+        (was
+          ? `: \`npm version ${was} --no-git-tag-version --allow-same-version\` puts the ` +
+            `version back, then commit that.`
+          : `.`) +
+        ` To try an extension that needs a newer MixOS, keep the bump in your checkout: ` +
+        `\`/mixos deploy\` leaves it out of its commits.`
     );
   });
 }
