@@ -9,6 +9,15 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-10-14
+
+- **CI runs the database tests, and Danger fails a committed version bump.**
+  `ci.yml` starts a throwaway Postgres 17 for `npm test`, so the suites that
+  skip without `MIXOS_TEST_DATABASE_URL` run on every pull request. A pull
+  request to `mixoshq/mixos` that changes `"version"` in `package.json` or
+  `package-lock.json` fails Danger unless it is the release PR, from
+  `release/vX.Y.Z`.
+
 ## 2026-10-08
 
 - **Each app's tables are in a schema of its own.** An app with
