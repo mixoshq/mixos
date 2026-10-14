@@ -26,6 +26,21 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      # For the test step alone: the suites that need Postgres run against it,
+      # and skip without it. The password is not a secret; the server lives as
+      # long as this job, and no other step is told where it is.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: throwaway
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -89,17 +104,22 @@ jobs:
         run: npm run typecheck
 
       # Node's built-in runner through tsx: no test framework to install.
-      # Nothing here needs a database or the generated registry — code that
-      # does is split from the rules it applies, and the rules are what is
-      # tested (see src/lib/branding/bounded.ts, scripts/brand-checks.ts).
-      - name: Unit tests
+      # Nothing here needs the generated registry — code that does is split
+      # from the rules it applies, and the rules are what is tested (see
+      # src/lib/branding/bounded.ts, scripts/brand-checks.ts). The suites that
+      # need Postgres skip without MIXOS_TEST_DATABASE_URL; here it names the
+      # job's throwaway server, which they share, each under names of its own.
+      - name: Tests
         run: npm test
+        env:
+          MIXOS_TEST_DATABASE_URL: postgres://postgres:throwaway@localhost:5432/postgres
 
       # `prebuild` regenerates src/generated/app-registry.ts, so this also
       # catches a malformed app.json / connector.json / theme.json manifest, and
       # a theme.css that violates the token contract.
       #
-      # No database or secrets are provided on purpose. The Postgres pool is a
+      # The build gets no DATABASE_URL and no secrets, on purpose; the job's
+      # throwaway Postgres is for the test step. The Postgres pool is a
       # lazy proxy (src/lib/db/client.ts) and the query builder holds nothing
       # but a reference to it, so nothing touches DATABASE_URL/PG* env vars until
       # a request is served. If this step ever starts failing on a missing env var, that
