@@ -668,11 +668,11 @@ token, every app API key and every unlock cookie simultaneously.
   database by accident. `npm run docker:reset -- --yes` is the deliberate
   override; needing it should feel like a decision.
 - **If they ask about running without Docker:** MixOS also runs with Node on the
-  host against a Postgres of their choosing — see the "Alternative: your own
-  Postgres" section of [README.md](../../../../README.md). Don't offer this
-  unprompted; it is more setup, not less.
-- **If they ask about putting it on the internet:** that is hosting, not
-  installing — point them at [docs/hosting](../../../../docs/hosting/README.md),
+  host against a Postgres of their choosing — see "With a database of your own"
+  in [docs/hosting/development.md](../../../../docs/hosting/development.md#with-a-database-of-your-own).
+  Don't offer this unprompted; it is more setup, not less.
+- **If they ask about putting it on the internet:** that is a deployment, not
+  this setup — point them at [How to install](../../../../docs/hosting/install.md),
   which covers their own server, Render, Railway and Vercel.
 
 ## Notes

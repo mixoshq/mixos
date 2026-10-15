@@ -700,7 +700,7 @@ re-encrypts the stored App key.
 **Do not point two keys at the same value, and do not derive one from another.**
 
 In production these are the host's environment variables
-([hosting](hosting/README.md)).
+([hosting](hosting/install.md#step-4-set-the-environment)).
 
 ---
 
@@ -1700,7 +1700,7 @@ and Enable are audited (§28).
 
 `GET /api/cron` drives the scheduler. In production the host's scheduler calls
 it every 5 minutes: Vercel Cron, a Render cron job, a Railway cron service or
-the Compose `cron` service ([hosting](hosting/README.md)). Locally, a compose
+the Compose `cron` service ([hosting](hosting/providers/README.md#what-each-host-provides)). Locally, a compose
 sidecar does.
 
 - **Auth** is a bearer comparison against `CRON_SECRET`, length-checked first then
@@ -3314,7 +3314,7 @@ below), so on those the flags decide only whether the catalogue can be browsed.
   host. Compose also runs the image on a read-only root filesystem, with those
   two directories and `/tmp` as `tmpfs` mounts (`Dockerfile`,
   `deploy/docker-compose.yml`,
-  [docs/hosting/docker-compose.md](hosting/docker-compose.md#whats-read-only)).
+  [docs/hosting/providers/self-hosted.md](hosting/providers/self-hosted.md#whats-read-only)).
   The marker is checked first, so an admin there is told why a built deployment
   cannot register, not that a folder is read-only.
 - **Carry the archive's file modes.** Everything is written `0644`: an archive
@@ -3564,7 +3564,7 @@ again and before every proposal (`branchRuleSatisfied()`). That lists ruleset ru
 protection doesn't show there, and private repositories on GitHub Free can't
 have rulesets, so an admin can confirm either, with the repository's name
 typed, audited. If GitHub won't show the rules at all (a 403 or 404), linking
-goes ahead and records that, since linking doesn't need the rule. [The hosting guide](hosting/README.md#linking-your-github-repository)
+goes ahead and records that, since linking doesn't need the rule. [The GitHub App guide](hosting/after-you-install/github-app.md#linking-your-github-repository)
 gives the ruleset.
 
 ### Proposing an install

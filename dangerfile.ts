@@ -317,7 +317,7 @@ if (addedMigrations.length > 0) {
  *
  * Only in the core repository, where releases are cut. A fork changes its
  * version by merging a release tag, which is how it upgrades
- * (docs/hosting/README.md#upgrading).
+ * (docs/hosting/after-you-install/upgrading.md).
  *
  * The change is measured from where the branch left its base, as GitHub's
  * Files changed tab measures it. Danger's own diff starts from the base's

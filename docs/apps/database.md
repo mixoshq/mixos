@@ -29,7 +29,7 @@ The schema belongs to a role of its own, `mixos_app_<slug>`, which cannot log in
 
 **One MixOS database per Postgres server.** Roles belong to the whole server, not to one database, so two MixOS databases on the same server would share each app's role. The release step refuses an app role that another database on the server already uses. Give each MixOS install a Postgres server of its own.
 
-**Your schema outlives your folder.** When the app leaves the build, because its folder is removed or renamed or the build skips it, the release step keeps its schema, its tables and the record of which migrations ran, and the app finds them all again when it comes back. Renaming the folder makes a new slug, and so a new, empty schema; the old one stays under the old name. Removing the app, with **Remove** on Admin > Apps or `npm run remove -- app/<slug>`, deletes its folder and keeps its data the same way. An admin deletes it on each instance with **Delete data…** under Not in this build, which drops the schema and the role, once no build that uses that database still has the app; a later app with the same slug then starts with an empty schema. See [docs/hosting](../hosting/README.md#deleting-an-extensions-data).
+**Your schema outlives your folder.** When the app leaves the build, because its folder is removed or renamed or the build skips it, the release step keeps its schema, its tables and the record of which migrations ran, and the app finds them all again when it comes back. Renaming the folder makes a new slug, and so a new, empty schema; the old one stays under the old name. Removing the app, with **Remove** on Admin > Apps or `npm run remove -- app/<slug>`, deletes its folder and keeps its data the same way. An admin deletes it on each instance with **Delete data…** under Not in this build, which drops the schema and the role, once no build that uses that database still has the app; a later app with the same slug then starts with an empty schema. See [After you install](../hosting/after-you-install/README.md#deleting-an-extensions-data).
 
 ## Creating Migrations
 
@@ -131,7 +131,7 @@ pointed at:
   apply by hand.
 - **Any other database** — `npm run db:migrate`, against `DATABASE_URL`.
 - **A deployment** — the release step does both schemas in order; see
-  [docs/hosting](../hosting/README.md#the-release-step).
+  [How to install](../hosting/install.md#step-6-run-the-release-step).
 
 `npm run db:push` (`supabase db push`) still works against a linked Supabase
 project, and records what it applied in the same ledger as `db:migrate`. Keep it
