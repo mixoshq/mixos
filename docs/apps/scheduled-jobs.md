@@ -289,7 +289,7 @@ straight before you conclude a job "isn't running":**
   Vercel Cron from `vercel.json`, the `mixos-cron` cron job on Render, a `cron`
   service on Railway, and the `cron` service in `deploy/docker-compose.yml` on
   your own server. Each sends the same request with `CRON_SECRET`. See
-  [Hosting MixOS](../hosting/README.md).
+  [Install at popular providers](../hosting/providers/README.md).
 
 - **On the Docker workflow (`npm run dev:docker`, `npm run docker:prod`) — the
   compose `cron` sidecar.** It is declared with `profiles: ["dev", "prod"]`, so
@@ -327,7 +327,7 @@ Even when ticks arrive, jobs don't run in three cases, each shown on
   first tick after the release step applies the migrations.
 
 On Vercel, the 5-minute tick needs a Pro plan: the Hobby plan allows only daily
-cron schedules. See [Vercel](../hosting/vercel.md).
+cron schedules. See [Vercel with Supabase](../hosting/providers/vercel-supabase.md).
 
 ## Local development
 

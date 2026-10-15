@@ -731,7 +731,8 @@ async function preflight(opts: {
     pf.fail(
       `Unsupported platform: ${process.platform}`,
       "The Docker path is built for macOS, Linux, and Windows via WSL 2.",
-      "Follow the manual setup in README.md (hosted Supabase + host Node).",
+      "Run it with Node on this machine and a Postgres of your own instead: " +
+        "docs/hosting/development.md#with-a-database-of-your-own.",
     );
   } else {
     pf.ok(PLATFORM_LABEL[PLATFORM], OWNER ? `files written as uid ${OWNER.uid}` : undefined);

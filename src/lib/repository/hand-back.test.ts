@@ -330,7 +330,7 @@ describe("the removal's commit", () => {
     assert.match(text, /^git switch -c remove-app-files\ngit rm -r apps\/files\ngit commit -F - -- apps\/files <<'MSG'\nfeat\(files\): remove app files 1\.2\.0 from mixos\.org$/m);
     assert.match(text, /^MSG\ngit push -u origin HEAD$/m);
     assert.match(text, /Or run \/mixos deploy/);
-    assert.match(text, /then build, migrate and start, as in docs\/hosting\/docker-compose\.md#upgrading\.$/);
+    assert.match(text, /then build, migrate and start, as in docs\/hosting\/providers\/self-hosted\.md#upgrading\.$/);
     // Never committed: nothing to commit, and no commands.
     const untracked = removalHandBackLines(handBack, { tracked: false }).join("\n");
     assert.match(untracked, /Git doesn't track apps\/files: it was never committed, so there is nothing to commit\./);

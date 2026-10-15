@@ -38,7 +38,7 @@ Anything else is ignored.
   here. Each can target a production database — the linked hosted project, or
   whatever `DATABASE_URL` names — so on a feature branch it would push
   unreviewed schema straight at production. Applying schema to production is
-  the deploy's release step (docs/hosting/README.md). That release step has
+  the deploy's release step (docs/hosting/install.md, step 6). That release step has
   nothing to do with `/mixos deploy release`, which makes versions.
 - Every commit message ends with the attribution trailer this session was
   given (the `Co-Authored-By: Claude …` line). If the session has none, omit it
@@ -421,7 +421,7 @@ merge (OS-UPDATES.md)." Omit the section otherwise.>
 <list any new **/migrations/*.sql. Note how they reach production: on Docker
 Compose, Render and Railway the release step applies them as part of the
 deploy; on Vercel the production build runs it after `next build`
-(docs/hosting/vercel.md). Either way the version still serving runs against the
+(docs/hosting/providers/vercel-supabase.md). Either way the version still serving runs against the
 migrated database for a while, so each has to work with it. Omit the section if
 there are none.>
 
