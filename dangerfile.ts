@@ -16,6 +16,7 @@ import {
   versionChanges,
   type VersionChange,
 } from "./scripts/release-prep";
+import { strayExtensions } from "./scripts/core-extensions";
 
 const ALLOWED_DIRS = ["apps/", "connectors/", "themes/"];
 const OS_CHANGE_LABEL = "os-change";
@@ -301,6 +302,32 @@ if (addedMigrations.length > 0) {
         ` See OS-UPDATES.md.`
     );
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/*  The core carries only its own extensions                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `fail`. The core repository carries each kind's template, Wall-E and the
+ * built-in themes (scripts/core-extensions.ts); an app, connector or theme of
+ * someone's own belongs in their fork. Only in the core repository: a fork
+ * commits its extensions, which is how it ships them.
+ */
+const strayFolders = isCoreRepository(danger.github.thisPR.owner, danger.github.thisPR.repo)
+  ? strayExtensions([...danger.git.created_files, ...danger.git.modified_files])
+  : [];
+
+if (strayFolders.length > 0) {
+  const one = strayFolders.length === 1;
+  fail(
+    `## This PR adds ${one ? "an extension" : "extensions"} to the core\n\n` +
+      `${strayFolders.map((f) => `- \`${f}/\``).join("\n")}\n\n` +
+      `The core repository carries only each kind's template, Wall-E and the built-in themes ` +
+      `(\`scripts/core-extensions.ts\`). An app, connector or theme of your own belongs in your ` +
+      `fork, where you commit and deploy it. Take ${one ? "it" : "them"} out of this PR: ` +
+      `\`git rm -r --cached <folder>\` keeps the files on disk.`
+  );
 }
 
 /* -------------------------------------------------------------------------- */
