@@ -91,6 +91,28 @@ line 1 and the notice directly below it.
   blocks your commit, the error names the field to fix. The hook also stamps
   `lastUpdated` on each app, connector or theme your commit changes. Merging
   `main` into your branch doesn't re-stamp the ones only `main` changed.
+- **Extensions:** the core carries only each kind's template, Wall-E and the
+  built-in themes (`scripts/core-extensions.ts`), and Danger fails a pull
+  request that adds another. Keep your own in your fork. To keep them out of
+  `git status` in a clone of the core, ignore them there in
+  `.git/info/exclude`:
+
+  ```
+  /apps/*
+  !/apps/AGENTS.md
+  !/apps/_template/
+  !/apps/wall-e/
+  /connectors/*
+  !/connectors/AGENTS.md
+  !/connectors/_template/
+  !/connectors/_template-oauth/
+  /themes/*
+  !/themes/AGENTS.md
+  !/themes/_template/
+  !/themes/mixos/
+  !/themes/mixos-dark/
+  ```
+
 - **Larger changes:** open an issue first, or add a plan under
   [`docs/plans/`](docs/plans/README.md), so the approach can be agreed before
   the code is written.
