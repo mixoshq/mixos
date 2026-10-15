@@ -9,8 +9,9 @@
 // ── Why this is not just "read .env.local" ──────────────────────────────────
 // There are two local setups, and they carry their environment differently:
 //
-//   hosted Supabase  — the developer writes .env.local by hand (README's
-//                      "Alternative" path). This is the original behaviour.
+//   hosted Supabase  — the developer writes .env.local by hand ("With a database
+//                      of your own" in docs/hosting/development.md). This is the
+//                      original behaviour.
 //   local Docker     — the default path. It deliberately creates NO .env.local:
 //                      .env.docker is committed and .env.docker.local is
 //                      generated at boot, and docker-up.ts injects both into
