@@ -35,7 +35,7 @@ import ProposeDialog from "./propose-dialog";
 import RegisterDialog from "./register-dialog";
 
 /** How to update an extension where this deployment can't, and has no App to propose with: in a checkout, then commit and deploy. */
-const HOW_TO_UPDATE = docsUrl("operating/hosting#updating-an-extension");
+const HOW_TO_UPDATE = docsUrl("install/after-you-install#updating-an-extension");
 
 /**
  * Browse one kind of extension in the mixos.org repository.

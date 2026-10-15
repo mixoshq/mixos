@@ -91,7 +91,7 @@ describe("the notice", () => {
       text: "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor release: it may need changes.",
       notes: "### Fixes\n\n- the notes for v0.5.0",
       releaseUrl: "https://mixos.org/docs/releases/v0.5.0",
-      upgradeUrl: "https://mixos.org/docs/operating/upgrading",
+      upgradeUrl: "https://mixos.org/docs/install/after-you-install/upgrading",
     });
   });
 
@@ -134,7 +134,7 @@ describe("the notice", () => {
     const n = notice("v0.5.0-rc.1", "0.4.2", { notes: "See https://evil.example/upgrade and [this](https://evil.example/)" });
     assert.equal(n?.releaseUrl, "https://mixos.org/docs/releases/v0.5.0-rc.1");
     assert.equal(n?.upgradeUrl, UPGRADE_GUIDE_URL);
-    assert.equal(UPGRADE_GUIDE_URL, "https://mixos.org/docs/operating/upgrading");
+    assert.equal(UPGRADE_GUIDE_URL, "https://mixos.org/docs/install/after-you-install/upgrading");
     for (const bad of ["v0.5", "../../admin", "v1.0.0/../../x", "https://evil.example/v1.0.0", "1.0.0"]) {
       assert.equal(releasePageUrl(bad), null, bad);
     }
