@@ -256,7 +256,7 @@ test("one installed from this catalogue offers Update in a checkout, how to upda
   assert.match(card({ onUpdate: () => {} }), /Installed from mixos\.org · 1\.2\.0 Update View listing$/);
   // The current release in place: another release can still be picked.
   assert.match(card({ onUpdate: () => {}, extension: { ...extension, latestVersion: "1.2.0" } }), /Installed from mixos\.org · 1\.2\.0 Change release View listing$/);
-  assert.match(card({ updateHelpUrl: "https://mixos.org/docs/operating/hosting#updating-an-extension" }), /Installed from mixos\.org · 1\.2\.0 How to update \(opens in a new tab\) View listing$/);
+  assert.match(card({ updateHelpUrl: "https://mixos.org/docs/install/after-you-install#updating-an-extension" }), /Installed from mixos\.org · 1\.2\.0 How to update \(opens in a new tab\) View listing$/);
   assert.match(card({ onUpdate: () => {}, pendingSlugs: new Set(["acme"]) }), /Installed from mixos\.org · 1\.2\.0 Review and register View listing$/);
   // Nothing to update for one from another catalogue, or a local one.
   assert.doesNotMatch(card({ onUpdate: () => {} }, provenanceOf("app", "acme", [install({ source: "http://localhost:4321" })], "https://mixos.org")), /Update/);
