@@ -2811,8 +2811,8 @@ dropped, so no tracking image loads in front of admins (the CSP allows
 `img-src https:`), and every link shown as its text and then its address, not
 clickable. The notice's only links are built from the checked tag: the
 release's page on mixos.org, `https://mixos.org/docs/releases/<tag>`, and
-`https://mixos.org/docs/operating/upgrading`. No address in the answer is ever
-fetched or made a link.
+`https://mixos.org/docs/install/after-you-install/upgrading`. No address in the
+answer is ever fetched or made a link.
 
 **Never applied.** No button applies a release. The check writes one row, its
 own, and takes its lock while it runs; it starts no process and writes no
