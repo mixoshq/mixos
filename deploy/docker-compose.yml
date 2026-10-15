@@ -1,6 +1,7 @@
 # MixOS on one machine: Postgres, the release step, the app, and the scheduler
 # tick, built from this repository's Dockerfile. No Supabase, nothing hosted.
-# The walkthrough — a VPS, Coolify, Dokploy — is docs/hosting/docker-compose.md.
+# The walkthrough — a VPS, Coolify, Dokploy — is
+# docs/hosting/providers/self-hosted.md.
 #
 #   sh deploy/new-env.sh https://mixos.example.com you@example.com
 #   docker compose -f deploy/docker-compose.yml up -d --build
@@ -36,7 +37,7 @@ x-image: &image
       #   MIXOS_COMMIT=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.yml build
       #
       # Unset builds fine; the commit then shows as unknown. On Coolify, set it
-      # to $SOURCE_COMMIT (docs/hosting/docker-compose.md).
+      # to $SOURCE_COMMIT (docs/hosting/providers/self-hosted.md#coolify).
       MIXOS_COMMIT: ${MIXOS_COMMIT:-}
 
 x-app-env: &app-env
@@ -68,11 +69,12 @@ x-app-env: &app-env
   INSTALL_CONNECTORS: ${INSTALL_CONNECTORS:-true}
   INSTALL_THEMES: ${INSTALL_THEMES:-true}
   # The daily checks with mixos.org, for extensions and for MixOS releases
-  # (docs/hosting/README.md). false sends nothing.
+  # (docs/hosting/after-you-install/README.md). false sends nothing.
   MIXOS_UPDATE_CHECK: ${MIXOS_UPDATE_CHECK:-true}
   # Which MixOS releases the admin pages announce: stable or prerelease.
   MIXOS_RELEASE_CHANNEL: ${MIXOS_RELEASE_CHANNEL:-stable}
-  # Optional. Set, it turns on Admin > GitHub (docs/hosting/README.md). Blank: off.
+  # Optional. Set, it turns on Admin > GitHub
+  # (docs/hosting/after-you-install/github-app.md). Blank: off.
   GITHUB_APP_ENCRYPTION_KEY: ${GITHUB_APP_ENCRYPTION_KEY:-}
   VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
   VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
@@ -123,8 +125,9 @@ services:
         condition: service_healthy
     restart: "no"
     # The image's HEALTHCHECK probes the web server, which this container never
-    # starts. It exits 0 when it is done; on Coolify, see docs/hosting for
-    # keeping that exit out of the deployment's health.
+    # starts. It exits 0 when it is done; on Coolify, see
+    # docs/hosting/providers/self-hosted.md for keeping that exit out of the
+    # deployment's health.
     healthcheck:
       disable: true
 
@@ -139,7 +142,8 @@ services:
     # app's code, root included. The image's files are root's already (see the
     # Dockerfile). What Next writes while serving goes to tmpfs mounts, which
     # live in memory and empty on restart. Anything added that writes at
-    # runtime needs a mount of its own: docs/hosting/docker-compose.md.
+    # runtime needs a mount of its own:
+    # docs/hosting/providers/self-hosted.md#whats-read-only.
     read_only: true
     # uid and gid 1000 are `node`, the user the server runs as. Without them
     # Docker mounts a tmpfs as root's, and the server cannot write to it.

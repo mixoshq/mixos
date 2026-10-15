@@ -2,7 +2,7 @@
 
 Thanks for helping. This page covers the terms a contribution is made under and
 the few things a pull request needs to get merged. For setting up a working
-copy, see [Developing](README.md#developing) in the README; for apps,
+copy, see [Running a development copy](docs/hosting/development.md); for apps,
 connectors and themes, read the guide for that kind of extension
 ([`apps/AGENTS.md`](apps/AGENTS.md), [`connectors/AGENTS.md`](connectors/AGENTS.md),
 [`themes/AGENTS.md`](themes/AGENTS.md)) before writing code.
