@@ -1,8 +1,8 @@
 # Local development in Docker
 
 The everyday local setup runs MixOS and its database entirely on your machine.
-This is the reference for how the pieces fit; [README.md](../README.md) has the
-five-minute version.
+This is the reference for how the pieces fit;
+[Running a development copy](hosting/development.md) has the short version.
 
 ```bash
 npm run dev:docker              # boot everything, app with hot reload

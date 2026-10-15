@@ -21,7 +21,7 @@
 // the deployment still serving runs against the migrated database until then,
 // and again after an Instant Rollback, which rebuilds nothing. So a migration
 // has to work with the deployment before it: add in one release, remove in a
-// later one. docs/hosting/vercel.md has the rest.
+// later one. docs/hosting/providers/vercel-supabase.md has the rest.
 //
 // The build log is readable by everyone on the project, so nothing here prints
 // a connection string: messages name the variable, never its value.
@@ -77,7 +77,7 @@ export interface ReleaseConnection {
  * Only when both strings sign in as the same role, with the same password, to
  * the same database name, as Neon's two do through different hosts. The
  * release step has to migrate the database the app uses, as the role the app
- * uses (docs/hosting/README.md, "The database role"). A DATABASE_URL_UNPOOLED
+ * uses (docs/hosting/install.md, "Step 3: Create the database"). A DATABASE_URL_UNPOOLED
  * left over from a database the project has moved off would otherwise take
  * the migrations somewhere else.
  *

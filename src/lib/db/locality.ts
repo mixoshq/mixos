@@ -5,11 +5,12 @@
 /**
  * Is the database this server uses one that only this machine reaches?
  *
- * A checkout can point at a database other instances use too: the README
- * documents sharing a development database, and a staging instance can share
- * one with a developer's checkout. An app's switch, `apps.is_active`, is a row
- * in that database, so turning an app on from a checkout turns it on for every
- * instance on the same database, including one that deploys the app later.
+ * A checkout can point at a database other instances use too:
+ * docs/hosting/development.md documents sharing a development database, and a
+ * staging instance can share one with a developer's checkout. An app's switch,
+ * `apps.is_active`, is a row in that database, so turning an app on from a
+ * checkout turns it on for every instance on the same database, including one
+ * that deploys the app later.
  * So what a checkout does to its own database after Register, "Activate in this
  * checkout", is offered and allowed only when the database is local:
  *
