@@ -11,6 +11,13 @@ just pulled.
 
 ## 2026-10-14
 
+- **The install guide is in five parts, in `docs/hosting/`.** Before you
+  install (`README.md`), How to install (`install.md`), Running a development
+  copy (`development.md`), Install at popular providers (`providers/`: Vercel
+  with Supabase, Render, Railway and Self-hosted), and After you install
+  (`after-you-install/`: extensions, upgrading, securing and the GitHub App).
+  The per-host pages moved into `providers/`, and the README's local setup and
+  troubleshooting moved to `development.md`.
 - **CI runs the database tests, and Danger fails a committed version bump.**
   `ci.yml` starts a throwaway Postgres 17 for `npm test`, so the suites that
   skip without `MIXOS_TEST_DATABASE_URL` run on every pull request. A pull
@@ -67,8 +74,9 @@ just pulled.
   into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
   from Vercel, Render and Railway's own variables; on Docker Compose, build with
   `MIXOS_COMMIT=$(git rev-parse HEAD)`, and on Coolify set
-  `MIXOS_COMMIT=$SOURCE_COMMIT`. See `docs/hosting/README.md`. **Breaking:** an
-  extension's `requiresMixOS` is now checked in a checkout too, against
+  `MIXOS_COMMIT=$SOURCE_COMMIT`. See
+  `docs/hosting/after-you-install/README.md#which-build-is-running`.
+  **Breaking:** an extension's `requiresMixOS` is now checked in a checkout too, against
   `package.json`; bump it locally to try an extension that needs a newer MixOS,
   but don't commit the bump: `/mixos deploy` leaves it out.
 - **A built deployment browses mixos.org.** The Docker image on any host, and
@@ -84,7 +92,7 @@ just pulled.
   for the commands that tag the merge commit and publish the GitHub Release,
   which a person runs. To upgrade a deployment, merge the newest release tag
   into your fork rather than `upstream/main`
-  (`docs/hosting/README.md#upgrading`). Prereleases are `vX.Y.Z-rc.N`.
+  (`docs/hosting/after-you-install/upgrading.md`). Prereleases are `vX.Y.Z-rc.N`.
 - **Two platform migrations can't share a number.** The ledger records a
   migration by its number, so the release step and `npm run db:migrate` applied
   one of two files with the same number and silently skipped the other. Now
@@ -110,7 +118,7 @@ just pulled.
   `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` on the project and the
   first deploy creates the admin. Migrations have to work with the deployment
   still serving: add in one release, remove in a later one. See
-  `docs/hosting/vercel.md`.
+  `docs/hosting/providers/vercel-supabase.md`.
 - **`scripts/smoke-test-app.ts` tests real routes.** It looked for routes
   with a pattern no `defineRoute` route matches, so it sent no requests, and
   it skipped apps without connectors. It now reads routes from the generated
@@ -137,7 +145,8 @@ just pulled.
   so the server can't change its own code on any host, and
   `deploy/docker-compose.yml` runs `app` and `migrate` on a read-only root
   filesystem, with Next's caches and `/tmp` on `tmpfs`. Something you add that
-  writes at runtime needs a mount; see `docs/hosting/docker-compose.md`.
+  writes at runtime needs a mount; see
+  `docs/hosting/providers/self-hosted.md#whats-read-only`.
 - **An app whose migrations are behind waits on its own.** While the build
   carries an app migration the database hasn't applied, none of that app's
   code runs, and it alone says "This app is being updated. Try again shortly.":
@@ -270,7 +279,7 @@ just pulled.
   no longer published; and when mixos.org last answered. It sends a random
   instance ID and each extension's kind, slug and version, nothing else, and
   acts on nothing. `MIXOS_UPDATE_CHECK=false` turns it off. See
-  `docs/hosting/README.md#what-mixos-sends-to-mixosorg`.
+  `docs/hosting/after-you-install/README.md#what-mixos-sends-to-mixosorg`.
 - **Smoke-test an app as you register it, and in every pull request that
   changes one.** `npm run register -- app/<slug> --smoke` registers the app,
   then runs its migrations, activates it, grants it to the user you sign in as
@@ -283,7 +292,7 @@ just pulled.
   `apps/`, `connectors/` or `themes/` when an installed folder no longer matches
   its `.registry.json`, or when a changed app fails the smoke test on a fresh
   instance. It has read-only access and no secrets. See
-  `docs/hosting/README.md`.
+  `docs/hosting/after-you-install/README.md#the-pull-request-check`.
 - **The admin pages say when a newer MixOS is out.** Once a day the tick reads
   mixos.org's list of MixOS releases, an anonymous `GET` that sends nothing
   about the instance and that mixos.org doesn't record. When a newer release
@@ -293,7 +302,7 @@ just pulled.
   page on mixos.org and to the upgrade guide. Nothing is applied for you.
   `MIXOS_RELEASE_CHANNEL=prerelease` adds prereleases, and
   `MIXOS_UPDATE_CHECK=false` turns this check off too. See
-  `docs/hosting/README.md#new-releases-of-mixos`.
+  `docs/hosting/after-you-install/README.md#new-releases-of-mixos`.
 - **Remove an extension's code.** Admin > Apps, Connectors and Themes have
   **Remove** on each tile, and `npm run remove -- <kind>/<slug>` does the same
   in a checkout. It says first what goes and what stays, then moves the folder
@@ -331,7 +340,7 @@ just pulled.
   `npm run keys:rotate-github-app` re-encrypts the stored key when you rotate
   it. Unlink uninstalls the App from GitHub before forgetting it. Linking,
   unlinking, replacing the key and the link turning off are audited. See
-  `docs/hosting/README.md#linking-your-github-repository`.
+  `docs/hosting/after-you-install/github-app.md#linking-your-github-repository`.
 - **Preparing an update of an extension.** Install has an update mode: it
   downloads any release of an app or a connector installed from mixos.org,
   verifies and checks it as an install does, and leaves it in
@@ -355,7 +364,7 @@ just pulled.
   proposed". `vercel.json` now turns off deployments of `mixos/**`,
   `render.yaml` turns off the web service's previews, Danger skips App
   branches, and CI checks out without keeping its token. See
-  `docs/hosting/README.md#proposing-an-extension`.
+  `docs/hosting/after-you-install/github-app.md#proposing-an-extension`.
 - **Updating an extension, in place.** Register puts a pending update in
   place: it moves the folder to `.mixos/backup/`, puts the new release there,
   runs the registry generator, and deletes the backup once the generator
@@ -372,7 +381,7 @@ just pulled.
   stopped midway, asking whether to restore the old release or keep the new
   one. The audit log records the swap on `<kind>.register`, a theme's as
   `theme.update`, and recovery as `<kind>.update.recover`. See
-  `docs/hosting/README.md#updating-an-extension`.
+  `docs/hosting/after-you-install/README.md#updating-an-extension`.
 - **MixOS update pull requests.** With the GitHub App linked and the
   repository a fork of `mixoshq/mixos`, the release notice offers **Open an
   update pull request**. It first asks GitHub whether upstream's tag is at
@@ -385,7 +394,7 @@ just pulled.
   it, and never merges. A private copy gets the `git fetch upstream --tags &&
   git merge <tag>` steps instead. Admin > GitHub lists open update pull
   requests with their checks. Audited as `mixos.update.propose`. See
-  `docs/hosting/README.md#updating-mixos-through-the-app`.
+  `docs/hosting/after-you-install/github-app.md#updating-mixos-through-the-app`.
 - **Propose an update or a removal as a pull request.** With the GitHub App
   linked, a deployment's withdrawn and newer notices and its Browse cards
   offer **Propose update**, and the Remove dialog offers **Propose removal**,
@@ -400,7 +409,7 @@ just pulled.
   there. Rolling back is reverting the merge. Admin > Apps, Connectors and
   Themes list these pull requests with their checks beside the installs.
   Audited as `<kind>.propose` with `action: "update"` or `"remove"`. See
-  `docs/hosting/README.md#proposing-an-extension`.
+  `docs/hosting/after-you-install/github-app.md#proposing-an-extension`.
 
 ## 2026-10-07
 
@@ -424,7 +433,7 @@ just pulled.
 - **`INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES`** (default `true`).
   Set one to `false` and that kind's Browse page and button disappear, and its
   install actions refuse. The instance runs only what it was deployed with.
-  See `docs/hosting/README.md`.
+  See `docs/hosting/after-you-install/README.md#fixing-what-an-instance-runs`.
 - **Brand hooks.** An app can change the install's name and marks
   (`brand-name`, `menu-bar-logo`, `login-logo`) from a new
   `apps/<slug>/hooks.ts` entrypoint, declared in `app.json` under `branding`;
