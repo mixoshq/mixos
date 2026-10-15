@@ -126,7 +126,7 @@ test("the notice: the sentence, the notes collapsed, and the two links built fro
   const links = [...html.matchAll(/<a\s[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/g)].map((m) => [m[1], text(m[2])]);
   assert.deepEqual(links, [
     ["https://mixos.org/docs/releases/v0.5.0", "v0.5.0 on mixos.org (opens in a new tab)"],
-    ["https://mixos.org/docs/operating/upgrading", "How to upgrade (opens in a new tab)"],
+    ["https://mixos.org/docs/install/after-you-install/upgrading", "How to upgrade (opens in a new tab)"],
   ]);
   for (const a of html.match(/<a\s[^>]*>/g) ?? []) {
     assert.match(a, /target="_blank"/);
@@ -178,7 +178,7 @@ test("on a fork of upstream: one button, which opens a pull request, and nothing
   assert.doesNotMatch(html, /<form|<input/);
   assert.match(html, /data-update-offer="fork"/);
   // Only the two links built from the tag: the compare link is the fallback, not a third link here.
-  assert.deepEqual(links(html), ["https://mixos.org/docs/releases/v0.5.0", "https://mixos.org/docs/operating/upgrading"]);
+  assert.deepEqual(links(html), ["https://mixos.org/docs/releases/v0.5.0", "https://mixos.org/docs/install/after-you-install/upgrading"]);
 
   // Off, as Browse's Propose is, until the rule and the checklist hold: the button, disabled, says why.
   const off = render({
@@ -208,7 +208,7 @@ test("on a private copy: the merge by hand and the compare link, and no button",
   assert.match(text(html), /acme-org\/intranet isn't a fork of mixoshq\/mixos, so the GitHub App can't open an update pull request there\. Merge the release by hand, on a branch: git fetch upstream --tags && git merge v0\.5\.0/);
   assert.deepEqual(links(html), [
     "https://mixos.org/docs/releases/v0.5.0",
-    "https://mixos.org/docs/operating/upgrading",
+    "https://mixos.org/docs/install/after-you-install/upgrading",
     "https://github.com/mixoshq/mixos/compare/0123456789abcdef0123456789abcdef01234567...v0.5.0",
   ]);
   assert.doesNotMatch(render({ kind: "copy", tag: "v0.5.0", repository: "acme-org/intranet", compareUrl: null, command: "git fetch upstream --tags && git merge v0.5.0" }), /compare/);
@@ -228,7 +228,7 @@ test("once a pull request was opened from here: say so, link to it, and offer no
   assert.match(text(html), /Pull request #7 \(opens in a new tab\) for v0\.5\.0 was opened on acme\/mixos .* by admin@example\.com\. Admin > GitHub lists it with its checks\. Merging it is the deploy\./);
   assert.deepEqual(links(html), [
     "https://mixos.org/docs/releases/v0.5.0",
-    "https://mixos.org/docs/operating/upgrading",
+    "https://mixos.org/docs/install/after-you-install/upgrading",
     "https://github.com/acme/mixos/pull/7",
   ]);
 });

@@ -190,7 +190,7 @@ export function releasePageUrl(tag: string): string | null {
 }
 
 /** How to take a release into a copy of MixOS. */
-export const UPGRADE_GUIDE_URL = docsUrl("operating/upgrading");
+export const UPGRADE_GUIDE_URL = docsUrl("install/after-you-install/upgrading");
 
 /** The docs section that says what the release check sends, and how to turn it off. */
 export const WHAT_THE_RELEASE_CHECK_SENDS = docsUrl("security/surface#the-release-check");
