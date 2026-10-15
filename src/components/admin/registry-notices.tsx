@@ -27,7 +27,7 @@ import RegistryNoticeUpdate, { RegistryNoticePropose, RegistryNoticeUpdates } fr
 const WHAT_IS_SENT = docsUrl("security/surface#the-update-check");
 
 /** How to update an extension where there is no App to propose with: in a checkout, then commit and deploy. */
-const HOW_TO_UPDATE = docsUrl("operating/hosting#updating-an-extension");
+const HOW_TO_UPDATE = docsUrl("install/after-you-install#updating-an-extension");
 
 /**
  * What a withdrawn or newer notice offers for updating: the Update button in a

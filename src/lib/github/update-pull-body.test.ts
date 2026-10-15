@@ -35,7 +35,7 @@ function input(over: Partial<UpdateBodyInput> = {}): UpdateBodyInput {
     migrations: 2,
     host: "vercel",
     releaseUrl: "https://mixos.org/docs/releases/v0.5.0",
-    upgradeUrl: "https://mixos.org/docs/operating/upgrading",
+    upgradeUrl: "https://mixos.org/docs/install/after-you-install/upgrading",
     ...over,
   };
 }
@@ -119,12 +119,12 @@ describe("a MixOS update's pull request body", () => {
     assert.match(outside, /\*\*Platform migrations:\*\* 2 files under `supabase\/migrations\/`/);
     assert.match(outside, /1\. \*\*Back up the database first\.\*\*/);
     assert.match(outside, /https:\/\/mixos\.org\/docs\/releases\/v0\.5\.0/);
-    assert.match(outside, /https:\/\/mixos\.org\/docs\/operating\/upgrading/);
+    assert.match(outside, /https:\/\/mixos\.org\/docs\/install\/after-you-install\/upgrading/);
     assert.match(outside, /No CI ran|keeps workflows off until you turn them on/);
     assert.match(outside, /Vercel builds the merge and puts it into production\. The production build's release step applies the migrations/);
     // Every address outside the fence is one of the two built here.
     const addresses = [...outside.matchAll(/https?:\/\/[^\s)`]+/g)].map((m) => m[0]);
-    assert.deepEqual([...new Set(addresses)], ["https://mixos.org/docs/releases/v0.5.0", "https://mixos.org/docs/operating/upgrading"]);
+    assert.deepEqual([...new Set(addresses)], ["https://mixos.org/docs/releases/v0.5.0", "https://mixos.org/docs/install/after-you-install/upgrading"]);
   });
 
   test("one commit, no migrations, another host, and no notes", () => {
