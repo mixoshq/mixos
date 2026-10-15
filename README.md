@@ -67,262 +67,56 @@ The guided installer covers **macOS**, **Linux**, and **Windows via WSL 2**. On
 Windows, the stack runs inside WSL: clone the repository there, under your Linux
 home directory — run `/mixos init` anywhere else on Windows and it walks you
 through setting WSL up first. Not using Claude Code, or want to know what the
-skill actually does? The same steps by hand are under
-[Prerequisites](#prerequisites) and [Manual setup](#manual-setup).
+skill actually does? The same steps by hand, and everything else about running
+MixOS on your computer, are in
+[Running a development copy](docs/hosting/development.md).
 
 ## Contents
 
 - [Quick start](#quick-start)
-- [Prerequisites](#prerequisites)
-- [Manual setup](#manual-setup)
-- [Running locally](#running-locally)
-- [Alternative: your own Postgres](#alternative-your-own-postgres)
+- [Installing and hosting MixOS](#installing-and-hosting-mixos)
 - [Extending MixOS](#extending-mixos)
 - [Authentication](#authentication)
 - [Connectors](#connectors)
 - [Connecting Claude (MCP)](#connecting-claude-mcp)
 - [Developing](#developing)
-- [Troubleshooting](#troubleshooting)
-- [Hosting MixOS](#hosting-mixos)
 - [Releases](#releases)
 - [Licence](#licence)
 
-## Prerequisites
+## Installing and hosting MixOS
 
-| What | Version | Notes |
-|---|---|---|
-| Operating system | macOS, Linux, or Windows with WSL 2 | On Windows the stack runs inside WSL. Git Bash and PowerShell can't run it. |
-| [Node.js](https://nodejs.org) | **24**, pinned in `.nvmrc`. 22 is the minimum | Node 22 reaches end of life on 30 April 2027. Every shell that runs MixOS commands needs it, not only your terminal (see below). |
-| npm | Ships with Node | The lockfile is npm's: install with `npm ci`, not pnpm or yarn. |
-| Git | Any recent version | |
-| Docker | Docker Desktop (macOS, Windows), or Docker Engine with the Compose v2 plugin (Linux) | Give Docker about 4 GiB of memory, and keep several GB of disk free for images. |
-| Free ports | 3000, 54321, 54322, 54323 | The app, the Supabase API, Postgres, and Supabase Studio. |
-| [VS Code](https://code.visualstudio.com/) | Current | With the Claude Code and Prettier extensions. Claude Code needs a Claude account; only the guided `/mixos` path uses it. |
-| [GitHub CLI](https://cli.github.com) | Optional | Lets `/mixos deploy` open pull requests for you. Without it you get a link to paste. |
+The install guide is in [`docs/hosting/`](docs/hosting/README.md), in five
+parts:
 
-`/mixos init` checks all of this and installs what's missing. In detail:
+1. **[Before you install](docs/hosting/README.md)**: what you need, and the
+   choices to make first: where to host, which database, and how extensions get
+   in.
+2. **[How to install](docs/hosting/install.md)**: a quick install, then each
+   step in detail: fork, keys, database, environment, deploy, the release step,
+   the first admin, and checking it works.
+3. **[Running a development copy](docs/hosting/development.md)**: MixOS on your
+   own computer, with `/mixos init` or by hand: what you need, the dev
+   container, `npm run dev`, installing from the Registry in a checkout, the
+   tests, and common problems.
+4. **[Install at popular providers](docs/hosting/providers/README.md)**:
+   [Vercel with Supabase](docs/hosting/providers/vercel-supabase.md),
+   [Render](docs/hosting/providers/render.md) ([`render.yaml`](render.yaml)),
+   [Railway](docs/hosting/providers/railway.md) ([`railway.json`](railway.json)),
+   and [Self-hosted](docs/hosting/providers/self-hosted.md): Docker Compose on
+   your own server, Coolify or Dokploy.
+5. **[After you install](docs/hosting/after-you-install/README.md)**: the first
+   admin, backups, the release and update notices, and installing, updating and
+   removing extensions; with
+   [Upgrading MixOS](docs/hosting/after-you-install/upgrading.md),
+   [Securing your install](docs/hosting/after-you-install/securing.md) and
+   [The GitHub App](docs/hosting/after-you-install/github-app.md).
 
-- [Visual Studio Code](https://code.visualstudio.com/) — the editor MixOS is built
-  to be worked on in. After installing, add these two extensions (Extensions
-  view → search by ID, or run the `code` commands below):
-  - **Anthropic.claude-code** — Claude Code, the assistant that drives the
-    guided `/mixos` command (`/mixos init`, `/mixos help`, `/mixos app`,
-    `/mixos connector`, `/mixos theme`, `/mixos deploy`).
-  - **esbenp.prettier-vscode** — Prettier, for consistent formatting.
-
-  ```bash
-  code --install-extension Anthropic.claude-code
-  code --install-extension esbenp.prettier-vscode
-  ```
-
-  (`code` on the command line requires the
-  [VSCode shell command](https://code.visualstudio.com/docs/setup/mac#_launching-from-the-command-line);
-  open VSCode and run **Shell Command: Install 'code' command in PATH** from the
-  Command Palette if it isn't available. `/mixos init` installs both extensions for
-  you automatically.)
-
-- Docker — runs the local database and, in the default workflow, the app
-  itself. [Docker Desktop](https://www.docker.com/products/docker-desktop/) on
-  macOS and Windows; on Windows, turn on its WSL integration for the
-  distribution this repository lives in. On Linux, Docker Engine with the
-  Compose plugin — `curl -fsSL https://get.docker.com | sudo sh`, then
-  `sudo usermod -aG docker "$USER"` and sign out and back in (other
-  distributions: https://docs.docker.com/engine/install/). On macOS install the
-  **cask**, not the CLI-only formula:
-
-  ```bash
-  brew install --cask docker-desktop
-  ```
-
-  A plain `brew install docker` gets you the `docker` client with **no daemon**,
-  which fails later with a confusing "Cannot connect to the Docker daemon".
-  Licensing: Docker Desktop is free for personal use, education, and small
-  companies, but organizations above **250 employees or $10M annual revenue**
-  need a paid subscription — [OrbStack](https://orbstack.dev) is a drop-in
-  alternative if that applies to you.
-
-- [Node.js](https://nodejs.org) 24 — the version pinned in `.nvmrc`, so
-  `nvm use` selects it for you; 22 or newer works. Node runs the boot script and
-  the Supabase CLI on the host even when the app itself runs in a container.
-
-  **Every shell has to find it, not only your terminal.** Git hooks, editors and
-  Claude Code often start shells that never read `~/.zprofile`, so on a Mac
-  where Homebrew is set up there (`brew shellenv`), they can find an older Node
-  first — typically one a nodejs.org installer left in `/usr/local/bin`.
-  `npm run dev`, `build`, `typecheck` and `dev:docker` check before they start.
-  When the Node is too old, they say which newer one is installed but hidden,
-  and how to put it first (`node scripts/check-node.mjs` runs the same check on
-  its own).
-- npm — ships with Node. The lockfile is npm's, so install with `npm ci`, not
-  pnpm or yarn.
-
-## Manual setup
-
-This is what [`/mixos init`](#quick-start) does on your behalf. Follow it if you
-aren't using Claude Code, or if you'd rather drive the steps yourself.
-
-1. Install Docker and start it once. On macOS and Windows that is Docker
-   Desktop, whose first launch shows a license agreement — and on macOS asks
-   for your password to install a privileged helper — which can't be scripted.
-   On Linux, Docker Engine is a system service the install already started.
-
-2. Clone and install:
-
-   ```bash
-   git clone <repo-url>
-   cd mixos
-   npm ci
-   ```
-
-   `npm ci` rather than `npm install`: it installs exactly what
-   `package-lock.json` pins and fails loudly if the lockfile has drifted, which
-   is the same install CI and both Dockerfiles run.
-
-3. Boot everything:
-
-   ```bash
-   npm run dev:docker
-   ```
-
-   That one command starts the Supabase local stack, writes the generated
-   connection settings to `.env.docker.local`, applies the platform migrations
-   and each app's migrations, seeds an admin, and starts the app container with
-   hot reload. **The first run pulls several GB of images and can take 5–15
-   minutes** with no visible progress for long stretches — it is not hung.
-
-   It then **stays in the foreground streaming container logs** and does not
-   return — that is the point, so a stack trace lands in front of you instead
-   of in a log you never look at. Ctrl-C ends the session: it stops the app
-   containers and leaves the Supabase stack running, so the next boot skips the
-   slow part. `npm run docker:down` stops that too. If you need the command to
-   _finish_ instead — a script, or Claude booting the stack for you — add
-   `--detach`, described under [Running locally](#running-locally).
-
-4. Open [http://localhost:3000](http://localhost:3000) and log in with the
-   `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` values in
-   [`.env.docker`](.env.docker). Then configure connectors at
-   [/admin/connectors](http://localhost:3000/admin/connectors).
-
-There is no secret to generate and no `.env.local` to fill in. `.env.docker` is
-committed on purpose: every value in it is a throwaway that only ever protects a
-database on your own laptop. **Never reuse any of them in a deployment.**
-
-## Running locally
-
-```bash
-npm run dev:docker              # Supabase + app with hot reload  (the everyday command)
-npm run dev:docker -- --detach  # same, but return to the prompt once it answers
-npm run docker:prod             # Supabase + the production image, to reproduce a deploy
-npm run docker:down             # stop everything, keep the database
-npm run docker:reset            # stop everything and DELETE the local database volume
-```
-
-The first two differ only in who owns your terminal. Attached (the default) the
-command streams container logs until Ctrl-C, which stops the app containers
-while the Supabase stack stays up. With `--detach` the stack comes up in the
-background, the script waits until `http://localhost:3000/api/health/ready`
-answers 200 — so a successful exit means the app really is serving, not merely
-that containers were created — prints the same banner, and exits. Nothing is
-running in your terminal afterwards, so `npm run docker:down` is how you stop
-it. The flag composes with the prod profile: `npm run docker:prod -- --detach`.
-
-Note the bare `--`: it is npm's separator for arguments meant for the script
-rather than for npm itself, so `npm run dev:docker --detach` silently does
-_not_ detach.
-
-A second checkout can run at the same time as this one by naming itself in
-`.env.instance` (copy `.env.instance.example`) — its own compose project, its
-own Supabase stack, its own database and ports. Without that file a checkout is
-`mixos` on port 3000, exactly as above. See
-[Local development in Docker](docs/local-docker.md#more-than-one-instance-on-one-machine).
-
-Use **`http://localhost:3000`**, not `http://127.0.0.1:3000` — Next.js dev mode
-rejects `/_next/*` requests (including the hot-reload websocket) from origins it
-doesn't recognize, and `127.0.0.1` isn't on that list, so the page loads broken.
-
-Supabase Studio, for browsing and editing local data, is at
-[http://localhost:54323](http://localhost:54323).
-
-When you add a migration while the stack is already up:
-
-```bash
-npm run db:local      # platform schema: supabase/migrations/*.sql
-npm run migrate:apps  # per-app tables: apps/*/migrations/*.sql
-```
-
-Both are incremental and idempotent, and `npm run dev:docker` runs them for you
-on every boot.
-
-Prefer to run Next.js on the host? That still works — `npm run dev` against the
-containerized backend is supported. See
-[docs/local-docker.md](docs/local-docker.md), which also explains what runs
-where, the port map, and why containers address the database as
-`host.docker.internal` while your terminal uses `127.0.0.1`.
-
-## Alternative: your own Postgres
-
-Node on the host and a database you choose: a Supabase or Neon project, a
-Postgres on your machine, or a shared development database. Use it if you can't
-run Docker, or if you need to work against shared data.
-
-1. Configure environment variables:
-
-   ```bash
-   cp .env.local.example .env.local
-   npm run keys:generate        # prints a fresh value for every key
-   ```
-
-   Populate `.env.local`. The database is one variable, `DATABASE_URL` — for a
-   hosted project, its pooled connection string (Supabase: the **transaction
-   pooler**, port 6543). Add `PGSSLMODE=disable` for a Postgres that speaks
-   plaintext, such as one on your own machine. The cryptographic keys —
-   `AUTH_SECRET`, `CRON_SECRET`, and the six independent keys inventoried in
-   [`src/lib/env/keys.ts`](src/lib/env/keys.ts) — come from
-   `npm run keys:generate`; `npm run keys:check` exits non-zero if any is
-   missing or malformed. Each key protects exactly one thing, so rotating one has
-   a bounded blast radius; see
-   [docs/security-architecture.md](docs/security-architecture.md).
-
-2. Apply the schema:
-
-   ```bash
-   npm run db:migrate       # applies supabase/migrations/*.sql to DATABASE_URL
-   npm run migrate:apps     # per-app tables
-   ```
-
-   `db:migrate` records what it applied in the same ledger the Supabase CLI
-   keeps, so against a linked Supabase project `npm run db:push` does the same
-   job, and the two can be mixed. Schema changes append a new
-   `supabase/migrations/NNNN_*.sql` with the next free number. The ledger
-   records a migration by its number, so two files with one number are
-   refused; see [OS-UPDATES.md](OS-UPDATES.md).
-
-   Apps that declare their own tables are separate — their migrations live in
-   `apps/<slug>/migrations/` and are applied by `npm run migrate:apps`. Each app
-   gets a schema of its own, `app_<slug>`, and its migrations run there as the
-   app's own database role, after every statement has been checked against what
-   an app may do (which is what keeps one app out of another's data, and out of
-   the platform's). Applied files are recorded in `_migrations`, so re-running
-   it is a no-op. See [docs/apps/database.md](docs/apps/database.md).
-
-3. Seed the first admin:
-
-   ```bash
-   # Set INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD in .env.local first.
-   npm run seed-admin
-   ```
-
-   After login you can remove `INITIAL_ADMIN_*` from `.env.local`.
-
-4. Run it:
-
-   ```bash
-   npm run dev
-   ```
-
-Scheduled jobs do **not** fire on this path — there is no cron sidecar in front
-of a bare `npm run dev`. Trigger a tick by hand with
-`npx tsx scripts/run-scheduled-jobs.ts`.
+A deployment is the server, a Postgres 13+ database from any provider, and a
+five-minute tick against `/api/cron`. MixOS connects to the database with one
+`DATABASE_URL` and needs nothing from it but Postgres: no PostgREST, no Supabase
+API keys. Every host runs the same release step before new code takes traffic:
+the platform schema, the app migrations, and the first admin. Deploy your fork,
+so the apps you add are in the build.
 
 ## Extending MixOS
 
@@ -332,55 +126,13 @@ themselves (`npm run registry`, which `dev` and `build` run for you), so adding
 a directory with a valid manifest is the whole installation step.
 
 **From the Registry.** In a checkout, Admin > Apps, Connectors and Themes can
-browse [mixos.org](https://mixos.org) and install from it. An installed app or
-connector waits in `.mixos/pending/`, where nothing runs it, until you register
-it: with **Review and register** on Admin > Apps or Admin > Connectors, which
-first shows what will run, or in a terminal:
-
-```bash
-npm run register                        # what is waiting
-npm run register -- app/<slug>          # move it into apps/ and run its code
-npm run register -- app/<slug> --smoke  # and migrate, activate and smoke-test it here
-npm run register -- app/<slug> --discard
-npm run register -- --recover           # after one that stopped midway
-```
-
-Registering checks the folder is still what was verified, moves it into `apps/`
-or `connectors/` and runs the registry generator, which is the first time its
-code runs. A theme has no code, so installing it registers it.
-
-Every install writes a record into the extension's folder, `.registry.json`:
-where it came from, the release, and the hashes that were verified. To ship an
-extension, commit its folder, record included, and deploy. Register hands back
-what that takes: the files it added, a prepared commit message and the
-commands. `/mixos deploy` does the same and opens the pull request. Check that
-`git status` lists every file: a rule in your `.gitignore` can leave one out,
-and `npm run register` warns when one does.
-
-**Removing one.** **Remove** on its tile, or `npm run remove -- <kind>/<slug>`,
-deletes its folder from the checkout and regenerates the registry, once it has
-said what goes and what stays. It is refused while an app depends on it, and
-for the last theme. Its data stays in each database. Commit the deletion and
-deploy: removing hands back the commands and a commit message, as Register
-does. `npm run remove -- --recover` puts back one that stopped midway. Then, on
-each instance, **Delete data…** under Not in this build on Admin > Apps or
-Connectors deletes what it kept, once no build that uses that database still
-has it; see
-[Deleting an extension's data](docs/hosting/README.md#deleting-an-extensions-data).
-
-Don't edit an installed folder. The registry generator compares it with its
-record, and Browse then says "modified locally". A pull request with an
-installed folder that no longer matches its record fails the extensions check
-(`.github/workflows/extensions.yml`), which also smoke-tests each app a pull
-request changes. On Windows,
-work in WSL, or set `git config core.autocrlf false` in the repository:
-converting line endings changes the files, so every installed folder would
-count as modified. Extensions added before installs kept a record count as
-local. To give one a record, remove it and install it again from the
-Registry. The release step then counts it as a different extension under the
-same name, once: it switches the app off and revokes its API keys, or
-disables the connector, until an admin types its name to turn it back on. See
-[docs/security-architecture.md §31](docs/security-architecture.md#31-installing-from-the-repository).
+browse [mixos.org](https://mixos.org) and install from it. An app or a connector
+waits in `.mixos/pending/`, where nothing runs it, until you register it: with
+**Review and register**, or `npm run register`. To ship it, commit its folder,
+with the `.registry.json` record install wrote in it, and deploy.
+[Installing from the Registry](docs/hosting/development.md#installing-from-the-registry)
+has the commands, and [After you install](docs/hosting/after-you-install/README.md#extensions)
+covers shipping, updating and removing an extension, and deleting what it kept.
 
 Each guide below is the authoritative spec — file layout, manifest fields, APIs,
 and the invariants that are easy to get wrong. Read the relevant one in full
@@ -456,8 +208,10 @@ questions before it starts.
 ## Authentication
 
 Uses [NextAuth (Auth.js)](https://authjs.dev) with email and password as the only
-sign-in method. The first account comes from `npm run seed-admin`; after that an
-admin creates and manages people at
+sign-in method. The first account comes from `INITIAL_ADMIN_EMAIL` and
+`INITIAL_ADMIN_PASSWORD`: a deployment's release step creates it, and
+`npm run seed-admin` does in a checkout. After that an admin creates and manages
+people at
 [/admin/users](http://localhost:3000/admin/users). Setting
 `ALLOWED_EMAIL_DOMAINS` restricts sign-in to a comma-separated list of email
 domains; left blank, any provisioned address may sign in.
@@ -521,11 +275,13 @@ npm run verify:connectors   # connector manifests match their implementations
 ```
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) gates every pull request
-with lint, `npm audit --audit-level=high`, typecheck, the tests and build. The
-tests include the database suites, against a throwaway Postgres the job starts.
-Locally those skip unless `MIXOS_TEST_DATABASE_URL` names a throwaway server;
-each suite's header shows how to start one. `verify:connectors` is a local
-check; run it after touching a connector manifest.
+with lint, `npm audit` (high advisories in what ships, critical ones anywhere),
+the repository-URL check, typecheck, the tests and build. The tests include the
+database suites, against a throwaway Postgres the job starts. Locally those skip
+unless `MIXOS_TEST_DATABASE_URL` names a throwaway server:
+[Running the tests](docs/hosting/development.md#running-the-tests) shows how to
+start one. `verify:connectors` is a local check; run it after touching a
+connector manifest.
 
 There is no publish step. `.githooks/pre-commit` runs
 [`scripts/stamp-updated.ts`](scripts/stamp-updated.ts), which stamps `lastUpdated`
@@ -549,109 +305,6 @@ Prettier as the default formatter and turns on format-on-save, so once the
 **esbenp.prettier-vscode** extension is installed (see Prerequisites) it just
 works.
 
-## Troubleshooting
-
-Deeper Docker-specific symptoms are in
-[docs/local-docker.md](docs/local-docker.md#troubleshooting).
-
-- **`Cannot connect to the Docker daemon`** — Docker Desktop isn't running.
-  Start it with `open -ga Docker` and wait until `docker info` exits 0. Test
-  liveness with **bare `docker info`**, never `docker info --format '...'`: the
-  templated form exits 0 and prints nothing when the daemon is down, so it
-  reports a dead daemon as healthy.
-- **`address already in use` / `port is already allocated`** — something else
-  holds 3000 (the app), 54321 (Supabase API), 54322 (Postgres), or 54323
-  (Studio). Find it with `lsof -nP -iTCP:3000 -sTCP:LISTEN`, then `kill` the PID
-  in the second column of that output and re-run. By far the most common cause
-  is a host `npm run dev` you forgot about, still holding 3000.
-
-  Starting _another_ `npm run dev` is not a way out of this: it collides on the
-  same port, and on the Docker path there is no `.env.local` and no database
-  running outside the stack, so a host server has no `DATABASE_URL` — every
-  request fails with `No Postgres connection configured`. If you deliberately
-  want the host to own port 3000, that is a supported workflow, but it needs the
-  containerized backend behind it: boot with `npm run dev:docker -- --detach`,
-  free the port with `docker compose -p mixos stop app-dev`, and point a host
-  `.env.local` at `127.0.0.1` following
-  [docs/local-docker.md](docs/local-docker.md#running-nextjs-on-the-host-against-the-container-backend).
-
-- **The first `npm run dev:docker` looks hung** — the Supabase CLI is pulling
-  Postgres, Kong, PostgREST, and Studio images, several GB in total, and prints
-  nothing while it does. Give it 5–15 minutes on a first run. `docker images`
-  in another terminal shows progress.
-- **`self-signed certificate` / TLS or SSL errors from Postgres** — `PGSSLMODE`
-  is unset. [src/lib/db/pg-options.ts](src/lib/db/pg-options.ts) deliberately
-  defaults to `ssl: "require"` because a hosted database sits on the public
-  internet, but the local container speaks plaintext. `.env.docker` sets
-  `PGSSLMODE=disable` for the Docker path; add it to `.env.local` yourself if
-  you point a host process at a local Postgres.
-- **`No Postgres connection configured`** — `DATABASE_URL` is unset. On the
-  Docker path it's generated into `.env.docker.local` by `npm run dev:docker`;
-  if that file is missing or stale, re-run it. Otherwise set it to your
-  database's connection string (or the discrete `PG*` fields).
-- **Connection timeouts / "too many clients"** — you are probably on the direct
-  port-5432 endpoint of a hosted project. Switch `DATABASE_URL` to the
-  **transaction pooler** (port 6543); serverless functions open far more
-  connections than a long-lived server does.
-- **`public._migrations does not exist`** — the platform schema has not been
-  applied. Run `npm run db:local` (Docker) or `npm run db:migrate` (any other
-  database) before `npm run migrate:apps`.
-- **Nothing works and you want a clean slate** — `npm run docker:reset` stops
-  every container and **deletes the local database volume**, so the next
-  `npm run dev:docker` starts from an empty database, re-migrates, and re-seeds
-  the admin. Local-only data (connector credentials, app rows) is gone; nothing
-  in a deployment is touched.
-- **Scheduled jobs** — they _do_ fire on the Docker path. A `cron` sidecar calls
-  `GET /api/cron` with `Authorization: Bearer $CRON_SECRET` every 5 minutes,
-  which is byte-for-byte what Vercel Cron does in production. Watch it with
-  `docker compose -p mixos logs -f cron`. On the own-Postgres path (bare
-  `npm run dev`) there is no ticker; run one manually with
-  `npx tsx scripts/run-scheduled-jobs.ts`.
-
-## Hosting MixOS
-
-A deployment is the server, a Postgres 13+ database from any provider, and a
-5-minute tick against `/api/cron`. MixOS connects to the database with one
-`DATABASE_URL` and needs nothing from it but Postgres — no PostgREST, no
-Supabase API keys. Every path runs the same release step before new code takes
-traffic: the platform schema, the app migrations, and the first admin.
-
-| Path | Guide |
-| --- | --- |
-| Docker Compose on your own server — Postgres, the app, HTTPS and the tick on one machine | [docs/hosting/docker-compose.md](docs/hosting/docker-compose.md) |
-| Coolify or Dokploy, from the same Compose file | [docs/hosting/docker-compose.md](docs/hosting/docker-compose.md#coolify) |
-| Render — a Blueprint with every secret generated ([`render.yaml`](render.yaml)) | [docs/hosting/render.md](docs/hosting/render.md) |
-| Railway — publishable as a one-click template ([`railway.json`](railway.json)) | [docs/hosting/railway.md](docs/hosting/railway.md) |
-| Vercel with Neon, Supabase, or any Postgres | [docs/hosting/vercel.md](docs/hosting/vercel.md) |
-
-[docs/hosting/README.md](docs/hosting/README.md) lists the environment every
-path needs and explains the release step. Deploy your fork, so the apps you add
-are in the build. To make an instance run only what it was deployed with, set
-`INSTALL_APPS`, `INSTALL_CONNECTORS` or `INSTALL_THEMES` to `false`: the
-catalogue's Browse pages and its install actions go away for that kind, and
-Register, from the page or `npm run register`, won't register it
-([details](docs/hosting/README.md#fixing-what-an-instance-runs)).
-
-Once a day, each instance asks mixos.org about the extensions it installed from
-there, so admins see a release its publisher withdrew. It sends a random
-instance ID and each of those extensions' kind, slug and version, and nothing
-else. It also reads mixos.org's list of MixOS releases, sending nothing about
-the instance, so admins see when a newer one is out.
-`MIXOS_UPDATE_CHECK=false` turns both off
-([what is sent and kept](docs/hosting/README.md#what-mixos-sends-to-mixosorg)).
-
-An admin can link a deployment to the repository it is built from, on
-**Admin > GitHub**, through a private GitHub App of your own, installed on that
-one repository. It is off until `GITHUB_APP_ENCRYPTION_KEY` is set
-([linking your repository](docs/hosting/README.md#linking-your-github-repository)).
-
-Before exposing a deployment publicly, read
-[docs/security-architecture.md](docs/security-architecture.md) — the trust
-boundaries, the key inventory and what rotating each key costs, and the
-Row-Level Security coverage — and
-[docs/secure-edge-gateway-architecture.md](docs/secure-edge-gateway-architecture.md)
-for the request path in front of it.
-
 ## Releases
 
 A release of MixOS is an annotated tag on `main`, `vX.Y.Z`, with a
@@ -664,7 +317,7 @@ patch (`v0.3.0` → `v0.3.1`). Prereleases have a suffix, such as
 
 **To upgrade a deployment,** merge the newest release tag into your fork, not
 `upstream/main`, which holds work that hasn't been released yet. The steps
-are in [docs/hosting/README.md](docs/hosting/README.md#upgrading).
+are in [Upgrading MixOS](docs/hosting/after-you-install/upgrading.md).
 
 **To cut a release** (maintainers), run `/mixos deploy release` on an
 up-to-date `main`. It opens a release PR that sets the version in
