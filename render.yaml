@@ -1,6 +1,6 @@
 # MixOS on Render: the app from this repository's Dockerfile, a Render Postgres,
 # and the 5-minute scheduler tick. One Blueprint, every secret generated.
-# Walkthrough, costs and the free-tier variant: docs/hosting/render.md.
+# Walkthrough, costs and the free-tier variant: docs/hosting/providers/render.md.
 #
 # Render asks for the two `sync: false` values — the first admin's email and
 # password — when the Blueprint is created, and generates the rest. Everything
@@ -14,7 +14,7 @@ services:
     dockerfilePath: ./Dockerfile
     # Paid on purpose. A free instance runs no preDeployCommand — so nothing
     # would apply the schema — and cannot receive private network traffic, so
-    # the cron job below could not reach it. docs/hosting/render.md has a free
+    # the cron job below could not reach it. docs/hosting/providers/render.md has a free
     # variant that migrates at startup instead.
     plan: 0.5c-512mb
     # The release step: the platform schema, app migrations, then the first
@@ -27,7 +27,7 @@ services:
     # No pull request previews. A preview copies this service's environment,
     # DATABASE_URL and every key included, and runs the pull request's code
     # with it. The GitHub App's pull requests carry a publisher's code, and the
-    # instance refuses to propose while this is on. docs/hosting/render.md.
+    # instance refuses to propose while this is on. docs/hosting/providers/render.md.
     previews:
       generation: off
     envVars:
