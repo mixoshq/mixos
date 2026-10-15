@@ -324,7 +324,7 @@ export const SHIPPING = {
     "Merging it into the branch your host deploys ships it on Coolify, Dokploy, Render, Railway and Vercel.",
   compose:
     "With Docker Compose on your own server, pull it there, then build, migrate and start, as in " +
-    "docs/hosting/docker-compose.md#upgrading.",
+    "docs/hosting/providers/self-hosted.md#upgrading.",
 } as const;
 
 /** A path git would leave out of the commit, and the rule that does it. */
