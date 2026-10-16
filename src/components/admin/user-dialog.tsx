@@ -35,7 +35,7 @@ import {
 } from "@/lib/account/state";
 import type { AdminAuditRow } from "@/lib/apps/admin-audit";
 import type { AppManifest, AppRole } from "@/lib/apps/types";
-import type { UserRow } from "./user-table";
+import type { GrantToggleOutcome, UserRow } from "./user-table";
 
 type DialogTab = "profile" | "security" | "access" | "activity";
 
@@ -156,7 +156,7 @@ export default function UserDialog({
   blockedBySlug: Record<string, string>;
   /** The admin doing the looking, so the page can refuse to demote them. */
   currentAdminId: string;
-  toggleAction: (formData: FormData) => void | Promise<void>;
+  toggleAction: (formData: FormData) => Promise<GrantToggleOutcome>;
   setRoleAction: (formData: FormData) => void | Promise<void>;
 }) {
   const [tab, setTab] = useState<DialogTab>("profile");
@@ -458,8 +458,9 @@ function initialsOf(name: string): ReactNode {
  * Moved wholesale out of the accordion it used to live in. The controls, the
  * connector gate and its wording are unchanged: what changed is that it is now
  * one tab of a record rather than the only thing the page could show.
+ * Exported for its test, which renders it on its own.
  */
-function AppAccessPanel({
+export function AppAccessPanel({
   user,
   registeredApps,
   blockedBySlug,
@@ -469,9 +470,11 @@ function AppAccessPanel({
   user: UserRow;
   registeredApps: AppManifest[];
   blockedBySlug: Record<string, string>;
-  toggleAction: (formData: FormData) => void | Promise<void>;
+  toggleAction: (formData: FormData) => Promise<GrantToggleOutcome>;
   setRoleAction: (formData: FormData) => void | Promise<void>;
 }) {
+  const toast = useToast();
+
   if (registeredApps.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -496,12 +499,24 @@ function AppAccessPanel({
           // still show the dropdown — the grant row it writes carries only the
           // role, not access.
           const showRoles = (granted || isGlobal) && app.roles.length > 0;
-          const currentRole = user.roleBySlug[app.slug] ?? "";
+          // The stored role, or "" for the app's default, which the user then
+          // follows when it changes.
+          const currentRole = user.assignedRoleBySlug[app.slug] ?? "";
           /*
-            Granting is blocked while a connector this app requires has no
-            credentials — it is tenant-scoped, so the app is broken for whoever
-            receives it. Revoking is never blocked: an app that stopped working
-            is exactly the one you want to be able to take away.
+            A role kept from when the app was global: a role, not access
+            (migration 0013). Granting turns it into a grant with that role,
+            while the app still declares it.
+          */
+          const roleOnly =
+            !isGlobal && !granted && Object.hasOwn(user.roleOnlyBySlug, app.slug);
+          const keptRole = roleOnly ? user.roleOnlyBySlug[app.slug] : null;
+          const keptLabel = app.roles.find((r) => r.key === keptRole)?.label ?? null;
+          /*
+            Granting is blocked while a connector this app requires isn't
+            ready: not configured, not connected, or disabled. The app would be
+            broken for whoever receives it. Revoking is never blocked: an app
+            that stopped working is exactly the one you want to be able to take
+            away.
           */
           const blockedBy = blockedBySlug[app.slug];
           const blockGrant = !granted && blockedBy != null;
@@ -532,19 +547,33 @@ function AppAccessPanel({
                     </span>
                   </div>
                 ) : (
-                  <form action={toggleAction} className="flex flex-col items-end">
+                  <form
+                    action={async (formData) => {
+                      const outcome = await toggleAction(formData);
+                      // The page was out of date: someone else had already
+                      // made this change. Nothing was written.
+                      if (!outcome.changed) {
+                        toast.show(
+                          "warning",
+                          granted
+                            ? `${user.display_name} didn't have ${app.name}, so there was nothing to revoke.`
+                            : `${user.display_name} already had ${app.name}. Their role wasn't changed.`,
+                        );
+                      }
+                    }}
+                    className="flex flex-col items-end"
+                  >
                     <input type="hidden" name="userId" value={user.id} />
                     <input type="hidden" name="slug" value={app.slug} />
                     <input type="hidden" name="granted" value={String(granted)} />
+                    {keptRole && keptLabel && (
+                      <input type="hidden" name="role" value={keptRole} />
+                    )}
                     <button
                       type="submit"
                       disabled={blockGrant}
                       aria-disabled={blockGrant}
-                      title={
-                        blockGrant
-                          ? `Configure these connectors first: ${blockedBy}`
-                          : undefined
-                      }
+                      title={blockGrant ? `${blockedBy} first` : undefined}
                       /*
                         Disabled is signalled by a dashed border and the cursor,
                         NOT by dimming. WCAG exempts inactive controls, but the
@@ -568,7 +597,14 @@ function AppAccessPanel({
                         screen. */}
                     {blockGrant && (
                       <span className="mt-1 max-w-[16rem] text-right text-[10px] leading-tight text-muted-foreground">
-                        Configure {blockedBy} first
+                        {blockedBy} first
+                      </span>
+                    )}
+                    {roleOnly && (
+                      <span className="mt-1 max-w-[16rem] text-right text-[10px] leading-tight text-muted-foreground">
+                        {keptLabel
+                          ? `${keptLabel} role kept from when it was global, with no access. Granting keeps the role.`
+                          : "A role kept from when it was global, with no access. Granting gives the default role."}
                       </span>
                     )}
                   </form>
@@ -580,6 +616,7 @@ function AppAccessPanel({
                     appName={app.name}
                     userName={user.display_name}
                     roles={app.roles}
+                    defaultRole={app.defaultRole}
                     current={currentRole}
                     action={setRoleAction}
                   />
@@ -593,12 +630,14 @@ function AppAccessPanel({
   );
 }
 
-function RoleSelect({
+/** One person's role in one app. Exported for its test. */
+export function RoleSelect({
   userId,
   slug,
   appName,
   userName,
   roles,
+  defaultRole,
   current,
   action,
 }: {
@@ -607,6 +646,9 @@ function RoleSelect({
   appName: string;
   userName: string;
   roles: AppRole[];
+  /** The manifest's defaultRole: what "Default" means today. */
+  defaultRole: string | null;
+  /** The stored role, or "" for none: the user follows the default. */
   current: string;
   action: (formData: FormData) => void | Promise<void>;
 }) {
@@ -616,8 +658,14 @@ function RoleSelect({
   const [pending, startTransition] = useTransition();
   const toast = useToast();
 
-  const labelOf = (key: string) =>
-    roles.find((r) => r.key === key)?.label ?? (key || "None");
+  // "Default" stores no role, so the user follows the manifest's defaultRole,
+  // and changes with it. Named with what it is today.
+  const roleLabel = (key: string) => roles.find((r) => r.key === key)?.label ?? key;
+  const defaultLabel = `Default (${defaultRole ? roleLabel(defaultRole) : "no role"})`;
+  const labelOf = (key: string) => (key === "" ? defaultLabel : roleLabel(key));
+  // A stored role the app no longer declares satisfies no route. Shown, so the
+  // select doesn't claim a role the person doesn't have, and not offered.
+  const stale = value !== "" && !roles.some((r) => r.key === value);
 
   function handleChange(e: ChangeEvent<HTMLSelectElement>) {
     const next = e.target.value;
@@ -657,6 +705,12 @@ function RoleSelect({
         disabled={pending}
         className="rounded-md border border-input bg-background px-2 py-1 text-xs disabled:opacity-60"
       >
+        <option value="">{defaultLabel}</option>
+        {stale && (
+          <option value={value} disabled>
+            {value} (no longer declared)
+          </option>
+        )}
         {roles.map((role) => (
           <option key={role.key} value={role.key}>
             {role.label}

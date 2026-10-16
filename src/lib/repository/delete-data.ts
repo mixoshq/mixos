@@ -41,9 +41,9 @@
  * `_migrations`, `app_settings`, `app_api_keys`, `app_scheduled_jobs`,
  * `app_job_runs` and `app_open_events`, and the `telemetry_events` it was the
  * source of; its place in each MCP authorization (`granted_apps`); and then its
- * row in `apps`, with its identity, which takes its grants, installs, password
- * and widgets with it. Calls it made to a connector or another app's services
- * are their telemetry, and stay.
+ * row in `apps`, with its identity, which takes its grants, installs, password,
+ * widgets and MCP tool switches with it. Calls it made to a connector or
+ * another app's services are their telemetry, and stay.
  *
  * For a connector: its credentials (`connector_configs`), every user's own
  * connection (`user_connector_oauth`), its `connector_scope_status`, its webhook
@@ -225,6 +225,7 @@ async function keptByApp(q: Query, slug: string): Promise<Kept> {
       (select count(*)::int from public.dashboard_widgets where app_slug = ${slug}) as widgets,
       (select count(*)::int from public.app_settings where app_slug = ${slug}) as settings,
       (select count(*)::int from public.app_api_keys where app_slug = ${slug}) as "apiKeys",
+      (select count(*)::int from public.app_mcp_tool_settings where app_slug = ${slug}) as "mcpToolSwitches",
       (select count(*)::int from public.app_scheduled_jobs where app_slug = ${slug}) as "scheduledJobs",
       (select count(*)::int from public.app_job_runs where app_slug = ${slug}) as "jobRuns",
       (select count(*)::int from public._migrations where app_slug = ${slug}) as migrations,
@@ -244,6 +245,7 @@ async function keptByApp(q: Query, slug: string): Promise<Kept> {
     widgets: c.widgets,
     settings: c.settings,
     apiKeys: c.apiKeys,
+    mcpToolSwitches: c.mcpToolSwitches,
     scheduledJobs: c.scheduledJobs,
     jobRuns: c.jobRuns,
     migrations: c.migrations,
@@ -521,6 +523,7 @@ const ZERO_APP: AppDataCounts = {
   widgets: 0,
   settings: 0,
   apiKeys: 0,
+  mcpToolSwitches: 0,
   scheduledJobs: 0,
   jobRuns: 0,
   migrations: 0,
@@ -565,12 +568,15 @@ async function deleteApp(tx: TransactionSql, slug: string, k: Kept): Promise<App
     ).count;
 
   // Its row, and what hangs off it by foreign key.
-  const [hanging] = await tx<{ grants: number; installs: number; passwords: number; widgets: number }[]>`
+  const [hanging] = await tx<
+    { grants: number; installs: number; passwords: number; widgets: number; mcpToolSwitches: number }[]
+  >`
     select
       (select count(*)::int from public.user_app_grants where app_slug = ${slug}) as grants,
       (select count(*)::int from public.user_apps where app_slug = ${slug}) as installs,
       (select count(*)::int from public.app_passwords where app_slug = ${slug}) as passwords,
-      (select count(*)::int from public.dashboard_widgets where app_slug = ${slug}) as widgets
+      (select count(*)::int from public.dashboard_widgets where app_slug = ${slug}) as widgets,
+      (select count(*)::int from public.app_mcp_tool_settings where app_slug = ${slug}) as "mcpToolSwitches"
   `;
   Object.assign(counts, hanging);
   await tx`delete from public.apps where slug = ${slug}`;

@@ -43,13 +43,19 @@ export default async function AppsAdminPage() {
   const proposal = await proposalTarget("app");
 
   // Precompute the missing-connector map once per page load. Shown here as a
-  // warning only — it is not a gate on this page any more. An app that needs an
-  // unconfigured connector still exists and is still valid; what it cannot do
-  // is be granted to anyone, which is enforced in /admin/users.
+  // warning only — it is not a gate on this page any more. An app that needs a
+  // connector that isn't ready still exists and is still valid; what it cannot
+  // do is be activated or granted to anyone, which the shared actions enforce
+  // (src/lib/apps/admin-actions.ts, src/lib/apps/grant-actions.ts). For
+  // display, so the page still renders when the connector switch can't be
+  // read; those actions read it again, and refuse.
   const missingEntries = await Promise.all(
     appRegistry.map(
       async (app) =>
-        [app.slug, await getMissingTenantConfigConnectors(app.slug)] as const,
+        [
+          app.slug,
+          await getMissingTenantConfigConnectors(app.slug, { forDisplay: true }),
+        ] as const,
     ),
   );
   const missingConnectorsBySlug = Object.fromEntries(missingEntries);
@@ -61,7 +67,7 @@ export default async function AppsAdminPage() {
           <h1 className="text-2xl font-bold text-foreground">Apps</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Every app in this repository, validated at build time. Grant an app
-            to a user in{" "}
+            to people from its Access tab, under Details, or in{" "}
             <Link href="/admin/users" className="underline underline-offset-2">
               Users
             </Link>{" "}
@@ -120,6 +126,7 @@ export default async function AppsAdminPage() {
         tableCountsBySlug={tableCountsBySlug}
         activeBySlug={activeBySlug}
         returnedChangedBySlug={buildStatus.returnedChanged}
+        needsGrantsBySlug={buildStatus.needsGrants}
         replacedBySlug={buildStatus.replaced}
         proposal={proposal}
       />

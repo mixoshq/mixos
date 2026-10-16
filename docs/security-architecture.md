@@ -262,6 +262,7 @@ erDiagram
         uuid user_id PK "FK -> users.id"
         text app_slug PK "FK -> apps.slug"
         text role "nullable"
+        bool role_only "a role only; null until decided"
     }
 ```
 
@@ -270,8 +271,10 @@ The check itself, run on every request:
 ```text
 hasAppGrant(userId, appSlug):
   if the app's manifest says `global`      --> true
-  SELECT app_slug FROM user_app_grants
+  SELECT app_slug FROM user_app_grants g
   WHERE user_id = $1 AND app_slug = $2
+    AND (g.role_only IS FALSE
+         OR (g.role_only IS NULL AND <someone is recorded granting it>))
 
 Result: boolean --> 403 if false
 ```
@@ -281,6 +284,55 @@ checked on **every request**, inside `resolveAuthTier`, before the handler runs.
 The other tiers don't read grants: `signed-in` serves any signed-in user,
 without the app's roles, and `password`, `key` and `public` serve callers with
 no account (§1).
+
+**On the admin pages, grants are written by three actions**, `grantAppAccess`,
+`revokeAppAccess` and `setAppRoleAction`
+([`src/lib/apps/grant-actions.ts`](../src/lib/apps/grant-actions.ts)), which the
+app's Access tab and /admin/users both call, so there is one copy of each rule.
+Each requires an admin (§9) and is audited (§28). The CLI's smoke activation
+grants too, audited as the CLI (§31). Granting is refused while a
+connector the app requires isn't ready, by the gate activation uses
+(`getMissingTenantConfigConnectors()` in
+[`src/lib/apps/connector-gates.ts`](../src/lib/apps/connector-gates.ts)): a
+tenant connector needs credentials and, for three-legged OAuth, a stored
+grant; a user-scoped one needs its client credentials; and none may be
+disabled (§19). When the connector switch can't be read, the gate fails
+rather than pass; the admin pages, which only show its answer, fall back to
+the credentials and log why. The gate saves an admin from handing out an app
+that can't work; it isn't what keeps anyone out. A grant never overwrites one
+the person already holds, and revoking someone who holds nothing changes
+nothing: both say so (`changed: false`), write and audit nothing, and refresh
+the pages that asked. Revoking also works for an app the running build doesn't
+carry, whose grants would otherwise come back with it; its audit row says
+`notInBuild`.
+
+**A role is never access.** A global app is held by everyone, and its users
+can still be given a role, stored on a `user_app_grants` row. `role_only` says
+what a row is (migration 0013): false for a grant, true for a role and nothing
+else, and null until that is decided. Every row from before 0013 is undecided,
+and so is any row an older build writes after a host rolls back to it. An
+undecided row is a grant only when someone is recorded granting it: an admin
+in `granted_by`, or the CLI in its own `user.grant.add` audit row (no admin,
+`via` cli or ci) from the row's `granted_at` on. So a grant revoked long ago
+and a role since don't add up to access, and nor does an admin's audit row
+alone: every admin grant sets `granted_by`. Every check reads grants through
+that one rule ([`src/lib/apps/grant-rule.ts`](../src/lib/apps/grant-rule.ts)),
+so it holds before any release step runs, and every release step decides the
+undecided rows of the apps its build carries, global or not, in one pass over
+the table, auditing the roles it finds as `app.grants.marked`. Every grant
+path records who granted: the admin actions in `granted_by`, the CLI's smoke
+grant and the pull-request check in their audit rows. A grant stays a grant
+whether or not the app is global, so a build that sees an app as global
+demotes nobody's, and a role set on a global app writes a role-only row only
+for someone with no grant. Each run also records whether each app is global,
+and audits an app that stopped being global as `app.global.ended`, with how
+many people lost it. Admin > Apps marks an app **Needs grants**, and says why,
+only when someone lost it: people decided to have only a role on an app that
+isn't global, or, when an app stops being global, someone who had it, by an
+install or a role, and has no grant. The mark stays until an admin grants the
+app to someone. The Access tab lists the people with a role apart from the
+people with access, and granting turns a role-only row into a grant, recording
+who granted it.
 
 **The app has to be active, and in the running build.** `resolveAuthTier` and
 `hasAppGrant` refuse an app an admin has deactivated, or one the running build
@@ -304,7 +356,8 @@ hangs off it stay until an admin deletes them with Delete data (§31), after
 which an app that arrives under the slug starts with nothing.
 
 **A different extension under the same slug starts off, and without the old
-one's API keys.** Every release step also records each app's identity
+one's API keys or MCP tool switches.** Every release step also records each
+app's identity
 ([`src/lib/repository/identity.ts`](../src/lib/repository/identity.ts)): for
 one installed from a Registry, the catalogue, kind, slug and GitHub repository
 from its install record (§31); for anything else, `local`. It compares them
@@ -313,15 +366,16 @@ commit from the same repository is the same app, so updating one changes
 nothing. Any other change means a different extension now has the slug: a
 local app reinstalled from the Registry, a release from another repository,
 or an installed app whose record was deleted. The release step switches it
-off, revokes its API keys, which were given out for the extension before it,
-and flags it **Replaces a different extension** on Admin > Apps. Its grants,
-settings and data stay. Activating it needs its slug typed, which the server
-checks (`setAppActive()` in `src/lib/apps/access.ts`); only that clears the
-flag. An app that returns as a different extension gets this flag alone,
-since it asks more of the admin than "back with different code". Migration
-0011 recorded every app the database already knew as `local`, so a local app
-reinstalled from the Registry is caught at the first release step that
-carries it.
+off, revokes its API keys and deletes its MCP tool switches, which were given
+out and turned on for the extension before it, and flags it **Replaces a
+different extension** on Admin > Apps; its `app.identity.changed` row counts
+both. Its grants, settings and data stay. Activating it needs its slug typed,
+which the server checks (`setAppActive()` in `src/lib/apps/access.ts`); only
+that clears the flag. An app that returns as a different extension gets this
+flag alone, since it asks more of the admin than "back with different code".
+Migration 0011 recorded every app the database already knew as `local`, so a
+local app reinstalled from the Registry is caught at the first release step
+that carries it.
 
 **The app's own migrations have to be applied, too.** The app gate's second
 reason, asked only of an active app: when the build carries a migration of the
@@ -1014,8 +1068,8 @@ and the role has to be one the release step could have made: no powers, no
 memberships, no use in another database. Dropping the schema must take nothing
 outside it, and the role must hold nothing else afterwards; otherwise the
 transaction rolls back and nothing is deleted. The app's row goes too, with its
-activation, grants, API keys and identity, so a later app under the slug
-arrives inactive with nothing (§3.1).
+activation, grants, API keys, MCP tool switches and identity, so a later app
+under the slug arrives inactive with nothing (§3.1).
 
 ### Reachability of the database credential
 
@@ -1048,7 +1102,8 @@ session JWT could go stale after a demotion, so `requireAdmin()` reads
 `is_admin` from the database on every call rather than trusting the token.
 
 Because server actions are directly invocable POST endpoints, each admin action
-(`configureConnector`, `toggleUserGrant`, `setAppActiveAction`,
+(`configureConnector`, `setAppActiveAction`, `grantAppAccess`,
+`setAppRoleAction`, `setMcpToolEnabledAction`, `mintAppApiKey`,
 `getAppSchema`, `revokeUserSessionsAction`, …) calls `requireAdmin()` itself.
 Nothing upstream does it for them, so an action that forgets the call is fully
 exposed to any signed-in user.
@@ -1354,19 +1409,39 @@ OAuth client.
 
 ### Authorization chain
 
-A tool call succeeds only where three independent gates overlap. Each is checked
+A tool call succeeds only where four independent gates overlap. Each is checked
 on **every** request; none is cached on the token.
 
 | Gate | Source of truth | Effect of revoking |
 | --- | --- | --- |
 | App declares the tool | `mcp` in `app.json`, build-validated | Tool disappears at next deploy |
+| An admin enabled the tool | `app_mcp_tool_settings` — live DB read, a missing row is **off** | Admin switches it off on the app's MCP tab; effective on the next call |
 | User consented to the app for this client | `oauth_tokens.granted_apps` | User disconnects at `/account/mcp` |
 | User still holds a grant for the app | `hasAppGrant()` — live DB read | Admin revokes; effective immediately |
+
+**Tools are off until an admin turns them on**, on a new install, after an
+upgrade, and after a tool is renamed. `tools/list` omits a disabled tool, the
+consent screen omits an app with none enabled, and its action checks the
+submitted apps against the same rule, so a crafted form can't consent to one.
+`tools/call` checks the grant before it looks the tool up, so someone
+without the app gets the same refusal whatever tool they name. For someone
+with it, a disabled tool gets the answer an undeclared one gets,
+`NOT_EXPOSED`, after the same reads: the switches are read whether or not the
+name is declared. An unreadable settings table reads as all-off. The switch
+is an admin action (`setMcpToolEnabledAction`,
+[`src/lib/mcp/tool-settings-actions.ts`](../src/lib/mcp/tool-settings-actions.ts)):
+it requires an admin (§9), accepts only a tool the manifest declares, and is
+audited as `app.mcp.tool.enable` or `app.mcp.tool.disable` (§28). Switches hang
+off the app's row like its grants: an app that leaves the build keeps them,
+Delete data (§31) takes them, and a different extension under the slug starts
+with none (§3.1).
 
 Consent is a **ceiling**, the live grant is a **floor**. A refresh copies
 `granted_apps` forward verbatim, so consent can never silently widen. `hasAppGrant`
 (not `hasAppAccess`) is used deliberately — it is the authorization fact, and it
 matches what the App Services broker already enforces for the same question.
+Revoking a grant therefore leaves the user's MCP tokens alone: the app's tools
+leave every token on its next call, and the user's other apps are untouched.
 Deleting an app's data (§31) takes its slug out of every token's and code's
 `granted_apps`, so consent given to it never covers a later app with the same
 slug.
@@ -1670,8 +1745,11 @@ While it is off, nothing reaches the connector:
 If the switch can't be read, none of these reaches the connector: the app
 context loads no connectors at all, and the others fail instead of going ahead.
 
-Activating an app does not check the switch. An app activated while a connector
-it requires is disabled runs, and its calls to that connector fail as above.
+Activating an app, or granting it to someone, is refused while a connector it
+requires is disabled, as it is while one isn't configured
+(`getMissingTenantConfigConnectors()`, §3.1). An app that was already active
+when its connector was disabled keeps running, and its calls to that connector
+fail as above.
 
 **A different connector under the same name starts off.** A connector's
 credentials, and every user's connection to it, are kept by its name, so a
@@ -1801,9 +1879,28 @@ The `key` tier (§1), for machine-to-machine callers. Public mount only.
 - **Bound to one app.** A valid key for app A presented on app B's route resolves
   to nothing.
 - **Scoped per method and route pattern.** A key minted for one endpoint does not
-  become a key for the whole app.
+  become a key for the whole app. A caller that can't name the method and route
+  accepts only a key for every route (`*`): a route-scoped key couldn't be
+  checked there, so it is refused.
 - Deliberately **independent** of `APP_UNLOCK_SECRET`, so rotating the unlock
   key does not silently invalidate every integration.
+- **Minted, listed and revoked by an admin** on the app's Access tab
+  (`src/lib/apps/api-key-actions.ts`). Each action calls `requireAdmin()` and is
+  audited (`app.apikey.create` / `app.apikey.revoke`, with the label and scopes,
+  never the key). Scopes are validated against the routes that accept `key`; an
+  empty list is refused rather than minted, since it would authorize nothing.
+  A label is plain text on one line: control characters, line and paragraph
+  separators and invisible formatting characters, such as a direction
+  override, are refused. Revocation is live: `resolveApiKey` reads
+  `revoked_at` on every request.
+- **Listed and revoked for an app the build doesn't carry**, from **Revoke
+  access…** under Not in this build: its keys are kept with its row and would
+  work again if it came back. Minting needs the manifest, so it isn't offered.
+  The audit row says `notInBuild`.
+- **Revoked by the release step** when a different extension takes the app's
+  slug (§3.1), since the keys were given out for the one before it. The Access
+  tab shows those keys as revoked by that change, matched to the
+  `app.identity.changed` row the same transaction writes.
 
 ---
 
@@ -2105,8 +2202,11 @@ module is not a retention policy.
 
 Currently recorded: `connector.configure`, `connector.connect`,
 `connector.test`, `connector.disable`, `connector.enable`, `app.password.set`,
-`app.password.clear`, `app.setting.set`, `app.setting.clear`, `app.activate`,
+`app.password.clear`, `app.setting.set`, `app.setting.clear`,
+`app.apikey.create`, `app.apikey.revoke`, `app.mcp.tool.enable`,
+`app.mcp.tool.disable`, `app.activate`,
 `app.deactivate`, `app.missing`, `app.returned`, `app.identity.changed`,
+`app.grants.marked`, `app.global.ended`,
 `connector.missing`, `connector.returned`, `connector.identity.changed`,
 `theme.identity.changed`, `app.job.run`, `app.job.enable`, `app.job.disable`,
 `scheduler.start`, `scheduler.stop`, `theme.apply`, `user.create`,
@@ -2569,7 +2669,7 @@ migrations `npm run migrate:apps` runs, without the generator run npm adds
 first: Register has just run the generator with `PATH` and `TMPDIR` only, and a
 second run would load the app's code with the shell's database URL and keys.
 Then, in a child process that reads the registry the generator just wrote,
-Activate's checks (a required connector must be configured) and a grant to the
+Activate's checks (a required connector must be ready) and a grant to the
 smoke user, each audited as the CLI (§28). Then `scripts/smoke-test-app.ts`,
 given only `PATH`, `TMPDIR` and the session; the password stays in the parent.
 The smoke test calls the app as that user, through the activation gate like any
@@ -2675,7 +2775,8 @@ generator, the build and the server. So the job holds nothing worth taking:
   in the job, and the database is a service container that goes with it;
 - it activates and grants by SQL (`scripts/ci-extensions.ts`), skipping
   Activate's checks and audit row, which is right only for that database, so
-  the helper refuses any database that isn't on the runner;
+  the helper refuses any database that isn't on the runner. Each grant is
+  audited as the CLI, as every grant path records who granted (§3.1);
 - the server log is printed with workflow commands stopped, so a line an app
   logs can't act as one.
 
@@ -2922,9 +3023,9 @@ share a development database. So it is refused:
 `app_job_runs` and `app_open_events`, and the `telemetry_events` it was the
 source of; its slug in each MCP authorization's `granted_apps` (§17), which
 keeps every other app it lists; and its `apps` row, which takes its grants,
-installs, password and widgets with it by foreign key, along with its
-activation and identity. Calls it made to a connector or to another app's
-services are their telemetry, and stay. For a connector: `connector_configs`,
+installs, password, widgets and MCP tool switches with it by foreign key, along
+with its activation and identity. Calls it made to a connector or to another
+app's services are their telemetry, and stay. For a connector: `connector_configs`,
 every `user_connector_oauth` and `connector_scope_status` row, its webhook
 replay markers, its telemetry, and its keys in `platform_settings` (the switch,
 the identity and both marks). Every row is matched by its own column, equal to

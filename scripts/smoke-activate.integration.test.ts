@@ -10,7 +10,10 @@
  *     makes it, nothing done twice, and an app that replaces a different
  *     extension activated only with its slug typed;
  *   - the pull-request check (scripts/ci-extensions.ts `activate`): by SQL, on
- *     the job's own database.
+ *     the job's own database, each grant audited as the CLI.
+ *
+ * Both record who granted what, so a release step after either leaves the
+ * grants they made grants (src/lib/apps/grant-rule.ts).
  *
  * Skipped unless MIXOS_TEST_DATABASE_URL names a server this may create and
  * drop a database on. Its name ends in this run's own suffix, and it is
@@ -24,6 +27,8 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import postgres, { type Sql } from "postgres";
 import { activateAndGrant } from "./ci-extensions";
@@ -48,14 +53,20 @@ describe("activating an app for a smoke test", { skip }, () => {
   const global = `global-${run}`;
   const replaced = `replaced-${run}`;
   const needsCrm = `crm-${run}`;
+  const wasGlobal = `was-global-${run}`;
+  const roles = [
+    { key: "editor", label: "Editor" },
+    { key: "viewer", label: "Viewer" },
+  ];
   const deps: SmokeActivationDeps = {
     apps: [
-      { slug: plain, global: false, defaultRole: "viewer" },
-      { slug: global, global: true, defaultRole: null },
-      { slug: replaced, global: false, defaultRole: null },
-      { slug: needsCrm, global: false, defaultRole: null },
+      { slug: plain, global: false, roles },
+      { slug: global, global: true, roles: [] },
+      { slug: replaced, global: false, roles: [] },
+      { slug: needsCrm, global: false, roles: [] },
+      { slug: wasGlobal, global: false, roles },
     ],
-    missingConnectors: async (slug) => (slug === needsCrm ? [{ name: "crm", displayName: "Acme CRM" }] : []),
+    missingConnectors: async (slug) => (slug === needsCrm ? [{ name: "crm", displayName: "Acme CRM", state: "unconfigured" as const }] : []),
   };
 
   async function activate(slug: string, typedSlug?: string, email = EMAIL) {
@@ -101,7 +112,7 @@ describe("activating an app for a smoke test", { skip }, () => {
     [{ id: userId }] = await sql`
       insert into public.users (email, display_name) values (${EMAIL}, 'Smoke') returning id
     `;
-    for (const slug of [plain, global, needsCrm]) {
+    for (const slug of [plain, global, needsCrm, wasGlobal]) {
       await sql`insert into public.apps (slug, name, is_active, identity) values (${slug}, ${slug}, false, 'local')`;
     }
     // What the release step leaves for a local app reinstalled from the Registry.
@@ -124,10 +135,11 @@ describe("activating an app for a smoke test", { skip }, () => {
     }
   });
 
-  test("activates and grants, with the default role, and audits both as the CLI", async () => {
+  test("activates and grants, with no role of its own, and audits both as the CLI", async () => {
     assert.deepEqual(await activate(plain), { ok: true, activated: true, replaced: null, grant: "added" });
     assert.equal((await row(plain))?.is_active, true);
-    assert.deepEqual(await grants(plain), [{ user_id: userId, role: "viewer", granted_by: null }]);
+    // Null: the user follows the app's defaultRole, whatever it becomes.
+    assert.deepEqual(await grants(plain), [{ user_id: userId, role: null, granted_by: null }]);
     assert.deepEqual(await audited(plain), [
       {
         actor_id: null,
@@ -156,6 +168,39 @@ describe("activating an app for a smoke test", { skip }, () => {
   test("a global app is activated, and has nothing to grant", async () => {
     assert.deepEqual(await activate(global), { ok: true, activated: true, replaced: null, grant: "global" });
     assert.deepEqual(await grants(global), []);
+  });
+
+  test("a role kept from when the app was global becomes a grant, with the role while it is declared", async () => {
+    const other = (
+      await sql`insert into public.users (email, display_name) values (${`other-${run}@example.com`}, 'Other') returning id`
+    )[0].id as string;
+    // What the release step leaves for an app that was global: roles, not grants.
+    await sql`
+      insert into public.user_app_grants (user_id, app_slug, role, role_only)
+      values (${userId}, ${wasGlobal}, 'editor', true), (${other}, ${wasGlobal}, 'retired', true)
+    `;
+    assert.deepEqual(await activate(wasGlobal), { ok: true, activated: true, replaced: null, grant: "added" });
+    const [mine] = await sql`
+      select role, role_only from public.user_app_grants where app_slug = ${wasGlobal} and user_id = ${userId}
+    `;
+    assert.deepEqual({ ...mine }, { role: "editor", role_only: false });
+    assert.deepEqual(
+      (await audited(wasGlobal)).map((r) => r.action),
+      ["app.activate", "user.grant.add"],
+    );
+
+    // A role the app no longer declares falls back to the default.
+    await sql`update public.apps set is_active = false where slug = ${wasGlobal}`;
+    const { activateForSmoke } = await import("./smoke-activate");
+    const result = await activateForSmoke(
+      { slug: wasGlobal, email: `other-${run}@example.com`, actor: ACTOR },
+      deps,
+    );
+    assert.deepEqual(result, { ok: true, activated: true, replaced: null, grant: "added" });
+    const [theirs] = await sql`
+      select role, role_only from public.user_app_grants where app_slug = ${wasGlobal} and user_id = ${other}
+    `;
+    assert.deepEqual({ ...theirs }, { role: null, role_only: false });
   });
 
   test("an app whose connector isn't configured is refused, as Activate refuses it", async () => {
@@ -210,5 +255,59 @@ describe("activating an app for a smoke test", { skip }, () => {
       "No user nobody@example.com to grant the apps to. Did the release step create the first admin?",
     ]);
     assert.deepEqual(await activateAndGrant(sql, ["Bad Slug"], EMAIL), ['"Bad Slug" isn\'t an app slug.']);
+  });
+
+  test("the pull-request check's grant makes a kept role a grant, and grants nothing for a global app", async () => {
+    const kept = `ci-kept-${run}`;
+    const everyone = `ci-global-${run}`;
+    await sql`insert into public.apps (slug, name, is_active, global) values (${kept}, 'Kept', false, false), (${everyone}, 'Everyone', false, true)`;
+    await sql`insert into public.user_app_grants (user_id, app_slug, role, role_only) values (${userId}, ${kept}, 'editor', true)`;
+    assert.deepEqual(await activateAndGrant(sql, [kept, everyone], EMAIL), []);
+    assert.deepEqual(
+      (await sql`select role, role_only from public.user_app_grants where app_slug = ${kept}`).map((r) => ({ ...r })),
+      [{ role: "editor", role_only: false }],
+    );
+    assert.deepEqual(await grants(everyone), []);
+  });
+
+  test("grants from both outlast a release step, each audited as the CLI", async () => {
+    const ci = `ci-${run}`;
+    const [audit] = await sql`
+      select actor_id, actor_email, details from public.admin_audit_log
+       where action = 'user.grant.add' and target_id = ${userId} and details->>'appSlug' = ${ci}
+    `;
+    assert.equal(audit.actor_id, null);
+    assert.match(audit.actor_email as string, /^cli:/);
+    assert.deepEqual(audit.details, { appSlug: ci, via: "ci" });
+
+    // The release step, carrying both apps, decides nothing about them.
+    const appsDir = fs.mkdtempSync(path.join(os.tmpdir(), "mixos-smoke-release-"));
+    try {
+      for (const slug of [plain, ci]) {
+        fs.mkdirSync(path.join(appsDir, slug));
+        fs.writeFileSync(path.join(appsDir, slug, "app.json"), `{ "name": "${slug}" }\n`);
+      }
+      const { syncAppRegistry } = await import("./sync-app-registry");
+      const mirror = (slug: string) => ({ slug, name: slug, description: "", icon: "box", global: false });
+      const result = await syncAppRegistry(sql, [mirror(plain), mirror(ci)], appsDir, []);
+      assert.deepEqual(result.marked, []);
+    } finally {
+      fs.rmSync(appsDir, { recursive: true, force: true });
+    }
+    const rows = await sql`
+      select app_slug, role_only from public.user_app_grants
+       where user_id = ${userId} and app_slug = any(${[plain, ci]}::text[]) order by app_slug
+    `;
+    assert.deepEqual(rows.map((r) => ({ ...r })), [
+      { app_slug: ci, role_only: false },
+      { app_slug: plain, role_only: false },
+    ]);
+    // The check grants again on its next run: still a grant, nothing more recorded.
+    assert.deepEqual(await activateAndGrant(sql, [ci], EMAIL), []);
+    const [{ n }] = await sql`
+      select count(*)::int as n from public.admin_audit_log
+       where action = 'user.grant.add' and target_id = ${userId} and details->>'appSlug' = ${ci}
+    `;
+    assert.equal(n, 1);
   });
 });

@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { createServiceClient } from "@/lib/db/server";
+import { createServiceClient, sql } from "@/lib/db/server";
 import { platformKey } from "@/lib/env/keys";
 
 /**
@@ -152,4 +152,98 @@ export function presentedApiKey(request: Request): string | null {
   const auth = request.headers.get("authorization");
   if (auth?.startsWith("Bearer ")) return auth.slice(7).trim();
   return request.headers.get("x-api-key");
+}
+
+// ── Admin listing and revocation ────────────────────────────────────────────
+
+/** One key as an admin sees it. Never the key, never the digest. */
+export interface ApiKeySummary {
+  id: string;
+  label: string;
+  /** The first characters of the key, enough to recognise it, not to use it. */
+  hint: string;
+  scopes: string[];
+  createdBy: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  /**
+   * Revoked by the release step, which revokes an app's keys when a different
+   * extension takes its slug (scripts/sync-app-registry.ts). Read from the
+   * `app.identity.changed` audit row it writes in the same transaction, whose
+   * time is the revocation's to the microsecond.
+   */
+  revokedOnIdentityChange: boolean;
+  lastUsedAt: string | null;
+}
+
+const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
+
+/**
+ * Every key ever minted for one app, newest first, revoked ones included.
+ *
+ * In SQL rather than the query builder, for the one thing the builder can't
+ * say: which revocations an identity change made.
+ */
+export async function listApiKeys(appSlug: string): Promise<ApiKeySummary[]> {
+  const rows = await sql<
+    {
+      id: string;
+      label: string;
+      hint: string;
+      scopes: unknown;
+      created_by: string | null;
+      created_at: Date;
+      expires_at: Date | null;
+      revoked_at: Date | null;
+      last_used_at: Date | null;
+      revoked_on_identity_change: boolean;
+    }[]
+  >`
+    with changes as (
+      select created_at from public.admin_audit_log
+       where action = 'app.identity.changed' and target_type = 'app' and target_id = ${appSlug}
+    )
+    select k.id, k.label, k.hint, k.scopes, k.created_by, k.created_at, k.expires_at,
+           k.revoked_at, k.last_used_at,
+           coalesce(k.revoked_at in (select created_at from changes), false)
+             as revoked_on_identity_change
+      from public.app_api_keys k
+     where k.app_slug = ${appSlug}
+     order by k.created_at desc
+  `;
+
+  return rows.map((r) => ({
+    id: r.id,
+    label: r.label,
+    hint: r.hint,
+    scopes: Array.isArray(r.scopes) ? (r.scopes as string[]) : [],
+    createdBy: r.created_by,
+    createdAt: r.created_at.toISOString(),
+    expiresAt: iso(r.expires_at),
+    revokedAt: iso(r.revoked_at),
+    revokedOnIdentityChange: r.revoked_on_identity_change,
+    lastUsedAt: iso(r.last_used_at),
+  }));
+}
+
+/**
+ * Revoke one key. Takes effect on the key's next request, because
+ * `resolveApiKey` reads `revoked_at` live. Scoped by app as well as id, so a
+ * key id from another app cannot be revoked through this app's screen.
+ * Returns false when there was no such live key.
+ */
+export async function revokeApiKey(
+  appSlug: string,
+  id: string,
+): Promise<boolean> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("app_api_keys")
+    .update({ revoked_at: new Date().toISOString() })
+    .match({ id, app_slug: appSlug })
+    .is("revoked_at", null)
+    .select("id");
+  if (error) throw new Error("Could not revoke the API key.");
+  return (data ?? []).length > 0;
 }

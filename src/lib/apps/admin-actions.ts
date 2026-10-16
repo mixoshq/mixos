@@ -4,14 +4,14 @@
 
 "use server";
 
-import { createServiceClient, sql } from "@/lib/db/server";
+import { sql } from "@/lib/db/server";
 import { appRegistry } from "@/generated/app-registry";
 import { revalidatePath } from "next/cache";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin, setAppActive } from "@/lib/apps/access";
 import {
-  formatMissingList,
   getMissingTenantConfigConnectors,
+  missingConnectorSteps,
 } from "@/lib/apps/connector-gates";
 import {
   clearAppPassword,
@@ -20,6 +20,8 @@ import {
 } from "@/lib/apps/app-password-store";
 import { recordAdminAction } from "@/lib/apps/admin-audit";
 import { appSchemaName } from "@/lib/apps/app-identifiers";
+import { appUsesPassword } from "@/lib/apps/access-surfaces";
+import { IS_GRANT_SQL } from "@/lib/apps/grant-rule";
 import { revokeUserSessions } from "@/lib/auth/revocation";
 
 /**
@@ -38,15 +40,14 @@ export async function getAppGrantCounts(): Promise<Record<string, number>> {
   const session = await requireReadOnlySession();
   await requireAdmin(session);
 
-  const supa = createServiceClient();
-  const { data, error } = await supa.from("user_app_grants").select("app_slug");
-  if (error) throw new Error(error.message);
-
-  const counts: Record<string, number> = {};
-  for (const row of (data ?? []) as { app_slug: string }[]) {
-    counts[row.app_slug] = (counts[row.app_slug] ?? 0) + 1;
-  }
-  return counts;
+  // Grants only, decided as every access check decides them
+  // (src/lib/apps/grant-rule.ts): a row that records only a role isn't one.
+  const rows = await sql<{ app_slug: string; n: number }[]>`
+    select g.app_slug, count(*)::int as n from public.user_app_grants g
+     where ${sql.unsafe(IS_GRANT_SQL)}
+     group by g.app_slug
+  `;
+  return Object.fromEntries(rows.map((r) => [r.app_slug, r.n]));
 }
 
 /**
@@ -139,7 +140,7 @@ export async function setAppActiveAction(
     const missing = await getMissingTenantConfigConnectors(slug);
     if (missing.length > 0) {
       throw new Error(
-        `Configure ${formatMissingList(missing)} before activating this app.`,
+        `${missingConnectorSteps(missing)} before activating this app.`,
       );
     }
   }
@@ -287,15 +288,17 @@ export async function clearAppPasswordAction(slug: string): Promise<void> {
   revalidatePath("/admin/apps");
 }
 
+/**
+ * Whether anything in the app asks for the unlock password. Read through the
+ * shared surface walk, which takes the hoisted route contracts first: this used
+ * to read only the manifest's legacy `pageVisibility` / `apiVisibility` maps, so
+ * an app declaring `password` in `defineRoute` — the recommended place — was
+ * refused a password it needed, and its password routes failed closed for good.
+ */
 function appHasPasswordVisibility(
   manifest: import("@/lib/apps/types").AppManifest,
 ): boolean {
-  const declaresPassword = (sets: Record<string, string[]> | undefined) =>
-    Object.values(sets ?? {}).some((auths) => auths.includes("password"));
-  return (
-    declaresPassword(manifest.pageVisibility) ||
-    declaresPassword(manifest.apiVisibility)
-  );
+  return appUsesPassword(manifest);
 }
 
 /**

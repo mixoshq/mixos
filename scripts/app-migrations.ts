@@ -632,8 +632,19 @@ export async function migrateAppSchemas(
     const back = sync.returned.some((a) => a.slug === r.slug) ? "back in the build, and " : "";
     console.log(
       `  ${r.slug}: ${back}a different extension than before (was ${describeIdentity(r.previous)}; ` +
-        `now ${describeIdentity(r.identity)}) — inactive, with ${r.apiKeysRevoked} API key(s) revoked, ` +
-        `until an admin activates it by typing its slug`,
+        `now ${describeIdentity(r.identity)}) — inactive, with ${r.apiKeysRevoked} API key(s) revoked ` +
+        `and ${r.mcpToolSwitchesReset} MCP tool switch(es) reset, until an admin activates it by typing its slug`,
+    );
+  }
+  for (const { slug, roleOnly } of sync.marked) {
+    console.log(`  ${slug}: ${roleOnly} row(s) with a role and no recorded grant, now only roles`);
+  }
+  for (const { slug, roleOnly, lost } of sync.globalEnded) {
+    console.log(
+      lost > 0
+        ? `  ${slug}: no longer global — only the people granted it have it; ` +
+            `${lost} who had it without a grant don't now, ${roleOnly} of them with a role kept`
+        : `  ${slug}: no longer global — everyone who had it was granted it`,
     );
   }
   if (sync.stillMissing.length > 0) {

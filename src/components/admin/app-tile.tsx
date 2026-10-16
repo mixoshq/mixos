@@ -7,7 +7,7 @@
 import { useState, useTransition } from "react";
 import { AlertCircle, Trash2 } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
-import type { AppReplacement } from "@/lib/apps/access";
+import type { AppReplacement, NeedsGrants } from "@/lib/apps/access";
 import LucideIcon from "@/components/lucide-icon";
 import { Button, IconButton } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status";
@@ -26,11 +26,10 @@ import AppDetailsDialog, {
   MissingConnectorWarning,
 } from "./app-details-dialog";
 import TypedConfirmDialog from "./typed-confirm-dialog";
-
-interface MissingConnector {
-  name: string;
-  displayName: string;
-}
+import {
+  missingConnectorSteps,
+  type MissingConnector,
+} from "@/lib/apps/connector-readiness";
 
 interface AppTileProps {
   app: AppManifest;
@@ -47,9 +46,14 @@ interface AppTileProps {
    */
   returnedChangedAt: string | null;
   /**
+   * Set when the release step found that people who had this app lost it:
+   * since when, and why. Cleared when an admin grants it to someone.
+   */
+  needsGrants: NeedsGrants | null;
+  /**
    * Set when the release step found this app under a slug a different
-   * extension had, switched it off and revoked its API keys. Activating needs
-   * the slug typed, and clears it.
+   * extension had, switched it off, revoked its API keys and turned its MCP
+   * tools off. Activating needs the slug typed, and clears it.
    */
   replacement: AppReplacement | null;
   /** Opens the Remove dialog, which says what goes and what stays before it removes anything. */
@@ -71,8 +75,8 @@ interface AppTileProps {
  * the registry is the whole of being valid — so tinting each card would invent
  * a status to report. Colour stays reserved for the things on this page that
  * genuinely need an admin: the unconfigured-connector strip, and the strip on
- * an app that came back into the build with different code, or that replaces
- * a different extension under its slug.
+ * an app that came back into the build with different code, that replaces a
+ * different extension under its slug, or that stopped being global.
  */
 export default function AppTile({
   app,
@@ -81,6 +85,7 @@ export default function AppTile({
   tableCount,
   isActive,
   returnedChangedAt,
+  needsGrants: lostBy,
   replacement,
   onRemove,
 }: AppTileProps) {
@@ -89,12 +94,21 @@ export default function AppTile({
   /** Activate's typed confirmation, for an app that replaces a different extension. */
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  /*
+    The count the Access tab read after a grant or a revoke, so the pill below
+    agrees with the list at once. Kept with the count it replaced: once the
+    page's own refresh brings a new one, that wins.
+  */
+  const [liveGrants, setLiveGrants] = useState<{ from: number; count: number } | null>(null);
+  const grants = liveGrants && liveGrants.from === grantCount ? liveGrants.count : grantCount;
 
   // One message at a time. An app that came back as a different extension
   // usually came back with different code too, and the replacement is what
   // the admin has to answer: it asks more of them.
   const replaced = replacement !== null;
   const backChanged = returnedChangedAt !== null && !replaced;
+  // People who had it have lost it, until an admin grants it to them.
+  const needsGrants = lostBy !== null && !app.global;
 
   function toggleActive() {
     if (!isActive && replaced) {
@@ -119,10 +133,11 @@ export default function AppTile({
   }
 
   /*
-    An unconfigured connector is a warning here, not a gate. It used to block
+    A connector that isn't ready is a warning here, not a gate. It used to block
     registration; there is no registration to block. What it still blocks is
-    GRANTING the app to someone, which is enforced in /admin/users — so this
-    strip says what is wrong and where the consequence lands, and stops there.
+    GRANTING the app to someone, which the shared grant action enforces for the
+    Access tab and /admin/users alike, so this strip says what is wrong and
+    where the consequence lands, and stops there.
   */
   // An app whose connectors are not configured cannot serve a request, so
   // activating it would put a broken app in front of everyone. Deactivating
@@ -147,7 +162,7 @@ export default function AppTile({
   */
   const pills: string[] = [];
   if (app.global) pills.push("Anyone");
-  else if (grantCount > 0) pills.push(formatCount(grantCount, "granted user"));
+  else if (grants > 0) pills.push(formatCount(grants, "granted user"));
   if (app.pageCount > 0) pills.push(formatCount(app.pageCount, "page"));
   if (app.widgets.length > 0)
     pills.push(formatCount(app.widgets.length, "widget"));
@@ -202,7 +217,7 @@ export default function AppTile({
         badge its own fill, which reads as four severities when it is really
         four measurements — and six of those would be a traffic light.
       */}
-      {(pills.length > 0 || !isActive || backChanged || replaced) && (
+      {(pills.length > 0 || !isActive || backChanged || replaced || needsGrants) && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {/* The pills here that are states rather than measurements, so the
               ones that get a tone. Nothing marks an active app: active is
@@ -215,6 +230,7 @@ export default function AppTile({
           {backChanged && (
             <StatusPill tone="warning">Back with different code</StatusPill>
           )}
+          {needsGrants && <StatusPill tone="warning">Needs grants</StatusPill>}
           {pills.map((text) => (
             <StatusPill key={text} tone="neutral">
               {text}
@@ -232,6 +248,7 @@ export default function AppTile({
           <MissingConnectorWarning
             app={app}
             missingConnectors={missingConnectors}
+            isActive={isActive}
           />
         </div>
       )}
@@ -245,8 +262,9 @@ export default function AppTile({
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
             <span>
               A different extension had this slug before, so this app was
-              switched off and its API keys were revoked. Its grants, settings
-              and data were kept. Before: {describeIdentity(replacement.previous)}. Now:{" "}
+              switched off, its API keys were revoked and its MCP tools were
+              turned off. Its grants, settings and data were kept. Before:{" "}
+              {describeIdentity(replacement.previous)}. Now:{" "}
               {describeIdentity(replacement.identity)}. Check what it does,
               then activate it by typing its slug.
             </span>
@@ -261,6 +279,29 @@ export default function AppTile({
               This app left the build and came back with different files, so
               it was switched off. Its grants and data were kept. Check what
               changed, then activate it.
+            </span>
+          </p>
+        </div>
+      )}
+      {needsGrants && (
+        <div className="mt-3 rounded-lg border-l-4 border-brand-accent bg-brand-accent/10 py-2 pl-3 pr-3">
+          <p className="flex items-start gap-2 text-xs text-foreground">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+            <span>
+              {lostBy?.reason === "global-ended" ? (
+                <>
+                  This app isn&apos;t global any more, so only the people
+                  granted it have it. People who had it without a grant
+                  don&apos;t now; their roles were kept, and give no access.
+                </>
+              ) : (
+                <>
+                  Some people had this app through a role and no grant. A
+                  role isn&apos;t access, so they don&apos;t have it now; their
+                  roles were kept.
+                </>
+              )}{" "}
+              Grant it from its Access tab, under Details.
             </span>
           </p>
         </div>
@@ -299,9 +340,7 @@ export default function AppTile({
             aria-label={`${isActive ? "Deactivate" : "Activate"} ${app.name}`}
             title={
               blockActivate
-                ? `Configure ${missingConnectors
-                    .map((m) => m.displayName)
-                    .join(", ")} first`
+                ? `${missingConnectorSteps(missingConnectors)} first`
                 : undefined
             }
           >
@@ -354,7 +393,9 @@ export default function AppTile({
       <AppDetailsDialog
         app={app}
         missingConnectors={missingConnectors}
-        grantCount={grantCount}
+        isActive={isActive}
+        grantCount={grants}
+        onGrantCount={(count) => setLiveGrants({ from: grantCount, count })}
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}
       />
@@ -391,7 +432,8 @@ export default function AppTile({
           </dl>
           <p className="text-muted-foreground">
             Activating it gives it the grants, settings and data kept under
-            this slug. The API keys made for the one before were revoked.
+            this slug. The API keys made for the one before were revoked, and
+            its MCP tools are off until you turn each one on.
           </p>
         </TypedConfirmDialog>
       )}

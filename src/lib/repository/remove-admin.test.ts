@@ -315,6 +315,7 @@ describe("Remove code and delete this checkout's data", () => {
         widgets: 0,
         settings: 2,
         apiKeys: 0,
+        mcpToolSwitches: 0,
         scheduledJobs: 0,
         jobRuns: 0,
         migrations: 1,
