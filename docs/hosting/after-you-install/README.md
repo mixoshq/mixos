@@ -404,8 +404,9 @@ database knows, because its folder was removed or renamed or the build skipped
 it, the step marks it missing and keeps everything it had: whether it was
 active, its grants, installs, widgets and password, its settings and API keys,
 its scheduled jobs and its tables. Nobody can open it while it's missing, and
-Admin > Apps lists it under **Not in this build**. A renamed folder is a new app:
-it arrives inactive with none of the old one's data.
+Admin > Apps lists it under **Not in this build**, where **Revoke access…**
+takes it from people, or revokes its API keys, before it comes back. A renamed
+folder is a new app: it arrives inactive with none of the old one's data.
 
 When the app comes back, the step compares a hash of its files with the one it
 recorded:
