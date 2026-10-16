@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/themes/mixos/logo.png" alt="MixOS" width="96" height="92">
+  <img src="public/logo.png" alt="MixOS" width="96" height="92">
 </p>
 
 <h1 align="center">MixOS</h1>
