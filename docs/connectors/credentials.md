@@ -94,8 +94,9 @@ While a connector is disabled:
   is recorded, so a delivery the provider retries after it is enabled is
   processed.
 - Connect, the OAuth callback and Verify connection are refused.
-- Activating an app doesn't check it. An app activated while a connector it
-  requires is disabled runs, and its calls to that connector fail as above.
+- An app that requires it can't be activated, or granted to anyone, until you
+  enable it again. An app that was already active keeps running, and its calls
+  to the connector fail as above.
 
 Disabling keeps the credentials, and each person's grant for a user-scoped
 connector, so enabling needs nothing entered again. It doesn't make a leaked

@@ -7,7 +7,7 @@
 import { redirect } from "next/navigation";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { hasAppGrant } from "@/lib/apps/access";
-import { appsWithMcpTools } from "@/lib/mcp/tools";
+import { appsWithEnabledMcpTools } from "@/lib/mcp/tools";
 import { isRegisteredRedirectUri } from "@/lib/mcp/oauth";
 import { createAuthorizationCode, getClient } from "@/lib/mcp/store";
 
@@ -43,8 +43,11 @@ export async function approveAuthorization(formData: FormData): Promise<void> {
 
   // Re-verify every ticked app: the checkbox values came from the browser, so
   // a crafted POST could name an app the user was never offered. Intersect with
-  // "declares MCP tools" AND "this user holds a grant".
-  const declaring = new Set(appsWithMcpTools().map((a) => a.slug));
+  // "has a tool an admin enabled" AND "this user holds a grant" — the same two
+  // tests that decided what the screen offered.
+  const declaring = new Set(
+    (await appsWithEnabledMcpTools()).map((a) => a.slug),
+  );
   const candidates = selected.filter((slug) => declaring.has(slug));
   const grants = await Promise.all(
     candidates.map((slug) => hasAppGrant(session.user.id, slug)),

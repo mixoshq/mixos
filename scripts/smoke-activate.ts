@@ -13,14 +13,19 @@
 // their audit rows, naming the CLI's actor, with `via: "cli"` and `smoke: true`:
 //
 //   1. The app is in this checkout's registry, and the user is in its database.
-//   2. Every connector the app requires is configured
+//   2. Every connector the app requires is ready
 //      (getMissingTenantConfigConnectors()).
 //   3. setAppActive(), which refuses an app that replaces a different extension
 //      under its slug unless that slug was typed: `--typed-slug`, which
 //      `--confirm-replaces` gives. Audited as `app.activate`, with what it
 //      replaced.
-//   4. A grant with the app's default role, unless the app is global, which
-//      every user has. Audited as `user.grant.add`.
+//   4. A grant, unless the app is global, which every user has. Its role is
+//      null, as a grant from Admin > Users stores it, so the user follows the
+//      app's `defaultRole`, now and whenever it changes. A role kept from when
+//      the app was global (src/lib/apps/grant-rule.ts) becomes a grant with
+//      that role, while the app still declares it. Audited as
+//      `user.grant.add`, which is how the row shows who granted it: nobody
+//      signed in, so `granted_by` is empty.
 //
 // An app already active, or a grant already there, is left as it is, with no
 // audit row. Prints one JSON line: SmokeActivation in ./register-smoke.ts.
@@ -29,7 +34,8 @@ import { appRegistry } from "../src/generated/app-registry";
 import { setAppActive } from "../src/lib/apps/access";
 import { recordAdminAction, type AdminActor } from "../src/lib/apps/admin-audit";
 import { CLI_ACTOR_PREFIX } from "../src/lib/apps/audit-actors";
-import { formatMissingList, getMissingTenantConfigConnectors } from "../src/lib/apps/connector-gates";
+import { getMissingTenantConfigConnectors, missingConnectorSteps } from "../src/lib/apps/connector-gates";
+import { IS_GRANT_SQL } from "../src/lib/apps/grant-rule";
 import type { AppManifest } from "../src/lib/apps/types";
 import { sql } from "../src/lib/db/client";
 import type { IdentityDetails } from "../src/lib/repository/identity";
@@ -45,7 +51,7 @@ export interface SmokeActivationInput {
 
 /** What it reads besides the database. Tests give their own. */
 export interface SmokeActivationDeps {
-  apps: readonly Pick<AppManifest, "slug" | "global" | "defaultRole">[];
+  apps: readonly Pick<AppManifest, "slug" | "global" | "roles">[];
   missingConnectors: typeof getMissingTenantConfigConnectors;
 }
 
@@ -70,7 +76,7 @@ export async function activateForSmoke(
   }
   const missing = await deps.missingConnectors(slug);
   if (missing.length > 0) {
-    return { ok: false, code: "connectors", message: `Configure ${formatMissingList(missing)} before activating this app.` };
+    return { ok: false, code: "connectors", message: `${missingConnectorSteps(missing)} before activating this app.` };
   }
 
   const [row] = await sql<{ is_active: boolean; identity_changed_at: Date | null }[]>`
@@ -104,13 +110,20 @@ export async function activateForSmoke(
   if (manifest.global) {
     grant = "global";
   } else {
-    // As Admin > Users grants it, with the app's default role. Nobody signed
-    // in, so nobody is recorded as granting it; the audit row names the CLI.
+    // As Admin > Users grants it. Nobody signed in, so nobody is recorded as
+    // granting it; the audit row names the CLI. A grant already there is left
+    // as it is.
+    const declared = manifest.roles.map((r) => r.key);
     const added = await sql`
-      insert into public.user_app_grants (user_id, app_slug, role)
-      values (${user.id}, ${slug}, ${manifest.defaultRole ?? null})
-      on conflict (user_id, app_slug) do nothing
-      returning app_slug
+      insert into public.user_app_grants as g (user_id, app_slug, role, role_only)
+      values (${user.id}, ${slug}, null, false)
+      on conflict (user_id, app_slug) do update
+        set role_only  = false,
+            role       = case when g.role = any(${declared}::text[]) then g.role end,
+            granted_by = null,
+            granted_at = now()
+        where not ${sql.unsafe(IS_GRANT_SQL)}
+      returning g.app_slug
     `;
     grant = added.length > 0 ? "added" : "existing";
     if (grant === "added") {

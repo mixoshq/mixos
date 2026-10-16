@@ -9,6 +9,64 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-10-15
+
+- **MCP tools are off until an admin turns them on.** Each tool has a switch on
+  its app's MCP tab (Admin > Apps > Details), and the tab's heading says how
+  many are on. A tool that is off isn't listed or callable for anyone, from its
+  next call, and an app with none on is left off the consent screen. Switching
+  is audited as `app.mcp.tool.enable` and `app.mcp.tool.disable`. When a
+  different extension takes an app's slug, the release step turns its tools
+  off again, as it revokes its API keys. Migration 0014; run
+  `npm run db:local` to apply it. **Breaking:** every tool starts off,
+  including tools people already use. After upgrading, open each app that has
+  MCP tools and turn on the ones you want; until then Claude sees none of them.
+  A connection made before keeps its consent and sees a tool again once it is
+  on. One approved while an app had no tool on doesn't include that app:
+  connect again.
+- **A role in a global app is only a role.** When an app stops being global,
+  the people who had only a role in it don't keep the app; the people an admin
+  granted it to do. Admin > Apps marks the app **Needs grants**, and its
+  Access tab lists the people with a role apart from the people with access,
+  with **Grant**, which keeps their role, and **Clear role**. A row counts as
+  a grant when an admin or the CLI is recorded granting it. Migration 0013;
+  run `npm run db:local` to apply it. **After upgrading**, look on Admin > Apps
+  for **Needs grants**. It marks each app where someone who only had a role,
+  and was never granted the app, no longer has it through that role: grant it
+  from the app's Access tab to whoever should still have it. A grant written
+  straight into the database, outside MixOS, counts as a role too.
+- **Who can reach an app, in one place.** The app dialog's Access tab filters
+  between Users, Password-gated, Public and API keys, each with a count. Users
+  lists everyone with access, with their role, who granted it and when: grant
+  it by name or email with **Grant access**, change a role, revoke it, and
+  filter by role. A role the manifest no longer declares is marked **Unknown
+  role**. A global app lists everyone, with roles and no grant or revoke.
+  Password-gated and Public list the pages and routes each tier reaches, read
+  from the route contracts, and Password-gated sets the password, which an app
+  declaring `password` only in `defineRoute` can now be given. Admin > Users
+  keeps its controls, through the same actions, and its role select now has
+  **Default**: a user on it follows the app's `defaultRole`, and changes when
+  it does. A new grant starts there. Granting someone who already has the app,
+  or revoking someone who doesn't, changes nothing and says so. An app under
+  **Not in this build** has **Revoke access…**, for its grants and API keys.
+- **API keys can be created.** The Access tab's API keys view makes a key for
+  an app's `key` routes: a label, the routes it may call or every key route,
+  and an expiry. The key is shown once. Each key lists its routes, who made it
+  and when, when it was last used and whether it is active, expired or
+  revoked, and Revoke works from its next request. Until now nothing created a
+  key, so `key` routes refused every caller. Audited as `app.apikey.create` and
+  `app.apikey.revoke`, never with the key.
+- **A connector has to be ready before its app is activated or granted.** A
+  three-legged OAuth connector with a saved client ID that was never
+  connected, and a connector an admin disabled, now block both, as an
+  unconfigured one does; a user-scoped connector needs only its client ID and
+  secret. The check used to look only for a saved row. The tile, the dialog and
+  Admin > Users say what to do: configure, connect or enable. For an app that
+  is already active, they say it can't be granted until then.
+- **Reach tab.** The app dialog's Connectors tab is now Reach. Under the
+  connectors it lists the hosts the app's own code may call, its `egress`, or
+  says it makes no outbound calls of its own.
+
 ## 2026-10-14
 
 - **The install guide is in five parts, in `docs/hosting/`.** Before you

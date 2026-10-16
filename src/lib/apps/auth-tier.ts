@@ -154,14 +154,14 @@ export async function resolveAuthTier(opts: {
         const resolved = await resolveApiKey(presentedApiKey(request), appSlug);
         if (!resolved) break;
         // A valid key still has to be SCOPED to this route. A key minted for
-        // one endpoint must not become a key for the whole app.
-        if (
-          method &&
-          routePattern !== undefined &&
-          !keyAllows(resolved.scopes, method, routePattern)
-        ) {
-          break;
-        }
+        // one endpoint must not become a key for the whole app. A caller
+        // that can't say which route this is gets only the keys scoped to
+        // every route: a route-scoped key can't be checked, so it's refused.
+        const inScope =
+          method && routePattern !== undefined
+            ? keyAllows(resolved.scopes, method, routePattern)
+            : resolved.scopes.includes("*");
+        if (!inScope) break;
         return { kind: "resolved", tier, dbUser: null };
       }
 

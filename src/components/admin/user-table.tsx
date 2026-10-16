@@ -25,6 +25,22 @@ export interface UserRow {
   installedActiveCount: number;
   /** Effective role key per granted slug (defaultRole when none set). */
   roleBySlug: Record<string, string | null>;
+  /**
+   * The role stored per granted slug: null when the user has none of their
+   * own and follows the app's defaultRole.
+   */
+  assignedRoleBySlug: Record<string, string | null>;
+  /**
+   * Apps that aren't global, where the user has a role kept from when the app
+   * was, and no access: slug → that role, null for the default.
+   */
+  roleOnlyBySlug: Record<string, string | null>;
+}
+
+/** What a grant or revoke from the users page changed. */
+export interface GrantToggleOutcome {
+  /** False when the person already had the app, or didn't have it to revoke. */
+  changed: boolean;
 }
 
 interface Props {
@@ -37,7 +53,7 @@ interface Props {
   blockedBySlug: Record<string, string>;
   /** The admin doing the looking, so their own row cannot demote itself. */
   currentAdminId: string;
-  toggleAction: (formData: FormData) => void | Promise<void>;
+  toggleAction: (formData: FormData) => Promise<GrantToggleOutcome>;
   setRoleAction: (formData: FormData) => void | Promise<void>;
 }
 

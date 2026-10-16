@@ -24,13 +24,19 @@ import {
   formatLastUpdated,
   formatCount,
 } from "@/lib/apps/display";
-import AppVisibilityPanel from "./app-visibility-panel";
-import AppPasswordPanel from "./app-password-panel";
-
-interface MissingConnector {
-  name: string;
-  displayName: string;
-}
+import {
+  getMcpToolSettings,
+  setMcpToolEnabledAction,
+} from "@/lib/mcp/tool-settings-actions";
+import { Toggle } from "@/components/ui/toggle";
+import { useToast } from "@/components/ui/toast";
+import {
+  BLOCK_LABEL,
+  blockDone,
+  groupByBlock,
+  type MissingConnector,
+} from "@/lib/apps/connector-readiness";
+import AppAccessPanel from "./app-access-panel";
 
 type DialogTab =
   "overview" | "access" | "settings" | "wiring" | "connectors" | "mcp" | "database";
@@ -45,16 +51,17 @@ type DialogTab =
  * The empty states carry the same fact the missing tab would have — an app with
  * no database says so — without moving the tabs either side of it.
  *
- * Connectors, MCP and Database sit together at the end because they are one
- * question asked three ways: what does this app reach out to, what does it
- * expose outwards, and what does it keep for itself.
+ * Reach, MCP and Database sit together at the end because they are one
+ * question asked three ways: what does this app reach out to (its connectors
+ * and the hosts it may call), what does it expose outwards, and what does it
+ * keep for itself.
  */
 const TABS: Array<{ key: DialogTab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "access", label: "Access" },
   { key: "settings", label: "Settings" },
   { key: "wiring", label: "Hooks & Services" },
-  { key: "connectors", label: "Connectors" },
+  { key: "connectors", label: "Reach" },
   { key: "mcp", label: "MCP" },
   { key: "database", label: "Database" },
 ];
@@ -372,41 +379,72 @@ function SchemaBrowser({ tables }: { tables: AppSchemaTable[] }) {
 }
 
 /**
- * The unconfigured-connector warning, worded once and rendered twice.
+ * The not-ready-connector warning, worded once and rendered twice.
  *
  * It lives on the registry row and again on this dialog's Overview, for someone
  * who opened it to find out what the strip was about. Same component both
  * places, so the two cannot drift into saying different things.
  *
  * It is a warning, not a gate. It used to block registration; registration is
- * gone, and what an unconfigured connector now blocks is granting the app to a
- * user — enforced in /admin/users, which is where the sentence points.
+ * gone, and what a connector that isn't ready now blocks is activating the
+ * app and granting it to anyone, both enforced on the server
+ * (src/lib/apps/connector-gates.ts). Each connector is named with what it
+ * still needs, in the Connector Registry's words: configured, connected after
+ * its client ID is saved, or enabled after an admin switched it off.
+ *
+ * Worded by the app's state. An inactive app is waiting on the connectors to
+ * be activated, which is the button a few pixels below. An active one was
+ * activated before a connector stopped being ready (it was switched off, say),
+ * so it is running without it: it still can't be granted, and whatever it
+ * needs the connector for fails.
  */
 export function MissingConnectorWarning({
   app,
   missingConnectors,
+  isActive,
 }: {
   app: AppManifest;
   missingConnectors: MissingConnector[];
+  isActive: boolean;
 }) {
+  const groups = groupByBlock(missingConnectors);
+  const names = groups.map(([state, group], g) => (
+    <span key={state}>
+      {g > 0 && (g === groups.length - 1 ? " and " : ", ")}
+      {group.map((m, i) => (
+        <span key={m.name}>
+          {i > 0 && (i === group.length - 1 ? " and " : ", ")}
+          <span className="font-semibold">{m.displayName}</span>
+        </span>
+      ))}{" "}
+      {isActive
+        ? group.length === 1
+          ? "isn't"
+          : "aren't"
+        : group.length === 1
+          ? "is"
+          : "are"}{" "}
+      {blockDone(state)}
+    </span>
+  ));
   return (
     <p className="flex items-start gap-2 text-xs text-foreground">
       <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
       <span>
-        {/* "Activated", not "granted": activation is now the gate this warning
-            is actually blocking, and it is the button sitting a few pixels
-            below this sentence. Granting was never the first thing stopped —
-            an app whose connector is unconfigured cannot serve a request from
-            anyone, granted or not. */}
-        <span className="font-semibold">{app.name}</span> can&apos;t be
-        activated until{" "}
-        {missingConnectors.map((m, i) => (
-          <span key={m.name}>
-            {i > 0 && (i === missingConnectors.length - 1 ? " and " : ", ")}
-            <span className="font-semibold">{m.displayName}</span>
-          </span>
-        ))}{" "}
-        {missingConnectors.length === 1 ? "is" : "are"} configured.{" "}
+        {isActive ? (
+          <>
+            <span className="font-semibold">{app.name}</span> is active, but{" "}
+            {names}, so it can&apos;t be granted to anyone, and anything that
+            needs {missingConnectors.length === 1 ? "that connector" : "those connectors"}{" "}
+            fails
+          </>
+        ) : (
+          <>
+            <span className="font-semibold">{app.name}</span> can&apos;t be
+            activated or granted until {names}
+          </>
+        )}
+        .{" "}
         <Link
           href="/admin/connectors"
           className="font-medium text-primary underline underline-offset-2"
@@ -418,17 +456,288 @@ export function MissingConnectorWarning({
   );
 }
 
+/**
+ * The Reach tab: what this app calls out to.
+ *
+ * Two sections, one question: the connectors it calls, which hold credentials
+ * for outside services, and the hosts its own code may call, from `egress`.
+ * Between them they are every way the app can send data out of the platform.
+ * Exported for its test, which renders it on its own.
+ */
+export function AppReachPanel({
+  app,
+  missingConnectors,
+}: {
+  app: AppManifest;
+  missingConnectors: MissingConnector[];
+}) {
+  const missing = new Map(missingConnectors.map((m) => [m.name, m]));
+  return (
+    <div className="space-y-8">
+      <section>
+        <SectionHeading>Connectors</SectionHeading>
+        {app.connectors.length > 0 ? (
+          <>
+            {/*
+              Every connector is tenant-scoped, so the name is the whole story
+              here. This list used to badge some of them "(per-user)"; the
+              user-scoped OAuth model that badge described was removed along
+              with the generated `userScopedConnectorNames` set it read from.
+              See docs/connectors/architecture.md.
+            */}
+            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+              {app.connectors.map((name) => (
+                <li key={name} className="flex flex-wrap items-center gap-2">
+                  <Mono>{name}</Mono>
+                  {missing.get(name) && (
+                    <StatusPill tone="warning">
+                      {BLOCK_LABEL[missing.get(name)!.state]}
+                    </StatusPill>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {missingConnectors.length > 0 && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                A connector this app requires must be ready before the app
+                can be activated or granted to anyone: configured, connected
+                if it signs in with OAuth, and not disabled.{" "}
+                <Link
+                  href="/admin/connectors"
+                  className="font-medium text-primary underline underline-offset-2"
+                >
+                  Open Connector Registry →
+                </Link>
+              </p>
+            )}
+          </>
+        ) : (
+          <Empty>
+            This app calls no connector, so it holds no credentials for an
+            outside service.
+          </Empty>
+        )}
+      </section>
+
+      {/*
+        The hosts the app's own code may call, from the manifest's `egress`.
+        context.http checks every request against this list, resolves the
+        name, re-checks each address against private ranges, and repeats both
+        on every redirect (src/lib/apps/http.ts), and the build refuses every
+        other way out of app code, so with its connectors this is where the
+        app's own code can send data. It is the field the Permissions guide on
+        mixos.org tells an admin to read first.
+      */}
+      <section>
+        <SectionHeading>Network</SectionHeading>
+        {app.egress.length > 0 ? (
+          <>
+            <p className="mt-1 text-sm text-muted-foreground">
+              The only hosts this app&apos;s own code can call. Each request,
+              and each redirect, is checked against this list.
+              {app.egress.some((host) => host.startsWith("*.")) &&
+                " An entry starting with *. covers one level of subdomain under the name after it, and not that name itself."}
+            </p>
+            <ul className="mt-2 space-y-1 text-sm">
+              {app.egress.map((host) => (
+                <li key={host}>
+                  <Mono>{host}</Mono>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <Empty>
+            This app makes no outbound calls of its own. It reaches outside
+            services only through its connectors.
+          </Empty>
+        )}
+      </section>
+    </div>
+  );
+}
+
+/**
+ * The MCP tab: each tool the app contributes, with its admin switch.
+ *
+ * The switches are read each time the tab is shown, which includes every time
+ * the dialog opens, since the dialog unmounts its panels when it closes. So
+ * another admin's change, or a release step that turned the tools off when a
+ * different extension took the slug, shows the next time the tab is opened,
+ * without a reload. Null until known — never "all off" by default on screen,
+ * since that would be a claim about the database we had not read. Exported
+ * for its test.
+ */
+export function McpToolsPanel({ app }: { app: AppManifest }) {
+  const toast = useToast();
+  const [toolsOn, setToolsOn] = useState<Record<string, boolean> | null>(null);
+  const [toolsError, setToolsError] = useState<string | null>(null);
+  const [toolBusy, setToolBusy] = useState<string | null>(null);
+  const toolsRequested = useRef(false);
+  useEffect(() => {
+    if (app.mcp.length === 0) return;
+    if (toolsRequested.current) return;
+    toolsRequested.current = true;
+    getMcpToolSettings(app.slug)
+      .then(setToolsOn)
+      .catch(() => setToolsError("Reload the page to try again."));
+  }, [app.mcp.length, app.slug]);
+
+  // Optimistic: the switch moves when it is clicked, and moves back with a
+  // toast if the save fails. Waiting for the round trip made it look broken.
+  async function toggleTool(name: string, enabled: boolean) {
+    setToolBusy(name);
+    setToolsOn((prev) => ({ ...(prev ?? {}), [name]: enabled }));
+    let refusal: string | null = null;
+    try {
+      const result = await setMcpToolEnabledAction(app.slug, name, enabled);
+      if (!result.ok) refusal = result.message;
+    } catch {
+      // A thrown error reaches the browser without its words in production.
+      refusal = "Could not change the tool. Reload the page and try again.";
+    } finally {
+      setToolBusy(null);
+    }
+    if (refusal !== null) {
+      setToolsOn((prev) => ({ ...(prev ?? {}), [name]: !enabled }));
+      toast.show("error", refusal);
+    }
+  }
+  const enabledCount = toolsOn
+    ? app.mcp.filter((t) => toolsOn[t.name]).length
+    : null;
+
+  return (
+    <section>
+      <SectionHeading>
+        MCP tools
+        {app.mcp.length
+          ? enabledCount === null
+            ? ` — ${formatCount(app.mcp.length, "tool")}`
+            : ` — ${enabledCount} of ${app.mcp.length} enabled`
+          : ""}
+      </SectionHeading>
+      {app.mcp.length === 0 ? (
+        <Empty>
+          This app contributes no MCP tools, so it never appears on the MCP
+          consent screen.
+        </Empty>
+      ) : (
+        <>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Read-only tools this app contributes to the MixOS MCP server.
+            Every tool starts off. A tool you switch on can be called by
+            people who have this app and have authorized it on the consent
+            screen; a tool that is off is not listed or callable for anyone,
+            from its next call, and an app with none on is left off the
+            consent screen.
+          </p>
+          {toolsError && (
+            <p className="mt-2 flex items-start gap-1.5 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>Could not read the tool switches. {toolsError}</span>
+            </p>
+          )}
+          {/*
+            Every field is shown, because every field is written for a MODEL
+            rather than for the admin reading this — and a description that
+            reads badly here is a tool that gets called wrongly, or never.
+            This tab is the only place that text is visible without opening
+            app.json.
+          */}
+          <ul className="mt-3 space-y-3">
+            {app.mcp.map((tool) => (
+              <li
+                key={tool.name}
+                className="rounded-lg border border-border bg-muted/30 px-4 py-3"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <p className="font-mono text-sm font-semibold text-foreground">
+                    {app.slug}
+                    {MCP_NS}
+                    {tool.name}
+                  </p>
+                  {toolsOn !== null && (
+                    <Toggle
+                      checked={!!toolsOn[tool.name]}
+                      onCheckedChange={(next) =>
+                        toggleTool(tool.name, next)
+                      }
+                      label={`The ${tool.name} tool`}
+                      busy={toolBusy === tool.name}
+                      disabled={toolBusy !== null && toolBusy !== tool.name}
+                    />
+                  )}
+                </div>
+                <p className="mt-1 text-sm text-foreground">
+                  {tool.description}
+                </p>
+                {tool.hint && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground">
+                      When to use:
+                    </span>{" "}
+                    {tool.hint}
+                  </p>
+                )}
+                <dl className="mt-2 space-y-1 text-xs">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <dt className="text-muted-foreground">Built from</dt>
+                    <dd className="flex flex-wrap items-center gap-1">
+                      {tool.sources.map((s) => (
+                        <span key={s}>
+                          {/* "ros" is not a connector — it is the marker
+                              for data that exists only in MixOS, and
+                              rendering it as a slug would send an admin
+                              hunting the connector registry for it. */}
+                          {s === MOS_SOURCE ? (
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">
+                              MixOS records
+                            </span>
+                          ) : (
+                            <Mono>{s}</Mono>
+                          )}
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
+                  {tool.notCovered && (
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      <dt className="text-muted-foreground">Not covered</dt>
+                      <dd className="text-foreground">{tool.notCovered}</dd>
+                    </div>
+                  )}
+                </dl>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function AppDetailsDialog({
   app,
   missingConnectors,
+  isActive,
   grantCount,
+  onGrantCount,
   open,
   onClose,
 }: {
   app: AppManifest;
   missingConnectors: MissingConnector[];
+  /** Whether the app serves anything, for the connector warning's wording. */
+  isActive: boolean;
   /** Users holding a grant. Meaningless for a global app — see the row. */
   grantCount: number;
+  /**
+   * The count the Access tab just read, after a grant or a revoke, so the
+   * tile's pill and the row below agree with the list without waiting for
+   * the page to refresh.
+   */
+  onGrantCount?: (count: number) => void;
   open: boolean;
   onClose: () => void;
 }) {
@@ -458,12 +767,8 @@ export default function AppDetailsDialog({
       .finally(() => setSchemaLoading(false));
   }, [open, app.database, app.slug]);
 
-  const missingNames = new Set(missingConnectors.map((m) => m.name));
 
-  const declaresPassword = (sets: Record<string, string[]> | undefined) =>
-    Object.values(sets ?? {}).some((a) => a.includes("password"));
-  const hasPasswordRoute =
-    declaresPassword(app.pageVisibility) || declaresPassword(app.apiVisibility);
+  const missing = new Map(missingConnectors.map((m) => [m.name, m]));
 
   const emits = [...app.hooks.emits.actions, ...app.hooks.emits.filters];
   const listens = [...app.hooks.listens.actions, ...app.hooks.listens.filters];
@@ -524,6 +829,7 @@ export default function AppDetailsDialog({
               <MissingConnectorWarning
                 app={app}
                 missingConnectors={missingConnectors}
+                isActive={isActive}
               />
             </div>
           )}
@@ -609,8 +915,10 @@ export default function AppDetailsDialog({
                      scanning for the unconfigured one should not have to decide
                      whether an empty cell means "fine" or "not checked". */
                   value={
-                    missingNames.has(name) ? (
-                      <StatusPill tone="warning">Not configured</StatusPill>
+                    missing.get(name) ? (
+                      <StatusPill tone="warning">
+                        {BLOCK_LABEL[missing.get(name)!.state]}
+                      </StatusPill>
                     ) : (
                       <StatusPill tone="success">Configured</StatusPill>
                     )
@@ -675,18 +983,13 @@ export default function AppDetailsDialog({
       )}
 
       {tab === "access" && (
-        <div className="space-y-4">
-          <AppVisibilityPanel app={app} />
-          {hasPasswordRoute ? (
-            <AppPasswordPanel slug={app.slug} appName={app.name} />
-          ) : (
-            <p className="rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">
-              No surface of this app is password-gated, so there is no unlock
-              password to set. A route opts in by declaring{" "}
-              <Mono>password</Mono> as its auth.
-            </p>
-          )}
-        </div>
+        <AppAccessPanel
+          app={app}
+          missingConnectors={missingConnectors}
+          onAccessChange={(access) => {
+            if (!access.global) onGrantCount?.(access.rows.length);
+          }}
+        />
       )}
 
       {tab === "wiring" && (
@@ -779,132 +1082,10 @@ export default function AppDetailsDialog({
       )}
 
       {tab === "connectors" && (
-        <section>
-          <SectionHeading>Connectors</SectionHeading>
-          {app.connectors.length > 0 ? (
-            <>
-              {/*
-                Every connector is tenant-scoped, so the name is the whole story
-                here. This list used to badge some of them "(per-user)"; the
-                user-scoped OAuth model that badge described was removed along
-                with the generated `userScopedConnectorNames` set it read from.
-                See docs/connectors/architecture.md.
-              */}
-              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-                {app.connectors.map((name) => (
-                  <li key={name} className="flex flex-wrap items-center gap-2">
-                    <Mono>{name}</Mono>
-                    {missingNames.has(name) && (
-                      <StatusPill tone="warning">Not configured</StatusPill>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              {missingConnectors.length > 0 && (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  A connector this app requires must hold a working credential
-                  set before the app can be registered.{" "}
-                  <Link
-                    href="/admin/connectors"
-                    className="font-medium text-primary underline underline-offset-2"
-                  >
-                    Open Connector Registry →
-                  </Link>
-                </p>
-              )}
-            </>
-          ) : (
-            <Empty>
-              This app calls no connector — it reaches nothing outside the
-              platform.
-            </Empty>
-          )}
-        </section>
+        <AppReachPanel app={app} missingConnectors={missingConnectors} />
       )}
 
-      {tab === "mcp" && (
-        <section>
-          <SectionHeading>
-            MCP tools
-            {app.mcp.length ? ` — ${formatCount(app.mcp.length, "tool")}` : ""}
-          </SectionHeading>
-          {app.mcp.length === 0 ? (
-            <Empty>
-              This app contributes no MCP tools, so it never appears on the MCP
-              consent screen.
-            </Empty>
-          ) : (
-            <>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Read-only tools this app contributes to the MixOS MCP server. A
-                tool is reachable only when the connecting user has authorized
-                this app on the consent screen <em>and</em> still holds a grant
-                for it.
-              </p>
-              {/*
-                Every field is shown, because every field is written for a MODEL
-                rather than for the admin reading this — and a description that
-                reads badly here is a tool that gets called wrongly, or never.
-                This tab is the only place that text is visible without opening
-                app.json.
-              */}
-              <ul className="mt-3 space-y-3">
-                {app.mcp.map((tool) => (
-                  <li
-                    key={tool.name}
-                    className="rounded-lg border border-border bg-muted/30 px-4 py-3"
-                  >
-                    <p className="font-mono text-sm font-semibold text-foreground">
-                      {app.slug}
-                      {MCP_NS}
-                      {tool.name}
-                    </p>
-                    <p className="mt-1 text-sm text-foreground">
-                      {tool.description}
-                    </p>
-                    {tool.hint && (
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        <span className="font-medium text-foreground">
-                          When to use:
-                        </span>{" "}
-                        {tool.hint}
-                      </p>
-                    )}
-                    <dl className="mt-2 space-y-1 text-xs">
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <dt className="text-muted-foreground">Built from</dt>
-                        <dd className="flex flex-wrap items-center gap-1">
-                          {tool.sources.map((s) => (
-                            <span key={s}>
-                              {/* "ros" is not a connector — it is the marker
-                                  for data that exists only in MixOS, and
-                                  rendering it as a slug would send an admin
-                                  hunting the connector registry for it. */}
-                              {s === MOS_SOURCE ? (
-                                <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">
-                                  MixOS records
-                                </span>
-                              ) : (
-                                <Mono>{s}</Mono>
-                              )}
-                            </span>
-                          ))}
-                        </dd>
-                      </div>
-                      {tool.notCovered && (
-                        <div className="flex flex-wrap items-baseline gap-x-2">
-                          <dt className="text-muted-foreground">Not covered</dt>
-                          <dd className="text-foreground">{tool.notCovered}</dd>
-                        </div>
-                      )}
-                    </dl>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </section>
-      )}
+      {tab === "mcp" && <McpToolsPanel app={app} />}
 
       {tab === "database" && (
         <section>
