@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 # The production image: what self-hosting runs (deploy/docker-compose.yml, and
 # the Render and Railway templates — see docs/hosting/), and what the local
 # `npm run docker:prod` profile builds to reproduce production.
