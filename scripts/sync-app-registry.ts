@@ -56,11 +56,13 @@
 // step and not only when an app returns, means a different extension now has
 // the slug: a local app reinstalled from the Registry, one from another
 // repository, or an installed one whose record was deleted. That one is
-// switched off and flagged (`identity_changed_at`), and its API keys are
-// revoked, since they were given out for the extension before it. Activating
-// it again needs its slug typed (setAppActive() in src/lib/apps/access.ts).
-// When it is also an app coming back with different files, this flag is the
-// one it gets: it says more, and asks more of the admin.
+// switched off and flagged (`identity_changed_at`), its API keys are revoked
+// and its MCP tool switches deleted, since both were given out for the
+// extension before it: a tool the new one declares under an old name starts
+// off, like any other. Activating it again needs its slug typed
+// (setAppActive() in src/lib/apps/access.ts). When it is also an app coming
+// back with different files, this flag is the one it gets: it says more, and
+// asks more of the admin.
 //
 // A ROLE IS NEVER ACCESS. A `user_app_grants` row records a grant, a role on
 // a global app, or both, and `role_only` says which (migration 0013). A row
@@ -125,6 +127,8 @@ export interface ReplacedApp {
   deactivated: boolean;
   /** How many of its API keys this run revoked. */
   apiKeysRevoked: number;
+  /** How many of its MCP tool switches this run deleted. */
+  mcpToolSwitchesReset: number;
 }
 
 /** An app whose rows this run decided, some of them to be only roles. */
@@ -335,12 +339,19 @@ export async function syncAppRegistry(
           where app_slug = ${app.slug} and revoked_at is null
           returning id
         `;
+        // Turned on for the tools of the extension before it.
+        const switches = await tx`
+          delete from public.app_mcp_tool_settings
+          where app_slug = ${app.slug}
+          returning tool_name
+        `;
         await audit(tx, "app.identity.changed", app.slug, {
           previous: identityDetails(row.identity),
           identity: identityDetails(identity),
           // True when this run switched off an app that was active.
           deactivated: row.is_active,
           apiKeysRevoked: revoked.length,
+          mcpToolSwitchesReset: switches.length,
         });
         replaced.push({
           slug: app.slug,
@@ -348,6 +359,7 @@ export async function syncAppRegistry(
           identity,
           deactivated: row.is_active,
           apiKeysRevoked: revoked.length,
+          mcpToolSwitchesReset: switches.length,
         });
       } else if (codeChanged) {
         await tx`

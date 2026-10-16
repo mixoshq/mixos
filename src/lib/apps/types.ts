@@ -299,7 +299,8 @@ export interface AppManifest {
    * Zod export used to derive the tool's JSON Schema). Exposed to clients as
    * `<slug>__<name>`.
    *
-   * A tool is reachable only when the connecting user authorized this app on the
+   * A tool is reachable only once an admin has switched it on (every tool
+   * starts off), and only when the connecting user authorized this app on the
    * MCP consent screen *and* still has a grant for it — consent is a ceiling,
    * the live grant is the floor. Defaults to `[]` (no tools, and the app never
    * appears on the consent screen). See `docs/apps/mcp.md`.

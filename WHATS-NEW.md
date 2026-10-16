@@ -11,6 +11,19 @@ just pulled.
 
 ## 2026-10-15
 
+- **MCP tools are off until an admin turns them on.** Each tool has a switch on
+  its app's MCP tab (Admin > Apps > Details), and the tab's heading says how
+  many are on. A tool that is off isn't listed or callable for anyone, from its
+  next call, and an app with none on is left off the consent screen. Switching
+  is audited as `app.mcp.tool.enable` and `app.mcp.tool.disable`. When a
+  different extension takes an app's slug, the release step turns its tools
+  off again, as it revokes its API keys. Migration 0014; run
+  `npm run db:local` to apply it. **Breaking:** every tool starts off,
+  including tools people already use. After upgrading, open each app that has
+  MCP tools and turn on the ones you want; until then Claude sees none of them.
+  A connection made before keeps its consent and sees a tool again once it is
+  on. One approved while an app had no tool on doesn't include that app:
+  connect again.
 - **A role in a global app is only a role.** When an app stops being global,
   the people who had only a role in it don't keep the app; the people an admin
   granted it to do. Admin > Apps marks the app **Needs grants**, and its

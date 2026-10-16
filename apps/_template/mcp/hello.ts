@@ -4,9 +4,10 @@ import type { McpToolContext } from "@/lib/hooks/types";
 /**
  * Example MCP tool.
  *
- * Declared in app.json under `mcp`, invoked by the MixOS MCP server when a user
- * has connected an MCP client (Claude) and ticked this app on the consent
- * screen. It runs as that user, with this app's roles resolved.
+ * Declared in app.json under `mcp`, and off until an admin turns it on, on the
+ * app's MCP tab. Then the MixOS MCP server invokes it when a user has connected
+ * an MCP client (Claude) and ticked this app on the consent screen. It runs as
+ * that user, with this app's roles resolved.
  *
  * Two exports are required, and the registry generator refuses to build without
  * them:

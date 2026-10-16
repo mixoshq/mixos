@@ -52,8 +52,8 @@ interface AppTileProps {
   needsGrants: NeedsGrants | null;
   /**
    * Set when the release step found this app under a slug a different
-   * extension had, switched it off and revoked its API keys. Activating needs
-   * the slug typed, and clears it.
+   * extension had, switched it off, revoked its API keys and turned its MCP
+   * tools off. Activating needs the slug typed, and clears it.
    */
   replacement: AppReplacement | null;
   /** Opens the Remove dialog, which says what goes and what stays before it removes anything. */
@@ -262,8 +262,9 @@ export default function AppTile({
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
             <span>
               A different extension had this slug before, so this app was
-              switched off and its API keys were revoked. Its grants, settings
-              and data were kept. Before: {describeIdentity(replacement.previous)}. Now:{" "}
+              switched off, its API keys were revoked and its MCP tools were
+              turned off. Its grants, settings and data were kept. Before:{" "}
+              {describeIdentity(replacement.previous)}. Now:{" "}
               {describeIdentity(replacement.identity)}. Check what it does,
               then activate it by typing its slug.
             </span>
@@ -431,7 +432,8 @@ export default function AppTile({
           </dl>
           <p className="text-muted-foreground">
             Activating it gives it the grants, settings and data kept under
-            this slug. The API keys made for the one before were revoked.
+            this slug. The API keys made for the one before were revoked, and
+            its MCP tools are off until you turn each one on.
           </p>
         </TypedConfirmDialog>
       )}
