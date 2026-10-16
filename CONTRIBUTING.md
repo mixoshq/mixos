@@ -50,19 +50,21 @@ full boundary; in short:
 
 | Where | Your contribution is licensed under |
 |---|---|
-| The platform: `src/**` (except `src/generated/**`), `scripts/**`, `eslint-rules/**`, root build configuration | MPL-2.0 |
+| The platform: everything not listed below, including `src/**` (except `src/generated/**`), `scripts/**`, `eslint-rules/**`, `supabase/**`, `public/**`, `deploy/**` and the root build files | MPL-2.0 |
 | An app, connector or theme in this repository | The licence in that extension's manifest (`"license"` in `app.json`, `connector.json` or `theme.json`) |
 | The scaffolding templates (`*/_template*/`) | CC0 1.0 (public domain) |
+| The documentation: `docs/**` | CC BY 4.0, with its code samples also under CC0 1.0 |
 
 Don't submit code you copied from elsewhere unless its licence is compatible
 with the destination, and say where it came from in the pull request.
 
 ## New platform files need the licence notice
 
-Every Covered file starts with the MPL-2.0 notice (MPL Exhibit A). It is what
-makes a file Covered Software, so a new file under `src/`, `scripts/` or
-`eslint-rules/` must begin with it, above imports and above any `"use client"`
-or `"use server"` directive:
+Every Covered file that can hold a comment starts with the MPL-2.0 notice (MPL
+Exhibit A), which marks it as Covered Software. A new platform file — under
+`src/`, `scripts/`, `eslint-rules/`, `supabase/`, `deploy/` or `public/`, a new
+hook or workflow, or a new build file at the root — must begin with it, above
+imports and above any `"use client"` or `"use server"` directive:
 
 ```ts
 /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -70,9 +72,13 @@ or `"use server"` directive:
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 ```
 
+The same three lines take `--` in a SQL migration and `#` in a shell script,
+YAML, TOML or Dockerfile. JSON can't hold a comment; `LICENSING.md` covers it
+instead.
+
 Leave the notice off files under `apps/`, `connectors/` and `themes/` unless
-that extension is itself MPL-licensed, and never add it to the templates or to
-`src/generated/**`.
+that extension is itself MPL-licensed, and never add it to the templates, to
+`docs/` or to `src/generated/**`.
 
 A file that starts with a shebang (`#!/usr/bin/env …`) keeps the shebang on
 line 1 and the notice directly below it.
