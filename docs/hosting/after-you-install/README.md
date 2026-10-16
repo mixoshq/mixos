@@ -438,8 +438,10 @@ app you removed and installed again from the Registry, or a release from another
 repository. The release step then:
 
 - **switches an app off**, marks it **Replaces a different extension** on
-  Admin > Apps, and revokes its API keys. Its grants, settings and data stay. To
-  turn it on, check what it does, press **Activate** and type its slug.
+  Admin > Apps, revokes its API keys and turns its MCP tools off. Its grants,
+  settings and data stay. To turn it on, check what it does, press
+  **Activate** and type its slug, then turn on the tools you want on its MCP
+  tab.
 - **disables a connector**, keeping its credentials. To turn it on, press
   **Enable** on Admin > Connectors and type its name.
 - **records a theme**, and nothing more. A theme runs no code and holds no data.
@@ -463,7 +465,7 @@ entry, read what goes, and type its name.
   role, `mixos_app_<slug>`; its settings, API keys, scheduled jobs and their
   runs, the record of which of its migrations ran, its telemetry and recorded
   opens; its place in each MCP authorization; and its row, with its grants, user
-  installs, password and widgets.
+  installs, password, widgets and MCP tool switches.
 - **A connector** loses its saved credentials, every user's own connection, its
   granted scopes, webhook replay markers and telemetry, and its switch and marks.
 

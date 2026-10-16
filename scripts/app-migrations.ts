@@ -632,8 +632,8 @@ export async function migrateAppSchemas(
     const back = sync.returned.some((a) => a.slug === r.slug) ? "back in the build, and " : "";
     console.log(
       `  ${r.slug}: ${back}a different extension than before (was ${describeIdentity(r.previous)}; ` +
-        `now ${describeIdentity(r.identity)}) — inactive, with ${r.apiKeysRevoked} API key(s) revoked, ` +
-        `until an admin activates it by typing its slug`,
+        `now ${describeIdentity(r.identity)}) — inactive, with ${r.apiKeysRevoked} API key(s) revoked ` +
+        `and ${r.mcpToolSwitchesReset} MCP tool switch(es) reset, until an admin activates it by typing its slug`,
     );
   }
   for (const { slug, roleOnly } of sync.marked) {
