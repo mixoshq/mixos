@@ -1,3 +1,7 @@
+-- This Source Code Form is subject to the terms of the Mozilla Public
+-- License, v. 2.0. If a copy of the MPL was not distributed with this
+-- file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 -- Two controls that the platform had no way to express before: which schema the
 -- running image expects, and a way for two privileged operations to not run at
 -- the same time.

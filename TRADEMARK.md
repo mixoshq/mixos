@@ -12,7 +12,7 @@ names of their own.
 
 The marks covered here are the name **MixOS**, the MixOS logo and wordmark, and
 any confusingly similar name or design. They are owned by
-**[OWNER — e.g. Anthony Montalbano, or the MixOS legal entity]** ("we").
+**Tangent Thinking, LLC** ("we").
 
 ## Fine without asking
 
@@ -65,7 +65,7 @@ of this.
 ## Asking for permission
 
 If you want to do something this page doesn't allow, or you aren't sure whether
-it does, ask before launching: **[CONTACT — e.g. trademarks@mixos.org]**. Tell
+it does, ask before launching: **[legal@mixos.org](mailto:legal@mixos.org)**. Tell
 us the name, what it's for, and where it will appear.
 
 We may update this policy. If something you were already doing becomes
