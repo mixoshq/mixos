@@ -38,16 +38,30 @@ leaving it to interpretation.
 | Changing a Covered file (see below) **and distributing it** | Publish those files' Source Code Form under MPL-2.0. |
 | Copying a `src/` file into your own tree and editing it | It stays Covered Software. Publish it if you distribute. |
 | Shipping a built bundle that mixes platform and app code | Fine — MPL-2.0 §3.2 permits distributing Executable Form under other terms, provided the Covered Software's source stays available under MPL. |
+| Reusing the documentation in `docs/` | Credit MixOS (CC BY 4.0). Its code samples carry no obligation (CC0). |
 
 ### Covered Software
 
-Every file carrying the MPL header, which is everything under:
+Everything in this repository except what [Not Covered
+Software](#not-covered-software) lists, including:
 
 - `src/**` (excluding `src/generated/**`, which is build output)
-- `scripts/**`
-- `eslint-rules/**`
-- the root build configuration: `next.config.ts`, `postcss.config.mjs`,
-  `eslint.config.mjs`, `dangerfile.ts`
+- `scripts/**` and `eslint-rules/**`
+- `supabase/**` — the platform schema and its migrations
+- `public/**` — the service worker, and the icons, which are the MixOS logo
+  (see [Trademark](#trademark))
+- `deploy/**`, and the build and deployment files at the root: `Dockerfile`,
+  `Dockerfile.dev`, `docker-compose.yml`, `render.yaml`, `railway.json`,
+  `vercel.json`, `next.config.ts`, `postcss.config.mjs`, `eslint.config.mjs`,
+  `dangerfile.ts`, `package.json`, `tsconfig.json`
+- `.githooks/**` and `.github/**`
+
+A file that can hold a comment carries the MPL notice in its first lines. One
+that can't, such as JSON or an image, is covered by this document and
+[`LICENSE`](LICENSE) instead, as MPL Exhibit A allows: the notice may go "in a
+location (such as a LICENSE file in a relevant directory) where a recipient
+would be likely to look for such a notice." A file that carries a licence
+notice of its own keeps that licence.
 
 ### Not Covered Software
 
@@ -57,6 +71,18 @@ Every file carrying the MPL header, which is everything under:
   1.0** (public domain), each with its own `LICENSE`. A template exists to be
   copied, and MPL copyleft follows a copied file; leaving them Covered would
   have meant every scaffolded app inheriting obligations on its first commit.
+- **`docs/**`** — the documentation, under CC BY 4.0. See below.
+
+### Documentation
+
+`docs/**` is licensed under [**CC BY 4.0**](https://creativecommons.org/licenses/by/4.0/)
+([`docs/LICENSE.md`](docs/LICENSE.md)). You can copy, adapt and republish it,
+commercially too, as long as you credit MixOS, link to the licence and say
+whether you changed it.
+
+Code samples in the docs are also released under **CC0 1.0**, for the same
+reason as the templates: they exist to be copied into your own work, and a
+credit line shouldn't have to follow them there.
 
 ### Importing platform code does not make your file Covered
 
@@ -87,7 +113,8 @@ can and can't be called.
 ## Contributing
 
 Contributions are accepted under MPL-2.0 — MPL §2 grants the licence from each
-Contributor directly, so no separate CLA is required. Sign off your commits
+Contributor directly, so no separate CLA is required — except in `docs/`, where
+they are accepted under CC BY 4.0. Sign off your commits
 (`git commit -s`) to certify the [Developer Certificate of
 Origin](https://developercertificate.org/). See
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for the details, including the notice
