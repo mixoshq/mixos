@@ -45,16 +45,17 @@ type DialogTab =
  * The empty states carry the same fact the missing tab would have — an app with
  * no database says so — without moving the tabs either side of it.
  *
- * Connectors, MCP and Database sit together at the end because they are one
- * question asked three ways: what does this app reach out to, what does it
- * expose outwards, and what does it keep for itself.
+ * Reach, MCP and Database sit together at the end because they are one
+ * question asked three ways: what does this app reach out to (its connectors
+ * and the hosts it may call), what does it expose outwards, and what does it
+ * keep for itself.
  */
 const TABS: Array<{ key: DialogTab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "access", label: "Access" },
   { key: "settings", label: "Settings" },
   { key: "wiring", label: "Hooks & Services" },
-  { key: "connectors", label: "Connectors" },
+  { key: "connectors", label: "Reach" },
   { key: "mcp", label: "MCP" },
   { key: "database", label: "Database" },
 ];
@@ -415,6 +416,104 @@ export function MissingConnectorWarning({
         </Link>
       </span>
     </p>
+  );
+}
+
+/**
+ * The Reach tab: what this app calls out to.
+ *
+ * Two sections, one question: the connectors it calls, which hold credentials
+ * for outside services, and the hosts its own code may call, from `egress`.
+ * Between them they are every way the app can send data out of the platform.
+ * Exported for its test, which renders it on its own.
+ */
+export function AppReachPanel({
+  app,
+  missingConnectors,
+}: {
+  app: AppManifest;
+  missingConnectors: MissingConnector[];
+}) {
+  const missingNames = new Set(missingConnectors.map((m) => m.name));
+  return (
+    <div className="space-y-8">
+      <section>
+        <SectionHeading>Connectors</SectionHeading>
+        {app.connectors.length > 0 ? (
+          <>
+            {/*
+              Every connector is tenant-scoped, so the name is the whole story
+              here. This list used to badge some of them "(per-user)"; the
+              user-scoped OAuth model that badge described was removed along
+              with the generated `userScopedConnectorNames` set it read from.
+              See docs/connectors/architecture.md.
+            */}
+            <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+              {app.connectors.map((name) => (
+                <li key={name} className="flex flex-wrap items-center gap-2">
+                  <Mono>{name}</Mono>
+                  {missingNames.has(name) && (
+                    <StatusPill tone="warning">Not configured</StatusPill>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {missingConnectors.length > 0 && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                A connector this app requires must hold a working credential
+                set before the app can be registered.{" "}
+                <Link
+                  href="/admin/connectors"
+                  className="font-medium text-primary underline underline-offset-2"
+                >
+                  Open Connector Registry →
+                </Link>
+              </p>
+            )}
+          </>
+        ) : (
+          <Empty>
+            This app calls no connector, so it holds no credentials for an
+            outside service.
+          </Empty>
+        )}
+      </section>
+
+      {/*
+        The hosts the app's own code may call, from the manifest's `egress`.
+        context.http checks every request against this list, resolves the
+        name, re-checks each address against private ranges, and repeats both
+        on every redirect (src/lib/apps/http.ts), and the build refuses every
+        other way out of app code, so with its connectors this is where the
+        app's own code can send data. It is the field the Permissions guide on
+        mixos.org tells an admin to read first.
+      */}
+      <section>
+        <SectionHeading>Network</SectionHeading>
+        {app.egress.length > 0 ? (
+          <>
+            <p className="mt-1 text-sm text-muted-foreground">
+              The only hosts this app&apos;s own code can call. Each request,
+              and each redirect, is checked against this list.
+              {app.egress.some((host) => host.startsWith("*.")) &&
+                " An entry starting with *. covers one level of subdomain under the name after it, and not that name itself."}
+            </p>
+            <ul className="mt-2 space-y-1 text-sm">
+              {app.egress.map((host) => (
+                <li key={host}>
+                  <Mono>{host}</Mono>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <Empty>
+            This app makes no outbound calls of its own. It reaches outside
+            services only through its connectors.
+          </Empty>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -779,47 +878,7 @@ export default function AppDetailsDialog({
       )}
 
       {tab === "connectors" && (
-        <section>
-          <SectionHeading>Connectors</SectionHeading>
-          {app.connectors.length > 0 ? (
-            <>
-              {/*
-                Every connector is tenant-scoped, so the name is the whole story
-                here. This list used to badge some of them "(per-user)"; the
-                user-scoped OAuth model that badge described was removed along
-                with the generated `userScopedConnectorNames` set it read from.
-                See docs/connectors/architecture.md.
-              */}
-              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-                {app.connectors.map((name) => (
-                  <li key={name} className="flex flex-wrap items-center gap-2">
-                    <Mono>{name}</Mono>
-                    {missingNames.has(name) && (
-                      <StatusPill tone="warning">Not configured</StatusPill>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              {missingConnectors.length > 0 && (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  A connector this app requires must hold a working credential
-                  set before the app can be registered.{" "}
-                  <Link
-                    href="/admin/connectors"
-                    className="font-medium text-primary underline underline-offset-2"
-                  >
-                    Open Connector Registry →
-                  </Link>
-                </p>
-              )}
-            </>
-          ) : (
-            <Empty>
-              This app calls no connector — it reaches nothing outside the
-              platform.
-            </Empty>
-          )}
-        </section>
+        <AppReachPanel app={app} missingConnectors={missingConnectors} />
       )}
 
       {tab === "mcp" && (
