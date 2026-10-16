@@ -338,7 +338,8 @@ The platform is copyleft; **what you build on it is yours.** Apps, connectors
 and themes under `apps/`, `connectors/` and `themes/` are not Covered Software
 and may be licensed however you like, including proprietary — importing
 platform code does not change that. The scaffolding templates are public domain
-(CC0) so a copied template never carries obligations into your work.
+(CC0) so a copied template never carries obligations into your work. The
+documentation in `docs/` is licensed under CC BY 4.0.
 
 See [`LICENSING.md`](LICENSING.md) for the boundary in detail and why MPL was
 chosen over GPL and AGPL. Contributions are made under the Developer
