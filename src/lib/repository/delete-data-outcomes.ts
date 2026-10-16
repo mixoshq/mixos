@@ -29,6 +29,8 @@ export interface AppDataCounts {
   widgets: number;
   settings: number;
   apiKeys: number;
+  /** Its switches in `app_mcp_tool_settings`, one per tool an admin flipped. */
+  mcpToolSwitches: number;
   scheduledJobs: number;
   jobRuns: number;
   /** Its rows in `_migrations`, the record of which of its migrations ran. */
@@ -128,6 +130,7 @@ export function describeData(
       some([
         [c.settings, "setting", "settings"],
         [c.apiKeys, "API key", "API keys"],
+        [c.mcpToolSwitches, "MCP tool switch", "MCP tool switches"],
       ]),
       some([
         [c.scheduledJobs, "scheduled job", "scheduled jobs"],

@@ -14,6 +14,7 @@ import type { McpToolContext } from "@/lib/hooks/types";
 import { APP_UPDATING_MESSAGE } from "@/lib/platform/maintenance-gate";
 import { safeErrorMessage } from "@/lib/safe-error";
 import { loadTool, parseToolName } from "./tools";
+import { enabledTools } from "./tool-settings";
 import type { TokenPrincipal } from "./store";
 
 /**
@@ -107,21 +108,29 @@ export async function callTool(
     throw new McpToolError("NOT_FOUND", `Unknown tool "${fullToolName}".`);
   }
 
-  const tool = manifest.mcp.find((t) => t.name === toolName);
-  if (!tool) {
-    throw new McpToolError(
-      "NOT_EXPOSED",
-      `"${manifest.name}" does not expose a tool "${toolName}".`,
-    );
-  }
-
   // Gate 2 — live authorization. Re-checked on every call, never cached on the
-  // token: revoking a user's app grant must take effect immediately.
+  // token: revoking a user's app grant must take effect immediately. Asked
+  // before the tool is looked up, so whatever the name, someone without the
+  // app gets this answer and nothing about the app's tools.
   const granted = await hasAppGrant(principal.userId, slug);
   if (!granted) {
     throw new McpToolError(
       "FORBIDDEN_USER",
       `You don't have access to "${manifest.name}".`,
+    );
+  }
+
+  // A tool an admin has not enabled answers as one the app never declared:
+  // the same error, after the same reads. The switches are read whether or not
+  // the name is declared, so a declared name doesn't cost a query an
+  // undeclared one skips. `tools/list` already omits a disabled tool, but a
+  // client can name a tool without listing it, so the switch is checked here.
+  const enabled = await enabledTools(slug);
+  const tool = manifest.mcp.find((t) => t.name === toolName);
+  if (!tool || !enabled.has(toolName)) {
+    throw new McpToolError(
+      "NOT_EXPOSED",
+      `"${manifest.name}" does not expose a tool "${toolName}".`,
     );
   }
 

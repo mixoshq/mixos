@@ -253,6 +253,10 @@ describe("Delete data against a real database", { skip }, () => {
         values (${slug}, 'CI', ${randomBytes(16).toString("hex")}, 'abcd1234')
       `;
       await sql`
+        insert into public.app_mcp_tool_settings (app_slug, tool_name, enabled, updated_by)
+        values (${slug}, 'search', true, ${user})
+      `;
+      await sql`
         insert into public.app_scheduled_jobs (app_slug, job_name, interval_minutes) values (${slug}, 'sweep', 60)
       `;
       await sql`
@@ -359,6 +363,7 @@ describe("Delete data against a real database", { skip }, () => {
       widgets: 1,
       settings: 1,
       apiKeys: 1,
+      mcpToolSwitches: 1,
       scheduledJobs: 1,
       jobRuns: 1,
       migrations: 1,
@@ -494,6 +499,7 @@ describe("Delete data against a real database", { skip }, () => {
         widgets: 1,
         settings: 1,
         apiKeys: 1,
+        mcpToolSwitches: 1,
         scheduledJobs: 1,
         jobRuns: 1,
         migrations: 1,
@@ -516,6 +522,7 @@ describe("Delete data against a real database", { skip }, () => {
       ["public.dashboard_widgets", "app_slug"],
       ["public.app_settings", "app_slug"],
       ["public.app_api_keys", "app_slug"],
+      ["public.app_mcp_tool_settings", "app_slug"],
       ["public.app_scheduled_jobs", "app_slug"],
       ["public.app_job_runs", "app_slug"],
       ["public._migrations", "app_slug"],
@@ -614,9 +621,10 @@ describe("Delete data against a real database", { skip }, () => {
         (select count(*)::int from public.user_app_grants where app_slug = ${NOTES}) as grants,
         (select count(*)::int from public.app_settings where app_slug = ${NOTES}) as settings,
         (select count(*)::int from public.app_api_keys where app_slug = ${NOTES}) as keys,
+        (select count(*)::int from public.app_mcp_tool_settings where app_slug = ${NOTES}) as switches,
         (select count(*)::int from public.oauth_tokens where ${NOTES} = any(granted_apps)) as mcp
     `;
-    assert.deepEqual({ ...held }, { grants: 0, settings: 0, keys: 0, mcp: 0 });
+    assert.deepEqual({ ...held }, { grants: 0, settings: 0, keys: 0, switches: 0, mcp: 0 });
     const [{ returned }] = await sql`
       select count(*)::int as returned from public.admin_audit_log
       where action = 'app.returned' and target_id = ${NOTES}

@@ -12,12 +12,17 @@ and write a handler per tool. Nothing is exposed unless you opt in.
 
 ## The model
 
-A tool is reachable only where three independent gates overlap:
+A tool is reachable only where four independent gates overlap:
 
 1. **Your app declares it** — `mcp` in `app.json`, handler on disk, validated at
    build time.
-2. **The user consented to your app** for that client, on the MixOS consent screen.
-3. **The user still has your app** — `hasAppGrant`, re-checked on every call.
+2. **An admin enabled it** — a switch per tool on the app's MCP tab
+   (Administration → Apps → your app). **Every tool starts disabled**, including
+   after an upgrade and after a rename, so shipping a tool is not the same as
+   turning it on. A disabled tool is not listed, cannot be called, and an app
+   with none enabled is left off the consent screen.
+3. **The user consented to your app** for that client, on the MixOS consent screen.
+4. **The user still has your app** — `hasAppGrant`, re-checked on every call.
 
 Consent is a *ceiling*, the live grant is a *floor*. An admin revoking someone's
 grant removes your tools immediately, without the user re-consenting; re-granting
@@ -272,12 +277,24 @@ The broker rejects with a code, delivered to the model as a readable tool result
 `NO_HANDLER` · `INVALID_INPUT` · `TIMEOUT` (30s) · `PAYLOAD_TOO_LARGE` (1 MB) ·
 `TOOL_ERROR`
 
+A tool an admin hasn't enabled answers `NOT_EXPOSED`, as a tool your app never
+declared does, with the same message, after the same reads. Someone without your
+app gets `FORBIDDEN_USER` whatever tool they name: the grant is checked first.
+
 Your thrown errors become `TOOL_ERROR`, passed through `safeErrorMessage()`.
 `APP_UPDATING` means your app's own migrations are behind this build: a call
 answers "This app is being updated. Try again shortly.", and your tools are
 left out of the tool list until the migrations are applied.
 
 ## What the operator sees
+
+**The MCP tab** of your app's details dialog (Administration → Apps → your app →
+**Details** → MCP) shows each tool with every field you wrote, and a switch.
+Every tool starts off, so a tool you ship is reachable only once an admin has
+read it and turned it on. The heading counts how many are on, and turning one
+off stops its next call on every connection. If a different extension takes
+your app's slug, the release step turns every tool off again: the switches were
+turned on for the one before it.
 
 Every tool call is recorded — **automatically, with no `telemetry` declaration
 needed**. Being read by a model isn't something an app opts into, so an operator
@@ -298,8 +315,9 @@ one that should have been narrower).
 
 - **`/account/mcp`** — the URL to paste into Claude, connected clients, what each
   can read, and a Disconnect button.
-- **The consent screen** — one checkbox per app they can reach that declares
-  tools, showing your app's name, description, and every tool description.
+- **The consent screen** — one checkbox per app they can reach that has at
+  least one enabled tool, showing your app's name, description, and every
+  enabled tool's description.
 
 Your descriptions appear here too. They're read by people as well as models.
 
@@ -309,8 +327,10 @@ Your descriptions appear here too. They're read by people as well as models.
    handler, a missing `inputSchema`, a 6th tool, or a missing `description`
    aborts the build.
 2. `npm run typecheck` and `npm run lint`.
-3. `npx @modelcontextprotocol/inspector` against `http://localhost:3000/api/mcp` —
+3. Turn your tool on, on your app's MCP tab (Administration → Apps → Details →
+   MCP). Every tool starts off, and a tool that is off isn't listed.
+4. `npx @modelcontextprotocol/inspector` against `http://localhost:3000/api/mcp` —
    walks the whole OAuth flow, then lets you call your tool with real arguments.
    **Read what it returns as if you were the model.** Is it answerable? Is
    anything in there noise?
-4. Connect a real client and ask the question your tool exists to answer.
+5. Connect a real client and ask the question your tool exists to answer.

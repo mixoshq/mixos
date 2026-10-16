@@ -225,8 +225,10 @@ function handleInitialize(req: JsonRpcRequest) {
 
   return {
     protocolVersion,
-    // `listChanged: false` — the tool set is fixed for the life of a token's
-    // consent, and we have no channel to push a change notification anyway.
+    // `listChanged: false` — the tool set can change under a connection (an
+    // admin switches a tool on or off, a grant is revoked), but we have no
+    // channel to push a notification. A client sees the change on its next
+    // `tools/list`, and a call to a tool that has gone since is refused.
     capabilities: { tools: { listChanged: false } },
     serverInfo: { name: "mixos", title: "MixOS", version: "1.0.0" },
     // The last two sentences are deliberate. A client pools these tools with

@@ -25,6 +25,12 @@ import {
   formatCount,
 } from "@/lib/apps/display";
 import {
+  getMcpToolSettings,
+  setMcpToolEnabledAction,
+} from "@/lib/mcp/tool-settings-actions";
+import { Toggle } from "@/components/ui/toggle";
+import { useToast } from "@/components/ui/toast";
+import {
   BLOCK_LABEL,
   blockDone,
   groupByBlock,
@@ -551,6 +557,166 @@ export function AppReachPanel({
   );
 }
 
+/**
+ * The MCP tab: each tool the app contributes, with its admin switch.
+ *
+ * The switches are read each time the tab is shown, which includes every time
+ * the dialog opens, since the dialog unmounts its panels when it closes. So
+ * another admin's change, or a release step that turned the tools off when a
+ * different extension took the slug, shows the next time the tab is opened,
+ * without a reload. Null until known — never "all off" by default on screen,
+ * since that would be a claim about the database we had not read. Exported
+ * for its test.
+ */
+export function McpToolsPanel({ app }: { app: AppManifest }) {
+  const toast = useToast();
+  const [toolsOn, setToolsOn] = useState<Record<string, boolean> | null>(null);
+  const [toolsError, setToolsError] = useState<string | null>(null);
+  const [toolBusy, setToolBusy] = useState<string | null>(null);
+  const toolsRequested = useRef(false);
+  useEffect(() => {
+    if (app.mcp.length === 0) return;
+    if (toolsRequested.current) return;
+    toolsRequested.current = true;
+    getMcpToolSettings(app.slug)
+      .then(setToolsOn)
+      .catch(() => setToolsError("Reload the page to try again."));
+  }, [app.mcp.length, app.slug]);
+
+  // Optimistic: the switch moves when it is clicked, and moves back with a
+  // toast if the save fails. Waiting for the round trip made it look broken.
+  async function toggleTool(name: string, enabled: boolean) {
+    setToolBusy(name);
+    setToolsOn((prev) => ({ ...(prev ?? {}), [name]: enabled }));
+    let refusal: string | null = null;
+    try {
+      const result = await setMcpToolEnabledAction(app.slug, name, enabled);
+      if (!result.ok) refusal = result.message;
+    } catch {
+      // A thrown error reaches the browser without its words in production.
+      refusal = "Could not change the tool. Reload the page and try again.";
+    } finally {
+      setToolBusy(null);
+    }
+    if (refusal !== null) {
+      setToolsOn((prev) => ({ ...(prev ?? {}), [name]: !enabled }));
+      toast.show("error", refusal);
+    }
+  }
+  const enabledCount = toolsOn
+    ? app.mcp.filter((t) => toolsOn[t.name]).length
+    : null;
+
+  return (
+    <section>
+      <SectionHeading>
+        MCP tools
+        {app.mcp.length
+          ? enabledCount === null
+            ? ` — ${formatCount(app.mcp.length, "tool")}`
+            : ` — ${enabledCount} of ${app.mcp.length} enabled`
+          : ""}
+      </SectionHeading>
+      {app.mcp.length === 0 ? (
+        <Empty>
+          This app contributes no MCP tools, so it never appears on the MCP
+          consent screen.
+        </Empty>
+      ) : (
+        <>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Read-only tools this app contributes to the MixOS MCP server.
+            Every tool starts off. A tool you switch on can be called by
+            people who have this app and have authorized it on the consent
+            screen; a tool that is off is not listed or callable for anyone,
+            from its next call, and an app with none on is left off the
+            consent screen.
+          </p>
+          {toolsError && (
+            <p className="mt-2 flex items-start gap-1.5 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>Could not read the tool switches. {toolsError}</span>
+            </p>
+          )}
+          {/*
+            Every field is shown, because every field is written for a MODEL
+            rather than for the admin reading this — and a description that
+            reads badly here is a tool that gets called wrongly, or never.
+            This tab is the only place that text is visible without opening
+            app.json.
+          */}
+          <ul className="mt-3 space-y-3">
+            {app.mcp.map((tool) => (
+              <li
+                key={tool.name}
+                className="rounded-lg border border-border bg-muted/30 px-4 py-3"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <p className="font-mono text-sm font-semibold text-foreground">
+                    {app.slug}
+                    {MCP_NS}
+                    {tool.name}
+                  </p>
+                  {toolsOn !== null && (
+                    <Toggle
+                      checked={!!toolsOn[tool.name]}
+                      onCheckedChange={(next) =>
+                        toggleTool(tool.name, next)
+                      }
+                      label={`The ${tool.name} tool`}
+                      busy={toolBusy === tool.name}
+                      disabled={toolBusy !== null && toolBusy !== tool.name}
+                    />
+                  )}
+                </div>
+                <p className="mt-1 text-sm text-foreground">
+                  {tool.description}
+                </p>
+                {tool.hint && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground">
+                      When to use:
+                    </span>{" "}
+                    {tool.hint}
+                  </p>
+                )}
+                <dl className="mt-2 space-y-1 text-xs">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <dt className="text-muted-foreground">Built from</dt>
+                    <dd className="flex flex-wrap items-center gap-1">
+                      {tool.sources.map((s) => (
+                        <span key={s}>
+                          {/* "ros" is not a connector — it is the marker
+                              for data that exists only in MixOS, and
+                              rendering it as a slug would send an admin
+                              hunting the connector registry for it. */}
+                          {s === MOS_SOURCE ? (
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">
+                              MixOS records
+                            </span>
+                          ) : (
+                            <Mono>{s}</Mono>
+                          )}
+                        </span>
+                      ))}
+                    </dd>
+                  </div>
+                  {tool.notCovered && (
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      <dt className="text-muted-foreground">Not covered</dt>
+                      <dd className="text-foreground">{tool.notCovered}</dd>
+                    </div>
+                  )}
+                </dl>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function AppDetailsDialog({
   app,
   missingConnectors,
@@ -600,6 +766,7 @@ export default function AppDetailsDialog({
       .catch((e) => setSchemaError(e instanceof Error ? e.message : String(e)))
       .finally(() => setSchemaLoading(false));
   }, [open, app.database, app.slug]);
+
 
   const missing = new Map(missingConnectors.map((m) => [m.name, m]));
 
@@ -918,89 +1085,7 @@ export default function AppDetailsDialog({
         <AppReachPanel app={app} missingConnectors={missingConnectors} />
       )}
 
-      {tab === "mcp" && (
-        <section>
-          <SectionHeading>
-            MCP tools
-            {app.mcp.length ? ` — ${formatCount(app.mcp.length, "tool")}` : ""}
-          </SectionHeading>
-          {app.mcp.length === 0 ? (
-            <Empty>
-              This app contributes no MCP tools, so it never appears on the MCP
-              consent screen.
-            </Empty>
-          ) : (
-            <>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Read-only tools this app contributes to the MixOS MCP server. A
-                tool is reachable only when the connecting user has authorized
-                this app on the consent screen <em>and</em> still holds a grant
-                for it.
-              </p>
-              {/*
-                Every field is shown, because every field is written for a MODEL
-                rather than for the admin reading this — and a description that
-                reads badly here is a tool that gets called wrongly, or never.
-                This tab is the only place that text is visible without opening
-                app.json.
-              */}
-              <ul className="mt-3 space-y-3">
-                {app.mcp.map((tool) => (
-                  <li
-                    key={tool.name}
-                    className="rounded-lg border border-border bg-muted/30 px-4 py-3"
-                  >
-                    <p className="font-mono text-sm font-semibold text-foreground">
-                      {app.slug}
-                      {MCP_NS}
-                      {tool.name}
-                    </p>
-                    <p className="mt-1 text-sm text-foreground">
-                      {tool.description}
-                    </p>
-                    {tool.hint && (
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        <span className="font-medium text-foreground">
-                          When to use:
-                        </span>{" "}
-                        {tool.hint}
-                      </p>
-                    )}
-                    <dl className="mt-2 space-y-1 text-xs">
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <dt className="text-muted-foreground">Built from</dt>
-                        <dd className="flex flex-wrap items-center gap-1">
-                          {tool.sources.map((s) => (
-                            <span key={s}>
-                              {/* "ros" is not a connector — it is the marker
-                                  for data that exists only in MixOS, and
-                                  rendering it as a slug would send an admin
-                                  hunting the connector registry for it. */}
-                              {s === MOS_SOURCE ? (
-                                <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">
-                                  MixOS records
-                                </span>
-                              ) : (
-                                <Mono>{s}</Mono>
-                              )}
-                            </span>
-                          ))}
-                        </dd>
-                      </div>
-                      {tool.notCovered && (
-                        <div className="flex flex-wrap items-baseline gap-x-2">
-                          <dt className="text-muted-foreground">Not covered</dt>
-                          <dd className="text-foreground">{tool.notCovered}</dd>
-                        </div>
-                      )}
-                    </dl>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </section>
-      )}
+      {tab === "mcp" && <McpToolsPanel app={app} />}
 
       {tab === "database" && (
         <section>

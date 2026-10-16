@@ -381,6 +381,12 @@ describe("an app whose own migrations are behind", { skip }, () => {
     // being updated stays off until the tests of a switched-off app are done.
     await releaseStep();
     await setActive(OTHER, true);
+    // Every MCP tool starts off (migration 0014). What is tested here is the
+    // app gate, so both apps' tools are switched on, as an admin would.
+    await sql`
+      insert into public.app_mcp_tool_settings (app_slug, tool_name, enabled)
+      values (${UPDATING}, 'peek', true), (${OTHER}, 'peek', true)
+    `;
 
     // Behind for real: the ledger lacks the file, and its table is gone.
     await sql`delete from public._migrations where app_slug = ${UPDATING}`;

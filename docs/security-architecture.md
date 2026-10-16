@@ -356,7 +356,8 @@ hangs off it stay until an admin deletes them with Delete data (§31), after
 which an app that arrives under the slug starts with nothing.
 
 **A different extension under the same slug starts off, and without the old
-one's API keys.** Every release step also records each app's identity
+one's API keys or MCP tool switches.** Every release step also records each
+app's identity
 ([`src/lib/repository/identity.ts`](../src/lib/repository/identity.ts)): for
 one installed from a Registry, the catalogue, kind, slug and GitHub repository
 from its install record (§31); for anything else, `local`. It compares them
@@ -365,15 +366,16 @@ commit from the same repository is the same app, so updating one changes
 nothing. Any other change means a different extension now has the slug: a
 local app reinstalled from the Registry, a release from another repository,
 or an installed app whose record was deleted. The release step switches it
-off, revokes its API keys, which were given out for the extension before it,
-and flags it **Replaces a different extension** on Admin > Apps. Its grants,
-settings and data stay. Activating it needs its slug typed, which the server
-checks (`setAppActive()` in `src/lib/apps/access.ts`); only that clears the
-flag. An app that returns as a different extension gets this flag alone,
-since it asks more of the admin than "back with different code". Migration
-0011 recorded every app the database already knew as `local`, so a local app
-reinstalled from the Registry is caught at the first release step that
-carries it.
+off, revokes its API keys and deletes its MCP tool switches, which were given
+out and turned on for the extension before it, and flags it **Replaces a
+different extension** on Admin > Apps; its `app.identity.changed` row counts
+both. Its grants, settings and data stay. Activating it needs its slug typed,
+which the server checks (`setAppActive()` in `src/lib/apps/access.ts`); only
+that clears the flag. An app that returns as a different extension gets this
+flag alone, since it asks more of the admin than "back with different code".
+Migration 0011 recorded every app the database already knew as `local`, so a
+local app reinstalled from the Registry is caught at the first release step
+that carries it.
 
 **The app's own migrations have to be applied, too.** The app gate's second
 reason, asked only of an active app: when the build carries a migration of the
@@ -1066,8 +1068,8 @@ and the role has to be one the release step could have made: no powers, no
 memberships, no use in another database. Dropping the schema must take nothing
 outside it, and the role must hold nothing else afterwards; otherwise the
 transaction rolls back and nothing is deleted. The app's row goes too, with its
-activation, grants, API keys and identity, so a later app under the slug
-arrives inactive with nothing (§3.1).
+activation, grants, API keys, MCP tool switches and identity, so a later app
+under the slug arrives inactive with nothing (§3.1).
 
 ### Reachability of the database credential
 
@@ -1101,8 +1103,8 @@ session JWT could go stale after a demotion, so `requireAdmin()` reads
 
 Because server actions are directly invocable POST endpoints, each admin action
 (`configureConnector`, `setAppActiveAction`, `grantAppAccess`,
-`setAppRoleAction`, `mintAppApiKey`, `getAppSchema`,
-`revokeUserSessionsAction`, …) calls `requireAdmin()` itself.
+`setAppRoleAction`, `setMcpToolEnabledAction`, `mintAppApiKey`,
+`getAppSchema`, `revokeUserSessionsAction`, …) calls `requireAdmin()` itself.
 Nothing upstream does it for them, so an action that forgets the call is fully
 exposed to any signed-in user.
 
@@ -1407,19 +1409,39 @@ OAuth client.
 
 ### Authorization chain
 
-A tool call succeeds only where three independent gates overlap. Each is checked
+A tool call succeeds only where four independent gates overlap. Each is checked
 on **every** request; none is cached on the token.
 
 | Gate | Source of truth | Effect of revoking |
 | --- | --- | --- |
 | App declares the tool | `mcp` in `app.json`, build-validated | Tool disappears at next deploy |
+| An admin enabled the tool | `app_mcp_tool_settings` — live DB read, a missing row is **off** | Admin switches it off on the app's MCP tab; effective on the next call |
 | User consented to the app for this client | `oauth_tokens.granted_apps` | User disconnects at `/account/mcp` |
 | User still holds a grant for the app | `hasAppGrant()` — live DB read | Admin revokes; effective immediately |
+
+**Tools are off until an admin turns them on**, on a new install, after an
+upgrade, and after a tool is renamed. `tools/list` omits a disabled tool, the
+consent screen omits an app with none enabled, and its action checks the
+submitted apps against the same rule, so a crafted form can't consent to one.
+`tools/call` checks the grant before it looks the tool up, so someone
+without the app gets the same refusal whatever tool they name. For someone
+with it, a disabled tool gets the answer an undeclared one gets,
+`NOT_EXPOSED`, after the same reads: the switches are read whether or not the
+name is declared. An unreadable settings table reads as all-off. The switch
+is an admin action (`setMcpToolEnabledAction`,
+[`src/lib/mcp/tool-settings-actions.ts`](../src/lib/mcp/tool-settings-actions.ts)):
+it requires an admin (§9), accepts only a tool the manifest declares, and is
+audited as `app.mcp.tool.enable` or `app.mcp.tool.disable` (§28). Switches hang
+off the app's row like its grants: an app that leaves the build keeps them,
+Delete data (§31) takes them, and a different extension under the slug starts
+with none (§3.1).
 
 Consent is a **ceiling**, the live grant is a **floor**. A refresh copies
 `granted_apps` forward verbatim, so consent can never silently widen. `hasAppGrant`
 (not `hasAppAccess`) is used deliberately — it is the authorization fact, and it
 matches what the App Services broker already enforces for the same question.
+Revoking a grant therefore leaves the user's MCP tokens alone: the app's tools
+leave every token on its next call, and the user's other apps are untouched.
 Deleting an app's data (§31) takes its slug out of every token's and code's
 `granted_apps`, so consent given to it never covers a later app with the same
 slug.
@@ -2181,7 +2203,8 @@ module is not a retention policy.
 Currently recorded: `connector.configure`, `connector.connect`,
 `connector.test`, `connector.disable`, `connector.enable`, `app.password.set`,
 `app.password.clear`, `app.setting.set`, `app.setting.clear`,
-`app.apikey.create`, `app.apikey.revoke`, `app.activate`,
+`app.apikey.create`, `app.apikey.revoke`, `app.mcp.tool.enable`,
+`app.mcp.tool.disable`, `app.activate`,
 `app.deactivate`, `app.missing`, `app.returned`, `app.identity.changed`,
 `app.grants.marked`, `app.global.ended`,
 `connector.missing`, `connector.returned`, `connector.identity.changed`,
@@ -3000,9 +3023,9 @@ share a development database. So it is refused:
 `app_job_runs` and `app_open_events`, and the `telemetry_events` it was the
 source of; its slug in each MCP authorization's `granted_apps` (§17), which
 keeps every other app it lists; and its `apps` row, which takes its grants,
-installs, password and widgets with it by foreign key, along with its
-activation and identity. Calls it made to a connector or to another app's
-services are their telemetry, and stay. For a connector: `connector_configs`,
+installs, password, widgets and MCP tool switches with it by foreign key, along
+with its activation and identity. Calls it made to a connector or to another
+app's services are their telemetry, and stay. For a connector: `connector_configs`,
 every `user_connector_oauth` and `connector_scope_status` row, its webhook
 replay markers, its telemetry, and its keys in `platform_settings` (the switch,
 the identity and both marks). Every row is matched by its own column, equal to
