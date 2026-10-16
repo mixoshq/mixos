@@ -142,10 +142,15 @@ export default async function AuthorizePage({ searchParams }: PageProps) {
         <input type="hidden" name="state" value={state} />
 
         {apps.length === 0 ? (
+          /* What a connection is allowed to read is fixed when it is approved
+             (a refresh copies it forward, never wider), so one approved with
+             nothing keeps seeing nothing. Saying "until an app does" promised
+             otherwise. */
           <div className={cn(CARD_SHELL, "p-5 text-sm text-muted-foreground")}>
-            None of the apps you have access to expose data over MCP yet. You
-            can still approve this connection — it just won&apos;t see anything
-            until an app does.
+            None of the apps you have access to have MCP tools turned on yet.
+            You can still approve this connection, but it won&apos;t see
+            anything. Once an administrator turns tools on, connect again to
+            choose those apps.
           </div>
         ) : (
           <ul className="space-y-3">

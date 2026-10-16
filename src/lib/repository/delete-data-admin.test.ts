@@ -149,6 +149,7 @@ describe("the words for what goes", () => {
     widgets: 3,
     settings: 0,
     apiKeys: 0,
+    mcpToolSwitches: 2,
     scheduledJobs: 0,
     jobRuns: 0,
     migrations: 2,
@@ -161,6 +162,7 @@ describe("the words for what goes", () => {
     assert.deepEqual(describeData("app", counts, { schema: "app_notes", role: "mixos_app_notes" }), [
       "Its schema, `app_notes`, with 2 tables, and its database role, `mixos_app_notes`",
       "1 grant and 3 dashboard widgets",
+      "2 MCP tool switches",
       "2 records of migrations that ran",
       "1,204 telemetry events and 1 recorded open",
       "Its record here: whether it is active, and where it came from",

@@ -3,8 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { cache } from "react";
-import { createServiceClient } from "@/lib/db/server";
+import { createServiceClient, sql } from "@/lib/db/server";
 import { appRegistry } from "@/generated/app-registry";
+import { IS_GRANT_SQL } from "@/lib/apps/grant-rule";
 import { identityDetails, type IdentityDetails } from "@/lib/repository/identity";
 
 function getGlobalAppSlugs(): string[] {
@@ -38,26 +39,6 @@ export async function getUserAppRole(
     .maybeSingle();
 
   return data?.role ?? getAppDefaultRole(appSlug);
-}
-
-/**
- * Set (or change) a user's role for an app. Upserts the grant row so it works
- * for global apps too — the row only carries the role; `isGlobalApp` still
- * short-circuits the access check, so creating it doesn't change who can reach
- * the app. Pass `null` to clear the explicit role (falls back to defaultRole).
- */
-export async function setUserAppRole(
-  userId: string,
-  appSlug: string,
-  role: string | null,
-): Promise<void> {
-  const supabase = createServiceClient();
-  const { error } = await supabase.from("user_app_grants").upsert({
-    user_id: userId,
-    app_slug: appSlug,
-    role,
-  });
-  if (error) throw new Error(`Failed to set user app role: ${error.message}`);
 }
 
 /**
@@ -283,9 +264,29 @@ export interface AppReplacement {
   identity: string | null;
 }
 
+/**
+ * Why people who had an app lost it, as the release step found
+ * (scripts/sync-app-registry.ts): it stopped being global, and someone who had
+ * it, by an install or a role, has no grant; or rows from before were decided
+ * to be roles on an app that isn't global.
+ */
+export type NeedsGrantsReason = "global-ended" | "roles-decided";
+
+/** An app's Needs grants mark: since when, and why. */
+export interface NeedsGrants {
+  /** ISO-8601. */
+  since: string;
+  reason: NeedsGrantsReason;
+}
+
 export interface AppBuildStatus {
   /** Apps in this build that came back with different code: slug to when. */
   returnedChanged: Record<string, string>;
+  /**
+   * Apps in this build that people lost, and that nobody has been granted
+   * since: slug to when and why.
+   */
+  needsGrants: Record<string, NeedsGrants>;
   /** Apps in this build that replace a different extension under their slug. */
   replaced: Record<string, AppReplacement>;
   /** Apps whose rows, and data, are kept although this build lacks them. */
@@ -310,11 +311,16 @@ export async function getAppBuildStatus(): Promise<AppBuildStatus> {
   const { data } = await supabase
     .from("apps")
     .select(
-      "slug, name, icon, missing_since, returned_changed_at, identity, identity_changed_at, replaced_identity",
+      "slug, name, icon, missing_since, returned_changed_at, identity, identity_changed_at, replaced_identity, needs_grants_since, needs_grants_reason",
     )
     .order("name");
 
-  const status: AppBuildStatus = { returnedChanged: {}, replaced: {}, notInBuild: [] };
+  const status: AppBuildStatus = {
+    returnedChanged: {},
+    needsGrants: {},
+    replaced: {},
+    notInBuild: [],
+  };
   for (const row of (data ?? []) as {
     slug: string;
     name: string;
@@ -324,6 +330,8 @@ export async function getAppBuildStatus(): Promise<AppBuildStatus> {
     identity: string | null;
     identity_changed_at: string | null;
     replaced_identity: string | null;
+    needs_grants_since: string | null;
+    needs_grants_reason: NeedsGrantsReason | null;
   }[]) {
     if (!inBuild.has(row.slug)) {
       status.notInBuild.push({
@@ -337,6 +345,9 @@ export async function getAppBuildStatus(): Promise<AppBuildStatus> {
     if (row.returned_changed_at) {
       status.returnedChanged[row.slug] = row.returned_changed_at;
     }
+    if (row.needs_grants_since && row.needs_grants_reason && !isGlobalApp(row.slug)) {
+      status.needsGrants[row.slug] = { since: row.needs_grants_since, reason: row.needs_grants_reason };
+    }
     if (row.identity_changed_at) {
       status.replaced[row.slug] = {
         at: row.identity_changed_at,
@@ -348,6 +359,14 @@ export async function getAppBuildStatus(): Promise<AppBuildStatus> {
   return status;
 }
 
+/**
+ * The apps the user has installed and still holds, in no particular order.
+ *
+ * An install outlives the access behind it when an app stops being global:
+ * nobody revoked anything, so the install row stays. Filtering by what the
+ * user holds keeps such an app off their dashboard and menus until someone
+ * grants it, without forgetting where its widgets were.
+ */
 export async function getUserApps(userId: string): Promise<string[]> {
   const supabase = createServiceClient();
   const { data, error } = await supabase
@@ -356,26 +375,42 @@ export async function getUserApps(userId: string): Promise<string[]> {
     .eq("user_id", userId);
 
   if (error) throw new Error(`Failed to get user apps: ${error.message}`);
-  return filterActiveApps(
+  return filterHeldApps(
+    userId,
     data.map((row: { app_slug: string }) => row.app_slug),
   );
 }
 
-export async function getUserGrantedSlugs(userId: string): Promise<string[]> {
-  const supabase = createServiceClient();
-  const { data, error } = await supabase
-    .from("user_app_grants")
-    .select("app_slug")
-    .eq("user_id", userId);
+/** The slugs of the apps granted to the user, a role alone not counting. */
+async function grantedSlugs(userId: string, among?: readonly string[]): Promise<Set<string>> {
+  const rows = await sql<{ app_slug: string }[]>`
+    select g.app_slug from public.user_app_grants g
+     where g.user_id = ${userId}
+       ${among ? sql`and g.app_slug = any(${[...among]}::text[])` : sql``}
+       and ${sql.unsafe(IS_GRANT_SQL)}
+  `;
+  return new Set(rows.map((r) => r.app_slug));
+}
 
-  if (error) throw new Error(`Failed to get user grants: ${error.message}`);
-  const explicit = new Set<string>(
-    data.map((row: { app_slug: string }) => row.app_slug),
-  );
+export async function getUserGrantedSlugs(userId: string): Promise<string[]> {
+  let explicit: Set<string>;
+  try {
+    explicit = await grantedSlugs(userId);
+  } catch (err) {
+    throw new Error(`Failed to get user grants: ${err instanceof Error ? err.message : String(err)}`);
+  }
   for (const slug of getGlobalAppSlugs()) explicit.add(slug);
   return filterActiveApps(Array.from(explicit));
 }
 
+/**
+ * Whether the user holds the app: it is active, and global or granted to them.
+ *
+ * A grant is a `user_app_grants` row that ./grant-rule.ts says is one. A row
+ * that records only a role is not, so an app that stops being global is held
+ * only by the people an admin granted it to. Fails closed: a grant that can't
+ * be read is no grant.
+ */
 export async function hasAppGrant(
   userId: string,
   appSlug: string,
@@ -385,15 +420,38 @@ export async function hasAppGrant(
   if (!(await isAppActive(appSlug))) return false;
   if (isGlobalApp(appSlug)) return true;
 
-  const supabase = createServiceClient();
-  const { data } = await supabase
-    .from("user_app_grants")
-    .select("app_slug")
-    .eq("user_id", userId)
-    .eq("app_slug", appSlug)
-    .maybeSingle();
+  try {
+    return (await grantedSlugs(userId, [appSlug])).has(appSlug);
+  } catch (err) {
+    console.error(`[access] could not read ${appSlug}'s grant, so it counts as none:`, err);
+    return false;
+  }
+}
 
-  return !!data;
+/**
+ * The subset of `slugs` the user holds, as `hasAppGrant` decides it, in the
+ * order given: one read of the user's grants for the lot.
+ *
+ * It backs the dashboard, the menu bar and the App Manager, so a grant read
+ * that fails doesn't take them down: it is logged, and only the global apps,
+ * which need no grant, are counted as held.
+ */
+export async function filterHeldApps(
+  userId: string,
+  slugs: readonly string[],
+): Promise<string[]> {
+  const active = await filterActiveApps([...slugs]);
+  const needsGrant = active.filter((slug) => !isGlobalApp(slug));
+  if (needsGrant.length === 0) return active;
+
+  let granted: Set<string>;
+  try {
+    granted = await grantedSlugs(userId, needsGrant);
+  } catch (err) {
+    console.error("[access] could not read the user's grants; counting only the global apps:", err);
+    granted = new Set();
+  }
+  return active.filter((slug) => isGlobalApp(slug) || granted.has(slug));
 }
 
 export async function hasAppAccess(

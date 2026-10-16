@@ -204,9 +204,10 @@ describe("analytics ingestion", { skip }, () => {
       insert into public.users (email, display_name) values (${USER_EMAIL}, 'User') returning id
     `;
     userId = user.id;
+    // Grants, as a grant path writes them (src/lib/apps/grant-rule.ts).
     await sql`
-      insert into public.user_app_grants (user_id, app_slug) values
-        (${userId}, ${HELD}), (${userId}, ${INACTIVE}), (${userId}, ${UPDATING})
+      insert into public.user_app_grants (user_id, app_slug, role_only) values
+        (${userId}, ${HELD}, false), (${userId}, ${INACTIVE}, false), (${userId}, ${UPDATING}, false)
     `;
     (globalThis as { __analyticsSession?: unknown }).__analyticsSession = {
       user: { id: userId, email: USER_EMAIL, name: "User", isAdmin: false },

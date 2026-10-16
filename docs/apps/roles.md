@@ -28,11 +28,12 @@ Rules enforced by the registry generator (a violation aborts the build):
 
 ## How a user gets a role
 
-- When an admin grants the app to a user (Users → open a user → **App Access** → **Grant**), the user receives `defaultRole`.
-- An admin can change a user's role anytime via the **role dropdown** next to the app on that same tab.
-- A user with **no explicitly-set role resolves to `defaultRole`**. This covers pre-existing grants (no migration/backfill needed) and every user of a `global` app (which writes no grant rows until a role is assigned).
+- An admin grants the app from its **Access** tab (Administration → Apps → **Details** → Access → **Grant access**), picking a role or leaving it on the default, or from Users → open a user → **App Access** → **Grant**. Left on the default, the user follows `defaultRole`.
+- An admin can change a user's role anytime, in the app's Access tab or with the **role dropdown** on the user's App Access tab. **Default**, in either, clears an assigned role.
+- A user on **Default** has no role of their own and **follows `defaultRole`**: whatever the manifest says now, and whatever it says after you change it. Choosing the role that is the default today instead fixes it, and the user keeps it when `defaultRole` changes. This covers pre-existing grants (no migration/backfill needed) and every user of a `global` app (which writes no grant rows until a role is assigned).
+- **Renaming or removing a role** leaves users who held the old key with a role the app no longer declares. No route can name it, so it satisfies none, and they don't fall back to `defaultRole`. The Access tab marks them **Unknown role** and its role filter lists them, until an admin picks a role for each.
 
-One role per user per app. Assigning a role to a `global` app writes a grant row that carries *only* the role — it does not change who can access the app (global access still applies to everyone).
+One role per user per app. Assigning a role to a `global` app writes a row that carries *only* the role, unless the user was granted the app before it went global — it does not change who can access the app (global access still applies to everyone). A role is never access: if the app stops being `global`, only the people an admin granted it to have it. People given a role keep the role and nothing else, and the app's Access tab lists them apart, with **Grant**, which keeps their role, and **Clear role**. Admin → Apps marks the app **Needs grants** until someone is granted it.
 
 ## Declaring roles on a route
 

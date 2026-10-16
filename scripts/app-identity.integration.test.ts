@@ -199,7 +199,12 @@ describe("an app under a slug a different extension had", { skip }, () => {
     assert.deepEqual(await audited("app.identity.changed"), []);
   });
 
-  test("reinstalled from the Registry, it is switched off and flagged, and loses its API keys and nothing else", async () => {
+  test("reinstalled from the Registry, it is switched off and flagged, and loses its API keys and tool switches and nothing else", async () => {
+    // Two tools an admin turned on for the extension before it.
+    await sql`
+      insert into public.app_mcp_tool_settings (app_slug, tool_name, enabled)
+      values (${files}, 'search', true), (${files}, 'peek', false)
+    `;
     const { printed } = await release([app(files)], [installOf(files)]);
     const identity = `https://mixos.org app/${files} acme/mixos-files`;
 
@@ -219,6 +224,10 @@ describe("an app under a slug a different extension had", { skip }, () => {
         (select count(*)::int from public.app_settings where app_slug = ${files}) as settings
     `;
     assert.deepEqual({ ...kept }, { grants: 1, settings: 1 });
+    const [{ switches }] = await sql`
+      select count(*)::int as switches from public.app_mcp_tool_settings where app_slug = ${files}
+    `;
+    assert.equal(switches, 0, "the tool switches of the extension before it were kept");
 
     assert.deepEqual(await audited("app.identity.changed"), [
       {
@@ -235,6 +244,7 @@ describe("an app under a slug a different extension had", { skip }, () => {
           },
           deactivated: true,
           apiKeysRevoked: 1,
+          mcpToolSwitchesReset: 2,
         },
       },
     ]);
@@ -242,7 +252,8 @@ describe("an app under a slug a different extension had", { skip }, () => {
       printed,
       new RegExp(
         `${files}: a different extension than before \\(was local, with no install record; now from mixos\\.org, ` +
-          `acme/mixos-files\\) — inactive, with 1 API key\\(s\\) revoked, until an admin activates it by typing its slug`,
+          `acme/mixos-files\\) — inactive, with 1 API key\\(s\\) revoked and 2 MCP tool switch\\(es\\) reset, ` +
+          `until an admin activates it by typing its slug`,
       ),
     );
 

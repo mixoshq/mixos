@@ -6,7 +6,7 @@
 
 import { createServiceClient } from "@/lib/db/server";
 import { requireServerSession } from "@/lib/auth/session";
-import { getUserById, hasAppGrant } from "@/lib/apps/access";
+import { filterHeldApps, getUserById, hasAppGrant } from "@/lib/apps/access";
 import { removeAppWidgetsForUser } from "@/lib/dashboard/cleanup";
 import { revalidatePath } from "next/cache";
 
@@ -32,6 +32,10 @@ export type InstalledApp = { slug: string; pinned: boolean };
  * The user's installed apps with their pinned state, in persisted order
  * (position then slug). Pinned apps drive the inline menu-bar order; the Apps
  * dropdown lists them all.
+ *
+ * Only apps the user still holds: an install outlives the access behind it
+ * when an app is deactivated or stops being global, and a menu entry that
+ * opens onto a refusal is worse than none.
  */
 export async function getMyInstalledApps(): Promise<InstalledApp[]> {
   const session = await requireServerSession();
@@ -46,12 +50,11 @@ export async function getMyInstalledApps(): Promise<InstalledApp[]> {
     .order("position", { ascending: true })
     .order("app_slug", { ascending: true });
 
-  return (
-    data?.map((r: { app_slug: string; pinned: boolean }) => ({
-      slug: r.app_slug,
-      pinned: r.pinned,
-    })) ?? []
-  );
+  const rows = (data ?? []) as { app_slug: string; pinned: boolean }[];
+  const held = new Set(await filterHeldApps(dbUser.id, rows.map((r) => r.app_slug)));
+  return rows
+    .filter((r) => held.has(r.app_slug))
+    .map((r) => ({ slug: r.app_slug, pinned: r.pinned }));
 }
 
 /**
@@ -133,6 +136,15 @@ export async function toggleMyAppInstall(
   revalidatePath("/");
 }
 
+/**
+ * Put the user's apps in a new order, as the menu bar sends it: the apps
+ * `getMyInstalledApps()` lists, which are the ones they hold.
+ *
+ * An install of an app they don't hold (switched off, out of the build, or
+ * no longer theirs) isn't listed, so it isn't in the new order either. It
+ * keeps its place among the others: the held apps take the places the held
+ * apps had, in the order given, and every install is numbered again from 0.
+ */
 export async function reorderMyApps(orderedSlugs: string[]): Promise<void> {
   const session = await requireServerSession();
   const dbUser = await getUserById(session.user.id);
@@ -141,19 +153,21 @@ export async function reorderMyApps(orderedSlugs: string[]): Promise<void> {
   const supa = createServiceClient();
   const { data, error: fetchError } = await supa
     .from("user_apps")
-    .select("app_slug")
-    .eq("user_id", dbUser.id);
+    .select("app_slug, position")
+    .eq("user_id", dbUser.id)
+    .order("position", { ascending: true })
+    .order("app_slug", { ascending: true });
   if (fetchError) throw new Error(fetchError.message);
 
-  const installed = new Set(
-    (data ?? []).map((r: { app_slug: string }) => r.app_slug),
-  );
-  if (orderedSlugs.length !== installed.size) {
+  const order = ((data ?? []) as { app_slug: string }[]).map((r) => r.app_slug);
+  const held = new Set(await filterHeldApps(dbUser.id, order));
+  const listed = order.filter((slug) => held.has(slug));
+  if (orderedSlugs.length !== listed.length) {
     throw new Error("Reorder list does not match installed apps");
   }
   const seen = new Set<string>();
   for (const slug of orderedSlugs) {
-    if (!installed.has(slug)) {
+    if (!held.has(slug)) {
       throw new Error(`Unknown app in reorder: ${slug}`);
     }
     if (seen.has(slug)) {
@@ -162,11 +176,14 @@ export async function reorderMyApps(orderedSlugs: string[]): Promise<void> {
     seen.add(slug);
   }
 
-  for (let i = 0; i < orderedSlugs.length; i++) {
+  // The held apps' places, filled in the new order.
+  let next = 0;
+  const merged = order.map((slug) => (held.has(slug) ? orderedSlugs[next++] : slug));
+  for (let i = 0; i < merged.length; i++) {
     const { error: updateError } = await supa
       .from("user_apps")
       .update({ position: i })
-      .match({ user_id: dbUser.id, app_slug: orderedSlugs[i] });
+      .match({ user_id: dbUser.id, app_slug: merged[i] });
     if (updateError) throw new Error(updateError.message);
   }
 

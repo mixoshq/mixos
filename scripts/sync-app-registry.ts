@@ -56,15 +56,32 @@
 // step and not only when an app returns, means a different extension now has
 // the slug: a local app reinstalled from the Registry, one from another
 // repository, or an installed one whose record was deleted. That one is
-// switched off and flagged (`identity_changed_at`), and its API keys are
-// revoked, since they were given out for the extension before it. Activating
-// it again needs its slug typed (setAppActive() in src/lib/apps/access.ts).
-// When it is also an app coming back with different files, this flag is the
-// one it gets: it says more, and asks more of the admin.
+// switched off and flagged (`identity_changed_at`), its API keys are revoked
+// and its MCP tool switches deleted, since both were given out for the
+// extension before it: a tool the new one declares under an old name starts
+// off, like any other. Activating it again needs its slug typed
+// (setAppActive() in src/lib/apps/access.ts). When it is also an app coming
+// back with different files, this flag is the one it gets: it says more, and
+// asks more of the admin.
 //
-// Leaving, returning and a change of identity are audited, with the release
-// step as the actor (RELEASE_STEP_ACTOR): `app.missing`, `app.returned` and
-// `app.identity.changed`.
+// A ROLE IS NEVER ACCESS. A `user_app_grants` row records a grant, a role on
+// a global app, or both, and `role_only` says which (migration 0013). A row
+// written by a build without that column says nothing: every row from before
+// it, and any a host's rollback lets an older build write. Every run decides
+// those rows, for every app it carries, global or not, in one pass, by
+// whether someone is recorded granting them (src/lib/apps/grant-rule.ts). A grant stays a grant
+// whether or not the app is global. Rows decided to be roles are audited, and
+// on an app that isn't global, the people who used it with only a role have
+// lost it, and `needs_grants_reason` puts that in front of the admin. Each
+// run also records whether each app is global, so the run after an app stops
+// being global can say so too, when someone who had it, by an install or a
+// role, has no grant. Either lasts until an admin grants the app to someone,
+// or it is global again.
+//
+// Leaving, returning, a change of identity, rows decided to be roles and an
+// app that stopped being global are audited, with the release step as the
+// actor (RELEASE_STEP_ACTOR): `app.missing`, `app.returned`,
+// `app.identity.changed`, `app.grants.marked` and `app.global.ended`.
 //
 // One transaction under the release step's lock (scripts/migration-lock.ts), so
 // the mirror and its audit rows are written whole or not at all, and two runners
@@ -76,6 +93,7 @@ import type { AppManifest } from "../src/lib/apps/types";
 import { appRegistry as builtRegistry } from "../src/generated/app-registry";
 import { registryInstalls as builtInstalls } from "../src/generated/registry-installs";
 import { RELEASE_STEP_ACTOR } from "../src/lib/apps/audit-actors";
+import { GRANT_RECORDED_SQL, IS_GRANT_SQL } from "../src/lib/apps/grant-rule";
 import { extensionIdentity, identityDetails } from "../src/lib/repository/identity";
 import type { RegistryInstall } from "../src/lib/repository/install-record";
 import { appCodeHash } from "./app-code-hash";
@@ -109,6 +127,27 @@ export interface ReplacedApp {
   deactivated: boolean;
   /** How many of its API keys this run revoked. */
   apiKeysRevoked: number;
+  /** How many of its MCP tool switches this run deleted. */
+  mcpToolSwitchesReset: number;
+}
+
+/** An app whose rows this run decided, some of them to be only roles. */
+export interface MarkedApp {
+  slug: string;
+  /** How many rows it decided are only roles. */
+  roleOnly: number;
+}
+
+/** An app this run found had stopped being global. */
+export interface GlobalEndedApp {
+  slug: string;
+  /** How many people have a role in it and, now, no access. */
+  roleOnly: number;
+  /**
+   * How many people who had it, with an install or a role, have no grant: the
+   * people who lost it. Only when there are any does the app need grants.
+   */
+  lost: number;
 }
 
 export interface AppRegistrySyncResult {
@@ -121,10 +160,19 @@ export interface AppRegistrySyncResult {
   returned: ReturnedApp[];
   /** A different extension than the one recorded under the slug. */
   replaced: ReplacedApp[];
+  /** Apps with rows this run decided are only roles. */
+  marked: MarkedApp[];
+  /** Apps that stopped being global. */
+  globalEnded: GlobalEndedApp[];
 }
 
-/** What the mirror records of each app. */
-export type MirroredApp = Pick<AppManifest, "slug" | "name" | "description" | "icon">;
+/**
+ * What the mirror records of each app. `global` is optional for a caller that
+ * doesn't know it; the release step always passes the registry's.
+ */
+export type MirroredApp = Pick<AppManifest, "slug" | "name" | "description" | "icon"> & {
+  global?: boolean;
+};
 
 interface AppRow {
   slug: string;
@@ -132,12 +180,13 @@ interface AppRow {
   missing_since: Date | null;
   code_hash: string | null;
   identity: string | null;
+  global: boolean | null;
 }
 
 /** One row in admin_audit_log, in the sync's own transaction. */
 async function audit(
   tx: TransactionSql,
-  action: "app.missing" | "app.returned" | "app.identity.changed",
+  action: "app.missing" | "app.returned" | "app.identity.changed" | "app.grants.marked" | "app.global.ended",
   slug: string,
   details: Record<string, unknown>,
 ): Promise<void> {
@@ -171,29 +220,99 @@ export async function syncAppRegistry(
     // Read under the lock, since a runner that went first may already have
     // marked or cleared what this one is about to.
     const rows = await tx<AppRow[]>`
-      select slug, is_active, missing_since, code_hash, identity from public.apps
+      select slug, is_active, missing_since, code_hash, identity, global from public.apps
     `;
     const bySlug = new Map(rows.map((r) => [r.slug, r]));
 
+    // The rows no build has decided, for every app this build carries, in one
+    // pass: a grant if someone is recorded granting it, otherwise only a role.
+    // A grant is never demoted because an app is global: while it is, a grant
+    // changes nothing, and it outlasts that.
+    const decided = await tx<{ app_slug: string; role_only: boolean }[]>`
+      update public.user_app_grants g
+         set role_only = not ${tx.unsafe(GRANT_RECORDED_SQL)}
+       where g.app_slug = any(${slugs}::text[]) and g.role_only is null
+      returning g.app_slug, g.role_only
+    `;
+    const rolesDecided = new Map<string, number>();
+    for (const d of decided) {
+      if (d.role_only) rolesDecided.set(d.app_slug, (rolesDecided.get(d.app_slug) ?? 0) + 1);
+    }
+
     const returned: ReturnedApp[] = [];
     const replaced: ReplacedApp[] = [];
+    const marked: MarkedApp[] = [];
+    const globalEnded: GlobalEndedApp[] = [];
     for (const app of appRegistry) {
       const codeHash = hashes.get(app.slug) ?? null;
       const identity = identities.get(app.slug)!;
+      const global = app.global ?? null;
+      // An app global again needs no grants: the reminder that it did goes.
       await tx`
-        insert into public.apps (slug, name, description, icon, is_active, code_hash, identity)
-        values (${app.slug}, ${app.name}, ${app.description}, ${app.icon}, false, ${codeHash}, ${identity})
+        insert into public.apps (slug, name, description, icon, is_active, code_hash, identity, global)
+        values (${app.slug}, ${app.name}, ${app.description}, ${app.icon}, false, ${codeHash}, ${identity}, ${global})
         on conflict (slug) do update set
-          name          = excluded.name,
-          description   = excluded.description,
-          icon          = excluded.icon,
-          code_hash     = excluded.code_hash,
-          identity      = excluded.identity,
-          missing_since = null
+          name                = excluded.name,
+          description         = excluded.description,
+          icon                = excluded.icon,
+          code_hash           = excluded.code_hash,
+          identity            = excluded.identity,
+          global              = coalesce(excluded.global, public.apps.global),
+          needs_grants_since  = case when excluded.global then null else public.apps.needs_grants_since end,
+          needs_grants_reason = case when excluded.global then null else public.apps.needs_grants_reason end,
+          missing_since       = null
       `;
 
-      // New to this database: it arrives inactive, with nothing to compare.
       const row = bySlug.get(app.slug);
+
+      const roles = rolesDecided.get(app.slug) ?? 0;
+      if (roles > 0) {
+        await audit(tx, "app.grants.marked", app.slug, { roleOnly: roles });
+        marked.push({ slug: app.slug, roleOnly: roles });
+        // On an app that isn't global, those people had it through a role
+        // alone, and don't now. Said once: a reason already there stays.
+        if ((global ?? row?.global ?? null) === false) {
+          await tx`
+            update public.apps
+               set needs_grants_since = coalesce(needs_grants_since, now()),
+                   needs_grants_reason = coalesce(needs_grants_reason, 'roles-decided')
+             where slug = ${app.slug}
+          `;
+        }
+      }
+
+      // Global at the last run that carried it, and not now: held only by the
+      // people an admin granted it to. Whoever had it, by an install or a
+      // role, and has no grant lost it, and only if anyone did does the app
+      // need grants. Recorded either way.
+      if (row?.global === true && global === false) {
+        const [{ roleOnly, lost }] = await tx<{ roleOnly: number; lost: number }[]>`
+          select
+            (select count(*)::int from public.user_app_grants
+              where app_slug = ${app.slug} and role_only) as "roleOnly",
+            (select count(*)::int from (
+               select user_id from public.user_apps where app_slug = ${app.slug}
+               union
+               select user_id from public.user_app_grants where app_slug = ${app.slug}
+             ) had
+              where not exists (
+                select 1 from public.user_app_grants g
+                 where g.user_id = had.user_id and g.app_slug = ${app.slug} and ${tx.unsafe(IS_GRANT_SQL)}
+              )) as lost
+        `;
+        if (lost > 0) {
+          await tx`
+            update public.apps
+               set needs_grants_since = coalesce(needs_grants_since, now()),
+                   needs_grants_reason = 'global-ended'
+             where slug = ${app.slug}
+          `;
+        }
+        await audit(tx, "app.global.ended", app.slug, { roleOnly, lost });
+        globalEnded.push({ slug: app.slug, roleOnly, lost });
+      }
+
+      // New to this database: it arrives inactive, with nothing to compare.
       if (!row) continue;
 
       // Null is a row activation wrote before any release step recorded one,
@@ -220,12 +339,19 @@ export async function syncAppRegistry(
           where app_slug = ${app.slug} and revoked_at is null
           returning id
         `;
+        // Turned on for the tools of the extension before it.
+        const switches = await tx`
+          delete from public.app_mcp_tool_settings
+          where app_slug = ${app.slug}
+          returning tool_name
+        `;
         await audit(tx, "app.identity.changed", app.slug, {
           previous: identityDetails(row.identity),
           identity: identityDetails(identity),
           // True when this run switched off an app that was active.
           deactivated: row.is_active,
           apiKeysRevoked: revoked.length,
+          mcpToolSwitchesReset: switches.length,
         });
         replaced.push({
           slug: app.slug,
@@ -233,6 +359,7 @@ export async function syncAppRegistry(
           identity,
           deactivated: row.is_active,
           apiKeysRevoked: revoked.length,
+          mcpToolSwitchesReset: switches.length,
         });
       } else if (codeChanged) {
         await tx`
@@ -282,6 +409,8 @@ export async function syncAppRegistry(
         .sort(),
       returned,
       replaced,
+      marked,
+      globalEnded,
     };
   });
 }
