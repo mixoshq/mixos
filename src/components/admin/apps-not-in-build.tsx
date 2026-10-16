@@ -9,6 +9,7 @@ import { CARD_SHELL } from "@/components/ui/card";
 import { formatCount, formatLastUpdated } from "@/lib/apps/display";
 import { cn } from "@/lib/utils";
 import DeleteDataButton from "./data/delete-data-button";
+import NotInBuildAccess from "./not-in-build-access";
 
 /**
  * Apps this database keeps that this build doesn't carry.
@@ -20,9 +21,11 @@ import DeleteDataButton from "./data/delete-data-button";
  * registry, and these apps are exactly the ones missing from it.
  *
  * Keeping is the default and needs nothing. Bringing an app back is a deploy,
- * not a click. The one action is **Delete data…**, destructive, whose dialog
- * asks for the slug typed and which the server refuses until the app has gone
- * from every build that uses this database (src/lib/repository/delete-data.ts).
+ * not a click. **Revoke access…** takes the app from people, or revokes its API
+ * keys, before it comes back (./not-in-build-access.tsx). **Delete data…** is
+ * destructive: its dialog asks for the slug typed, and the server refuses it
+ * until the app has gone from every build that uses this database
+ * (src/lib/repository/delete-data.ts).
  */
 export default function AppsNotInBuild({
   apps,
@@ -47,8 +50,10 @@ export default function AppsNotInBuild({
         can open these, and everything they had is kept: activation, grants,
         installs, widgets, settings and tables. Restore an app&apos;s folder
         and deploy to bring it back. With the same files it returns as it was;
-        with different files it returns switched off. Once no build that uses
-        this database has an app, Delete data removes what it kept here.
+        with different files it returns switched off. Revoke access takes it
+        from people, or revokes its API keys, before it does. Once no build
+        that uses this database has an app, Delete data removes what it kept
+        here.
       </p>
       <ul className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {apps.map((app) => {
@@ -93,7 +98,8 @@ export default function AppsNotInBuild({
                     </span>
                   )}
                 </p>
-                <div className="mt-3 flex justify-end">
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <NotInBuildAccess slug={app.slug} name={app.name} />
                   <DeleteDataButton kind="app" slug={app.slug} name={app.name} />
                 </div>
               </div>

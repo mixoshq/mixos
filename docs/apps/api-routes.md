@@ -182,9 +182,14 @@ You do not declare it in two places; if you also set `apiVisibility` in
 
 ### Machine-to-machine: scoped API keys
 
-An admin mints a key per app with an explicit scope list, an optional expiry, and
-a label. It is shown **once** — only an HMAC digest is stored, so a database leak
-alone yields nothing replayable.
+An admin mints a key per app on its **Access** tab (Administration → Apps →
+Details → Access → API keys), with a label, a scope list chosen from the routes
+that accept `key`, and an optional expiry of 30, 90 or 365 days. It is shown
+**once** — only an HMAC digest is stored, so a database leak alone yields nothing
+replayable. The same tab lists every key, with its status, and revokes one. An
+app that has left the build keeps its keys, and they work again if it comes
+back: revoke them from **Revoke access…** on its entry under **Not in this
+build**.
 
 ```
 curl -H "Authorization: Bearer mosk_…" https://mos.example.com/api/p/my-app/items
@@ -195,10 +200,12 @@ Three properties worth knowing:
 - **A key is bound to one app.** Presenting a valid key for app A on app B's
   route does not authenticate, or a key would become a platform-wide credential.
 - **Scopes are per route.** `["GET /items"]` opens exactly that; a key minted for
-  one endpoint never becomes a key for the whole app. `["*"]` covers everything
-  the app declares.
+  one endpoint never becomes a key for the whole app. `["*"]` covers every route
+  that accepts `key`, including one added later.
 - **Revocation and expiry are live**, checked on every request rather than cached
   on the key — one indexed lookup, and a revoked key stops working immediately.
+  The release step revokes every key of an app when a different extension takes
+  its slug, since they were given out for the one before it.
 
 The key travels in `Authorization: Bearer` or `X-API-Key`, never a query string,
 which would end up in access logs, browser history and referrer headers.

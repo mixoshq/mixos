@@ -24,13 +24,13 @@ import {
   formatLastUpdated,
   formatCount,
 } from "@/lib/apps/display";
-import AppVisibilityPanel from "./app-visibility-panel";
-import AppPasswordPanel from "./app-password-panel";
-
-interface MissingConnector {
-  name: string;
-  displayName: string;
-}
+import {
+  BLOCK_LABEL,
+  blockDone,
+  groupByBlock,
+  type MissingConnector,
+} from "@/lib/apps/connector-readiness";
+import AppAccessPanel from "./app-access-panel";
 
 type DialogTab =
   "overview" | "access" | "settings" | "wiring" | "connectors" | "mcp" | "database";
@@ -373,41 +373,72 @@ function SchemaBrowser({ tables }: { tables: AppSchemaTable[] }) {
 }
 
 /**
- * The unconfigured-connector warning, worded once and rendered twice.
+ * The not-ready-connector warning, worded once and rendered twice.
  *
  * It lives on the registry row and again on this dialog's Overview, for someone
  * who opened it to find out what the strip was about. Same component both
  * places, so the two cannot drift into saying different things.
  *
  * It is a warning, not a gate. It used to block registration; registration is
- * gone, and what an unconfigured connector now blocks is granting the app to a
- * user — enforced in /admin/users, which is where the sentence points.
+ * gone, and what a connector that isn't ready now blocks is activating the
+ * app and granting it to anyone, both enforced on the server
+ * (src/lib/apps/connector-gates.ts). Each connector is named with what it
+ * still needs, in the Connector Registry's words: configured, connected after
+ * its client ID is saved, or enabled after an admin switched it off.
+ *
+ * Worded by the app's state. An inactive app is waiting on the connectors to
+ * be activated, which is the button a few pixels below. An active one was
+ * activated before a connector stopped being ready (it was switched off, say),
+ * so it is running without it: it still can't be granted, and whatever it
+ * needs the connector for fails.
  */
 export function MissingConnectorWarning({
   app,
   missingConnectors,
+  isActive,
 }: {
   app: AppManifest;
   missingConnectors: MissingConnector[];
+  isActive: boolean;
 }) {
+  const groups = groupByBlock(missingConnectors);
+  const names = groups.map(([state, group], g) => (
+    <span key={state}>
+      {g > 0 && (g === groups.length - 1 ? " and " : ", ")}
+      {group.map((m, i) => (
+        <span key={m.name}>
+          {i > 0 && (i === group.length - 1 ? " and " : ", ")}
+          <span className="font-semibold">{m.displayName}</span>
+        </span>
+      ))}{" "}
+      {isActive
+        ? group.length === 1
+          ? "isn't"
+          : "aren't"
+        : group.length === 1
+          ? "is"
+          : "are"}{" "}
+      {blockDone(state)}
+    </span>
+  ));
   return (
     <p className="flex items-start gap-2 text-xs text-foreground">
       <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
       <span>
-        {/* "Activated", not "granted": activation is now the gate this warning
-            is actually blocking, and it is the button sitting a few pixels
-            below this sentence. Granting was never the first thing stopped —
-            an app whose connector is unconfigured cannot serve a request from
-            anyone, granted or not. */}
-        <span className="font-semibold">{app.name}</span> can&apos;t be
-        activated until{" "}
-        {missingConnectors.map((m, i) => (
-          <span key={m.name}>
-            {i > 0 && (i === missingConnectors.length - 1 ? " and " : ", ")}
-            <span className="font-semibold">{m.displayName}</span>
-          </span>
-        ))}{" "}
-        {missingConnectors.length === 1 ? "is" : "are"} configured.{" "}
+        {isActive ? (
+          <>
+            <span className="font-semibold">{app.name}</span> is active, but{" "}
+            {names}, so it can&apos;t be granted to anyone, and anything that
+            needs {missingConnectors.length === 1 ? "that connector" : "those connectors"}{" "}
+            fails
+          </>
+        ) : (
+          <>
+            <span className="font-semibold">{app.name}</span> can&apos;t be
+            activated or granted until {names}
+          </>
+        )}
+        .{" "}
         <Link
           href="/admin/connectors"
           className="font-medium text-primary underline underline-offset-2"
@@ -434,7 +465,7 @@ export function AppReachPanel({
   app: AppManifest;
   missingConnectors: MissingConnector[];
 }) {
-  const missingNames = new Set(missingConnectors.map((m) => m.name));
+  const missing = new Map(missingConnectors.map((m) => [m.name, m]));
   return (
     <div className="space-y-8">
       <section>
@@ -452,16 +483,19 @@ export function AppReachPanel({
               {app.connectors.map((name) => (
                 <li key={name} className="flex flex-wrap items-center gap-2">
                   <Mono>{name}</Mono>
-                  {missingNames.has(name) && (
-                    <StatusPill tone="warning">Not configured</StatusPill>
+                  {missing.get(name) && (
+                    <StatusPill tone="warning">
+                      {BLOCK_LABEL[missing.get(name)!.state]}
+                    </StatusPill>
                   )}
                 </li>
               ))}
             </ul>
             {missingConnectors.length > 0 && (
               <p className="mt-3 text-xs text-muted-foreground">
-                A connector this app requires must hold a working credential
-                set before the app can be registered.{" "}
+                A connector this app requires must be ready before the app
+                can be activated or granted to anyone: configured, connected
+                if it signs in with OAuth, and not disabled.{" "}
                 <Link
                   href="/admin/connectors"
                   className="font-medium text-primary underline underline-offset-2"
@@ -520,14 +554,24 @@ export function AppReachPanel({
 export default function AppDetailsDialog({
   app,
   missingConnectors,
+  isActive,
   grantCount,
+  onGrantCount,
   open,
   onClose,
 }: {
   app: AppManifest;
   missingConnectors: MissingConnector[];
+  /** Whether the app serves anything, for the connector warning's wording. */
+  isActive: boolean;
   /** Users holding a grant. Meaningless for a global app — see the row. */
   grantCount: number;
+  /**
+   * The count the Access tab just read, after a grant or a revoke, so the
+   * tile's pill and the row below agree with the list without waiting for
+   * the page to refresh.
+   */
+  onGrantCount?: (count: number) => void;
   open: boolean;
   onClose: () => void;
 }) {
@@ -557,12 +601,7 @@ export default function AppDetailsDialog({
       .finally(() => setSchemaLoading(false));
   }, [open, app.database, app.slug]);
 
-  const missingNames = new Set(missingConnectors.map((m) => m.name));
-
-  const declaresPassword = (sets: Record<string, string[]> | undefined) =>
-    Object.values(sets ?? {}).some((a) => a.includes("password"));
-  const hasPasswordRoute =
-    declaresPassword(app.pageVisibility) || declaresPassword(app.apiVisibility);
+  const missing = new Map(missingConnectors.map((m) => [m.name, m]));
 
   const emits = [...app.hooks.emits.actions, ...app.hooks.emits.filters];
   const listens = [...app.hooks.listens.actions, ...app.hooks.listens.filters];
@@ -623,6 +662,7 @@ export default function AppDetailsDialog({
               <MissingConnectorWarning
                 app={app}
                 missingConnectors={missingConnectors}
+                isActive={isActive}
               />
             </div>
           )}
@@ -708,8 +748,10 @@ export default function AppDetailsDialog({
                      scanning for the unconfigured one should not have to decide
                      whether an empty cell means "fine" or "not checked". */
                   value={
-                    missingNames.has(name) ? (
-                      <StatusPill tone="warning">Not configured</StatusPill>
+                    missing.get(name) ? (
+                      <StatusPill tone="warning">
+                        {BLOCK_LABEL[missing.get(name)!.state]}
+                      </StatusPill>
                     ) : (
                       <StatusPill tone="success">Configured</StatusPill>
                     )
@@ -774,18 +816,13 @@ export default function AppDetailsDialog({
       )}
 
       {tab === "access" && (
-        <div className="space-y-4">
-          <AppVisibilityPanel app={app} />
-          {hasPasswordRoute ? (
-            <AppPasswordPanel slug={app.slug} appName={app.name} />
-          ) : (
-            <p className="rounded-md border border-border bg-muted/50 px-3 py-2 text-sm text-foreground">
-              No surface of this app is password-gated, so there is no unlock
-              password to set. A route opts in by declaring{" "}
-              <Mono>password</Mono> as its auth.
-            </p>
-          )}
-        </div>
+        <AppAccessPanel
+          app={app}
+          missingConnectors={missingConnectors}
+          onAccessChange={(access) => {
+            if (!access.global) onGrantCount?.(access.rows.length);
+          }}
+        />
       )}
 
       {tab === "wiring" && (

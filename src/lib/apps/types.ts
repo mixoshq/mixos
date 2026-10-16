@@ -149,9 +149,10 @@ export interface AppManifest {
    */
   roles: AppRole[];
   /**
-   * Role key auto-assigned to a user the moment they're granted this app. Must
-   * match one of `roles[].key`. A user with no explicitly-set role resolves to
-   * this default. `null` when the app declares no default.
+   * The role of every user who has this app and no role of their own. Must
+   * match one of `roles[].key`. It is resolved when read, never copied onto
+   * the grant, so a user on the default follows it when it changes. `null`
+   * when the app declares no default.
    */
   defaultRole: string | null;
   hookCounts: { actions: number; filters: number };

@@ -2,18 +2,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import { revalidatePath } from "next/cache";
-import { createServiceClient } from "@/lib/db/server";
+import { createServiceClient, sql } from "@/lib/db/server";
 import { requireReadOnlySession } from "@/lib/auth/session";
-import { requireAdmin, isGlobalApp, setUserAppRole } from "@/lib/apps/access";
+import { requireAdmin } from "@/lib/apps/access";
 import { appRegistry } from "@/generated/app-registry";
+import { IS_GRANT_SQL } from "@/lib/apps/grant-rule";
 import {
   getMissingTenantConfigConnectors,
-  formatMissingList,
+  missingConnectorSteps,
 } from "@/lib/apps/connector-gates";
-import { removeAppWidgetsForUser } from "@/lib/dashboard/cleanup";
-import UserTable, { type UserRow } from "@/components/admin/user-table";
-import { recordAdminAction } from "@/lib/apps/admin-audit";
+import {
+  grantAppAccess,
+  revokeAppAccess,
+  setAppRoleAction,
+} from "@/lib/apps/grant-actions";
+import UserTable, {
+  type GrantToggleOutcome,
+  type UserRow,
+} from "@/components/admin/user-table";
 
 export default async function UsersAdminPage() {
   const pageSession = await requireReadOnlySession();
@@ -21,10 +27,15 @@ export default async function UsersAdminPage() {
 
   const supabase = createServiceClient();
 
-  const [{ data: users }, { data: grants }, { data: installs }, missingByApp] =
+  const [{ data: users }, grants, { data: installs }, missingByApp] =
     await Promise.all([
       supabase.from("users").select("*").order("display_name"),
-      supabase.from("user_app_grants").select("user_id, app_slug, role"),
+      // Each row with whether it is a grant, as every access check decides it
+      // (src/lib/apps/grant-rule.ts).
+      sql<{ user_id: string; app_slug: string; role: string | null; held: boolean }[]>`
+        select g.user_id, g.app_slug, g.role, ${sql.unsafe(IS_GRANT_SQL)} as held
+          from public.user_app_grants g
+      `,
       supabase.from("user_apps").select("user_id, app_slug"),
       /*
         THE CONNECTOR GATE LIVES HERE NOW.
@@ -35,10 +46,14 @@ export default async function UsersAdminPage() {
         every connector is tenant-scoped, so an app missing one does not work
         for the person you just gave it to, whoever they are.
       */
+      // For display: the grant itself checks again, and refuses.
       Promise.all(
         appRegistry.map(
           async (a) =>
-            [a.slug, await getMissingTenantConfigConnectors(a.slug)] as const,
+            [
+              a.slug,
+              await getMissingTenantConfigConnectors(a.slug, { forDisplay: true }),
+            ] as const,
         ),
       ),
     ]);
@@ -46,7 +61,7 @@ export default async function UsersAdminPage() {
   const blockedBySlug = new Map(
     missingByApp
       .filter(([, missing]) => missing.length > 0)
-      .map(([slug, missing]) => [slug, formatMissingList(missing)]),
+      .map(([slug, missing]) => [slug, missingConnectorSteps(missing)]),
   );
 
   // Every app in the registry. Being in it IS being valid — it passed
@@ -54,9 +69,21 @@ export default async function UsersAdminPage() {
   const grantableApps = appRegistry;
   const globalSlugs = grantableApps.filter((a) => a.global).map((a) => a.slug);
 
+  const globalSet = new Set(globalSlugs);
+
   const grantsByUser = new Map<string, string[]>();
   const roleByUserSlug = new Map<string, Record<string, string | null>>();
-  for (const row of grants ?? []) {
+  const roleOnlyByUser = new Map<string, Record<string, string | null>>();
+  for (const row of grants) {
+    // A row that records only a role gives no access. On a global app that is
+    // all it ever needs to; on any other, it is a role kept from when the app
+    // was global, shown beside the grant it isn't.
+    if (!row.held && !globalSet.has(row.app_slug)) {
+      const kept = roleOnlyByUser.get(row.user_id) ?? {};
+      kept[row.app_slug] = row.role ?? null;
+      roleOnlyByUser.set(row.user_id, kept);
+      continue;
+    }
     const list = grantsByUser.get(row.user_id) ?? [];
     list.push(row.app_slug);
     grantsByUser.set(row.user_id, list);
@@ -103,7 +130,9 @@ export default async function UsersAdminPage() {
       ).length;
       const explicitRoles = roleByUserSlug.get(u.id) ?? {};
       const roleBySlug: Record<string, string | null> = {};
+      const assignedRoleBySlug: Record<string, string | null> = {};
       for (const slug of grantedSlugs) {
+        assignedRoleBySlug[slug] = explicitRoles[slug] ?? null;
         roleBySlug[slug] =
           explicitRoles[slug] ?? defaultRoleBySlug.get(slug) ?? null;
       }
@@ -116,124 +145,54 @@ export default async function UsersAdminPage() {
         grantedActiveCount,
         installedActiveCount,
         roleBySlug,
+        assignedRoleBySlug,
+        roleOnlyBySlug: roleOnlyByUser.get(u.id) ?? {},
       };
     },
   );
 
-  async function toggleUserGrant(formData: FormData) {
+  /*
+    Thin FormData adapters over the shared grant actions in
+    src/lib/apps/grant-actions.ts, which the app dialog's Access tab calls too.
+    The connector gate, role validation and the audit record live there, once.
+    Each adapter is a server action of its own, reachable by anyone who can
+    name it, so it checks for an admin itself before it reads the form, as the
+    shared action does again before it reads anything.
+
+    A refusal is thrown, as it was when this page held the only copy: the form
+    has nowhere else to put it, and its controls are disabled in the cases the
+    shared action refuses. What a grant or revoke changed comes back, so the
+    dialog can say when the person already had the app, or didn't.
+  */
+  async function toggleUserGrant(formData: FormData): Promise<GrantToggleOutcome> {
     "use server";
-    const userId = formData.get("userId") as string;
-    const slug = formData.get("slug") as string;
+    await requireAdmin(await requireReadOnlySession());
+    const userId = String(formData.get("userId") ?? "");
+    const slug = String(formData.get("slug") ?? "");
+    // "granted" is the state BEFORE the click: true means revoke.
     const granted = formData.get("granted") === "true";
+    // A role kept from when the app was global, to grant it with. Checked
+    // against the manifest by the shared action.
+    const role = String(formData.get("role") ?? "") || null;
+    if (!userId || !slug) throw new Error("That request isn't valid.");
 
-    if (!userId || !slug) return;
-
-    const supa = createServiceClient();
-    const session = await requireReadOnlySession();
-    const adminUser = await requireAdmin(session);
-
-    if (isGlobalApp(slug)) {
-      throw new Error("Global apps cannot be granted or revoked per-user.");
-    }
-
-    // Re-checked server-side, not just disabled in the UI: the disabled control
-    // is a courtesy and a form post is not obliged to respect it. Revoking is
-    // always allowed — an app that stopped working is one you want to be able
-    // to take away.
-    if (!granted) {
-      const missing = await getMissingTenantConfigConnectors(slug);
-      if (missing.length > 0) {
-        throw new Error(
-          `Configure these connectors first: ${formatMissingList(missing)}`,
-        );
-      }
-    }
-
-    if (granted) {
-      // Revoking the grant must also uninstall the app. The FK cascade from
-      // grants -> installs was removed in migration 008 so installs can exist
-      // without grants (for global apps). Delete the install row explicitly.
-      const { error: installErr } = await supa
-        .from("user_apps")
-        .delete()
-        .match({ user_id: userId, app_slug: slug });
-      if (installErr) {
-        console.error("toggleUserGrant install-delete error:", installErr);
-        throw new Error(installErr.message);
-      }
-
-      const { error } = await supa
-        .from("user_app_grants")
-        .delete()
-        .match({ user_id: userId, app_slug: slug });
-      if (error) {
-        console.error("toggleUserGrant delete error:", error);
-        throw new Error(error.message);
-      }
-
-      await removeAppWidgetsForUser(userId, slug);
-    } else {
-      const manifest = appRegistry.find((a) => a.slug === slug);
-      const { error } = await supa.from("user_app_grants").upsert({
-        user_id: userId,
-        app_slug: slug,
-        granted_by: adminUser?.id ?? null,
-        role: manifest?.defaultRole ?? null,
-      });
-      if (error) {
-        console.error("toggleUserGrant upsert error:", error);
-        throw new Error(error.message);
-      }
-    }
-
-    // The question this table exists to answer: who gave this person access to
-    // this app, and when.
-    await recordAdminAction(
-      { id: adminUser.id, email: adminUser.email },
-      {
-        action: granted ? "user.grant.revoke" : "user.grant.add",
-        targetType: "user",
-        targetId: userId,
-        details: { appSlug: slug },
-      },
-    );
-
-    revalidatePath("/admin/users");
-    revalidatePath("/apps");
-    revalidatePath("/");
+    const result = granted
+      ? await revokeAppAccess(slug, userId)
+      : await grantAppAccess(slug, userId, role);
+    if (!result.ok) throw new Error(result.message);
+    return { changed: result.changed };
   }
 
   async function setUserGrantRole(formData: FormData) {
     "use server";
-    const userId = formData.get("userId") as string;
-    const slug = formData.get("slug") as string;
-    const role = (formData.get("role") as string) || null;
-
+    await requireAdmin(await requireReadOnlySession());
+    const userId = String(formData.get("userId") ?? "");
+    const slug = String(formData.get("slug") ?? "");
+    const role = String(formData.get("role") ?? "") || null;
     if (!userId || !slug) return;
 
-    const session = await requireReadOnlySession();
-    const roleAdmin = await requireAdmin(session);
-
-    // Guard against arbitrary values: the role must be one the app declares.
-    const manifest = appRegistry.find((a) => a.slug === slug);
-    const validRole =
-      role !== null && manifest?.roles.some((r) => r.key === role);
-    if (role !== null && !validRole) {
-      throw new Error(`"${role}" is not a valid role for ${slug}.`);
-    }
-
-    await setUserAppRole(userId, slug, role);
-    await recordAdminAction(
-      { id: roleAdmin.id, email: roleAdmin.email },
-      {
-        action: "user.role.set",
-        targetType: "user",
-        targetId: userId,
-        details: { appSlug: slug, role },
-      },
-    );
-
-    revalidatePath("/admin/users");
+    const result = await setAppRoleAction(slug, userId, role);
+    if (!result.ok) throw new Error(result.message);
   }
 
   return (
