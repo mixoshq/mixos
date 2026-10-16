@@ -11,6 +11,7 @@ import { AlertCircle } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import { toggleMyAppInstall } from "@/lib/apps/actions";
 import LucideIcon from "@/components/lucide-icon";
+import { Toggle } from "@/components/ui/toggle";
 import { renderAuthors, formatLastUpdated } from "@/lib/apps/display";
 
 interface MissingConnector {
@@ -36,7 +37,6 @@ export default function AppToggleList({
   // Block enabling when this app declares user-scoped connectors the user
   // hasn't connected. Disabling is always allowed.
   const blockInstall = !installed && missingUserConnectors.length > 0;
-  const toggleDisabled = isPending || blockInstall;
 
   function handleToggle() {
     if (blockInstall) return;
@@ -88,35 +88,18 @@ export default function AppToggleList({
             <strong className="font-semibold">Updated</strong>{" "}
             {formatLastUpdated(app.lastUpdated, "Not yet committed")}
           </p>
-          <div className="flex items-center gap-2">
-            <span
-              className={`text-xs font-medium ${
-                installed ? "text-brand" : "text-muted-foreground"
-              }`}
-            >
-              {installed ? "Enabled" : "Disabled"}
-            </span>
-            <button
-              onClick={handleToggle}
-              disabled={toggleDisabled}
-              aria-disabled={toggleDisabled}
-              aria-label={installed ? "Disable" : "Enable"}
-              title={
-                blockInstall
-                  ? `Connect ${missingUserConnectors.map((m) => m.displayName).join(", ")} first`
-                  : undefined
-              }
-              className={`relative h-6 w-11 rounded-full transition-colors ${
-                installed ? "bg-primary" : "bg-muted"
-              } ${isPending ? "opacity-50" : ""} ${blockInstall ? "cursor-not-allowed opacity-50" : ""}`}
-            >
-              <span
-                className={`absolute top-0.5 block h-5 w-5 rounded-full border border-border bg-background shadow transition-transform ${
-                  installed ? "translate-x-5" : "translate-x-0.5"
-                }`}
-              />
-            </button>
-          </div>
+          <Toggle
+            checked={installed}
+            onCheckedChange={handleToggle}
+            label={app.name}
+            disabled={blockInstall}
+            busy={isPending}
+            title={
+              blockInstall
+                ? `Connect ${missingUserConnectors.map((m) => m.displayName).join(", ")} first`
+                : undefined
+            }
+          />
           {app.authors && app.authors.length > 0 && (
             <p className="text-[10px] leading-none text-muted-foreground">
               <strong className="font-semibold">Authored By</strong>{" "}

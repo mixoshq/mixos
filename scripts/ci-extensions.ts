@@ -21,16 +21,21 @@
  *     says why.
  *
  * CI only. Activating by SQL skips Activate's own checks (a connector to
- * configure first, a typed slug for an app that replaces another) and writes
- * no audit row, which is right for a database made for one job and wrong for
- * any other. So `activate` refuses a database that isn't on this machine. In a
+ * configure first, a typed slug for an app that replaces another) and its
+ * audit row, which is right for a database made for one job and wrong for any
+ * other. So `activate` refuses a database that isn't on this machine. In a
  * checkout, use `npm run register -- app/<slug> --smoke`, or Admin > Apps.
+ * Each grant is audited, as the CLI, as every grant path records who granted
+ * it (src/lib/apps/grant-rule.ts).
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { Sql } from "postgres";
 import { APP_SLUG_PATTERN } from "../src/lib/apps/app-identifiers";
+import { cliActorName } from "../src/lib/apps/audit-actors";
+import { IS_GRANT_SQL } from "../src/lib/apps/grant-rule";
 import { describeDatabase } from "../src/lib/db/locality";
 import { createPgClient } from "../src/lib/db/pg-options";
 
@@ -148,14 +153,43 @@ export async function activateAndGrant(sql: Sql, slugs: readonly string[], email
       );
     }
   }
-  const granted = [...found];
-  if (granted.length > 0) {
-    await sql`
-      insert into public.user_app_grants (user_id, app_slug)
-      select ${user.id}, s from unnest(${granted}::text[]) as s
-      on conflict do nothing
+  if (found.size > 0) {
+    // A grant for each app that isn't global; every user has a global one. A
+    // role kept from when an app was global becomes a grant
+    // (src/lib/apps/grant-rule.ts), and a grant already there stays.
+    const granted = await sql<{ app_slug: string }[]>`
+      insert into public.user_app_grants as g (user_id, app_slug, role_only)
+      select ${user.id}, a.slug, false from public.apps a
+       where a.slug = any(${[...found]}::text[]) and a.global is not true
+      on conflict (user_id, app_slug) do update
+        set role_only = false, granted_at = now()
+        where not ${sql.unsafe(IS_GRANT_SQL)}
+      returning g.app_slug
     `;
-    console.log(`Activated ${granted.sort().join(", ")}, and granted ${granted.length === 1 ? "it" : "them"} to ${email}.`);
+    if (granted.length > 0) {
+      let osUser = "unknown";
+      try {
+        osUser = os.userInfo().username;
+      } catch {
+        // No passwd entry for the job's user: the name says so.
+      }
+      await sql`
+        insert into public.admin_audit_log (actor_id, actor_email, action, target_type, target_id, details)
+        select null, ${cliActorName(osUser, os.hostname())}, 'user.grant.add', 'user', ${user.id},
+               jsonb_build_object('appSlug', s, 'via', 'ci')
+          from unnest(${granted.map((g) => g.app_slug)}::text[]) as s
+      `;
+    }
+    const global = await sql<{ slug: string }[]>`
+      select slug from public.apps where slug = any(${[...found]}::text[]) and global
+    `;
+    const list = (slugs: string[]) => slugs.sort().join(", ");
+    console.log(
+      `Activated ${list([...found])}` +
+        (granted.length > 0 ? `, and granted ${list(granted.map((g) => g.app_slug))} to ${email}` : "") +
+        (global.length > 0 ? `; ${list(global.map((g) => g.slug))} ${global.length === 1 ? "is" : "are"} global, so everyone has ${global.length === 1 ? "it" : "them"}` : "") +
+        ".",
+    );
   }
   return problems;
 }

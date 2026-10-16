@@ -9,7 +9,7 @@ import {
   requireReadOnlySession,
   requireServerSession,
 } from "@/lib/auth/session";
-import { getUserById, isAppActive } from "@/lib/apps/access";
+import { filterHeldApps, getUserById } from "@/lib/apps/access";
 import { revalidatePath } from "next/cache";
 
 export interface LayoutItem {
@@ -51,18 +51,22 @@ export async function getDashboard(): Promise<{
       .eq("user_id", dbUser.id),
   ]);
 
-  // A widget whose app has been deactivated is not shown. The ROW stays —
-  // deactivating is a switch, not a deletion, and reactivating has to put
-  // everyone's dashboard back exactly as they left it — so this filters the
-  // read rather than the table. The layout is left whole for the same reason:
-  // react-grid-layout ignores entries with no matching child, and rewriting it
-  // here would quietly forget where the widget used to sit.
+  // A widget whose app the user doesn't hold is not shown: one deactivated,
+  // or one that stopped being global with nobody granting it to them since.
+  // The ROW stays — deactivating is a switch, not a deletion, and reactivating
+  // or granting has to put everyone's dashboard back exactly as they left it —
+  // so this filters the read rather than the table. The layout is left whole
+  // for the same reason: react-grid-layout ignores entries with no matching
+  // child, and rewriting it here would quietly forget where the widget used
+  // to sit.
   const widgets = (widgetsRes.data as DashboardWidget[]) ?? [];
-  const active = await Promise.all(widgets.map((w) => isAppActive(w.app_slug)));
+  const held = new Set(
+    await filterHeldApps(dbUser.id, [...new Set(widgets.map((w) => w.app_slug))]),
+  );
 
   return {
     layout: (layoutRes.data?.layout as LayoutItem[]) ?? [],
-    widgets: widgets.filter((_, i) => active[i]),
+    widgets: widgets.filter((w) => held.has(w.app_slug)),
   };
 }
 

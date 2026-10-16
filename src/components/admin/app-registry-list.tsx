@@ -7,17 +7,13 @@
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
-import type { AppReplacement } from "@/lib/apps/access";
+import type { AppReplacement, NeedsGrants } from "@/lib/apps/access";
 import type { ProposalTarget } from "@/lib/github/outcomes";
 import AppTile from "./app-tile";
 import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
 import { CARD_SHELL } from "@/components/ui/card";
+import type { MissingConnector } from "@/lib/apps/connector-readiness";
 import { cn } from "@/lib/utils";
-
-interface MissingConnector {
-  name: string;
-  displayName: string;
-}
 
 interface Props {
   apps: AppManifest[];
@@ -29,6 +25,8 @@ interface Props {
   activeBySlug: Record<string, boolean>;
   /** Apps the release step brought back with different code: slug to when. */
   returnedChangedBySlug: Record<string, string>;
+  /** Apps people lost, granted to nobody since: slug to when and why. */
+  needsGrantsBySlug: Record<string, NeedsGrants>;
   /** Apps the release step found under a slug a different extension had. */
   replacedBySlug: Record<string, AppReplacement>;
   /** On a built deployment with the GitHub App linked: where a removal can be proposed instead. */
@@ -42,6 +40,7 @@ export default function AppRegistryList({
   tableCountsBySlug,
   activeBySlug,
   returnedChangedBySlug,
+  needsGrantsBySlug,
   replacedBySlug,
   proposal = null,
 }: Props) {
@@ -102,6 +101,7 @@ export default function AppRegistryList({
               // appeared, which is not the same as active.
               isActive={activeBySlug[app.slug] === true}
               returnedChangedAt={returnedChangedBySlug[app.slug] ?? null}
+              needsGrants={needsGrantsBySlug[app.slug] ?? null}
               replacement={replacedBySlug[app.slug] ?? null}
               onRemove={() => setRemoving({ kind: "app", slug: app.slug, name: app.name })}
             />

@@ -150,6 +150,7 @@ const STAR_EXPORTS: Record<string, string[]> = {
   "@/components/ui/skeleton": ["Skeleton"],
   "@/components/ui/status": ["StatusDot", "StatusPill", "StatusSwatch"],
   "@/components/ui/toast": ["ToastProvider", "useToast"],
+  "@/components/ui/toggle": ["Toggle"],
 };
 
 describe("the list", () => {
