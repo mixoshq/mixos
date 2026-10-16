@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 # MixOS on Render: the app from this repository's Dockerfile, a Render Postgres,
 # and the 5-minute scheduler tick. One Blueprint, every secret generated.
 # Walkthrough, costs and the free-tier variant: docs/hosting/providers/render.md.

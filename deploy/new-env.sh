@@ -1,4 +1,8 @@
 #!/bin/sh
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 # Write deploy/.env for deploy/docker-compose.yml, with every secret freshly
 # generated. Needs only a POSIX shell — no Node, no checkout tooling — so it runs
 # on the server itself.

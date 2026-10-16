@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 # HTTPS for deploy/docker-compose.yml on a bare server: Caddy in front of the
 # app, with a certificate from Let's Encrypt for the host in MIXOS_URL.
 #
