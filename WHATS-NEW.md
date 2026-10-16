@@ -9,6 +9,12 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-10-15
+
+- **Reach tab.** The app dialog's Connectors tab is now Reach. Under the
+  connectors it lists the hosts the app's own code may call, its `egress`, or
+  says it makes no outbound calls of its own.
+
 ## 2026-10-14
 
 - **The install guide is in five parts, in `docs/hosting/`.** Before you
