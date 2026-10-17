@@ -16,6 +16,14 @@ import {
   BRAND_NAME_MAX_LENGTH,
   sanitizeBrandName,
 } from "../src/lib/branding/types";
+import { APP_SLUG_PATTERN } from "../src/lib/apps/app-identifiers";
+import {
+  REMIX_KEYWORDS_MAX,
+  REMIX_KEYWORDS_MIN,
+  REMIX_KEYWORD_MAX_LENGTH,
+  REMIX_KEYWORD_PATTERN,
+  parseAnchor,
+} from "../src/lib/apps/remix";
 
 /**
  * Zod schemas for the *on-disk* manifest shapes — `apps/<slug>/app.json`
@@ -685,6 +693,147 @@ const catalogueKeywordsSchema = z
     message: "duplicate keyword",
   });
 
+/* -------------------------------------------------------------------------- */
+/*  Remix provenance                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One remix: a component of another installed app, rebuilt in this one, as the
+ * moment it was taken (docs/apps/remix.md). `/mixos remix` writes it; nobody
+ * edits it afterwards — the pre-commit hook and Danger refuse an edit
+ * (editedRemixEntries in src/lib/apps/remix.ts).
+ *
+ * THE BUILD CHECKS SHAPE, NOT HISTORY. What held at the moment of the remix —
+ * the landed files exist, none links back into the source app, the keywords
+ * survive normalization — is checked once, by `scripts/remix.ts check`, at the
+ * end of the remix. The developer keeps changing the remixed code afterwards, and
+ * an entry that can't be edited must never start failing a build because of it,
+ * or because the keyword vocabulary grew.
+ */
+const remixDecisionSchema = z.enum(["same", "different", "remove"]);
+
+const remixIdSchema = z
+  .string()
+  .max(64)
+  .regex(
+    /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+    'remix action, rule and part ids are lowercase-hyphenated (e.g. "change-status")',
+  );
+
+const remixCommitSchema = z
+  .string()
+  .regex(/^[0-9a-f]{40}$/, "a full 40-character commit SHA, in lowercase")
+  .nullable();
+
+const remixAppSlugSchema = z
+  .string()
+  .regex(APP_SLUG_PATTERN, "an app slug: lowercase words joined by single hyphens or underscores");
+
+const remixAnchorSchema = z
+  .string()
+  .refine(
+    (a) => parseAnchor(a) !== null,
+    'an anchor is "widget:<id>", "page:<path>", "route:<METHOD> <path>" or "job:<name>" — e.g. "page:/", "route:PATCH /applications/[id]"',
+  );
+
+/** The catalogue listing a source was installed from, as its install record names it. */
+const remixRegistrySchema = z.strictObject({
+  origin: z
+    .url()
+    .refine((u) => /^https?:\/\//.test(u), "the catalogue's origin, http or https"),
+  slug: remixAppSlugSchema,
+  version: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[0-9A-Za-z][0-9A-Za-z.+-]*$/, "a release version, or a short commit SHA"),
+});
+
+const remixRemixedAtSchema = z.iso.date();
+
+const remixSourceSchema = z
+  .strictObject({
+    app: remixAppSlugSchema,
+    /** The moment remixed: the install record's commit, or the last commit that touched the folder. */
+    commitSha: remixCommitSchema,
+    commitFrom: z.enum(["install-record", "git"]),
+    /** True when the files remixed weren't exactly that commit. */
+    modified: z.boolean(),
+    registry: remixRegistrySchema.nullable(),
+    anchors: z.array(remixAnchorSchema).min(1).max(20),
+  })
+  .superRefine((src, ctx) => {
+    const first = parseAnchor(src.anchors[0] ?? "");
+    if (first && first.kind !== "widget" && first.kind !== "page") {
+      ctx.addIssue({
+        code: "custom",
+        message: "the first anchor is the component pointed at: a widget or a page",
+        path: ["anchors", 0],
+      });
+    }
+    if (src.commitSha === null && !src.modified) {
+      ctx.addIssue({
+        code: "custom",
+        message: "a source with no commit was never committed, so its files can't have matched one — set modified: true",
+        path: ["modified"],
+      });
+    }
+    if ((src.commitFrom === "install-record") !== (src.registry !== null)) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          'commitFrom "install-record" goes with the registry the record names, and "git" with registry: null',
+        path: ["registry"],
+      });
+    }
+  });
+
+export const RemixEntrySchema = z.strictObject({
+  remixedAt: remixRemixedAtSchema,
+  source: remixSourceSchema,
+  summary: z.string().min(1).max(300),
+  keywords: z
+    .array(
+      z
+        .string()
+        .max(REMIX_KEYWORD_MAX_LENGTH)
+        .regex(
+          REMIX_KEYWORD_PATTERN,
+          'remix keywords are recorded normalized: lowercase words joined by single hyphens (e.g. "drag-and-drop")',
+        ),
+    )
+    .min(REMIX_KEYWORDS_MIN, `at least ${REMIX_KEYWORDS_MIN} keywords`)
+    .max(REMIX_KEYWORDS_MAX, `at most ${REMIX_KEYWORDS_MAX} keywords`)
+    .refine((k) => new Set(k).size === k.length, { message: "duplicate keyword" }),
+  license: z
+    .strictObject({
+      spdx: licenseSchema.nullable(),
+      mode: z.enum(["adapted", "rebuilt"]),
+    })
+    .refine((l) => l.mode === "rebuilt" || (l.spdx !== null && l.spdx !== "UNLICENSED"), {
+      message: "code is adapted only from a source whose license permits it; with no license, or UNLICENSED, it is rebuilt",
+      path: ["mode"],
+    }),
+  actions: z.record(remixIdSchema, remixDecisionSchema),
+  hiddenRules: z.record(remixIdSchema, remixDecisionSchema).optional(),
+  /** Parts of the component left out: a section, a column, a badge, an interaction such as filtering. */
+  partsRemoved: z.array(remixIdSchema).optional(),
+  landedIn: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .max(200)
+        .regex(
+          /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._[\]\/-]+$/,
+          "a path inside this app, relative to its folder — e.g. \"pages/deals.tsx\"",
+        ),
+    )
+    .min(1),
+});
+
+export type RemixEntry = z.infer<typeof RemixEntrySchema>;
+
 /**
  * The auths a page or route may accept.
  *
@@ -810,6 +959,9 @@ export const RawAppManifestSchema = z
         `an app may expose at most ${MAX_MCP_TOOLS_PER_APP} MCP tools — prefer fewer, coarser tools`,
       )
       .optional(),
+    // Remixes this app took from other installed apps, each the moment it was
+    // taken. Written by `/mixos remix`, never edited. See docs/apps/remix.md.
+    remixedFrom: z.array(RemixEntrySchema).max(200).optional(),
   })
   .refine(
     (m) =>

@@ -27,6 +27,7 @@ const TABS: Array<{ id: string; label: string; file: string }> = [
   { id: "app-shell", label: "App Shell & IA", file: "app-shell.md" },
   { id: "telemetry", label: "Telemetry", file: "telemetry.md" },
   { id: "mcp", label: "MCP Tools", file: "mcp.md" },
+  { id: "remix", label: "Remix", file: "remix.md" },
 ];
 
 async function readDoc(file: string): Promise<string> {

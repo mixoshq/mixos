@@ -17,6 +17,7 @@ import {
   type VersionChange,
 } from "./scripts/release-prep";
 import { strayExtensions } from "./scripts/core-extensions";
+import { editedRemixEntries, remixEntriesFromAppJson } from "./src/lib/apps/remix";
 
 const ALLOWED_DIRS = ["apps/", "connectors/", "themes/"];
 const OS_CHANGE_LABEL = "os-change";
@@ -357,8 +358,11 @@ const versionFiles = isCoreRepository(danger.github.thisPR.owner, danger.github.
   ? VERSION_FILES.filter((f) => danger.git.modified_files.includes(f))
   : [];
 
-/** The commit this PR's branch left its base at; null, with a warning, when GitHub can't say. */
-async function branchPoint(): Promise<string | null> {
+/**
+ * The commit this PR's branch left its base at; null, with a warning naming
+ * what therefore `unchecked`, when GitHub can't say.
+ */
+async function branchPoint(unchecked: string): Promise<string | null> {
   const { base, head } = danger.github.pr;
   try {
     const { data } = await danger.github.api.repos.compareCommitsWithBasehead({
@@ -371,8 +375,7 @@ async function branchPoint(): Promise<string | null> {
   } catch (err) {
     warn(
       `Could not find where this branch left \`${base.ref}\` ` +
-        `(${err instanceof Error ? err.message : String(err)}), so the version in ` +
-        `\`package.json\` and \`package-lock.json\` was not checked.`
+        `(${err instanceof Error ? err.message : String(err)}), so ${unchecked} was not checked.`
     );
     return null;
   }
@@ -380,7 +383,7 @@ async function branchPoint(): Promise<string | null> {
 
 if (versionFiles.length > 0) {
   schedule(async () => {
-    const from = await branchPoint();
+    const from = await branchPoint("the version in `package.json` and `package-lock.json`");
     if (from === null) return;
     const repoSlug = `${danger.github.thisPR.owner}/${danger.github.thisPR.repo}`;
     const changes: VersionChange[] = [];
@@ -411,6 +414,49 @@ if (versionFiles.length > 0) {
           : `.`) +
         ` To try an extension that needs a newer MixOS, keep the bump in your checkout: ` +
         `\`/mixos deploy\` leaves it out of its commits.`
+    );
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/*  A remix entry is never edited                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `fail`. An entry in an app's `remixedFrom` records the moment a remix was
+ * taken — the source app, its commit, what was kept and what removed — and
+ * mixos.org counts it once the app is published. Editing one rewrites that
+ * moment; the remixed code is the developer's to change, the record is not
+ * (decision 19 of docs/plans/20261015_2343-remix.md).
+ *
+ * The pre-commit hook makes the same check (scripts/check-remix-provenance.ts),
+ * and this catches a commit that skipped it. Compared against the commit the
+ * branch left its base at, like the version check above. Adding an entry and
+ * deleting one both pass.
+ */
+const appManifests = danger.git.modified_files.filter((f) => /^apps\/[^/]+\/app\.json$/.test(f));
+
+if (appManifests.length > 0) {
+  schedule(async () => {
+    const from = await branchPoint("whether a remix entry in `remixedFrom` was edited");
+    if (from === null) return;
+    const repoSlug = `${danger.github.thisPR.owner}/${danger.github.thisPR.repo}`;
+    const edited: string[] = [];
+    for (const file of appManifests) {
+      const diff = await danger.git.diffForFile(file);
+      if (!diff) continue;
+      const before = await danger.github.utils.fileContents(file, repoSlug, from);
+      for (const entry of editedRemixEntries(remixEntriesFromAppJson(before), remixEntriesFromAppJson(diff.after))) {
+        edited.push(`- \`${file}\`: the entry for \`${entry}\``);
+      }
+    }
+    if (edited.length === 0) return;
+    fail(
+      `## A remix entry was edited\n\n` +
+        `${edited.join("\n")}\n\n` +
+        `An entry in \`remixedFrom\` records the moment a remix was taken, and is never ` +
+        `changed afterwards. Put it back as it was. The remixed code is yours to change; ` +
+        `remixing again from a newer version is a new entry. See \`docs/apps/remix.md\`.`
     );
   });
 }
