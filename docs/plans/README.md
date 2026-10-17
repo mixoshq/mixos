@@ -61,6 +61,7 @@ Current platform plans:
 | [`20261007_0153-app-import-allowlist.md`](20261007_0153-app-import-allowlist.md) | App code imports its own files, a published list of platform modules and a few packages, judged by where each import lands and enforced by the registry generator; `callAppRoute` bound to the app's own slug; no writes to shared modules; one policy module read by the build and by ESLint |
 | [`20261007_0158-contain-app-migrations.md`](20261007_0158-contain-app-migrations.md) | A schema and a role per app, app migrations checked by Postgres's parser against an allowlist and applied as the app's role, and a platform `updatedAt` trigger in place of app triggers |
 | [`20261008_2300-extension-lifecycle.md`](20261008_2300-extension-lifecycle.md) | The extension lifecycle and MixOS's own updates: installs checked without running and held in `.mixos/pending/` until Register, data kept when an app leaves the build, activation and connector switches, update and removal, an update check against mixos.org, a stamped build, releases and their notices, a maintenance response, and a GitHub App that proposes pull requests |
+| [`20261015_2343-remix.md`](20261015_2343-remix.md) | Remix (built; phase 3 in mixos.org): `/mixos remix` abstracts a component of an installed app into a card — needs, gives, actions, hidden rules, interactions — asks Same, Different or Remove per action, builds it into another app, and records provenance that mixos.org counts for the source's creator |
 
 ## File naming
 

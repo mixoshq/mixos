@@ -3,13 +3,14 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-# Two jobs, whenever an app, connector, or theme is part of this commit:
+# Three jobs, whenever an app, connector, or theme is part of this commit:
 #
 #   1. Stamp `lastUpdated` on every app/connector/theme manifest the commit
 #      touches, and re-stage it so the date ships with the change it describes.
 #      A merge or cherry-pick stamps only what it changes itself, not what it
 #      brings in as the other side has it — see scripts/stamp-updated.ts.
-#   2. Validate app/connector/theme manifests (and rebuild the gitignored
+#   2. Refuse an edit to an existing remix entry in an app's `remixedFrom`.
+#   3. Validate app/connector/theme manifests (and rebuild the gitignored
 #      src/generated/*.ts). The generator schema-validates every app.json /
 #      connector.json / theme.json — and compiles each theme.css against the
 #      token contract — aborting loudly on a bad manifest, so wiring it here
@@ -48,6 +49,11 @@ node scripts/check-node.mjs
 # Stamps what changed and `git add`s the manifests it wrote. Exits 0 even on
 # failure, by design — see the header of scripts/stamp-updated.ts.
 npx tsx scripts/stamp-updated.ts
+
+# A remix entry in an app's `remixedFrom` is written once and never edited —
+# it records the moment the remix was taken. Blocks, like validation below.
+# See scripts/check-remix-provenance.ts and docs/apps/remix.md.
+npx tsx scripts/check-remix-provenance.ts
 
 echo "[pre-commit] apps/, connectors/ or themes/ changed — validating manifests…"
 # Non-zero on a bad manifest — exactly what we want before a commit lands.
