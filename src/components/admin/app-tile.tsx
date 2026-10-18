@@ -288,20 +288,10 @@ export default function AppTile({
           <p className="flex items-start gap-2 text-xs text-foreground">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
             <span>
-              {lostBy?.reason === "global-ended" ? (
-                <>
-                  This app isn&apos;t global any more, so only the people
-                  granted it have it. People who had it without a grant
-                  don&apos;t now; their roles were kept, and give no access.
-                </>
-              ) : (
-                <>
-                  Some people had this app through a role and no grant. A
-                  role isn&apos;t access, so they don&apos;t have it now; their
-                  roles were kept.
-                </>
-              )}{" "}
-              Grant it from its Access tab, under Details.
+              This app isn&apos;t global any more, so only the people granted
+              it have it. People who had it without a grant don&apos;t now;
+              their roles were kept, and give no access. Grant it from its
+              Access tab, under Details.
             </span>
           </p>
         </div>

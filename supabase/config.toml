@@ -56,12 +56,12 @@ max_rows = 1000
 # deprecated and the field is removed on 2026-10-30 once the always-revoked behaviour is permanent.
 #
 # No longer needed by MixOS. It mattered when the app read through PostgREST
-# as `service_role`: supabase/migrations/0001_initial.sql issues no table-level
+# as `service_role`: supabase/migrations/0001_platform_schema.sql issues no table-level
 # GRANTs, so without it every read was `42501 permission denied for table`. The
 # app now connects over DATABASE_URL as the tables' owner, which needs no
 # grants. Turning it on does NOT widen the anon surface: `anon` receives the
 # GRANT but RLS-with-no-policies still returns an empty set, which is exactly
-# the model 0001_initial.sql documents. Note the CLI's own comment above — this
+# the model 0001_platform_schema.sql documents. Note the CLI's own comment above — this
 # field is removed on 2026-10-30, and MixOS has no reason to keep it.
 auto_expose_new_tables = true
 

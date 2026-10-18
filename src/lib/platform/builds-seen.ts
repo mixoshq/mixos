@@ -4,7 +4,7 @@
 
 /**
  * Which builds use this database: `public.platform_builds_seen`
- * (supabase/migrations/0012_builds_seen.sql).
+ * (supabase/migrations/0001_platform_schema.sql).
  *
  * One database is often served by more than one build. A host's rollback serves
  * an older build without running a release step, a preview can share

@@ -334,9 +334,9 @@ out, and `npm run register` warns when one does. On Windows, work in WSL, or set
 `git config core.autocrlf false` in the repository: converting line endings
 changes the files, so every installed folder would count as modified.
 
-Extensions added before installs kept a record count as local. To give one a
-record, remove it and install it again from the Registry; the release step then
-counts it as a different extension, once: see
+An extension copied in by hand, with no `.registry.json`, counts as local. To
+give it a record, remove it and install it again from the Registry; the release
+step then counts it as a different extension, once: see
 [When a different extension takes a name](after-you-install/README.md#when-a-different-extension-takes-a-name).
 [Installing from the repository](../security-architecture.md#31-installing-from-the-repository)
 has the security model behind all of this.

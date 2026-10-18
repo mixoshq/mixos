@@ -16,7 +16,6 @@ import {
 import { useRouter } from "next/navigation";
 import { AlertCircle, Search, UserPlus } from "lucide-react";
 import type { AppManifest, RouteAuth } from "@/lib/apps/types";
-import type { NeedsGrants } from "@/lib/apps/access";
 import {
   keyScopes,
   surfacesFor,
@@ -494,11 +493,7 @@ function UsersView({
       )}
 
       {access.needsGrants && (
-        <NeedsGrantsBanner
-          appName={app.name}
-          needsGrants={access.needsGrants}
-          roleOnly={access.roleOnly.length}
-        />
+        <NeedsGrantsBanner appName={app.name} roleOnly={access.roleOnly.length} />
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -619,17 +614,14 @@ function UsersView({
 }
 
 /**
- * Over the Users list when people lost the app, worded for why: it stopped
- * being global, or roles from before were decided to be only roles. Exported
- * for its test.
+ * Over the Users list when people lost the app because it stopped being
+ * global. Exported for its test.
  */
 export function NeedsGrantsBanner({
   appName,
-  needsGrants,
   roleOnly,
 }: {
   appName: string;
-  needsGrants: NeedsGrants;
   /** How many people have a role and no access, listed below it. */
   roleOnly: number;
 }) {
@@ -637,11 +629,9 @@ export function NeedsGrantsBanner({
     <p className="flex items-start gap-2 rounded-md border border-warning px-3 py-2 text-sm text-foreground">
       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
       <span>
-        {needsGrants.reason === "global-ended"
-          ? `${appName} isn't global any more, so only the people granted it have it.`
-          : `Some people had ${appName} through a role and no grant. A role isn't access, so they don't have it now.`}
-        {roleOnly === 1 && " One person has a role from before, listed below, and no access."}
-        {roleOnly > 1 && ` ${roleOnly} people have a role from before, listed below, and no access.`}
+        {`${appName} isn't global any more, so only the people granted it have it.`}
+        {roleOnly === 1 && " One person has a role from when it was global, listed below, and no access."}
+        {roleOnly > 1 && ` ${roleOnly} people have a role from when it was global, listed below, and no access.`}
       </span>
     </p>
   );
@@ -651,8 +641,8 @@ export function NeedsGrantsBanner({
  * People with a role in this app and no access to it.
  *
  * The app was global when they were given the role. A role isn't access
- * (migration 0013): once the app stopped being global, they no longer had it,
- * and won't until an admin grants it to them. Listed apart from the people who
+ * (./grant-rule.ts in src/lib/apps): now that the app isn't global, they don't
+ * have it until an admin grants it to them. Listed apart from the people who
  * have it, so nobody reads a role as a grant.
  */
 function RoleOnlyList({

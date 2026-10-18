@@ -84,7 +84,7 @@ describe("an app under a slug a different extension had", { skip }, () => {
   let sql: Sql;
   let url: string;
 
-  /** Known to the database before migration 0011, active, with a grant, settings and two API keys. */
+  /** Recorded as local by an earlier release step, active, with a grant, settings and two API keys. */
   const files = `files-${run}`;
   /** Activated before any release step recorded its identity. */
   const early = `early-${run}`;
@@ -141,18 +141,13 @@ describe("an app under a slug a different extension had", { skip }, () => {
     url = u.toString();
     sql = postgres(url, { max: 1, onnotice: () => {} });
 
-    // The schema as it was before 0011, and an app it already knew.
-    const before0011 = path.join(scratch, "migrations-0010");
-    fs.mkdirSync(before0011);
-    for (const file of fs.readdirSync(MIGRATIONS).filter((f) => /^00(0\d|10)_.*\.sql$/.test(f))) {
-      fs.copyFileSync(path.join(MIGRATIONS, file), path.join(before0011, file));
-    }
-    await quietly(() => migratePlatform(sql, before0011));
-    await sql`insert into public.apps (slug, name, is_active) values (${files}, 'Files', true)`;
+    // The schema, and an app a release step has already recorded as local.
+    await quietly(() => migratePlatform(sql, MIGRATIONS));
+    await sql`insert into public.apps (slug, name, is_active, identity) values (${files}, 'Files', true, 'local')`;
     const [{ id: user }] = await sql`
       insert into public.users (email, display_name) values ('user@example.com', 'User') returning id
     `;
-    await sql`insert into public.user_app_grants (user_id, app_slug, role) values (${user}, ${files}, 'editor')`;
+    await sql`insert into public.user_app_grants (user_id, app_slug, role, role_only) values (${user}, ${files}, 'editor', false)`;
     await sql`insert into public.app_settings (app_slug, key, value) values (${files}, 'region', 'eu')`;
     await addKey();
     // Revoked long ago: it keeps its own date.
@@ -161,7 +156,6 @@ describe("an app under a slug a different extension had", { skip }, () => {
       values (${files}, 'Old', ${randomBytes(16).toString("hex")}, 'mixk_old', '2026-01-01T00:00:00Z')
     `;
 
-    await quietly(() => migratePlatform(sql, MIGRATIONS));
     writeApp(files);
     writeApp(early);
     writeApp(fresh);
@@ -179,16 +173,6 @@ describe("an app under a slug a different extension had", { skip }, () => {
       await admin.end();
     }
     fs.rmSync(scratch, { recursive: true, force: true });
-  });
-
-  test("the migration records every app the database already knew as local", async () => {
-    assert.deepEqual(await row(), {
-      is_active: true,
-      identity: "local",
-      identity_changed_at: null,
-      replaced_identity: null,
-      returned_changed_at: null,
-    });
   });
 
   test("the same local app, released again, is left as it was", async () => {
