@@ -164,8 +164,7 @@ may read it. A stranger gets `public` too.
 | `public` | Nothing | `null` | `/api/apps/<slug>/…` and `/api/p/<slug>/…` |
 
 A route accepting `public`, `password` or `key` is **derived** into the `/api/p/` mount.
-You do not declare it in two places; if you also set `apiVisibility` in
-`app.json`, the build requires the two to agree.
+Its `auth` is the only place that says so: nothing in `app.json` repeats it.
 
 **Which mount serves which tier** is a property of the transport, not a policy:
 
@@ -274,7 +273,25 @@ in the app's details. Auth, roles, CSRF and the rate limit apply as usual.
 and path params only — the pipeline deliberately does not read the body, because
 reading it would drain the stream and hand your handler an already-consumed
 `Request`, which is the one thing a raw route exists to read. The 27 MB cap
-still applies to it ([see `input`](#input-declared-or-unavailable)).
+still applies to it ([see `input`](#input-declared-or-unavailable)). That makes
+a raw route the one that takes a file upload:
+
+```ts
+// apps/my-app/api/folders/[folder]/files/route.ts
+export const POST = defineRoute({
+  raw: true,
+  input: z.object({ folder: z.string() }),
+  handler: async (context, input, request) => {
+    const file = (await request.formData()).get("file");
+    if (!(file instanceof File)) throw AppError.invalidInput("Attach a file.");
+    const id = await storeFile(context, input.folder, file);
+    return Response.json({ id });
+  },
+});
+```
+
+A widget sends it the file with
+[`call()` and a `FormData`](#uploading-a-file).
 
 **A raw route answers its own connector failures.** Catch the error and return
 `ctx.connectorErrorResponse(err)`: the connector's envelope with its status and
@@ -423,8 +440,26 @@ without loading your route's module. Show the message and offer to retry; see
 Requests always go to `/api/apps/<your-slug>/…`; you cannot call another app's
 routes. For that, use [App Services](./app-services.md).
 
-> `client.get<T>()` still works and is **deprecated**. `T` there was an assertion
-> with nothing behind it — the exact bug class `call()` removes.
+### Uploading a file
+
+A JSON route's body is JSON, so a file goes to a [`raw: true`](#raw-true) route.
+Pass a `FormData` in place of the input:
+
+```tsx
+const form = new FormData();
+form.set("folder", folderId); // fills [folder]
+form.set("file", file);
+const { id } = UploadResult.parse(
+  await client.call("POST /folders/[folder]/files", form),
+);
+```
+
+The form's fields fill the spec's `[param]` segments by name, and the rest of
+the form is the body, sent as `multipart/form-data`; your form is left as it
+was. A form goes with `POST`, `PUT` or `PATCH`, to a raw route, and the typed
+client refuses it anywhere else. The result is `unknown`: a raw route's Response
+has no declared schema, so the client reads it as JSON and you check its shape,
+here with a Zod schema (`UploadResult = z.object({ id: z.string() })`).
 
 ## Server components
 
@@ -471,8 +506,6 @@ back in-process.
 - Constructing a `NextResponse` in a handler that isn't `raw: true`.
 - Calling `safeErrorMessage()` yourself; the pipeline already does.
 - Hand-writing a status code for a case `AppError` already covers.
-- Declaring a route's auth in both `defineRoute` and `apiVisibility`. Keep the
-  one next to the handler.
 - Reading `context.user` without a null check on a route that accepts an
   anonymous auth. The compiler stops you; don't cast around it.
 - Raising `budget.connectorCalls` to make a failing route pass. The budget is

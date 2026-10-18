@@ -26,8 +26,8 @@
  * checks it at registration, which loads the route.
  *
  * WHAT IT DOES NOT CHECK. The rest of a route's contract needs its code: the
- * schemas, whether a JSON route declares `output`, `auth` against `roles` and
- * `apiVisibility`, and whether the module loads at all. Registration checks
+ * schemas, whether a JSON route declares `output`, `auth` against `roles`,
+ * and whether the module loads at all. Registration checks
  * all of it, for every route, read here or not.
  *
  * It parses with the TypeScript compiler, one program over an app's route

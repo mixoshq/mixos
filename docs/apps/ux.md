@@ -78,35 +78,35 @@ Match the skeleton to the shape of the real content. The goal is that the transi
 
 ```tsx
 "use client";
-import { useEffect, useState } from "react";
+import { AsyncView } from "@/components/ui/async-view";
 import { Skeleton } from "@/components/ui/skeleton";
-import { createAppClient } from "@/lib/apps/sdk";
+import { useAppQuery } from "@/lib/apps/use-app-query";
 import type { WidgetProps } from "@/lib/hooks/types";
 
 export default function RevenueStat({ appSlug }: WidgetProps) {
-  const [data, setData] = useState<{ total: number } | null>(null);
-
-  useEffect(() => {
-    createAppClient(appSlug).get("/revenue").then(setData);
-  }, [appSlug]);
-
-  if (!data) {
-    // Mirrors the loaded layout: a label line + a big number block.
-    return (
-      <div className="space-y-2">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-9 w-32" />
-      </div>
-    );
-  }
+  const query = useAppQuery<{ total: number }>(appSlug, "GET /revenue");
 
   return (
-    <div className="space-y-2">
-      <p className="text-sm text-muted-foreground">Total revenue</p>
-      <p className="text-3xl font-semibold text-foreground">
-        ${data.total.toLocaleString()}
-      </p>
-    </div>
+    <AsyncView
+      query={query}
+      // Mirrors the loaded layout: a label line + a big number block.
+      skeleton={
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-9 w-32" />
+        </div>
+      }
+      empty={{ cause: "no-data", body: "No revenue recorded yet." }}
+    >
+      {(data) => (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">Total revenue</p>
+          <p className="text-3xl font-semibold text-foreground">
+            ${data.total.toLocaleString()}
+          </p>
+        </div>
+      )}
+    </AsyncView>
   );
 }
 ```

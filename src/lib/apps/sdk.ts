@@ -25,27 +25,27 @@ export interface AppClient<S extends string = string> {
    * values go in the input object, which is where the route's schema can
    * validate them. A spec the app does not declare is a compile error.
    *
+   * **Uploads.** A `raw: true` route reads its own body, so a POST, PUT or
+   * PATCH to one can take a `FormData` in place of the input object:
+   *
+   * ```tsx
+   * const form = new FormData();
+   * form.set("folder", folderId); // fills [folder]
+   * form.set("file", file);
+   * await client.call("POST /folders/[folder]/files", form);
+   * ```
+   *
+   * The form's fields fill the spec's `[param]` segments by name, and the rest
+   * of the form is the body, sent as `multipart/form-data`. The caller's form is
+   * left as it was. A raw route's result is `unknown`: it answers with its own
+   * Response, which the client reads as JSON.
+   *
    * **The `<"my-app">` type argument is what buys the types.** `appSlug` arrives
    * as a plain `string` from `WidgetProps`, which TypeScript cannot narrow to a
    * literal, so the app names itself once and gets a checked client. Without it
    * the call still works and falls back to `unknown`.
    */
   call: TypedCall<S>;
-
-  /**
-   * @deprecated Use `call()`. `T` here is an unchecked assertion — nothing ties
-   * it to what the route actually returns, which is the class of bug the typed
-   * client exists to remove. Kept for code not yet migrated.
-   */
-  get<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
-  /** @deprecated Use `call()`. */
-  post<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
-  /** @deprecated Use `call()`. */
-  put<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
-  /** @deprecated Use `call()`. */
-  patch<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
-  /** @deprecated Use `call()`. */
-  delete<T = unknown>(path: string, options?: RequestOptions): Promise<T>;
 }
 
 /** The routes an app declares, or an open map when the slug is not a literal. */
@@ -53,20 +53,47 @@ type RoutesFor<S extends string> = S extends keyof AppRouteTypes
   ? AppRouteTypes[S]
   : Record<string, never>;
 
+/** The methods that carry a body, and so the only ones a form can go with. */
+type BodySpec = `${"POST" | "PUT" | "PATCH"} ${string}`;
+
+/**
+ * What a call takes: the route's input, or, for a body method on a raw route,
+ * a form. A JSON route parses its body as JSON, so it never takes a form.
+ */
+type CallInput<K, D> = K extends BodySpec
+  ? RouteOutputOf<D> extends Response
+    ? RouteInputOf<D> | FormData
+    : RouteInputOf<D>
+  : RouteInputOf<D>;
+
+type CallArgs<K, D> = Record<string, never> extends RouteInputOf<D>
+  ? [input?: CallInput<K, D>]
+  : [input: CallInput<K, D>];
+
+/**
+ * What a call resolves to: the route's output, or `unknown` for a raw route,
+ * whose Response the client reads as JSON.
+ */
+type CallOutput<D> = RouteOutputOf<D> extends Response ? unknown : RouteOutputOf<D>;
+
+/**
+ * `call()` typed over one app's route map. `AppClient<"my-app">` has it over the
+ * map the registry generator writes for that app.
+ */
+export type RouteCall<R> = <K extends keyof R & string>(
+  spec: K,
+  ...args: CallArgs<K, R[K]>
+) => Promise<CallOutput<R[K]>>;
+
 // `[S] extends [keyof AppRouteTypes]` — wrapped in a tuple so a plain `string`
 // (what `WidgetProps.appSlug` is) does NOT distribute and match some member of
 // the union. Without the tuple, `string extends "my-app"` was evaluated the
 // wrong way round and every caller silently took the typed branch against an
 // empty route map.
 type TypedCall<S extends string> = [S] extends [keyof AppRouteTypes]
-  ? <K extends keyof RoutesFor<S> & string>(
-      spec: K,
-      ...args: Record<string, never> extends RouteInputOf<RoutesFor<S>[K]>
-        ? [input?: RouteInputOf<RoutesFor<S>[K]>]
-        : [input: RouteInputOf<RoutesFor<S>[K]>]
-    ) => Promise<RouteOutputOf<RoutesFor<S>[K]>>
+  ? RouteCall<RoutesFor<S>>
   : // Slug wasn't a literal: stay usable, but check nothing and say so.
-    (spec: string, input?: Record<string, unknown>) => Promise<unknown>;
+    (spec: string, input?: Record<string, unknown> | FormData) => Promise<unknown>;
 
 import type { AppRouteTypes } from "@/generated/app-clients";
 import type { RouteInputOf, RouteOutputOf } from "@/lib/apps/route";
@@ -76,12 +103,6 @@ import type { ConnectorErrorEnvelope } from "@/lib/connectors/response";
 // Re-exported because a widget may not import `@/lib/connectors/*`, and this is
 // the type `ConnectorErrorState` takes.
 export type { ConnectorErrorEnvelope };
-
-export interface RequestOptions {
-  body?: unknown;
-  headers?: Record<string, string>;
-  signal?: AbortSignal;
-}
 
 export class AppClientError extends Error {
   constructor(
@@ -126,6 +147,11 @@ function normalise(path: string): string {
   return path.startsWith("/") ? path.slice(1) : path;
 }
 
+function isFormData(value: unknown): value is FormData {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
+
+const BODY_METHODS = new Set(["POST", "PUT", "PATCH"]);
 const CSRF_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 let csrfTokenCache: string | null = null;
@@ -139,33 +165,26 @@ async function getCsrfToken(): Promise<string> {
   return data.csrfToken;
 }
 
-async function request<T>(
+async function request(
   base: string,
   method: string,
   path: string,
-  options?: RequestOptions
-): Promise<T> {
+  body?: Record<string, unknown> | FormData,
+): Promise<unknown> {
   const url = `/api/apps/${base}/${normalise(path)}`;
-  const isFormData =
-    typeof FormData !== "undefined" && options?.body instanceof FormData;
-  const headers: Record<string, string> = isFormData
-    ? { ...options?.headers }
-    : { "Content-Type": "application/json", ...options?.headers };
+  // A form's Content-Type is left to fetch, which writes the multipart boundary.
+  const headers: Record<string, string> = isFormData(body)
+    ? {}
+    : { "Content-Type": "application/json" };
 
   if (CSRF_METHODS.has(method)) {
     headers["X-CSRF-Token"] = await getCsrfToken();
   }
 
-  const init: RequestInit = {
-    method,
-    headers,
-    signal: options?.signal,
-  };
+  const init: RequestInit = { method, headers };
 
-  if (options?.body !== undefined && method !== "GET") {
-    init.body = isFormData
-      ? (options.body as FormData)
-      : JSON.stringify(options.body);
+  if (body !== undefined && method !== "GET") {
+    init.body = isFormData(body) ? body : JSON.stringify(body);
   }
 
   let res = await fetch(url, init);
@@ -178,46 +197,72 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const body: unknown = await res.json().catch(() => null);
+    const errorBody: unknown = await res.json().catch(() => null);
     throw new AppClientError(
-      messageOf(body) ?? `Request failed: ${method} ${url} (${res.status})`,
+      messageOf(errorBody) ?? `Request failed: ${method} ${url} (${res.status})`,
       res.status,
-      body
+      errorBody
     );
   }
 
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) return undefined;
 
-  return res.json() as Promise<T>;
+  return res.json();
 }
 
 /**
- * Build the URL for a typed call.
+ * Build the request for a call.
  *
  * `"GET /items/[id]"` plus `{ id: 42, limit: 10 }` becomes
  * `/items/42?limit=10` — the path params are consumed by the pattern and only
  * what is left travels as a query string. For a body method the remainder is
  * the JSON body instead.
+ *
+ * A form follows the same rule: its fields fill the path params, and a copy of
+ * the rest is the body, so the caller's form keeps every field it had. It goes
+ * only with a body method, since a query string cannot carry a file.
  */
 function buildCall(
   spec: string,
-  input: Record<string, unknown>,
-): { method: string; path: string; body?: Record<string, unknown> } {
+  input: Record<string, unknown> | FormData,
+): { method: string; path: string; body?: Record<string, unknown> | FormData } {
   const [method, rawPath = ""] = spec.split(" ");
-  const rest: Record<string, unknown> = { ...input };
+  const form = isFormData(input) ? input : null;
+  if (form && !BODY_METHODS.has(method)) {
+    throw new TypeError(
+      `${spec}: a FormData body goes only with POST, PUT or PATCH.`,
+    );
+  }
+  const rest: Record<string, unknown> = isFormData(input) ? {} : { ...input };
+  const taken = new Set<string>();
 
   const path = rawPath
     .split("/")
     .map((segment) => {
       if (!segment.startsWith("[") || !segment.endsWith("]")) return segment;
       const name = segment.slice(1, -1).replace(/^\.\.\./, "");
-      const value = rest[name];
-      delete rest[name];
+      let value: unknown;
+      if (form) {
+        const field = form.get(name);
+        value = typeof field === "string" ? field : undefined;
+        taken.add(name);
+      } else {
+        value = rest[name];
+        delete rest[name];
+      }
       return encodeURIComponent(String(value ?? ""));
     })
     .join("/");
 
-  if (method === "POST" || method === "PUT" || method === "PATCH") {
+  if (form) {
+    const body = new FormData();
+    for (const [key, value] of form) {
+      if (!taken.has(key)) body.append(key, value);
+    }
+    return { method, path, body };
+  }
+
+  if (BODY_METHODS.has(method)) {
     return { method, path, body: rest };
   }
 
@@ -238,21 +283,11 @@ export function createAppClient<S extends string = string>(
   appSlug: string,
 ): AppClient<S> {
   return {
-    call: ((spec: string, input?: Record<string, unknown>) => {
+    // Async, so a call that cannot be built rejects like one that failed.
+    call: (async (spec: string, input?: Record<string, unknown> | FormData) => {
       const { method, path, body } = buildCall(spec, input ?? {});
-      return request<unknown>(appSlug, method, path, body ? { body } : undefined);
+      return request(appSlug, method, path, body);
     }) as TypedCall<S>,
-
-    get: <T = unknown>(path: string, opts?: RequestOptions) =>
-      request<T>(appSlug, "GET", path, opts),
-    post: <T = unknown>(path: string, opts?: RequestOptions) =>
-      request<T>(appSlug, "POST", path, opts),
-    put: <T = unknown>(path: string, opts?: RequestOptions) =>
-      request<T>(appSlug, "PUT", path, opts),
-    patch: <T = unknown>(path: string, opts?: RequestOptions) =>
-      request<T>(appSlug, "PATCH", path, opts),
-    delete: <T = unknown>(path: string, opts?: RequestOptions) =>
-      request<T>(appSlug, "DELETE", path, opts),
   };
 }
 

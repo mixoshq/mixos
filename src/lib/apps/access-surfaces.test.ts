@@ -4,9 +4,9 @@
 
 /**
  * The walk over an app's pages and routes that the Access tab, the password
- * action and the API-key action all read. Contracts first, per method; the
- * legacy manifest maps only where no contract covers the path; and key scopes
- * in exactly the form the gateway matches.
+ * action and the API-key action all read: pages from `pageVisibility`, routes
+ * from their contracts, per method, and key scopes in exactly the form the
+ * gateway matches.
  */
 
 import { test } from "node:test";
@@ -59,26 +59,14 @@ test("pages come from pageVisibility, routes from the contracts, one surface per
   );
 });
 
-test("a route declared password in defineRoute alone still asks for the password", () => {
-  // The legacy maps are empty, as they usually are: reading only them is how
-  // an app with password routes was once refused a password.
+test("a route declared password in defineRoute asks for the password", () => {
   const notes = app({
     pageVisibility: {},
-    apiVisibility: {},
     routes: [{ path: "export", params: [], methods: [method("GET", ["password"])] }],
   });
   assert.equal(appUsesPassword(notes), true);
   assert.deepEqual(labels(notes, "password"), ["GET /api/p/notes/export"]);
   assert.equal(appUsesPassword(app({ routes: [{ path: "", params: [], methods: [method("GET", ["session"])] }] })), false);
-});
-
-test("the legacy map counts only for a path no contract carries", () => {
-  const notes = app({
-    routes: [{ path: "items", params: [], methods: [method("GET", ["session"])] }],
-    apiVisibility: { items: ["public"], legacy: ["password"] },
-  });
-  assert.deepEqual(labels(notes, "public"), []);
-  assert.deepEqual(labels(notes, "password"), ["/api/p/notes/legacy"]);
 });
 
 test("a surface accepting several tiers is listed under each", () => {
@@ -98,7 +86,6 @@ test("key scopes are one per method that accepts a key, in the form the gateway 
       { path: "items", params: [], methods: [method("GET", ["key", "session"]), method("POST", ["session"])] },
       { path: "items/[id]", params: ["id"], methods: [method("DELETE", ["key"])] },
     ],
-    apiVisibility: { legacy: ["key"] },
   });
   const scopes = keyScopes(notes);
   assert.deepEqual(scopes, ["GET /", "GET /items", "DELETE /items/[id]"]);
