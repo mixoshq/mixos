@@ -41,15 +41,15 @@ function recordingClient(queries: string[]): Sql {
 
 test("two files with one number are refused before the first query", async () => {
   const dir = directory("duplicate", [
-    "0001_initial.sql",
-    "0002_keep_app_data.sql",
-    "0002_app_mcp_tool_settings.sql",
+    "0001_platform_schema.sql",
+    "0002_tags.sql",
+    "0002_pins.sql",
   ]);
   const queries: string[] = [];
   await assert.rejects(
     migratePlatform(recordingClient(queries), dir, () => {}),
     (err: Error) => {
-      assert.match(err.message, /0002_app_mcp_tool_settings\.sql and 0002_keep_app_data\.sql/);
+      assert.match(err.message, /0002_pins\.sql and 0002_tags\.sql/);
       assert.match(err.message, /0003, the next free number/);
       return true;
     },
@@ -58,7 +58,7 @@ test("two files with one number are refused before the first query", async () =>
 });
 
 test("one file per number goes on to the database", async () => {
-  const dir = directory("distinct", ["0001_initial.sql", "0002_keep_app_data.sql"]);
+  const dir = directory("distinct", ["0001_platform_schema.sql", "0002_tags.sql"]);
   const queries: string[] = [];
   await assert.rejects(migratePlatform(recordingClient(queries), dir, () => {}), /the database was asked/);
   assert.deepEqual(queries, ["show server_version_num"]);

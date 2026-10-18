@@ -60,7 +60,7 @@ before(async () => {
     select to_regclass('public._platform_locks') is not null as present
   `;
   if (!present) {
-    // As supabase/migrations/0007_platform_schema_version.sql creates it.
+    // As supabase/migrations/0001_platform_schema.sql creates it.
     await sql`
       create table public._platform_locks (
         name        text primary key,

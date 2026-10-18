@@ -267,10 +267,10 @@ export interface AppReplacement {
 /**
  * Why people who had an app lost it, as the release step found
  * (scripts/sync-app-registry.ts): it stopped being global, and someone who had
- * it, by an install or a role, has no grant; or rows from before were decided
- * to be roles on an app that isn't global.
+ * it, by an install or a role, has no grant. The only reason there is; the
+ * column holding it accepts nothing else.
  */
-export type NeedsGrantsReason = "global-ended" | "roles-decided";
+export type NeedsGrantsReason = "global-ended";
 
 /** An app's Needs grants mark: since when, and why. */
 export interface NeedsGrants {
@@ -452,22 +452,6 @@ export async function filterHeldApps(
     granted = new Set();
   }
   return active.filter((slug) => isGlobalApp(slug) || granted.has(slug));
-}
-
-export async function hasAppAccess(
-  userId: string,
-  appSlug: string,
-): Promise<boolean> {
-  if (!(await isAppActive(appSlug))) return false;
-  const supabase = createServiceClient();
-  const { data } = await supabase
-    .from("user_apps")
-    .select("app_slug")
-    .eq("user_id", userId)
-    .eq("app_slug", appSlug)
-    .maybeSingle();
-
-  return !!data;
 }
 
 export async function getUserById(userId: string) {

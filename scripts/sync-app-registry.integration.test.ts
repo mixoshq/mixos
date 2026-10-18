@@ -161,7 +161,7 @@ describe("an app leaving the build and coming back", { skip }, () => {
     const [{ id: user }] = await sql`
       insert into public.users (email, display_name) values ('user@example.com', 'User') returning id
     `;
-    await sql`insert into public.user_app_grants (user_id, app_slug, role) values (${user}, ${notes.slug}, 'editor')`;
+    await sql`insert into public.user_app_grants (user_id, app_slug, role, role_only) values (${user}, ${notes.slug}, 'editor', false)`;
     await sql`insert into public.user_apps (user_id, app_slug) values (${user}, ${notes.slug})`;
     await sql`insert into public.app_passwords (app_slug, password_hash) values (${notes.slug}, 'HASH')`;
     await sql`insert into public.dashboard_widgets (user_id, app_slug, widget_id) values (${user}, ${notes.slug}, 'latest')`;

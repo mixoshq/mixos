@@ -214,7 +214,7 @@ if (migrationsMissingBump.length > 0) {
       `values ('platform_schema_version', '<this migration's number>')\n` +
       `on conflict (key) do update set value = excluded.value, updated_at = now();\n` +
       "```\n\n" +
-      `See \`supabase/migrations/0007_platform_schema_version.sql\` and OS-UPDATES.md.`
+      `See the end of \`supabase/migrations/0001_platform_schema.sql\` and OS-UPDATES.md.`
   );
 }
 

@@ -6,13 +6,12 @@
  * Token-bucket rate limiting, backed by Postgres and fronted by an in-memory
  * pre-filter.
  *
- * WHY IT MOVED. This module used to be purely in-memory, with a comment saying
- * that was "suitable for single-process deployments". The deployment is
- * serverless: every function instance holds its own Map, so the documented
- * "60 burst / 10 per second" was per-instance and, across a fleet that scales
- * with the traffic being limited, close to no limit at all. A security control
- * that reads as enforced and is not is worse than an absent one, because
- * nothing prompts you to add the real thing.
+ * WHY POSTGRES. In memory alone, a limiter suits a single process only. The
+ * deployment is serverless: every function instance holds its own Map, so the
+ * documented "60 burst / 10 per second" would be per-instance and, across a
+ * fleet that scales with the traffic being limited, close to no limit at all. A
+ * security control that reads as enforced and is not is worse than an absent
+ * one, because nothing prompts you to add the real thing.
  *
  * THE TWO TIERS, AND WHY THE ORDER IS SOUND. A per-instance bucket sees only a
  * fraction of the traffic, so it drains more slowly than the global bucket and
@@ -35,7 +34,7 @@
 
 import { sql } from "@/lib/db/client";
 
-/** Matches the `scope` check constraint in supabase/migrations/0002_rate_buckets.sql. */
+/** Matches the `scope` check constraint on `rate_buckets` in supabase/migrations/0001_platform_schema.sql. */
 export type RateLimitScope = "ip" | "user_app" | "route" | "api_key";
 
 export interface RateLimitResult {
@@ -160,9 +159,9 @@ export function createRateLimiter({
    *   3. `tokens` therefore never goes negative, and `last_refill` only moves
    *      when time was actually spent.
    *
-   * An earlier version charged on every request and clamped at -1 to "preserve
-   * the deficit". That is a permanent-lockout bug, not a stricter limiter:
-   * charging on a denial while also resetting `last_refill` means a client
+   * Charging on every request and clamping at -1 to "preserve the deficit"
+   * would be a permanent-lockout bug, not a stricter limiter: charging on a
+   * denial while also resetting `last_refill` means a client
    * arriving at or above the refill rate can never accumulate the uninterrupted
    * gap needed to climb back off the floor, so the bucket denies 100% of
    * traffic forever. The bucket must forget denied requests.

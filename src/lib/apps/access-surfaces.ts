@@ -12,13 +12,10 @@ import type { AppManifest, RouteAuth } from "./types";
  * that guard the password and API-key settings validate against it, so the
  * screen and the gate can never disagree about what an app exposes.
  *
- * API ROUTES COME FROM THE HOISTED ROUTE CONTRACTS FIRST. Auth is declared next
- * to the handler (`defineRoute`), and the manifest's `apiVisibility` map is the
- * legacy view, usually absent. Reading only the map is how the password panel
- * once refused to set a password for an app whose routes were declared
- * `password` in code: the map was empty, so the app looked as if it had nothing
- * to unlock. Per method, because one path can serve GET publicly and keep POST
- * behind a session.
+ * PAGES COME FROM `pageVisibility`; API ROUTES FROM THE HOISTED ROUTE CONTRACTS.
+ * A route's auth is declared next to its handler (`defineRoute`), and the
+ * registry carries it for each method, because one path can serve GET publicly
+ * and keep POST behind a session.
  */
 
 export type SurfaceKind = "page" | "api";
@@ -49,9 +46,7 @@ export function appSurfaces(app: AppManifest): Surface[] {
     });
   }
 
-  const covered = new Set<string>();
   for (const route of app.routes ?? []) {
-    covered.add(route.path);
     for (const m of route.methods) {
       out.push({
         kind: "api",
@@ -60,17 +55,6 @@ export function appSurfaces(app: AppManifest): Surface[] {
         auths: m.auth,
       });
     }
-  }
-
-  // Anything declared only in the legacy manifest map and carried by no contract.
-  for (const [key, auths] of Object.entries(app.apiVisibility ?? {})) {
-    if (covered.has(key)) continue;
-    out.push({
-      kind: "api",
-      key: `api:${key}`,
-      label: formatPath(`/api/p/${app.slug}`, key),
-      auths,
-    });
   }
 
   return out;

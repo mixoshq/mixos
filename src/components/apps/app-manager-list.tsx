@@ -11,15 +11,9 @@ import AppToggleList from "./app-toggle-list";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-interface MissingConnector {
-  name: string;
-  displayName: string;
-}
-
 interface Props {
   apps: AppManifest[];
   installedSlugs: string[];
-  missingUserConnectorsBySlug: Record<string, MissingConnector[]>;
 }
 
 type StatusFilter = "all" | "installed" | "not-installed";
@@ -30,11 +24,7 @@ const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "not-installed", label: "Not Installed" },
 ];
 
-export default function AppManagerList({
-  apps,
-  installedSlugs,
-  missingUserConnectorsBySlug,
-}: Props) {
+export default function AppManagerList({ apps, installedSlugs }: Props) {
   const [query, setQuery] = useState("");
   const [fullAppOnly, setFullAppOnly] = useState(false);
   const [widgetsOnly, setWidgetsOnly] = useState(false);
@@ -150,14 +140,7 @@ export default function AppManagerList({
         <div className="divide-y divide-border">
           {filtered.length > 0 ? (
             filtered.map((app) => (
-              <AppToggleList
-                key={app.slug}
-                app={app}
-                installed={installedSet.has(app.slug)}
-                missingUserConnectors={
-                  missingUserConnectorsBySlug[app.slug] ?? []
-                }
-              />
+              <AppToggleList key={app.slug} app={app} installed={installedSet.has(app.slug)} />
             ))
           ) : (
             <div className="px-6 py-8 text-center text-muted-foreground">

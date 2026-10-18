@@ -103,9 +103,10 @@ export interface AppManifest {
   tagline: string | null;
   icon: string;
   /**
-   * Names of connectors this app uses. Every connector is tenant-scoped: one
+   * Names of connectors this app uses. A tenant connector has one
    * admin-configured credential set in `connector_configs`, shared by all
-   * users. An admin must configure each one before the app can be registered.
+   * users; a `userScoped` one is each user's own account. An admin must make
+   * each one ready before the app can be activated or granted.
    */
   connectors: string[];
   /**
@@ -315,24 +316,11 @@ export interface AppManifest {
    * resolves to a real `Main.tsx` on disk and refuses to build otherwise.
    */
   pageVisibility?: Record<string, RouteAuth[]>;
-  /**
-   * Per-API-route visibility declarations. Keys are POSIX paths relative
-   * to `apps/<slug>/api/`, with the same conventions as `pageVisibility`
-   * (`""` is the index route at `api/index/route.ts` — practically uncommon).
-   * Unlisted routes default to `["session"]`.
-   *
-   * PREFER DECLARING THE AUTH ON THE ROUTE ITSELF. `defineRoute({ auth: [...] })`
-   * sits next to the handler it governs, and the compiler uses it to type
-   * `context.user`. This map exists for the page-parity case and as the
-   * manifest-level view an admin reads; where both are present the generator
-   * requires them to agree.
-   */
-  apiVisibility?: Record<string, RouteAuth[]>;
 }
 
 /**
- * The rules an app may escape. One, now: see ESCAPE_RULES in
- * scripts/manifest-schemas.ts for the four that were removed and why.
+ * The rules an app may escape: one. See ESCAPE_RULES in
+ * scripts/manifest-schemas.ts for why nothing else is escapable.
  */
 export type EscapeRule = "raw-response";
 

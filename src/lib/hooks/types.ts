@@ -313,19 +313,9 @@ export interface SidebarItem {
 // Platform hook signatures
 // ============================================================
 
-export interface ActionHookMap {
-  "init": () => Promise<void> | void;
-  // `user-login` and `user-sync` are declared but NOT currently dispatched.
-  // Their trigger was the SSO sign-in callback; SSO was removed and no
-  // equivalent hook was added to the credentials path. Listening to either is
-  // legal and will simply never fire — wire them up or drop them, but do not
-  // leave a reader believing they are live.
-  "user-login": (user: { id: string; email: string }) => Promise<void> | void;
-  "user-sync": (user: { id: string; email: string; name: string }) => Promise<void> | void;
-}
-
+// Every core hook is a filter: the brand hooks. An action is always an app's
+// own, `<slug>:<name>`.
 export interface FilterHookMap {
-  "user-display-name": (displayName: string, user: { id: string; email: string }) => Promise<string> | string;
   // The brand hooks are BOUNDED: the platform re-validates every result and
   // keeps the previous value when one is not acceptable. They count only when
   // registered from the app's `hooks.ts` and declared under `branding.hooks`
@@ -352,11 +342,6 @@ export type FilterCallback = (value: unknown, ...args: unknown[]) => unknown | P
 
 export interface HookRegistrar {
   /** Register a callback for an action hook */
-  addAction<K extends keyof ActionHookMap>(
-    hookName: K,
-    callback: ActionHookMap[K],
-    priority?: number
-  ): void;
   addAction(
     hookName: string,
     callback: ActionCallback,
@@ -376,10 +361,6 @@ export interface HookRegistrar {
   ): void;
 
   /** Fire an action — execute all registered callbacks */
-  doAction<K extends keyof ActionHookMap>(
-    hookName: K,
-    ...args: Parameters<ActionHookMap[K]>
-  ): Promise<void>;
   doAction(hookName: string, ...args: unknown[]): Promise<void>;
 
   /** Apply filters — pipe a value through all registered callbacks */

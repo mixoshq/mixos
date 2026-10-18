@@ -29,9 +29,9 @@ test("the migrations in a directory, in the order they apply", () => {
   // README.md, seed.sql and 0012.sql are not named NNNN_name.sql, so the runner
   // never applies them, and the build must not expect them either.
   const dir = directory("ordered", [
-    "0010_keep_app_data.sql",
+    "0010_tags.sql",
     "0002_status.sql",
-    "0001_initial.sql",
+    "0001_platform_schema.sql",
     "README.md",
     "seed.sql",
     "0012.sql",
@@ -39,25 +39,25 @@ test("the migrations in a directory, in the order they apply", () => {
   assert.deepEqual(
     listPlatformMigrations(dir).map((m) => [m.version, m.name, m.file]),
     [
-      ["0001", "initial", "0001_initial.sql"],
+      ["0001", "platform_schema", "0001_platform_schema.sql"],
       ["0002", "status", "0002_status.sql"],
-      ["0010", "keep_app_data", "0010_keep_app_data.sql"],
+      ["0010", "tags", "0010_tags.sql"],
     ],
   );
 });
 
 test("two files with one number are refused, naming both and the next free number", () => {
   const dir = directory("duplicate", [
-    "0009_app_schemas.sql",
-    "0010_keep_app_data.sql",
-    "0010_app_mcp_tool_settings.sql",
+    "0009_notes.sql",
+    "0010_tags.sql",
+    "0010_pins.sql",
   ]);
   assert.throws(
     () => listPlatformMigrations(dir),
     (err: Error) => {
       assert.match(
         err.message,
-        /share the number 0010: 0010_app_mcp_tool_settings\.sql and 0010_keep_app_data\.sql\./,
+        /share the number 0010: 0010_pins\.sql and 0010_tags\.sql\./,
       );
       assert.match(err.message, /to 0011, the next free number/);
       assert.match(err.message, /platform_schema_version to '11'/);
@@ -102,7 +102,7 @@ test("the next free number is one past the highest, padded like the rest", () =>
 
 test("a pull request's new migration is held to the ones already there", () => {
   const dir = "supabase/migrations";
-  const main = [`${dir}/0010_keep_app_data.sql`, `${dir}/0011_on_main.sql`];
+  const main = [`${dir}/0010_tags.sql`, `${dir}/0011_on_main.sql`];
 
   // A number main already has.
   assert.deepEqual(duplicatesAdded([`${dir}/0011_added.sql`], main), [

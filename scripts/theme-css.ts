@@ -67,16 +67,11 @@ export class ThemeError extends Error {
 /**
  * The one block a theme may declare tokens in. Anything else is an error.
  *
- * A theme has exactly one palette. The mode axis this file used to carry — a
- * second `:root[data-mode="dark"]` block, verified separately — was collapsed
- * into the theme axis, because "which colours am I looking at" already had an
- * answer and two answers could disagree. A dark look is a different theme.
+ * A theme has exactly one palette: "which colours am I looking at" has one
+ * answer, the theme an admin selected. A dark look is a different theme.
  * See docs/plans/20260826_2041-single-palette-themes.md.
  */
 const TOKEN_SELECTOR = ":root";
-
-/** Recognised only to give its author a message that names the replacement. */
-const LEGACY_DARK_SELECTOR = ':root[data-mode="dark"]';
 
 const ALLOWED_AT_RULES = new Set([
   "font-face",
@@ -273,10 +268,10 @@ function rewriteUrls(value: string, slug: string): string {
 /**
  * Resolve a block's declarations to concrete values, following `var()` chains.
  *
- * A chain that ends in nothing fails the build. It used to drop the token from
- * the result, and every check after this one reads the result: a
- * `--primary: var(--brand-cyan)` with no `--brand-cyan` passed the completeness
- * check (`--primary` IS declared) and then skipped both primary pairs.
+ * A chain that ends in nothing fails the build, because every check after this
+ * one reads the result: dropping the token instead would let a
+ * `--primary: var(--brand-cyan)` with no `--brand-cyan` pass the completeness
+ * check (`--primary` IS declared) and then skip both primary pairs.
  */
 function resolveBlock(
   raw: Map<string, string>,
@@ -500,18 +495,6 @@ export function compileTheme(args: {
     const selectors = rule.selectors.map(norm);
 
     for (const sel of selectors) {
-      // Caught explicitly. Without this the selector would fall through to
-      // assertSurfaceSelector and the author would be told their theme "reaches
-      // a class that is not an allowlisted surface", which is true and useless.
-      if (sel === LEGACY_DARK_SELECTOR) {
-        throw new ThemeError(
-          `themes/${slug}/theme.css: "${sel}" is no longer a token block. A theme now declares ` +
-            `exactly ONE palette, in :root — the light/dark mode axis was collapsed into the theme ` +
-            `axis. Move this block into its own theme (themes/${slug}-dark/theme.css, as its :root) ` +
-            `and an admin selects it at /admin/themes. See docs/themes/architecture.md.`,
-        );
-      }
-
       if (sel === TOKEN_SELECTOR) {
         if (selectors.length > 1) {
           throw new ThemeError(
@@ -520,9 +503,9 @@ export function compileTheme(args: {
         }
 
         // A :root inside @media or @supports is a palette that applies only
-        // some of the time. It used to be read like the top-level block, each
-        // value overwriting the last, so a prefers-color-scheme dark palette
-        // built cleanly with only its final value of each token measured.
+        // some of the time. Read like the top-level block, each value would
+        // overwrite the last, so a prefers-color-scheme dark palette would build
+        // cleanly with only its final value of each token measured.
         if (!isTokenBlock(rule)) {
           const at = rule.parent?.type === "atrule" ? (rule.parent as AtRule) : null;
           const where = at ? `@${at.name} ${at.params}`.trim() : "another rule";
@@ -569,10 +552,9 @@ export function compileTheme(args: {
   });
 
   // ── tokens live in :root and nowhere else ─────────────────────────────────
-  // Only :root's declarations used to be inspected; a surface rule had its
-  // selector checked and its body ignored. So `.mix-button { --primary: … }`
-  // built cleanly and repainted every button in a colour the contrast gate
-  // never saw.
+  // Every rule's body is inspected, not only :root's: a custom property set in
+  // a surface rule, such as `.mix-button { --primary: … }`, would repaint every
+  // button in a colour the contrast gate never saw.
   root.walkDecls((decl: Declaration) => {
     if (!decl.prop.startsWith("--") || isTokenBlock(decl.parent)) return;
     throw new ThemeError(

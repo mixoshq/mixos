@@ -233,18 +233,8 @@ export type PendingSidecar = z.infer<typeof PendingSidecarSchema>;
 
 export type SidecarRead =
   | { state: "missing" }
-  /**
-   * `earlier` marks a sidecar an earlier version of MixOS wrote, which held
-   * what install verified before that moved into the tree's own record. Its
-   * folder has no record, so it can't be registered: discard it and install it
-   * again.
-   */
-  | { state: "unreadable"; reason: string; earlier?: true }
+  | { state: "unreadable"; reason: string }
   | { state: "ok"; sidecar: PendingSidecar };
-
-/** Why an earlier version's sidecar can't be used, for a person. */
-const EARLIER_SIDECAR =
-  "it was written by an earlier version of MixOS, before installs kept their record in the extension's folder";
 
 /** The largest sidecar this reads. A deferred list at its limit fits well inside it. */
 const MAX_SIDECAR_BYTES = 4 * 1024 * 1024;
@@ -271,10 +261,6 @@ export function readSidecar(file: string): SidecarRead {
     value = JSON.parse(text);
   } catch {
     return { state: "unreadable", reason: "it is not JSON" };
-  }
-  // What an install before .registry.json wrote: the release's facts, here.
-  if (value && typeof value === "object" && "filesHash" in value && "contentHash" in value) {
-    return { state: "unreadable", reason: EARLIER_SIDECAR, earlier: true };
   }
   const parsed = PendingSidecarSchema.safeParse(value);
   if (!parsed.success) {
@@ -376,10 +362,7 @@ function pendingProblem(where: PendingLocation, hasFolder: boolean, read: Sideca
     return `It has no record of its install (${where.rel}.json), so it can't be registered. Discard it.`;
   }
   if (read.state === "unreadable") {
-    return read.earlier
-      ? "An earlier version of MixOS installed it, before installs kept their record in the extension's " +
-          "folder, so it can't be registered. Discard it and install it again."
-      : `Its record of its install (${where.rel}.json) can't be read: ${read.reason}. Discard it.`;
+    return `Its record of its install (${where.rel}.json) can't be read: ${read.reason}. Discard it.`;
   }
   return null;
 }

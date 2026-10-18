@@ -212,13 +212,12 @@ never authorize on it.
 | **Connectors** | A tool can call only the methods a connector declares as reads. A method declared `mutates`, or one it doesn't declare at all (`request()` included), throws. |
 | **App Services** | A provider reached through `ctx.services` runs read-only too: its `db` refuses writes and its connectors are narrowed the same way. |
 
-**Connectors used to be the gap the platform couldn't close**, because it could
-not know which connector methods mutate. A connector now declares that
-(`mutates: true` on a method in its manifest), and the MCP context wraps
-`ctx.connectors` so that only the declared reads can be called — so a write from
-a read-only tool is a runtime error, not a blocking review finding somebody has
-to catch. Anything a connector doesn't declare is refused as well, including the
-base class's `request()`: it is protected, but `as any` reaches it, and it sends
+**A connector declares which of its methods mutate** (`mutates: true` on a
+method in its manifest), because the platform could not know otherwise. The MCP
+context wraps `ctx.connectors` so that only the declared reads can be called —
+so a write from a read-only tool is a runtime error, not a blocking review
+finding somebody has to catch. Anything a connector doesn't declare is refused
+as well, including the base class's `request()`: it is protected, but `as any` reaches it, and it sends
 whatever verb it is given.
 
 **A tool can't write by asking another app to.** When it calls

@@ -6,10 +6,8 @@
  * The app API gateway.
  *
  * Both HTTP mounts — `/api/apps/<slug>/…` and `/api/p/<slug>/…` — are the same
- * pipeline with a different `mount` argument. They used to be two parallel
- * implementations kept in step by comment, which is how the public one ended up
- * with a gate the authenticated one never had and the authenticated one ended up
- * checking the wrong table.
+ * pipeline with a different `mount` argument, so neither can grow a gate the
+ * other lacks: two implementations kept in step by comment drift apart.
  *
  * Neither mount is behind the proxy (src/proxy.ts, `config.matcher`): Next
  * would cut any request body the proxy sees at 10 MB. So the gateway gives
@@ -253,8 +251,7 @@ async function dispatch({
   // publicly and keep POST behind a session.
   const contract = manifest.routes?.find((r) => r.path === routeKey);
   const methodContract = contract?.methods.find((m) => m.method === method);
-  const registryAuth: RouteAuth[] | undefined =
-    methodContract?.auth ?? manifest.apiVisibility?.[routeKey];
+  const registryAuth: RouteAuth[] | undefined = methodContract?.auth;
   if (registryAuth && !servedHere(registryAuth, mount)) return notFound();
 
   // 6 — the app gate, before the import, because importing runs the module's

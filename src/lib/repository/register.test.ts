@@ -437,34 +437,6 @@ describe("Register", () => {
     assert.deepEqual(runs(), []);
   });
 
-  test("refuses a pending install an earlier version made, with no record in its folder", async () => {
-    const where = pend("app", "acme");
-    fs.rmSync(path.join(where.folder, INSTALL_RECORD_FILE));
-    // What its sidecar held then: the release's facts.
-    fs.writeFileSync(
-      where.sidecar,
-      JSON.stringify({
-        ...JSON.parse(fs.readFileSync(where.sidecar, "utf8")),
-        source: "https://mixos.org",
-        version: "1.2.0",
-        gitTag: "v1.2.0",
-        commitSha: "c".repeat(40),
-        contentHash: hashFileTree(ACME),
-        filesHash: filesHash(ACME),
-        requiresMixOS: null,
-        fileCount: ACME.length,
-        byteCount: 30,
-      }),
-    );
-    await assert.rejects(registerPending("app", "acme", options()), (err: unknown) =>
-      err instanceof RegisterError &&
-      err.code === "unregistrable" &&
-      /installed by an earlier version of MixOS/.test(err.message) &&
-      /--discard. and install it again/.test(err.message),
-    );
-    assert.equal(exists("apps/acme"), false);
-  });
-
   test("the files hash leaves the record out: editing the record alone changes nothing it checks", async () => {
     const where = pend("app", "acme");
     // A hand edit to the record changes what it says, not the files it was checked against.

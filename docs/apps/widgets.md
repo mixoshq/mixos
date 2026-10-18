@@ -57,7 +57,7 @@ Add a `widgets` array to your `app.json`. The widget `id` is automatically deriv
 
 Widget components must be client components (`"use client"`) and accept `WidgetProps`. The props provide:
 
-- `appSlug` — the app's slug, used to create an API client for fetching data through the secure gateway
+- `appSlug` — the app's slug, which `useAppQuery` and `createAppClient` take to reach your routes through the secure gateway
 - `config` — user-configured values from the config schema declared in `app.json`
 - `size` — current grid size `{ w, h }`
 
@@ -65,35 +65,25 @@ Widget components must be client components (`"use client"`) and accept `WidgetP
 // apps/my-app/widgets/sales-chart.tsx
 "use client";
 
-import { useEffect, useState } from "react";
 import type { WidgetProps } from "@/lib/hooks/types";
-import { createAppClient } from "@/lib/apps/sdk";
+import { useAppQuery } from "@/lib/apps/use-app-query";
+import { AsyncView } from "@/components/ui/async-view";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function SalesChart({ appSlug, config, size }: WidgetProps) {
-  const [data, setData] = useState(null);
   const period = (config.period as string) ?? "month";
-
-  useEffect(() => {
-    const client = createAppClient(appSlug);
-    client.get(`/sales?period=${period}`).then(setData);
-  }, [appSlug, period]);
-
-  if (!data) {
-    return (
-      <div className="flex h-full flex-col p-4">
-        <Skeleton className="h-5 w-32" />
-        <Skeleton className="mt-3 flex-1 rounded-md" />
-      </div>
-    );
-  }
+  const query = useAppQuery<Sales>(appSlug, "GET /sales", { period });
 
   return (
     <div className="flex h-full flex-col">
       <h3>{(config.title as string) ?? "Sales Overview"}</h3>
-      <div className="flex-1">
-        {/* Render chart using data */}
-      </div>
+      <AsyncView
+        query={query}
+        skeleton={<Skeleton className="mt-3 flex-1 rounded-md" />}
+        empty={{ cause: "no-data", body: "No sales in this period." }}
+      >
+        {(data) => <div className="flex-1">{/* Render chart using data */}</div>}
+      </AsyncView>
     </div>
   );
 }
@@ -105,10 +95,10 @@ A widget should ask its route for just the data it displays. Several widgets oft
 
 ```tsx
 // renders account names only → ask for company data, skip the ticket scan
-client.get(`/accounts?manager=${manager}&include=company`);
+useAppQuery<Accounts>(appSlug, "GET /accounts", { manager, include: "company" });
 ```
 
-Remember every config value the request depends on must be in the `useEffect` dependency array, so changing a setting refetches.
+Pass every config value the request depends on in the input: `useAppQuery` compares it by value, so changing a setting refetches.
 
 ## Skeleton Loading States
 
@@ -117,29 +107,29 @@ Widgets must show skeleton placeholders while fetching data — never bare "Load
 ```tsx
 "use client";
 
-import { useEffect, useState } from "react";
 import type { WidgetProps } from "@/lib/hooks/types";
-import { createAppClient } from "@/lib/apps/sdk";
+import { useAppQuery } from "@/lib/apps/use-app-query";
+import { AsyncView } from "@/components/ui/async-view";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function MyWidget({ appSlug }: WidgetProps) {
-  const [data, setData] = useState<Data | null>(null);
+  const query = useAppQuery<Data>(appSlug, "GET /endpoint");
 
-  useEffect(() => {
-    createAppClient(appSlug).get<Data>("/endpoint").then(setData);
-  }, [appSlug]);
-
-  if (!data) {
-    return (
-      <div className="flex h-full flex-col p-4">
-        <Skeleton className="h-3 w-24" />
-        <Skeleton className="mt-2 h-8 w-32" />
-        <Skeleton className="mt-2 h-3 w-16" />
-      </div>
-    );
-  }
-
-  return <div>{/* render data */}</div>;
+  return (
+    <AsyncView
+      query={query}
+      skeleton={
+        <div className="flex h-full flex-col p-4">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="mt-2 h-8 w-32" />
+          <Skeleton className="mt-2 h-3 w-16" />
+        </div>
+      }
+      empty={{ cause: "no-data", body: "Nothing to show yet." }}
+    >
+      {(data) => <div>{/* render data */}</div>}
+    </AsyncView>
+  );
 }
 ```
 
@@ -255,10 +245,10 @@ export async function resolveConfig({
 }: {
   appSlug: string;
 }): Promise<ResolvedConfig> {
-  const client = createAppClient(appSlug);
+  const client = createAppClient<"my-app">(appSlug);
   const [linksRes, catsRes] = await Promise.all([
-    client.get<{ links: Link[] }>("/links").catch(() => ({ links: [] })),
-    client.get<{ categories: Category[] }>("/categories").catch(() => ({ categories: [] })),
+    client.call("GET /links").catch(() => ({ links: [] })),
+    client.call("GET /categories").catch(() => ({ categories: [] })),
   ]);
 
   return {
@@ -294,8 +284,8 @@ The config modal `await`s your `resolveConfig` and shows **"Loading configuratio
 
 ```tsx
 export async function resolveConfig({ appSlug }: { appSlug: string }): Promise<ResolvedConfig> {
-  const fetched = createAppClient(appSlug)
-    .get<{ managers: { id: string; name: string }[] }>("/managers") // light, not /accounts
+  const fetched = createAppClient<"my-app">(appSlug)
+    .call("GET /managers") // light, not /accounts
     .catch(() => null);
   const timeout = new Promise<null>((r) => setTimeout(() => r(null), 8000));
   const res = await Promise.race([fetched, timeout]);

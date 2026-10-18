@@ -5,12 +5,10 @@
 /**
  * Card chrome: one shell, one header row, one body.
  *
- * WHY THIS EXISTS. Before this file there were **86 hand-rolled
- * `rounded-lg border border-border bg-card` shells across 16 apps**, and they had
- * drifted the way copies do. Within a single app, four cards carried
- * `h2 text-lg`, `h2 text-sm` and `h3 text-sm` between them; some padded the whole
- * card with `p-4` while others padded header and body separately. Across apps the
- * heading tag for the same visual weight was h1, h2, h3 and h4.
+ * WHY THIS EXISTS. Hand-rolled `rounded-lg border border-border bg-card` shells
+ * drift the way copies do: the same visual weight ends up as `h2 text-lg`,
+ * `h2 text-sm` or `h3 text-sm`, and as h1 to h4 across apps, and some pad the
+ * whole card with `p-4` while others pad header and body separately.
  *
  * WHAT THE CALL SITES DICTATED. This API is smaller than the version it was
  * generalized from, because sampling all 86 first showed the bigger one wouldn't
@@ -30,7 +28,7 @@
  * two-lens framing. That stays in that app: a shared primitive shouldn't carry
  * one team's vocabulary. Anything of that kind goes in as `children`.
  *
- * NOT `SectionCard` in ./section-card.tsx, which predates this and stays. That one
+ * NOT `SectionCard` in ./section-card.tsx. That one
  * is a **form section**: an `h3 text-sm` field-group label, a `hint` line, evenly
  * padded body, and a `SaveRow` footer whose absence is the read-only permission
  * model. This one is a **dashboard panel**: `text-lg` title, a right-hand status

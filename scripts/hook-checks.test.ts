@@ -89,7 +89,6 @@ test("an app's own hooks and core hooks need no declaration", () => {
       [
         `  hooks.addAction("ready", () => {});`,
         `  hooks.addAction("crm:ready", () => {});`,
-        `  hooks.addFilter("user-display-name", (n) => n);`,
         `  hooks.addFilter("brand-name", () => "Acme");`,
       ].join("\n"),
     ),
@@ -97,7 +96,7 @@ test("an app's own hooks and core hooks need no declaration", () => {
   });
   assert.deepEqual(findings, []);
   assert.deepEqual(scan.listens.actions, ["crm:ready"]);
-  assert.deepEqual(scan.listens.filters, ["brand-name", "user-display-name"]);
+  assert.deepEqual(scan.listens.filters, ["brand-name"]);
   assert.deepEqual(scan.emits.actions, ["crm:ready"]);
 });
 

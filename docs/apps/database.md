@@ -216,9 +216,8 @@ Rules worth knowing:
 
 ### What comes back
 
-Rows arrive as JSON, serialized by Postgres itself — the same values the
-PostgREST API this replaced returned, so code written against either reads the
-same thing:
+Rows arrive as JSON, serialized by Postgres itself — the same values a
+PostgREST API returns, so code written against either reads the same thing:
 
 | Column type | Arrives as |
 | --- | --- |

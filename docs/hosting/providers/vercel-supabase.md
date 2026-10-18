@@ -153,14 +153,6 @@ Production** on a preview deployment, both with the production environment. So
 both run the release step, as a push does. Promoting a staged production
 deployment doesn't rebuild: its release step ran when it was built.
 
-## Moving from an existing Vercel and Supabase deployment
-
-Nothing about the database changes. Deploy this version, whose production build
-runs the release step (it reads the same migration ledger as
-`npm run db:push`), and then delete `SUPABASE_URL` and
-`SUPABASE_SERVICE_ROLE_KEY` from the Vercel project. Nothing reads them any
-more.
-
 ## Common problems
 
 - **The build fails with "Release step: failing the build".** `DATABASE_URL`

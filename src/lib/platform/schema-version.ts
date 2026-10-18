@@ -13,9 +13,11 @@
  * touched a column that was not there yet. The symptom is scattered 500s in
  * unrelated features; the cause is invisible from any of them.
  *
- * `supabase/migrations/0007_platform_schema_version.sql` introduces the row.
- * The image carries `EXPECTED_SCHEMA_VERSION`, derived at build time from the
- * highest-numbered file in that directory. This compares them.
+ * The database records its version in `platform_settings`, as
+ * `platform_schema_version`: each file in `supabase/migrations/` sets it to its
+ * own number, the baseline (`0001_platform_schema.sql`) to 1. The image carries
+ * `EXPECTED_SCHEMA_VERSION`, derived at build time from the highest-numbered
+ * file in that directory. This compares them.
  *
  * ── WHERE THIS IS ENFORCED, AND WHY NOT EARLIER ─────────────────────────────
  *
@@ -88,10 +90,9 @@ const globalForSchema = globalThis as unknown as {
  * Read the applied schema version.
  *
  * A missing ROW and a missing TABLE both mean the same thing here — the
- * database has not applied migration 0007 — and both resolve to 0, which is
- * behind any image that carries this file. That is the correct answer, and it
- * is the answer on the very first deploy of this change: the operator has to
- * run the migration, which is the whole point.
+ * database has not applied the platform schema — and both resolve to 0, which
+ * is behind every build. The release step has to run first, which is the whole
+ * point.
  *
  * A connection failure is NOT that. It resolves to null, and the caller treats
  * null as "cannot tell" rather than "behind", because readiness already probes
@@ -124,8 +125,8 @@ async function readAppliedVersion(): Promise<{
     return { version: parsed };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // `42P01 undefined_table` is a database that predates migration 0007.
-    // That is a real answer — 0 — not an error.
+    // `42P01 undefined_table` is a database the platform schema was never
+    // applied to. That is a real answer — 0 — not an error.
     if (
       (err as { code?: string })?.code === "42P01" ||
       /relation .*platform_settings.* does not exist/i.test(message)

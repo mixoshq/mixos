@@ -4,20 +4,19 @@
 
 // Makes public.apps a mirror of the generated app registry.
 //
-// WHY THIS EXISTS AT ALL. `public.apps` used to be a decision: an admin flipped
-// a toggle and a row appeared. That decision is gone — an app in the registry
-// was validated at build time, so it is valid, full stop — but the TABLE has to
-// stay, because four tables hang off it by foreign key:
+// WHY THIS EXISTS AT ALL. An app in the registry was validated at build time,
+// so it is valid, full stop, and no person decides that a row exists. The TABLE
+// stays all the same, because four tables hang off it by foreign key:
 //
 //   user_app_grants · user_apps · app_passwords · dashboard_widgets
 //
 // all `on delete cascade`. Those constraints are the only thing at the database
 // level that stops a grant, an install, a password or a dashboard widget
-// referring to an app that does not exist. Dropping the table to remove the
-// toggle would have taken that guarantee with it and left nothing in its place.
+// referring to an app that does not exist. Without the table, nothing would
+// take that guarantee's place.
 //
-// So the row is no longer something a person creates. It is derived state, and
-// this is what derives it:
+// So the row is not something a person creates. It is derived state, and this
+// is what derives it:
 //
 //   - a NEWLY seen app arrives INACTIVE: its code is present but it serves
 //     nothing until an admin activates it on the Apps page. `is_active` is
@@ -40,12 +39,11 @@
 //
 // WHY MARK RATHER THAN DELETE. This cannot tell an app removed on purpose from
 // one the registry generator skipped for a problem in it, or from a rollback to
-// a build that predates it. Deleting made every one of those destroy the app's
-// grants, installs and widgets, so nothing here deletes.
+// a build that predates it. Deleting would make every one of those destroy the
+// app's grants, installs and widgets, so nothing here deletes.
 //
-// WHY THE HASH. The delete was also what made a slug that came back arrive
-// inactive with no grants. A kept row must not hand that activation, and with it
-// the grants, to different code that comes back under the slug. The same files
+// WHY THE HASH. A kept row must not hand its activation, and with it the grants,
+// to different code that comes back under the slug. The same files
 // coming back (a rollback, a skip that ended) are the same app; anything else
 // waits for an admin.
 //
@@ -65,23 +63,17 @@
 // asks more of the admin.
 //
 // A ROLE IS NEVER ACCESS. A `user_app_grants` row records a grant, a role on
-// a global app, or both, and `role_only` says which (migration 0013). A row
-// written by a build without that column says nothing: every row from before
-// it, and any a host's rollback lets an older build write. Every run decides
-// those rows, for every app it carries, global or not, in one pass, by
-// whether someone is recorded granting them (src/lib/apps/grant-rule.ts). A grant stays a grant
-// whether or not the app is global. Rows decided to be roles are audited, and
-// on an app that isn't global, the people who used it with only a role have
-// lost it, and `needs_grants_reason` puts that in front of the admin. Each
-// run also records whether each app is global, so the run after an app stops
-// being global can say so too, when someone who had it, by an install or a
-// role, has no grant. Either lasts until an admin grants the app to someone,
-// or it is global again.
+// a global app, or both, and `role_only` says which (src/lib/apps/grant-rule.ts).
+// A grant stays a grant whether or not the app is global. Each run records
+// whether each app is global, so the run after an app stops being global can
+// tell: whoever had it, by an install or a role, and has no grant has lost it,
+// and `needs_grants_since` puts that in front of the admin until an admin
+// grants the app to someone, or it is global again.
 //
-// Leaving, returning, a change of identity, rows decided to be roles and an
-// app that stopped being global are audited, with the release step as the
-// actor (RELEASE_STEP_ACTOR): `app.missing`, `app.returned`,
-// `app.identity.changed`, `app.grants.marked` and `app.global.ended`.
+// Leaving, returning, a change of identity and an app that stopped being
+// global are audited, with the release step as the actor
+// (RELEASE_STEP_ACTOR): `app.missing`, `app.returned`, `app.identity.changed`
+// and `app.global.ended`.
 //
 // One transaction under the release step's lock (scripts/migration-lock.ts), so
 // the mirror and its audit rows are written whole or not at all, and two runners
@@ -93,7 +85,7 @@ import type { AppManifest } from "../src/lib/apps/types";
 import { appRegistry as builtRegistry } from "../src/generated/app-registry";
 import { registryInstalls as builtInstalls } from "../src/generated/registry-installs";
 import { RELEASE_STEP_ACTOR } from "../src/lib/apps/audit-actors";
-import { GRANT_RECORDED_SQL, IS_GRANT_SQL } from "../src/lib/apps/grant-rule";
+import { IS_GRANT_SQL } from "../src/lib/apps/grant-rule";
 import { extensionIdentity, identityDetails } from "../src/lib/repository/identity";
 import type { RegistryInstall } from "../src/lib/repository/install-record";
 import { appCodeHash } from "./app-code-hash";
@@ -131,13 +123,6 @@ export interface ReplacedApp {
   mcpToolSwitchesReset: number;
 }
 
-/** An app whose rows this run decided, some of them to be only roles. */
-export interface MarkedApp {
-  slug: string;
-  /** How many rows it decided are only roles. */
-  roleOnly: number;
-}
-
 /** An app this run found had stopped being global. */
 export interface GlobalEndedApp {
   slug: string;
@@ -160,8 +145,6 @@ export interface AppRegistrySyncResult {
   returned: ReturnedApp[];
   /** A different extension than the one recorded under the slug. */
   replaced: ReplacedApp[];
-  /** Apps with rows this run decided are only roles. */
-  marked: MarkedApp[];
   /** Apps that stopped being global. */
   globalEnded: GlobalEndedApp[];
 }
@@ -186,7 +169,7 @@ interface AppRow {
 /** One row in admin_audit_log, in the sync's own transaction. */
 async function audit(
   tx: TransactionSql,
-  action: "app.missing" | "app.returned" | "app.identity.changed" | "app.grants.marked" | "app.global.ended",
+  action: "app.missing" | "app.returned" | "app.identity.changed" | "app.global.ended",
   slug: string,
   details: Record<string, unknown>,
 ): Promise<void> {
@@ -224,24 +207,8 @@ export async function syncAppRegistry(
     `;
     const bySlug = new Map(rows.map((r) => [r.slug, r]));
 
-    // The rows no build has decided, for every app this build carries, in one
-    // pass: a grant if someone is recorded granting it, otherwise only a role.
-    // A grant is never demoted because an app is global: while it is, a grant
-    // changes nothing, and it outlasts that.
-    const decided = await tx<{ app_slug: string; role_only: boolean }[]>`
-      update public.user_app_grants g
-         set role_only = not ${tx.unsafe(GRANT_RECORDED_SQL)}
-       where g.app_slug = any(${slugs}::text[]) and g.role_only is null
-      returning g.app_slug, g.role_only
-    `;
-    const rolesDecided = new Map<string, number>();
-    for (const d of decided) {
-      if (d.role_only) rolesDecided.set(d.app_slug, (rolesDecided.get(d.app_slug) ?? 0) + 1);
-    }
-
     const returned: ReturnedApp[] = [];
     const replaced: ReplacedApp[] = [];
-    const marked: MarkedApp[] = [];
     const globalEnded: GlobalEndedApp[] = [];
     for (const app of appRegistry) {
       const codeHash = hashes.get(app.slug) ?? null;
@@ -264,22 +231,6 @@ export async function syncAppRegistry(
       `;
 
       const row = bySlug.get(app.slug);
-
-      const roles = rolesDecided.get(app.slug) ?? 0;
-      if (roles > 0) {
-        await audit(tx, "app.grants.marked", app.slug, { roleOnly: roles });
-        marked.push({ slug: app.slug, roleOnly: roles });
-        // On an app that isn't global, those people had it through a role
-        // alone, and don't now. Said once: a reason already there stays.
-        if ((global ?? row?.global ?? null) === false) {
-          await tx`
-            update public.apps
-               set needs_grants_since = coalesce(needs_grants_since, now()),
-                   needs_grants_reason = coalesce(needs_grants_reason, 'roles-decided')
-             where slug = ${app.slug}
-          `;
-        }
-      }
 
       // Global at the last run that carried it, and not now: held only by the
       // people an admin granted it to. Whoever had it, by an install or a
@@ -409,7 +360,6 @@ export async function syncAppRegistry(
         .sort(),
       returned,
       replaced,
-      marked,
       globalEnded,
     };
   });

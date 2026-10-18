@@ -45,7 +45,7 @@ export interface GrantToggleOutcome {
 
 interface Props {
   users: UserRow[];
-  registeredApps: AppManifest[];
+  grantableApps: AppManifest[];
   /**
    * Slug → the connectors it needs that nobody has configured, already
    * formatted for display. A slug present here cannot be granted.
@@ -73,7 +73,7 @@ type SortDir = "asc" | "desc";
  */
 export default function UserTable({
   users,
-  registeredApps,
+  grantableApps,
   blockedBySlug,
   currentAdminId,
   toggleAction,
@@ -257,7 +257,7 @@ export default function UserTable({
           user={openUser}
           open
           onClose={() => setOpenUserId(null)}
-          registeredApps={registeredApps}
+          grantableApps={grantableApps}
           blockedBySlug={blockedBySlug}
           currentAdminId={currentAdminId}
           toggleAction={toggleAction}
