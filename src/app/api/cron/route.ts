@@ -15,12 +15,11 @@ import { recordThisBuild } from "@/lib/platform/this-build";
 import { runUpdateCheck, type UpdateCheckOutcome } from "@/lib/repository/update-check";
 
 /**
- * Scheduler tick endpoint, invoked by Vercel Cron (see vercel.json).
- *
- * Replaces the in-process `setInterval` that used to run from
- * instrumentation.ts. A serverless instance is frozen between requests, so the
- * tick has to come from outside; `runDueJobs()` itself is unchanged and still
- * claims each job with an atomic Postgres UPDATE, which is what makes an
+ * Scheduler tick endpoint, called from outside on a schedule: Vercel Cron (see
+ * vercel.json), the local `cron` container, or whatever calls it on your host
+ * (docs/apps/scheduled-jobs.md). A serverless instance is frozen between
+ * requests, so the tick has to come from outside; `runDueJobs()` claims each
+ * job with an atomic Postgres UPDATE, which is what makes an
  * overlapping or duplicated invocation harmless. After the jobs it prunes, and
  * then runs the update check (src/lib/repository/update-check.ts) and the
  * release check (src/lib/platform/release-check.ts), each when one is due.

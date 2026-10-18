@@ -34,9 +34,8 @@ export function NavGroup({
   /**
    * The one href highlighted across the whole sidebar, resolved by the parent.
    *
-   * Resolved once for both groups rather than per group: `/apps/guide` matches
-   * Apps by alias and App Manager by prefix, and two groups each
-   * picking their own best would light up both at once.
+   * Resolved once for both groups rather than per group, so two groups each
+   * picking their own best match can never light up an entry in both.
    */
   active: string | null;
 }) {

@@ -150,5 +150,4 @@ gone, and try again later.
 
 1. `npx tsx scripts/generate-project-registry.ts` — two-sided consent and
    `services/<name>.ts` existence are validated; a mismatch aborts the build.
-2. Provider/consumer relationships appear in **Administration → Apps** and in the
-   App Services guide tab.
+2. Provider/consumer relationships appear in **Administration → Apps**.

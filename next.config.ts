@@ -22,20 +22,15 @@ const nextConfig: NextConfig = {
   // need is outputFileTracingIncludes below, which stays unconditional.
   output: process.env.VERCEL ? undefined : "standalone",
 
-  // Two runtime code paths read the repository from disk by path, which
+  // One runtime code path reads the repository from disk by path, which
   // @vercel/nft's static analysis cannot see — it follows imports and literal
   // fs calls, not a runtime-computed directory walk:
-  //
-  //   - src/lib/apps/api-router.ts readdir's `process.cwd()/apps/<slug>/api/**`
-  //     and checks for a literal "route.ts" on every app API request. Bundling
-  //     the module via the dynamic `@apps/...` import is not enough; the .ts
-  //     SOURCE FILES have to exist on disk. Without them resolveRoutePath
-  //     returns null and nested app routes 404 (the bare index route still
-  //     works, which makes this fail quietly — test a nested path).
-  //   - src/components/apps/guide-tabs.tsx and
-  //     src/components/connectors/connector-guide-tabs.tsx readFile
-  //     `process.cwd()/docs/apps/*.md` and `docs/connectors/*.md`. Missing
-  //     files here are an unhandled ENOENT, i.e. a 500 on the guide pages.
+  // src/lib/apps/api-router.ts readdir's `process.cwd()/apps/<slug>/api/**` and
+  // checks for a literal "route.ts" on every app API request. Bundling the
+  // module via the dynamic `@apps/...` import is not enough; the .ts SOURCE
+  // FILES have to exist on disk. Without them resolveRoutePath returns null and
+  // nested app routes 404 (the bare index route still works, which makes this
+  // fail quietly — test a nested path).
   //
   // Deliberately NOT also a `COPY` in the Dockerfile: one mechanism, in one
   // place. This is applied by Turbopack (the default builder in 16) on the Rust
@@ -44,13 +39,13 @@ const nextConfig: NextConfig = {
   // `process.cwd()` will be. `outputFileTracingRoot` must stay unset; setting it
   // would nest the layout and break that.
   //
-  // Unconditional because Vercel deploys use the same traces, so this is very
-  // likely fixing those two bugs in production too, not just in the container.
+  // Unconditional because Vercel deploys use the same traces, so this covers
+  // production too, not just the container.
   outputFileTracingIncludes: {
     // "/*" is the documented global key. It matches every dynamic route in this
     // app (including /api/apps/[...slug]); the copier de-dupes by output path,
-    // so one match is enough to pull each tree in once.
-    "/*": ["apps/**/*", "docs/apps/**/*", "docs/connectors/**/*"],
+    // so one match is enough to pull the tree in once.
+    "/*": ["apps/**/*"],
   },
 
   // Never in a build: `.mixos/` holds this checkout's installs from the

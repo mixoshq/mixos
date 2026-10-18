@@ -29,7 +29,7 @@ export type Provenance =
   | { from: "catalogue"; host: string; version: string; modified: boolean }
   /** Installed from another catalogue, which this instance doesn't ask. */
   | { from: "elsewhere"; host: string }
-  /** In the build with no install record: written here, or installed before records existed. */
+  /** In the build with no install record: written or copied here. */
   | { from: "local" };
 
 /** An origin's host, as people say it: `mixos.org`, `localhost:4321`. */
@@ -80,6 +80,6 @@ export function provenanceDetail(p: Provenance): string {
     case "elsewhere":
       return "It was installed from another catalogue than the one this instance browses.";
     case "local":
-      return "This build has an extension of this name with no install record, so it wasn't installed from a Registry, or was installed before installs kept one.";
+      return "This build has an extension of this name with no install record, so it wasn't installed from a Registry.";
   }
 }

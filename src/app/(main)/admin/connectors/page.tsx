@@ -122,12 +122,11 @@ export default async function ConnectorsAdminPage({
 
   const statuses = await Promise.all(
     connectorRegistry.map(async (c) => {
-      // Read once, derive everything from it. This used to ask
-      // isConnectorConfigured(), which answers "does a row exist" — so a
-      // three-legged connector whose admin saved a client ID and never pressed
-      // Connect rendered as Configured while the runtime refused every call.
-      // registryConfigState() applies the rule HttpConnector.configured uses,
-      // which is what keeps the two from disagreeing again.
+      // Read once, derive everything from it. registryConfigState() applies the
+      // rule HttpConnector.configured uses, so this page and the runtime agree.
+      // "A row exists" is not that rule: a three-legged connector whose admin
+      // saved a client ID and never pressed Connect would read as Configured
+      // while the runtime refused every call.
       const credentials = await getDecryptedConfig(c.name);
       const state = registryConfigState(c, credentials);
       // The grant this page reports on. A user-scoped connector's tenant row
@@ -322,8 +321,7 @@ export default async function ConnectorsAdminPage({
           have goes first. The docs are for the case where nobody has built it
           yet, so they keep the brand fill and the second position rather than
           competing with the action most visits to this page want. They open on
-          mixos.org in a new tab: the in-app copy at /connectors/guide still exists but
-          is no longer linked, so the site is the one place the guide is current.
+          mixos.org in a new tab, where the guides are published.
 
           Browse is absent when installing this kind is turned off
           (lib/repository/policy.ts); the page it leads to is a 404 then anyway.

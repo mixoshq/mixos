@@ -478,16 +478,15 @@ export async function checkInstallable(kind: ExtensionKind): Promise<Installabil
   /*
     A BUILT DEPLOYMENT CANNOT REGISTER, and has to be told so up front.
 
-    This check used to be writability plus "is the generator file there", and
-    both of those PASS on a Next standalone build: `outputFileTracingIncludes`
-    copies `apps/` in, and the tracer follows the literal paths in this module
-    and pulls `scripts/` and `node_modules/tsx` along with them. What it does
-    not pull is `esbuild`, `typescript` or `zod` — so the generator is present
-    and cannot run.
+    Writability plus "is the generator file there" is not the check: both PASS
+    on a Next standalone build. `outputFileTracingIncludes` copies `apps/` in,
+    and the tracer follows the literal paths in this module and pulls `scripts/`
+    and `node_modules/tsx` along with them. What it does not pull is `esbuild`,
+    `typescript` or `zod` — so the generator is present and cannot run.
 
-    The failure that produced was `rejected-by-registry`: the download verified,
-    the files were written, the generator was spawned, it died, everything was
-    rolled back, and the admin was told the extension "did not pass this
+    Without this check, the failure would be `rejected-by-registry`: the
+    download verified, the files written, the generator spawned, dead, and
+    everything rolled back, with the admin told the extension "did not pass this
     instance's registry checks". That reads as an accusation against the
     publisher for what is a property of the deployment.
 

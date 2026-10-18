@@ -222,9 +222,7 @@ export interface JsonRouteSpec<
   input?: S;
   /**
    * Validated on every response, in every environment. The parse is also what
-   * strips keys the schema does not declare, so it is never skipped; there used
-   * to be a `{ schema, validate: "dev-only" }` form, removed with its escape in
-   * docs/plans/20261005_2150-app-escapes.md.
+   * strips keys the schema does not declare, so it is never skipped.
    */
   output: z.ZodType<TOut>;
   handler: (ctx: ContextFor<A>, input: ParsedInput<S>) => TOut | Promise<TOut>;
@@ -274,8 +272,7 @@ export interface RouteDefinition<S = unknown, TOut = unknown> {
    * This is what makes the generated client typed. `defineRoute` knows `TIn`
    * and `TOut` from the Zod schemas, but a non-generic `RouteDefinition` would
    * throw both away at the export boundary, leaving the client with nothing to
-   * infer from and `client.call()` no better than the `get<T>()` assertion it
-   * replaces.
+   * infer from and `client.call()` typed by whatever its caller asserts.
    */
   readonly __types?: { schema: S; output: TOut };
 }
@@ -323,7 +320,7 @@ export function defineRoute(
   // (which the generator does at build time) rather than on its first request.
   if (output !== undefined && typeof (output as { safeParse?: unknown }).safeParse !== "function") {
     throw new Error(
-      "defineRoute: `output` must be a Zod schema. The `{ schema, validate }` form was removed — output is validated on every response.",
+      "defineRoute: `output` must be a Zod schema; it validates every response.",
     );
   }
 

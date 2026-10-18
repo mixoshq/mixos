@@ -49,10 +49,9 @@ export default function AppRegistryList({
   const [removing, setRemoving] = useState<RemoveTarget | null>(null);
   const lower = query.toLowerCase();
   /*
-    Search is the only filter left. The status tabs it sat beside — All /
-    Registered / Unregistered — partitioned the list by a state that no longer
-    exists: every app in this list is in the registry, and being in the registry
-    is the whole of being valid.
+    Search is the only filter. A status filter would have nothing to partition
+    by: every app in this list is in the registry, and being in the registry is
+    the whole of being valid.
   */
   const filtered = useMemo(
     () =>

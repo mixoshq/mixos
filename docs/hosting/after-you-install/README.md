@@ -300,9 +300,9 @@ checks again. When an extension in the build needs a newer MixOS than the one
 being built, the build stops:
 
 ```
-This build is MixOS 0.1.0, and an extension installed from a Registry needs a newer one:
-  apps/acme-board/.registry.json: release 1.2.0 requires MixOS 0.2.0 or newer.
-Upgrade MixOS, or install an older release of it that runs on 0.1.0. The build stops rather than leave it out of this deploy.
+This build is MixOS 0.4.2, and an extension installed from a Registry needs a newer one:
+  apps/acme-board/.registry.json: release 1.2.0 requires MixOS 0.5.0 or newer.
+Upgrade MixOS, or install an older release of it that runs on 0.4.2. The build stops rather than leave it out of this deploy.
 ```
 
 It stops because skipping the extension would drop it from the deploy without a
@@ -448,11 +448,8 @@ repository. The release step then:
 
 The audit log records each as `app.identity.changed`,
 `connector.identity.changed` or `theme.identity.changed`, with both identities.
-Every app the database knew before this check existed counts as local, and so
-does every connector that held credentials then. So the first release step after
-you reinstall one of those from the Registry switches it off once. Deleting an
-installed extension's `.registry.json` makes it local, which counts as a
-different extension too.
+Deleting an installed extension's `.registry.json` makes it local, which counts
+as a different extension too.
 
 ### Deleting an extension's data
 

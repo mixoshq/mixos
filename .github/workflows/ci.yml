@@ -4,13 +4,9 @@
 
 name: ci
 
-# The only build gate in this repo. Vercel owns building and deploying the app
-# itself (Preview per PR, Production on main), so CI here exists purely to fail
-# a PR before it merges — it produces no artifact and pushes nothing.
-#
-# Replaces the six workflows from the previous self-hosted deploy pipeline
-# (image build, image push, cluster deploy, deployment-manifest lint, and a
-# container smoke test) — none of which apply on Vercel.
+# The only build gate in this repo. Each host builds and deploys the app itself,
+# so CI here exists purely to fail a PR before it merges — it produces no
+# artifact and pushes nothing.
 
 on:
   pull_request:
@@ -60,11 +56,7 @@ jobs:
 
       - run: npm ci
 
-      # BLOCKING. It was `continue-on-error` while 10 pre-existing react-hooks
-      # errors were outstanding; those are fixed and the count is zero, so the
-      # exemption is gone.
-      #
-      # This matters more than a style gate. `eslint.config.mjs` carries the app
+      # BLOCKING, and more than a style gate. `eslint.config.mjs` carries the app
       # containment rules — no raw `fetch` or `process.env` in app code, no
       # import off the app import list — and the design-system rules, every one
       # an `error`. The registry generator enforces the containment rules again

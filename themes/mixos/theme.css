@@ -28,9 +28,9 @@
  */
 
 /* ── typefaces ─────────────────────────────────────────────────────────────
- * Self-hosted variable fonts, latin subset. The platform previously pulled
- * Roboto from fonts.googleapis.com on every page load; a theme may not
- * reference another host, so these ship with the theme instead.
+ * Self-hosted variable fonts, latin subset. A theme may not reference another
+ * host, so these ship with the theme rather than loading from a font service
+ * on every page load.
  */
 @font-face {
   font-family: "Plus Jakarta Sans";

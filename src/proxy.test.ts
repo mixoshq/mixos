@@ -94,5 +94,5 @@ test("the static exemptions are unchanged", () => {
   ]) {
     assert.equal(proxyRuns(path), false, path);
   }
-  assert.equal(proxyRuns("/themes/guide"), true, "/themes/guide is a signed-in page");
+  assert.equal(proxyRuns("/themes"), true, "only a theme's own files are exempt, not /themes itself");
 });

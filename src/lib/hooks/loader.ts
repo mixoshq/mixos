@@ -12,10 +12,10 @@ import type { HookRegistrar } from "./types";
 /**
  * Load every app's declared hook entrypoint, `apps/<slug>/hooks.ts`.
  *
- * WHY THIS EXISTS. Listeners used to register as an import side effect, which
- * meant a hook was live only on a request that happened to import the app's
- * module. Nothing imports app code on `/login` or in the main layout, so a
- * filter on the brand would never have run where the brand renders. A declared
+ * WHY THIS EXISTS. A listener registered as an import side effect would be live
+ * only on a request that happened to import the app's module. Nothing imports
+ * app code on `/login` or in the main layout, so a filter on the brand would
+ * never run where the brand renders. A declared
  * entrypoint, imported here before any dispatch that needs it, is what makes a
  * registration a fact about the install rather than about the request.
  *

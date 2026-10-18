@@ -4,13 +4,13 @@
 
 import { BRAND_HOOKS } from "../branding/types";
 import type { HookEmit, HookListen } from "../apps/types";
-import type { ActionHookMap, FilterHookMap } from "./types";
+import type { FilterHookMap } from "./types";
 
 /**
  * Hook names, and who may use which.
  *
- * A core hook (`init`, `user-display-name`, the brand hooks) has a bare name
- * and belongs to the platform. Every other hook belongs to one app and lives in
+ * A core hook (the brand hooks, all filters) has a bare name and belongs to
+ * the platform. Every other hook belongs to one app and lives in
  * its namespace, `<slug>:<name>`. A bare name written by an app means its own.
  *
  *   - Firing: an app fires its own hooks and core hooks, never another app's.
@@ -26,14 +26,8 @@ import type { ActionHookMap, FilterHookMap } from "./types";
 
 /** All core hook names. These are never prefixed. */
 export const CORE_HOOKS: ReadonlySet<string> = new Set<string>([
-  // Actions
-  "init",
-  "user-login",
-  "user-sync",
-  // Filters
-  "user-display-name",
   ...BRAND_HOOKS,
-] satisfies (keyof ActionHookMap | keyof FilterHookMap)[]);
+] satisfies (keyof FilterHookMap)[]);
 
 /**
  * The name a hook is stored under. A core name, or one that already names its

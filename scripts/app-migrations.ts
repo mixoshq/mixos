@@ -75,7 +75,7 @@ function ident(name: string): string {
 /**
  * Return the set of migration files already applied for the given app slug.
  * `_migrations` is created by the platform schema (supabase/migrations/
- * 0001_initial.sql). SQLSTATE `42P01` (undefined_table) therefore means the
+ * 0001_platform_schema.sql). SQLSTATE `42P01` (undefined_table) therefore means the
  * platform schema has not been pushed yet, which is a setup error worth
  * reporting rather than swallowing.
  */
@@ -382,7 +382,8 @@ function updatedAtTrigger(column: string): string {
 }
 
 /**
- * Put the platform's updated_at trigger (supabase/migrations/0009) on each
+ * Put the platform's updated_at trigger (`mixos_touch_updated_at`, in
+ * supabase/migrations/0001_platform_schema.sql) on each
  * column the app lists under `updatedAt`, and take it off any it no longer
  * lists. After the app's migrations, so the tables exist.
  *
@@ -635,9 +636,6 @@ export async function migrateAppSchemas(
         `now ${describeIdentity(r.identity)}) — inactive, with ${r.apiKeysRevoked} API key(s) revoked ` +
         `and ${r.mcpToolSwitchesReset} MCP tool switch(es) reset, until an admin activates it by typing its slug`,
     );
-  }
-  for (const { slug, roleOnly } of sync.marked) {
-    console.log(`  ${slug}: ${roleOnly} row(s) with a role and no recorded grant, now only roles`);
   }
   for (const { slug, roleOnly, lost } of sync.globalEnded) {
     console.log(

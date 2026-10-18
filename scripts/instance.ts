@@ -7,27 +7,21 @@
  *
  * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
  *
- * Until this file, a checkout was not an instance — it was THE instance. The
- * compose project name was the literal `"mixos"` in two scripts that each
- * carried a comment telling the other not to change it, `docker-compose.yml`
- * published `127.0.0.1:3000:3000`, and `supabase/config.toml` pinned
- * `project_id = "mixos"` with ports 54320–54329. Two checkouts on one machine
- * were therefore not two instances: they were the same compose project,
- * fighting over the same named volumes, and the same Supabase containers by
- * name. Booting the second silently recreated the first.
+ * An instance is a compose project, its named volumes and its Supabase
+ * containers, all named after it, and the ports it publishes. Two checkouts with
+ * one name are one instance: booting the second recreates the first.
  *
- * That matters because developing an extension and *installing* one are
- * different jobs that cannot share a tree — registration refuses a slug whose
- * directory already exists (`src/lib/repository/install.ts`). Verifying that an
- * extension installs the way a stranger would get it needs a second instance,
- * running at the same time as the one it was authored in.
+ * A second instance is what developing an extension and *installing* one need,
+ * because they are different jobs that cannot share a tree — registration
+ * refuses a slug whose directory already exists (`src/lib/repository/install.ts`).
+ * Verifying that an extension installs the way a stranger would get it needs a
+ * second instance, running at the same time as the one it was authored in.
  *
- * ── WHAT IT DOES NOT CHANGE ─────────────────────────────────────────────────
+ * ── THE DEFAULTS ────────────────────────────────────────────────────────────
  *
- * Every value here defaults to what it has always been. An existing checkout
- * with no `.env.instance` is the `mixos` project on port 3000 with Supabase on
- * 54321, exactly as before and exactly as the docs say. This adds a second
- * instance; it does not move the first.
+ * A checkout with no `.env.instance` is the `mixos` project on port 3000 with
+ * Supabase on 54321, as the docs say. A second instance takes its own name and
+ * ports; the first keeps the defaults.
  *
  * ── WHY THE PORTS ARE DERIVED FROM ONE BASE ─────────────────────────────────
  *
@@ -35,8 +29,8 @@
  * something has to compute them. Doing it here from a single base keeps the
  * per-instance file to three lines instead of ten, and keeps the offsets — the
  * part nobody will remember — in one place. The offsets below are the ones
- * today's committed config.toml already uses relative to 54320, so the default
- * base reproduces the current file exactly.
+ * config.toml's defaults use relative to 54320, so the default base reproduces
+ * them exactly.
  */
 
 import fs from "node:fs";
@@ -44,10 +38,10 @@ import path from "node:path";
 
 const ROOT = path.resolve(__dirname, "..");
 
-/** The name this checkout has always had, and still has when nothing says otherwise. */
+/** The instance name when nothing says otherwise. */
 export const DEFAULT_INSTANCE = "mixos";
 
-/** 54320. Supabase's own default, and the base today's config.toml is written against. */
+/** 54320. Supabase's own default, and the base config.toml's defaults are written against. */
 export const DEFAULT_SUPABASE_PORT_BASE = 54320;
 
 export const DEFAULT_APP_PORT = 3000;

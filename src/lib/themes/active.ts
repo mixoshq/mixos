@@ -60,11 +60,9 @@ export const getActiveTheme = cache(async (): Promise<ActiveTheme> => {
  * admin in as `actor`: the change is recorded as `theme.apply`, since it
  * changes the look of every page for everyone at once.
  *
- * Writes into `public.platform_settings`, which predates this feature and
- * already holds `scheduler_enabled`. The `theme_mode` key this used to write
- * alongside is gone: a theme has one palette, so the theme slug is the whole
- * appearance decision. Nothing seeds that key, so there is no row to migrate —
- * any left behind on an install is simply never read again.
+ * Writes into `public.platform_settings`, beside `scheduler_enabled`. The theme
+ * slug is the whole appearance decision: a theme has one palette, so there is
+ * no mode to store beside it.
  */
 export async function setActiveTheme(
   slug: string,

@@ -4,7 +4,6 @@
 
 export { HookSystem, hooks } from "./hook-system";
 export type {
-  ActionHookMap,
   FilterHookMap,
   ActionCallback,
   FilterCallback,

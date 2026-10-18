@@ -14,8 +14,8 @@ changes first. Upgrade by merging the newest release's tag. Don't merge
 
 ## When a new release is out
 
-From MixOS 0.2.0, each instance asks mixos.org once a day which releases of
-MixOS exist. When a newer one is out, the top of every admin page says so, such
+Each instance asks mixos.org once a day which releases of MixOS exist. When a
+newer one is out, the top of every admin page says so, such
 as: "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor release: it may
 need changes." The notice links to the release's page on mixos.org and to this
 guide, and its notes are folded under it. Nothing is applied for you. The check

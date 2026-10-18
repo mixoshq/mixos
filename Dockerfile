@@ -66,26 +66,20 @@ COPY . .
 # reads a NEXT_PUBLIC_ variable, so the build inlines no value from this stage.
 RUN npm run build
 
-# Fail the build loudly if the runtime file trees did not make it into the
-# standalone output. Two server code paths read the repo off disk at request
-# time and neither is visible to @vercel/nft's static analysis:
+# Fail the build loudly if the runtime file tree did not make it into the
+# standalone output. One server code path reads the repo off disk at request
+# time, and it is not visible to @vercel/nft's static analysis:
+# src/lib/apps/api-router.ts readdir's process.cwd()/apps/<slug>/api/** and
+# fs.access's a literal "route.ts" on every app API request. Bundling the route
+# module is not enough; the .ts source file itself must be present.
 #
-#   - src/lib/apps/api-router.ts readdir's process.cwd()/apps/<slug>/api/** and
-#     fs.access's a literal "route.ts" on every app API request. Bundling the
-#     route module is not enough; the .ts source file itself must be present.
-#   - src/components/apps/guide-tabs.tsx and
-#     src/components/connectors/connector-guide-tabs.tsx readFile
-#     process.cwd()/docs/apps/*.md and docs/connectors/*.md.
-#
-# next.config.ts pulls them in with outputFileTracingIncludes. Without this
-# check a misconfiguration produces a perfectly healthy-looking image where
-# /apps/guide 500s and nested app API routes 404 — symptoms that look like
-# application bugs, days later, on someone else's machine.
+# next.config.ts pulls it in with outputFileTracingIncludes. Without this check
+# a misconfiguration produces a perfectly healthy-looking image where nested app
+# API routes 404 — a symptom that looks like an application bug, days later, on
+# someone else's machine.
 RUN set -eu; \
     missing=""; \
     [ -d .next/standalone/apps ] || missing="$missing apps/"; \
-    [ -f .next/standalone/docs/apps/architecture.md ] || missing="$missing docs/apps/"; \
-    [ -f .next/standalone/docs/connectors/architecture.md ] || missing="$missing docs/connectors/"; \
     if [ -n "$missing" ]; then \
       echo "ERROR: missing from .next/standalone:$missing" >&2; \
       echo "  These are read from process.cwd() at runtime and must be listed in" >&2; \

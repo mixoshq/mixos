@@ -863,15 +863,6 @@ function pendingInstallFor(
     );
   }
   const discard = `Discard it with \`npm run register -- ${kind}/${slug} --discard\` and install it again.`;
-  if (read.state === "unreadable" && read.earlier) {
-    // Pending installs from before the record moved into the folder have no
-    // record there, so there is nothing to check them against.
-    throw new RegisterError(
-      `${where.rel}/ was installed by an earlier version of MixOS, before installs kept their record ` +
-        `in the extension's folder, so it can't be checked and won't be registered. ${discard}`,
-      "unregistrable",
-    );
-  }
   if (read.state !== "ok") {
     throw new RegisterError(
       `${where.rel}/ has no readable record of its install (${where.rel}.json` +

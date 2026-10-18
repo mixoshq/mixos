@@ -14,21 +14,18 @@
  *   2. a single-segment dynamic directory `[id]`,
  *   3. a catch-all `[...rest]`, which consumes every remaining segment.
  *
- * Three properties this deliberately holds, each of which was previously wrong:
+ * Three properties this deliberately holds:
  *
- * - **Directories only.** The listing used to include files, so a URL segment
- *   that happened to equal a filename (`helpers.ts`) matched as a "literal",
- *   the next read threw, and resolution returned null instead of trying the
+ * - **Directories only.** The listing reads directories, not files, so a URL
+ *   segment that happens to equal a filename (`helpers.ts`) never matches as a
+ *   "literal" and leaves resolution returning null instead of trying the
  *   dynamic sibling.
- * - **Deterministic.** The dynamic candidate used to be the first entry in raw
- *   `readdir` order, which is not sorted and not stable across filesystems. Two
- *   dynamic siblings resolved by accident. They are sorted now, and a
- *   single-segment match is preferred over a catch-all rather than whichever
- *   sorted first.
- * - **Catch-alls actually work.** Each URL segment used to consume exactly one
- *   directory level, so `[...path]` could never match more than one segment —
- *   while the registry hoisted it and the gateway's param extraction promised
- *   to join the rest. The feature was documented, generated, and unreachable.
+ * - **Deterministic.** Dynamic candidates are sorted, because raw `readdir`
+ *   order is neither sorted nor stable across filesystems, and a single-segment
+ *   match is preferred over a catch-all rather than whichever sorts first.
+ * - **Catch-alls consume the rest.** A `[...path]` directory matches every
+ *   remaining segment, which is what the registry hoists and the gateway's param
+ *   extraction joins, not one directory level per URL segment.
  *
  * Returns `null` when nothing matches or no `route.ts` sits at the leaf. Path
  * traversal is safe by construction: every emitted component came from a

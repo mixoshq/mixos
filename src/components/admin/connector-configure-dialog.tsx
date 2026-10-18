@@ -437,8 +437,7 @@ export default function ConnectorConfigureDialog({
    * action is what makes the wizard advance on its own: save the credentials
    * and the next render lands on authorizing.
    *
-   * There is no "closed" state. Exactly one step is always showing, so the
-   * tri-state this replaced has nothing left to represent.
+   * There is no "closed" state: exactly one step is always showing.
    */
   const [pinnedStep, setPinnedStep] = useState<string | undefined>(undefined);
   const [showDone, setShowDone] = useState(false);
@@ -642,9 +641,9 @@ export default function ConnectorConfigureDialog({
           action={(formData) =>
             startSave(async () => {
               const saved = await configureAction(formData);
-              // Only a save that actually stored something completes this step.
-              // Advancing regardless is how an empty submit used to skip
-              // straight past it.
+              // Only a save that actually stored something completes this step;
+              // advancing regardless would let an empty submit skip straight past
+              // it.
               if (saved) advanceFrom("credentials");
             })
           }
