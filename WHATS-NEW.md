@@ -9,6 +9,23 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-10-16
+
+- **`/mixos remix`.** Abstract a widget, a page or part of a page from one
+  installed app into another, as a component of its own. The agent walks you
+  through what is being abstracted, the data structure it needs to render, and
+  what each CTA does in your app — the same, something different, or nothing —
+  and you can remove any CTA or part. It writes a plan and stops; after you
+  approve, it builds it into your app, with a comment in every file it wrote
+  crediting the source app, its version, its authors and the day. Code is
+  adapted only where the source's license allows; otherwise it is rebuilt. See
+  `docs/apps/remix.md`.
+- **`remixedFrom` in `app.json`** records each remix: the source app, the exact
+  commit it was taken at, and what was kept, changed and removed. It is written
+  once and never edited: the pre-commit hook and Danger refuse a change to an
+  existing entry. Admin > Apps > an app's **Remixes** tab shows what it took and
+  who took from it.
+
 ## 2026-10-15
 
 - **MCP tools are off until an admin turns them on.** Each tool has a switch on

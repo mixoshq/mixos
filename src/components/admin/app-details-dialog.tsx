@@ -37,9 +37,24 @@ import {
   type MissingConnector,
 } from "@/lib/apps/connector-readiness";
 import AppAccessPanel from "./app-access-panel";
+import { appRegistry } from "@/generated/app-registry";
+import { remixIndex } from "@/generated/remix-index";
+import {
+  describeAnchor,
+  remixesFrom,
+  remixesInto,
+  type RemixIndexEntry,
+} from "@/lib/apps/remix";
 
 type DialogTab =
-  "overview" | "access" | "settings" | "wiring" | "connectors" | "mcp" | "database";
+  | "overview"
+  | "access"
+  | "settings"
+  | "wiring"
+  | "connectors"
+  | "mcp"
+  | "database"
+  | "remixes";
 
 /**
  * Every tab, on every app, always.
@@ -51,10 +66,10 @@ type DialogTab =
  * The empty states carry the same fact the missing tab would have — an app with
  * no database says so — without moving the tabs either side of it.
  *
- * Reach, MCP and Database sit together at the end because they are one
- * question asked three ways: what does this app reach out to (its connectors
- * and the hosts it may call), what does it expose outwards, and what does it
- * keep for itself.
+ * Reach, MCP and Database sit together because they are one question asked
+ * three ways: what does this app reach out to (its connectors and the hosts it
+ * may call), what does it expose outwards, and what does it keep for itself.
+ * Remixes comes last: where this app's code came from, and where it went.
  */
 const TABS: Array<{ key: DialogTab; label: string }> = [
   { key: "overview", label: "Overview" },
@@ -64,6 +79,7 @@ const TABS: Array<{ key: DialogTab; label: string }> = [
   { key: "connectors", label: "Reach" },
   { key: "mcp", label: "MCP" },
   { key: "database", label: "Database" },
+  { key: "remixes", label: "Remixes" },
 ];
 
 /** Separator between app slug and tool name in the client-facing MCP name.
@@ -717,6 +733,185 @@ export function McpToolsPanel({ app }: { app: AppManifest }) {
   );
 }
 
+/** An app's name in this build, or its slug for one that has left it. */
+function appName(slug: string): string {
+  return appRegistry.find((a) => a.slug === slug)?.name ?? slug;
+}
+
+const DECISION_LABEL = { same: "Kept the same", different: "Changed", remove: "Removed" } as const;
+
+/** `change-status` as a person says it. */
+function spoken(id: string): string {
+  return id.replace(/-/g, " ");
+}
+
+/** The commit a remix was taken at, as a short SHA, or why there is none. */
+function Moment({ entry }: { entry: RemixIndexEntry["entry"] }) {
+  const { source } = entry;
+  return (
+    <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      {source.commitSha ? (
+        <span>
+          at <Mono>{source.commitSha.slice(0, 7)}</Mono>
+        </span>
+      ) : (
+        <span>never committed</span>
+      )}
+      {source.registry && (
+        <span>
+          version {source.registry.version} from{" "}
+          {source.registry.origin.replace(/^https?:\/\//, "")}
+        </span>
+      )}
+      {source.modified && <StatusPill tone="warning">Modified locally</StatusPill>}
+      <span>on {entry.remixedAt}</span>
+    </span>
+  );
+}
+
+/** What was kept, changed and removed, grouped, for actions or hidden rules. */
+function Decisions({
+  label,
+  decisions,
+}: {
+  label: string;
+  decisions: Record<string, "same" | "different" | "remove"> | undefined;
+}) {
+  const ids = Object.keys(decisions ?? {});
+  if (ids.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="text-foreground">
+        {(["same", "different", "remove"] as const)
+          .map((d) => {
+            const these = ids.filter((id) => decisions![id] === d);
+            return these.length === 0
+              ? null
+              : `${DECISION_LABEL[d]}: ${these.map(spoken).join(", ")}`;
+          })
+          .filter(Boolean)
+          .join(" · ")}
+      </dd>
+    </div>
+  );
+}
+
+/** One remix, from either side. `from` names the source; otherwise the app that took it. */
+function RemixCard({ remix, from }: { remix: RemixIndexEntry; from: boolean }) {
+  const { entry } = remix;
+  const [pointedAt, ...drewOn] = entry.source.anchors;
+  return (
+    <li className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="text-sm font-semibold text-foreground">
+          {from ? `From ${appName(entry.source.app)}` : `Into ${appName(remix.app)}`}
+          <span className="font-normal text-muted-foreground">
+            {" "}
+            — the {describeAnchor(pointedAt)}
+          </span>
+        </p>
+        <Moment entry={entry} />
+      </div>
+      <p className="mt-1 text-sm text-foreground">{entry.summary}</p>
+      <dl className="mt-2 space-y-1 text-xs">
+        {drewOn.length > 0 && (
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <dt className="text-muted-foreground">Drew on</dt>
+            <dd className="flex flex-wrap gap-1">
+              {drewOn.map((a) => (
+                <Mono key={a}>{describeAnchor(a)}</Mono>
+              ))}
+            </dd>
+          </div>
+        )}
+        <Decisions label="Actions" decisions={entry.actions} />
+        <Decisions label="Hidden rules" decisions={entry.hiddenRules} />
+        {(entry.partsRemoved?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <dt className="text-muted-foreground">Parts removed</dt>
+            <dd className="text-foreground">
+              {entry.partsRemoved!.map(spoken).join(", ")}
+            </dd>
+          </div>
+        )}
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <dt className="text-muted-foreground">Keywords</dt>
+          <dd className="flex flex-wrap gap-1">
+            {remix.keywords.map((k) => (
+              <span
+                key={k}
+                className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground"
+              >
+                {k}
+              </span>
+            ))}
+          </dd>
+        </div>
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <dt className="text-muted-foreground">Code</dt>
+          <dd className="text-foreground">
+            {entry.license.mode === "adapted"
+              ? `Adapted under ${entry.license.spdx}`
+              : `Rebuilt from the remix card${entry.license.spdx ? ` (${entry.license.spdx})` : " (no license declared)"}`}
+          </dd>
+        </div>
+        {from && (
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <dt className="text-muted-foreground">Landed in</dt>
+            <dd className="flex flex-wrap gap-1">
+              {entry.landedIn.map((f) => (
+                <Mono key={f}>{f}</Mono>
+              ))}
+            </dd>
+          </div>
+        )}
+      </dl>
+    </li>
+  );
+}
+
+/**
+ * Where this app's code came from and where it went: each remix as the moment
+ * it was taken — the commit, what was kept, changed and removed — read from the
+ * `remixedFrom` entries in this build (src/generated/remix-index.ts). The
+ * remixed code has usually moved on since; the record hasn't, by design. See
+ * docs/apps/remix.md.
+ */
+export function AppRemixPanel({ app }: { app: AppManifest }) {
+  const from = remixesFrom(remixIndex, app.slug);
+  const into = remixesInto(remixIndex, app.slug);
+  return (
+    <div className="space-y-8">
+      <section>
+        <SectionHeading>Remixed from</SectionHeading>
+        {from.length === 0 ? (
+          <Empty>This app hasn&apos;t remixed anything from another app.</Empty>
+        ) : (
+          <ul className="mt-3 space-y-3">
+            {from.map((r) => (
+              <RemixCard key={`${r.entry.source.app} ${r.entry.source.anchors[0]} ${r.entry.remixedAt}`} remix={r} from />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section>
+        <SectionHeading>Remixed into</SectionHeading>
+        {into.length === 0 ? (
+          <Empty>No app in this build has remixed anything from this one.</Empty>
+        ) : (
+          <ul className="mt-3 space-y-3">
+            {into.map((r) => (
+              <RemixCard key={`${r.app} ${r.entry.source.anchors[0]} ${r.entry.remixedAt}`} remix={r} from={false} />
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export default function AppDetailsDialog({
   app,
   missingConnectors,
@@ -1108,6 +1303,8 @@ export default function AppDetailsDialog({
       )}
 
       {tab === "settings" && <AppSettingsPanel app={app} />}
+
+      {tab === "remixes" && <AppRemixPanel app={app} />}
     </Dialog>
   );
 }
