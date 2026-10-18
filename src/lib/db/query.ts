@@ -8,13 +8,12 @@ import type { Sql } from "postgres";
  * The platform's query builder — `db.from("users").select("id").eq(...)` — and
  * the engine under every app's `context.db`.
  *
- * WHY IT EXISTS. This used to be supabase-js talking to PostgREST over HTTPS,
- * which made every deployment a Supabase deployment (or one that ran and
- * secured its own PostgREST). The codebase only ever used a small part of that
- * client, so this module speaks that part — same method names, same result
- * shape, same JSON types — directly over the postgres.js pool that analytics and
- * the scheduler already used. One `DATABASE_URL` is now the whole database
- * story, against any Postgres 13 or later: Supabase, Neon, RDS, a container.
+ * WHY IT EXISTS. It speaks the small part of supabase-js the codebase uses —
+ * same method names, same result shape, same JSON types — directly over the
+ * postgres.js pool, rather than over HTTPS to PostgREST, which would make every
+ * deployment a Supabase deployment (or one that ran and secured its own
+ * PostgREST). One `DATABASE_URL` is the whole database story, against any
+ * Postgres 13 or later: Supabase, Neon, RDS, a container.
  *
  * WHAT "SAME" MEANS, because apps were written and tested against PostgREST:
  *   - Rows are serialized by Postgres with `to_json`, as PostgREST serializes
@@ -50,17 +49,17 @@ import type { Sql } from "postgres";
  */
 
 /**
- * A row, as callers see it. `any`, matching the untyped PostgREST client this
- * replaced: callers cast rows to their own types at the read boundary, and a
- * stricter type here would turn each of those casts into a compile error
+ * A row, as callers see it. `any`, as in the untyped PostgREST client whose
+ * shape this keeps: callers cast rows to their own types at the read boundary,
+ * and a stricter type here would turn each of those casts into a compile error
  * without making any of them safer.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Row = any;
 
 /**
- * A failed query. Shaped like PostgREST's error so existing checks keep
- * working: `code` is the SQLSTATE for a database error (`23505` for a unique
+ * A failed query, shaped like PostgREST's error so checks written against
+ * either work: `code` is the SQLSTATE for a database error (`23505` for a unique
  * violation), `PGRST116` for a `.single()` that did not get one row, and
  * `MIXOS_QUERY` for a query this builder refused to build.
  *

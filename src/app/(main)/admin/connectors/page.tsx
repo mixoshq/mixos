@@ -122,12 +122,11 @@ export default async function ConnectorsAdminPage({
 
   const statuses = await Promise.all(
     connectorRegistry.map(async (c) => {
-      // Read once, derive everything from it. This used to ask
-      // isConnectorConfigured(), which answers "does a row exist" — so a
-      // three-legged connector whose admin saved a client ID and never pressed
-      // Connect rendered as Configured while the runtime refused every call.
-      // registryConfigState() applies the rule HttpConnector.configured uses,
-      // which is what keeps the two from disagreeing again.
+      // Read once, derive everything from it. registryConfigState() applies the
+      // rule HttpConnector.configured uses, so this page and the runtime agree.
+      // "A row exists" is not that rule: a three-legged connector whose admin
+      // saved a client ID and never pressed Connect would read as Configured
+      // while the runtime refused every call.
       const credentials = await getDecryptedConfig(c.name);
       const state = registryConfigState(c, credentials);
       // The grant this page reports on. A user-scoped connector's tenant row

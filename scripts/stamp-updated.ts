@@ -11,9 +11,9 @@
  *
  * `lastUpdated` means "this app/connector changed in this commit". It is written
  * by `.githooks/pre-commit` (and by `/mixos deploy`, which calls the same script so
- * the stamp lands in the diff you review). It replaced `/mix-publish`, which made
- * the date mean "the author ran a command" — accurate, but only when someone
- * remembered to run it, which is the failure mode this removes.
+ * the stamp lands in the diff you review). A command an author had to run would
+ * make the date mean "the author ran a command", which is accurate only when
+ * someone remembers to; a hook doesn't forget.
  *
  * Six rules keep the date honest:
  *
@@ -153,10 +153,8 @@ function incoming(): { what: "merge" | "cherry-pick"; changed: string[][] } | nu
 /**
  * Resolve which manifest a directory owns.
  *
- * One candidate per kind now. This used to mirror a precedence rule in
- * `loadAppManifest()` — `app.ts` over `app.json` — which existed so that
- * stamping did not write a value nothing consumes. With `app.json` the sole
- * manifest there is nothing to prefer.
+ * One candidate per kind: `app.json` is the only app manifest, so there is
+ * nothing to prefer.
  *
  * `widgets.ts` is deliberately not considered: it carries config fields, not
  * the `lastUpdated` this script stamps.

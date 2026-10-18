@@ -20,17 +20,15 @@ import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
 /**
  * The theme picker. There is deliberately no light/dark control beside it.
  *
- * This used to be two axes — pick a theme, then pick light/dark/system — and a
- * theme could answer the colour question twice. Now a theme IS the answer: one
- * palette, and a dark look ships as its own selectable theme. What was a mode
- * toggle is now just another tile in this grid.
+ * A theme IS the answer to the colour question: one palette, and a dark look
+ * ships as its own selectable theme, so it is another tile in this grid. A
+ * light/dark/system control beside it would let the theme and the mode answer
+ * that question twice.
  *
- * There is no staged selection. It used to take two steps — click a tile to
- * select, then press one "Apply to everyone" button below the grid — which
- * meant the page could sit in a state where the ringed tile was not the live
- * theme, and nothing on the tile itself said which was which. Now each tile
- * owns its own Apply, and the confirmation that used to be the second step is
- * the modal.
+ * There is no staged selection. Each tile owns its own Apply, confirmed in a
+ * modal. Selecting a tile and then applying it from a button below the grid
+ * would let the page sit in a state where the ringed tile is not the live
+ * theme, with nothing on the tile itself saying which is which.
  *
  * The tile shell is the connector tile's, deliberately: both take `CARD_SHELL`
  * from ui/card.tsx and the same `p-5` inset, so they cannot drift. An admin
@@ -164,7 +162,7 @@ export default function ThemeRegistryList({
                     // temporarily unavailable, so this is a status, and rendering
                     // it as a greyed control would invite clicks that can never
                     // do anything. It is also the ONLY place the tile says it is
-                    // live — the badge this replaced said the same thing twice.
+                    // live, so a badge would say the same thing twice.
                     <p className="flex shrink-0 items-center gap-1.5 text-sm font-medium text-success">
                       <Check className="h-4 w-4" aria-hidden /> Activated
                     </p>

@@ -109,10 +109,9 @@ function resolveSsl(): PgOpts["ssl"] {
       return "verify-full";
     case undefined:
     case "":
-      // Default to TLS. Unset used to mean "plaintext", which was the right
-      // default when the database was a sidecar container and the wrong one now
-      // that it is a hosted service reached over the public internet. A local
-      // Postgres that speaks plaintext must now say PGSSLMODE=disable.
+      // Default to TLS: the database is usually a hosted service reached over
+      // the public internet. A local Postgres that speaks plaintext says
+      // PGSSLMODE=disable.
       return "require";
     default:
       throw new Error(

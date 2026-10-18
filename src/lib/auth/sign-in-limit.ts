@@ -13,8 +13,8 @@
  *   - Auth.js's own `POST /api/auth/callback/credentials`, which any client
  *     can call with a CSRF token from `/api/auth/csrf`.
  *
- * The limit used to live in the server action alone, so the second route
- * checked passwords with no limit at all. Charged here, it also covers
+ * Charged in the server action alone, the limit would leave the second route
+ * checking passwords with no limit at all. Charged here, it also covers
  * whatever reaches `authorize()` next.
  *
  * THE KEY is the client IP by the rule every limiter shares (`getClientIp`):

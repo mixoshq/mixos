@@ -11,11 +11,10 @@ Hooks are scoped by the app's folder name using a `:` separator. Core platform h
 
 ## Cross-app hooks: two-sided consent
 
-Listening to another app's hook used to need nothing at all — any app could
-`addAction("other-app:thing", fn)` with the full prefixed name and observe
-another app's events. [App Services](app-services.md) required two-sided consent
-for a *pull*; a *push* had none. It does now, and the shape is deliberately the
-same:
+Without consent, any app could `addAction("other-app:thing", fn)` with the full
+prefixed name and observe another app's events. So a *push* needs two-sided
+consent, as a *pull* through [App Services](app-services.md) does, and the shape
+is deliberately the same:
 
 ```jsonc
 // apps/emitter/app.json — the emitter names its consumers

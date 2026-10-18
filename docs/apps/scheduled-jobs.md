@@ -277,10 +277,9 @@ tick after the migrations are applied.
 ## What drives the tick
 
 The tick is always an outside HTTP caller doing `GET /api/cron` with
-`Authorization: Bearer $CRON_SECRET` — never a timer inside the app process. It
-used to be an in-process `setInterval` started from `instrumentation.ts`; that
-cannot work on Vercel, where a function instance is frozen between requests and
-torn down when idle, so a timer set 5 minutes out would rarely fire.
+`Authorization: Bearer $CRON_SECRET` — never a timer inside the app process. A
+timer cannot work on Vercel, where a function instance is frozen between requests
+and torn down when idle, so a timer set 5 minutes out would rarely fire.
 
 Who that caller is depends on how you are running MixOS. **This is the part to get
 straight before you conclude a job "isn't running":**

@@ -133,9 +133,8 @@ export default function AppTile({
   }
 
   /*
-    A connector that isn't ready is a warning here, not a gate. It used to block
-    registration; there is no registration to block. What it still blocks is
-    GRANTING the app to someone, which the shared grant action enforces for the
+    A connector that isn't ready is a warning here, not a gate. What it blocks
+    is GRANTING the app to someone, which the shared grant action enforces for the
     Access tab and /admin/users alike, so this strip says what is wrong and
     where the consequence lands, and stops there.
   */

@@ -20,10 +20,9 @@ export default async function AppsPage() {
     getUserGrantedSlugs(userId),
   ]);
 
-  // The grant is the only gate now. Registration used to be a second one —
-  // every app had to be switched on by an admin before anyone could be given
-  // it — but an app in the registry passed build-time validation, which is what
-  // that switch was standing in for.
+  // What the user holds is what they can turn on: their grants and the global
+  // apps, less any app that is switched off. An app in the registry passed
+  // build-time validation, so nothing else stands between it and a grant.
   const granted = new Set(grantedSlugs);
   const availableApps = appRegistry.filter((a) => granted.has(a.slug));
 
