@@ -6,11 +6,10 @@ import { cache } from "react";
 import { createServiceClient } from "@/lib/db/server";
 
 /**
- * Which MCP tools an admin has switched on. Table `app_mcp_tool_settings`,
- * migration 0014.
+ * Which MCP tools an admin has switched on: table `app_mcp_tool_settings`.
  *
- * A tool with no row is DISABLED. That is the whole default (new installs,
- * upgrades and renamed tools all start off), so every reader here treats
+ * A tool with no row is DISABLED. That is the whole default (a new install, a
+ * new tool and a renamed tool all start off), so every reader here treats
  * "missing" and "false" identically, and only an explicit `true` lets a tool
  * through.
  *

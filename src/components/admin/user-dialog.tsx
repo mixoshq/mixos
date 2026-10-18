@@ -504,8 +504,8 @@ export function AppAccessPanel({
           const currentRole = user.assignedRoleBySlug[app.slug] ?? "";
           /*
             A role kept from when the app was global: a role, not access
-            (migration 0013). Granting turns it into a grant with that role,
-            while the app still declares it.
+            (src/lib/apps/grant-rule.ts). Granting turns it into a grant with
+            that role, while the app still declares it.
           */
           const roleOnly =
             !isGlobal && !granted && Object.hasOwn(user.roleOnlyBySlug, app.slug);
