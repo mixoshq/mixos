@@ -25,8 +25,8 @@
  * audit row, which is right for a database made for one job and wrong for any
  * other. So `activate` refuses a database that isn't on this machine. In a
  * checkout, use `npm run register -- app/<slug> --smoke`, or Admin > Apps.
- * Each grant is audited, as the CLI, as every grant path records who granted
- * it (src/lib/apps/grant-rule.ts).
+ * Each grant is written as one (`role_only` false, src/lib/apps/grant-rule.ts)
+ * and audited as the CLI's, as every grant path records who granted it.
  */
 
 import fs from "node:fs";

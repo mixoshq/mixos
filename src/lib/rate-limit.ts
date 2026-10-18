@@ -35,7 +35,7 @@
 
 import { sql } from "@/lib/db/client";
 
-/** Matches the `scope` check constraint in supabase/migrations/0002_rate_buckets.sql. */
+/** Matches the `scope` check constraint on `rate_buckets` in supabase/migrations/0001_platform_schema.sql. */
 export type RateLimitScope = "ip" | "user_app" | "route" | "api_key";
 
 export interface RateLimitResult {

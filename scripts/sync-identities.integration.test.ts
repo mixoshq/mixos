@@ -40,9 +40,9 @@ const run = randomBytes(3).toString("hex");
 const database = `mixos_identities_${run}`;
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "mixos-identities-"));
 
-/** Tenant credentials saved before 0011. */
+/** Tenant credentials saved. */
 const CRM = `crm-${run}`;
-/** A user's OAuth grant saved before 0011, and switched off by an admin. */
+/** A user's OAuth grant saved, and the connector switched off by an admin. */
 const MAIL = `mail-${run}`;
 /** No credentials. */
 const MAPS = `maps-${run}`;
@@ -117,13 +117,8 @@ describe("a connector or a theme under a name a different one had", { skip }, ()
     u.pathname = `/${database}`;
     sql = postgres(u.toString(), { max: 1, onnotice: () => {} });
 
-    // The schema as it was before 0011, with credentials already saved.
-    const before0011 = path.join(scratch, "migrations-0010");
-    fs.mkdirSync(before0011);
-    for (const file of fs.readdirSync(MIGRATIONS).filter((f) => /^00(0\d|10)_.*\.sql$/.test(f))) {
-      fs.copyFileSync(path.join(MIGRATIONS, file), path.join(before0011, file));
-    }
-    await quietly(() => migratePlatform(sql, before0011));
+    // The schema, with credentials already saved.
+    await quietly(() => migratePlatform(sql, MIGRATIONS));
     const [user] = await sql`
       insert into public.users (email, display_name, is_admin)
       values (${`admin-${run}@mos.test`}, 'Admin', true)
@@ -136,7 +131,6 @@ describe("a connector or a theme under a name a different one had", { skip }, ()
       values (${user.id}, ${MAIL}, 'SEALED')
     `;
     await sql`insert into public.platform_settings (key, value) values ('theme', ${DUSK})`;
-    await quietly(() => migratePlatform(sql, MIGRATIONS));
 
     // The platform's own pool, for Enable, reads these on its first query.
     process.env.DATABASE_URL = u.toString();
@@ -159,15 +153,8 @@ describe("a connector or a theme under a name a different one had", { skip }, ()
     fs.rmSync(scratch, { recursive: true, force: true });
   });
 
-  test("the migration records each connector that held credentials as local, and nothing else", async () => {
-    assert.deepEqual(await settings("connector.identity."), {
-      [`connector.identity.${CRM}`]: "local",
-      [`connector.identity.${MAIL}`]: "local",
-    });
-    assert.deepEqual(await settings("theme.identity."), {});
-  });
-
-  test("the first release step records the rest, and changes nothing else", async () => {
+  test("the first release step records every connector and theme, and changes nothing else", async () => {
+    assert.deepEqual(await settings("connector.identity."), {});
     const { value } = await release([installOf("connector", MAPS), installOf("theme", DAWN)]);
     // Every connector with credentials is in this build, so none is marked missing.
     assert.deepEqual(value, { connectors: [], themes: [], missing: [], returned: [] });

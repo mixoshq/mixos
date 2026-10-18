@@ -262,7 +262,7 @@ erDiagram
         uuid user_id PK "FK -> users.id"
         text app_slug PK "FK -> apps.slug"
         text role "nullable"
-        bool role_only "a role only; null until decided"
+        bool role_only "a role only, not a grant"
     }
 ```
 
@@ -273,8 +273,7 @@ hasAppGrant(userId, appSlug):
   if the app's manifest says `global`      --> true
   SELECT app_slug FROM user_app_grants g
   WHERE user_id = $1 AND app_slug = $2
-    AND (g.role_only IS FALSE
-         OR (g.role_only IS NULL AND <someone is recorded granting it>))
+    AND g.role_only IS FALSE
 
 Result: boolean --> 403 if false
 ```
@@ -308,29 +307,22 @@ carry, whose grants would otherwise come back with it; its audit row says
 
 **A role is never access.** A global app is held by everyone, and its users
 can still be given a role, stored on a `user_app_grants` row. `role_only` says
-what a row is (migration 0013): false for a grant, true for a role and nothing
-else, and null until that is decided. Every row from before 0013 is undecided,
-and so is any row an older build writes after a host rolls back to it. An
-undecided row is a grant only when someone is recorded granting it: an admin
-in `granted_by`, or the CLI in its own `user.grant.add` audit row (no admin,
-`via` cli or ci) from the row's `granted_at` on. So a grant revoked long ago
-and a role since don't add up to access, and nor does an admin's audit row
-alone: every admin grant sets `granted_by`. Every check reads grants through
-that one rule ([`src/lib/apps/grant-rule.ts`](../src/lib/apps/grant-rule.ts)),
-so it holds before any release step runs, and every release step decides the
-undecided rows of the apps its build carries, global or not, in one pass over
-the table, auditing the roles it finds as `app.grants.marked`. Every grant
-path records who granted: the admin actions in `granted_by`, the CLI's smoke
-grant and the pull-request check in their audit rows. A grant stays a grant
-whether or not the app is global, so a build that sees an app as global
-demotes nobody's, and a role set on a global app writes a role-only row only
-for someone with no grant. Each run also records whether each app is global,
-and audits an app that stopped being global as `app.global.ended`, with how
-many people lost it. Admin > Apps marks an app **Needs grants**, and says why,
-only when someone lost it: people decided to have only a role on an app that
-isn't global, or, when an app stops being global, someone who had it, by an
-install or a role, and has no grant. The mark stays until an admin grants the
-app to someone. The Access tab lists the people with a role apart from the
+what a row is: false for a grant, true for a role and nothing else. The column
+is NOT NULL with no default, so every path that writes a row says which it is,
+and one that leaves it out is refused by the database rather than writing a
+row that reads as a grant. Every check reads grants through that one rule
+([`src/lib/apps/grant-rule.ts`](../src/lib/apps/grant-rule.ts)). Every grant
+path writes `role_only` false and records who granted: the admin actions in
+`granted_by`, the CLI's smoke grant and the pull-request check in their
+`user.grant.add` audit rows. A grant stays a grant whether or not the app is
+global, so a build that sees an app as global demotes nobody's, and a role set
+on a global app writes a role-only row only for someone with no grant. Each
+release step records whether each app is global, and audits an app that
+stopped being global as `app.global.ended`, with how many people lost it.
+Admin > Apps marks an app **Needs grants** only when someone lost it: when an
+app stops being global, someone who had it, by an install or a role, has no
+grant. The mark stays until an admin grants the app to someone, or the app is
+global again. The Access tab lists the people with a role apart from the
 people with access, and granting turns a role-only row into a grant, recording
 who granted it.
 
@@ -373,9 +365,6 @@ both. Its grants, settings and data stay. Activating it needs its slug typed,
 which the server checks (`setAppActive()` in `src/lib/apps/access.ts`); only
 that clears the flag. An app that returns as a different extension gets this
 flag alone, since it asks more of the admin than "back with different code".
-Migration 0011 recorded every app the database already knew as `local`, so a
-local app reinstalled from the Registry is caught at the first release step
-that carries it.
 
 **The app's own migrations have to be applied, too.** The app gate's second
 reason, asked only of an active app: when the build carries a migration of the
@@ -501,7 +490,7 @@ the build before it can fail a deploy.
 The one trigger apps asked for, an `updated_at` that keeps itself current,
 belongs to the platform: an app lists the column under `updatedAt` in its
 manifest, and the release step installs `public.mixos_touch_updated_at()` on it
-(`supabase/migrations/0009_app_schemas.sql`). That function sets the one column
+(`supabase/migrations/0001_platform_schema.sql`). That function sets the one column
 to `now()` and reads nothing else.
 
 ### 3.3 Client-server boundary enforcement
@@ -962,7 +951,7 @@ cannot carry a quote, a dot or another schema out of it.
 ### What RLS does and does not do here
 
 RLS is **enabled on every table, with zero policies** (see the header of
-[`supabase/migrations/0001_initial.sql`](../supabase/migrations/0001_initial.sql)).
+[`supabase/migrations/0001_platform_schema.sql`](../supabase/migrations/0001_platform_schema.sql)).
 That combination is deny-all for the `anon` and `authenticated` roles while the
 owning role — the one MixOS connects as — passes straight through.
 
@@ -1011,13 +1000,13 @@ What it is **not**:
   makes the platform query the wrong row will be served, because the owning role
   is permitted to read every row.
 
-**A table added in a later migration is not covered by the sweep at the bottom
-of `0001_initial.sql`**, which ran once, when `0001` was applied. A migration
-that *adds* a table enables RLS on it directly, as `0002`, `0003`, `0004` and
-`0007` do. The sweep the release step and `npm run migrate:apps` run over
-`public` afterwards is a backstop, not the rule: `npm run db:migrate` and the
-Supabase CLI apply the platform schema without it. Adding a *policy* is what
-would open a table up; there are none, and there should stay none.
+**A table added by a later migration is not covered by the sweep at the bottom
+of `0001_platform_schema.sql`**, which runs once, when that file is applied. A
+migration that *adds* a table enables RLS on it directly. The sweep the release
+step and `npm run migrate:apps` run over `public` afterwards is a backstop, not
+the rule: `npm run db:migrate` and the Supabase CLI apply the platform schema
+without it. Adding a *policy* is what would open a table up; there are none,
+and there should stay none.
 
 ### Where authorization actually happens
 
@@ -1761,8 +1750,7 @@ switch, keeping its credentials, and marks it `connector.replaced.<name>`.
 Enable then needs the connector's name typed, which the server checks
 (`setConnectorEnabled()` in `src/lib/connectors/switch-admin.ts`), and clears
 the mark. A connector an admin had already disabled stays off from when they
-did. Migration 0011 recorded every connector that held credentials then as
-`local`. A theme's identity is recorded too, as `theme.identity.<slug>`, and a
+did. A theme's identity is recorded too, as `theme.identity.<slug>`, and a
 change is only audited: a theme runs no code and holds no credentials, keys or
 data, and the build checks everything it can change.
 
@@ -2206,7 +2194,7 @@ Currently recorded: `connector.configure`, `connector.connect`,
 `app.apikey.create`, `app.apikey.revoke`, `app.mcp.tool.enable`,
 `app.mcp.tool.disable`, `app.activate`,
 `app.deactivate`, `app.missing`, `app.returned`, `app.identity.changed`,
-`app.grants.marked`, `app.global.ended`,
+`app.global.ended`,
 `connector.missing`, `connector.returned`, `connector.identity.changed`,
 `theme.identity.changed`, `app.job.run`, `app.job.enable`, `app.job.disable`,
 `scheduler.start`, `scheduler.stop`, `theme.apply`, `user.create`,

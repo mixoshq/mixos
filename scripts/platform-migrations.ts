@@ -23,6 +23,12 @@
 // directory where two files share a number (scripts/platform-migration-files.ts),
 // and it is read before the first query, so such a run applies nothing.
 //
+// ── One history ──────────────────────────────────────────────────────────────
+// For the same reason, a ledger row with a file's number but another name means
+// the database's history is not this checkout's: the file would be skipped as
+// applied without ever having run. The runner refuses such a database before it
+// applies anything, and names each row and file that disagree.
+//
 // ── Safe to run twice at once ────────────────────────────────────────────────
 // Each file is applied in its own transaction, together with its ledger row,
 // under a transaction-scoped advisory lock, and the ledger is re-read once the
@@ -82,6 +88,26 @@ export async function migratePlatform(
       )
     `;
   });
+
+  // A row without a name says nothing about which file it was, so only a named
+  // row can disagree.
+  const recorded = await sql<{ version: string; name: string | null }[]>`
+    select version, name from supabase_migrations.schema_migrations
+  `;
+  const recordedName = new Map(recorded.map((r) => [r.version, r.name]));
+  const disagreeing = migrations.filter((m) => {
+    const name = recordedName.get(m.version);
+    return name != null && name !== m.name;
+  });
+  if (disagreeing.length > 0) {
+    const rows = disagreeing.map(
+      (m) => `${m.version} is recorded as "${recordedName.get(m.version)}", but this checkout's ${m.version} is ${m.file}`,
+    );
+    throw new Error(
+      `This database's migration history is not this checkout's: ${rows.join("; ")}. ` +
+        `Nothing was applied. Bring the ledger (supabase_migrations.schema_migrations) in line with supabase/migrations before running this build.`,
+    );
+  }
 
   const applied: string[] = [];
   let alreadyApplied = 0;

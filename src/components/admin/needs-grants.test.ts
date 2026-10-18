@@ -4,8 +4,8 @@
 
 /**
  * The Needs grants mark, rendered on the server: an app's tile and the Access
- * tab's banner, worded for why people lost the app, and nothing when nobody
- * did.
+ * tab's banner, saying people lost the app when it stopped being global, and
+ * nothing when nobody did.
  */
 
 import { test } from "node:test";
@@ -96,30 +96,21 @@ test("a tile says the app needs grants because it stopped being global", () => {
   );
 });
 
-test("a tile says the app needs grants because roles from before were only roles", () => {
-  const words = tile({ since, reason: "roles-decided" });
-  assert.match(words, /Needs grants/);
-  assert.match(
-    words,
-    /Some people had this app through a role and no grant\. A role isn't access, so they don't have it now; their roles were kept\. Grant it from its Access tab, under Details\./,
-  );
-  assert.doesNotMatch(words, /global/);
-});
-
 test("a tile nobody lost says nothing about grants", () => {
   const words = tile(null);
   assert.doesNotMatch(words, /Needs grants|granted it have it|through a role/);
 });
 
-test("the Access tab's banner, for each reason", () => {
-  const banner = (needsGrants: NeedsGrants, roleOnly: number) =>
-    text(renderToStaticMarkup(createElement(NeedsGrantsBanner, { appName: "Team", needsGrants, roleOnly })));
+test("the Access tab's banner, for one person and for several", () => {
+  const banner = (roleOnly: number) =>
+    text(renderToStaticMarkup(createElement(NeedsGrantsBanner, { appName: "Team", roleOnly })));
   assert.equal(
-    banner({ since, reason: "global-ended" }, 2),
-    "Team isn't global any more, so only the people granted it have it. 2 people have a role from before, listed below, and no access.",
+    banner(2),
+    "Team isn't global any more, so only the people granted it have it. 2 people have a role from when it was global, listed below, and no access.",
   );
   assert.equal(
-    banner({ since, reason: "roles-decided" }, 1),
-    "Some people had Team through a role and no grant. A role isn't access, so they don't have it now. One person has a role from before, listed below, and no access.",
+    banner(1),
+    "Team isn't global any more, so only the people granted it have it. One person has a role from when it was global, listed below, and no access.",
   );
+  assert.equal(banner(0), "Team isn't global any more, so only the people granted it have it.");
 });

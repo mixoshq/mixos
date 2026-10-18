@@ -448,11 +448,8 @@ repository. The release step then:
 
 The audit log records each as `app.identity.changed`,
 `connector.identity.changed` or `theme.identity.changed`, with both identities.
-Every app the database knew before this check existed counts as local, and so
-does every connector that held credentials then. So the first release step after
-you reinstall one of those from the Registry switches it off once. Deleting an
-installed extension's `.registry.json` makes it local, which counts as a
-different extension too.
+Deleting an installed extension's `.registry.json` makes it local, which counts
+as a different extension too.
 
 ### Deleting an extension's data
 

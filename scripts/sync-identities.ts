@@ -32,10 +32,8 @@
 // turning it "off" would be putting every user on another theme.
 //
 // A name with nothing recorded is recorded without comparing: an extension new
-// to this database. Migration 0011 recorded `local` for each connector that
-// held credentials then, so one reinstalled from a Registry is caught once.
-// A connector or theme that leaves the build keeps its record, so one that
-// comes back as a different extension is caught as well.
+// to this database. A connector or theme that leaves the build keeps its
+// record, so one that comes back as a different extension is caught as well.
 //
 // CONNECTORS THIS BUILD LACKS. A connector this database holds credentials
 // or connections for (connector_configs, user_connector_oauth), and that this

@@ -11,8 +11,7 @@
  *
  * What it proves:
  *
- *   - migration 0014 applies to a fresh database and to one at 0012, leaving
- *     every tool off and everything else as it was;
+ *   - the platform schema makes the switches' table, with RLS on and no policy;
  *   - both actions refuse a signed-in user who isn't an admin, and no session,
  *     and write nothing;
  *   - every tool starts off: `tools/list` is empty, the consent screen offers
@@ -63,7 +62,6 @@ const skip = serverUrl ? false : "set MIXOS_TEST_DATABASE_URL to run against a r
 
 const run = randomBytes(3).toString("hex");
 const database = `mixos_tools_${run}`;
-const upgraded = `mixos_tools_up_${run}`;
 
 /** Two tools, granted to Alice. */
 const LEDGER = `ledger-${run}`;
@@ -326,7 +324,6 @@ describe("per-tool MCP switches", { skip }, () => {
       await sql?.end();
       if (admin) {
         await admin.unsafe(`drop database if exists ${database} with (force)`);
-        await admin.unsafe(`drop database if exists ${upgraded} with (force)`);
         await admin.end();
       }
       if (work) fs.rmSync(work, { recursive: true, force: true });
@@ -335,61 +332,13 @@ describe("per-tool MCP switches", { skip }, () => {
 
   // ── the migration ────────────────────────────────────────────────────────
 
-  test("0014 makes the table, RLS on and no policy, and brings the schema to 14", async () => {
+  test("the platform schema makes the table, with RLS on and no policy", async () => {
     const [state] = await sql`
       select
-        (select value from public.platform_settings where key = 'platform_schema_version') as version,
         (select relrowsecurity from pg_class where oid = 'public.app_mcp_tool_settings'::regclass) as rls,
-        (select count(*)::int from pg_policies where tablename = 'app_mcp_tool_settings') as policies,
-        (select count(*)::int from supabase_migrations.schema_migrations where version = '0014') as ledger
+        (select count(*)::int from pg_policies where tablename = 'app_mcp_tool_settings') as policies
     `;
-    assert.deepEqual({ ...state }, { version: "14", rls: true, policies: 0, ledger: 1 });
-  });
-
-  test("on a database at 0012 it adds the table and leaves every tool off and everything else as it was", async () => {
-    await admin.unsafe(`create database ${upgraded}`);
-    const u = new URL(serverUrl!);
-    u.pathname = `/${upgraded}`;
-    const db = postgres(u.toString(), { max: 1, onnotice: () => {} });
-    try {
-      const { migratePlatform } = await import("../../../scripts/platform-migrations");
-      const through12 = path.join(work, "migrations-0012");
-      fs.mkdirSync(through12);
-      for (const file of fs.readdirSync(MIGRATIONS).filter((f) => /^(000\d|001[0-2])_.*\.sql$/.test(f))) {
-        fs.copyFileSync(path.join(MIGRATIONS, file), path.join(through12, file));
-      }
-      await migratePlatform(db, through12, () => {});
-      const [{ value: before }] = await db`select value from public.platform_settings where key = 'platform_schema_version'`;
-      assert.equal(before, "12");
-      await db`insert into public.apps (slug, name, is_active) values ('ledger', 'Ledger', true)`;
-      const [user] = await db`insert into public.users (email, display_name) values ('a@example.com', 'A') returning id`;
-      const [granter] = await db`
-        insert into public.users (email, display_name, is_admin) values ('admin@example.com', 'Admin', true) returning id
-      `;
-      // As an admin's grant was written before 0013: with who granted it.
-      await db`insert into public.user_app_grants (user_id, app_slug, granted_by) values (${user.id}, 'ledger', ${granter.id})`;
-
-      await migratePlatform(db, MIGRATIONS, () => {});
-      const [after] = await db`
-        select
-          (select value from public.platform_settings where key = 'platform_schema_version') as version,
-          (select count(*)::int from public.app_mcp_tool_settings) as switches,
-          (select count(*)::int from public.user_app_grants
-            where app_slug = 'ledger' and role_only is null and granted_by is not null) as grants,
-          (select is_active from public.apps where slug = 'ledger') as active
-      `;
-      // The grant is still there, undecided until a release step decides it,
-      // and a grant by the rule every check applies meanwhile.
-      assert.deepEqual({ ...after }, { version: "14", switches: 0, grants: 1, active: true });
-      // Applied once: a second run changes nothing.
-      await migratePlatform(db, MIGRATIONS, () => {});
-      const [{ n }] = await db`
-        select count(*)::int as n from supabase_migrations.schema_migrations where version in ('0013', '0014')
-      `;
-      assert.equal(n, 2);
-    } finally {
-      await db.end();
-    }
+    assert.deepEqual({ ...state }, { rls: true, policies: 0 });
   });
 
   // ── an admin first ───────────────────────────────────────────────────────

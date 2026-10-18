@@ -15,9 +15,7 @@
 //
 // Transaction-scoped, so the commit or rollback that ends a step releases it,
 // and it survives a transaction pooler. A session-scoped lock would not (see
-// 0007's notes on _platform_locks). The key's text dates from when only the
-// platform migrations took it, and stays, so a release step from an older image
-// still excludes one from a newer image.
+// the notes on `_platform_locks` in the platform schema).
 //
 // Library only.
 
