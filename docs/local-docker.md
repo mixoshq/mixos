@@ -61,7 +61,6 @@ the setup, and everything else follows from it.
   npm run dev:docker ──┬─ supabase ──►│  supabase_db_mixos      Postgres 17    │
   (scripts/docker-up)  │    start     │  supabase_kong_mixos    gateway :54321 │
                        │              │  supabase_rest_mixos    PostgREST      │
-                       │              │  supabase_auth_mixos    GoTrue (idle)  │
                        │              │  supabase_pg_meta_mixos schema API     │
                        │              │  supabase_studio_mixos  Studio :54323  │
                        │              └────────────────────────────────────────┘
@@ -241,7 +240,7 @@ nothing, `supabase/config.toml` turns off.
 | Postgres | **on** | Both data paths end here. |
 | PostgREST + Kong | **on, unused** | MixOS no longer calls the Supabase API. They are part of the CLI's core stack, and Studio goes through them. |
 | Studio + pg-meta | **on** | Browsing local data at :54323. Pure convenience; harmless to disable. |
-| GoTrue (`[auth]`) | **on, unused** | MixOS has no Supabase Auth — NextAuth owns authentication. It ran because the boot script read `SERVICE_ROLE_KEY` from `supabase status -o json`, which the CLI emits only while auth is enabled. Nothing reads that key now; see the note in `supabase/config.toml` before turning it off. |
+| GoTrue (`[auth]`) | **off** | MixOS has no Supabase Auth — NextAuth owns authentication. The boot script reads only the API, database and Studio addresses from `supabase status -o json`, which the CLI reports with it off. |
 | Storage | **off** | No `supabase.storage` / `.storage.from(` anywhere in the codebase. |
 | Realtime | **off** | No `.channel(` subscriptions anywhere; the UI polls. |
 | Edge Functions (`[edge_runtime]`) | **off** | There is no `supabase/functions/` directory. All server code is Next.js route handlers. |
@@ -347,18 +346,12 @@ under standalone output by name, and the runner has no full `node_modules` to
 run it from anyway). No hot reload — rebuild to see a change. Use it to
 reproduce something that only misbehaves in a production build.
 
-**Two directories have to be inside the production image, and tracing won't
-find them on its own.** Next's file tracing is static analysis of `import` /
-`require` / `fs` usage; it cannot see a path assembled at runtime from
-`process.cwd()`. Two code paths do exactly that:
-
-- [src/lib/apps/api-router.ts](../src/lib/apps/api-router.ts) walks
-  `process.cwd()/apps/<slug>/api/**` and checks for a literal `route.ts` on
-  every app API request — so **`apps/` must ship with its `.ts` sources**.
-- [src/components/apps/guide-tabs.tsx](../src/components/apps/guide-tabs.tsx)
-  and
-  [src/components/connectors/connector-guide-tabs.tsx](../src/components/connectors/connector-guide-tabs.tsx)
-  read `process.cwd()/docs/apps/*.md` and `docs/connectors/*.md`.
+**One directory has to be inside the production image, and tracing won't find
+it on its own.** Next's file tracing is static analysis of `import` / `require`
+/ `fs` usage; it cannot see a path assembled at runtime from `process.cwd()`.
+[src/lib/apps/api-router.ts](../src/lib/apps/api-router.ts) does exactly that:
+it walks `process.cwd()/apps/<slug>/api/**` and checks for a literal `route.ts`
+on every app API request — so **`apps/` must ship with its `.ts` sources**.
 
 `next.config.ts` handles this with `outputFileTracingIncludes`, deliberately
 rather than a `COPY` in the Dockerfile: the same traces drive the Vercel build,
@@ -450,10 +443,6 @@ router catches the failed `readdir` and returns **404, not 500**, and an app's
 *index* route short-circuits without touching disk — so test a **nested** path
 like `/api/apps/<slug>/something` or a broken image will look fine. Verify with
 `docker compose -p mixos exec app ls apps`.
-
-**In-app guide pages 500 in the prod image.** Same root cause on the `docs/`
-side, but this one is an unhandled `readFile` ENOENT, so it surfaces as a real
-500. Verify with `docker compose -p mixos exec app ls docs/apps`.
 
 **The page loads but is unstyled, and the console is full of 403s on
 `/_next/...`.** You opened `http://127.0.0.1:3000`. Next's dev server rejects

@@ -32,9 +32,9 @@ import { enabledToolsBySlug } from "./tool-settings";
  * imported: while the app's own migrations are behind this build its tools
  * are not listed, and a call to one refuses until the release step has run.
  *
- * `hasAppGrant` — not `hasAppAccess` — is deliberate. "Installed" is a
- * dashboard-layout preference; "granted" is the authorization fact, and it is
- * what the App Services broker already uses for exactly this question.
+ * `hasAppGrant` is the check. "Granted" is the authorization fact, where
+ * "installed" (`user_apps`) is a dashboard-layout preference, and it is what
+ * the App Services broker uses for exactly this question.
  */
 
 /** Separator between app slug and tool name in the client-facing tool name. */

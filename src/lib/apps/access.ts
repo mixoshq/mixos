@@ -454,22 +454,6 @@ export async function filterHeldApps(
   return active.filter((slug) => isGlobalApp(slug) || granted.has(slug));
 }
 
-export async function hasAppAccess(
-  userId: string,
-  appSlug: string,
-): Promise<boolean> {
-  if (!(await isAppActive(appSlug))) return false;
-  const supabase = createServiceClient();
-  const { data } = await supabase
-    .from("user_apps")
-    .select("app_slug")
-    .eq("user_id", userId)
-    .eq("app_slug", appSlug)
-    .maybeSingle();
-
-  return !!data;
-}
-
 export async function getUserById(userId: string) {
   const supabase = createServiceClient();
   const { data } = await supabase

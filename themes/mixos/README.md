@@ -25,7 +25,7 @@ thing to sit underneath anything.
 
 ## Worth knowing
 
-[MixOS Dark](https://github.com/italianst4/mixos/tree/main/themes/mixos-dark) is
+[MixOS Dark](https://github.com/mixoshq/mixos/tree/main/themes/mixos-dark) is
 its counterpart — the same palette with the roles inverted, not a filter applied
 to this one. A workspace picks one; there is no automatic switching, which is a
 deliberate platform decision rather than an omission here.

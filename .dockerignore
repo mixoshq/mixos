@@ -3,10 +3,9 @@
 # Be careful editing this. next.config.ts's outputFileTracingIncludes globs are
 # evaluated against the build context, so anything excluded here can never reach
 # the standalone output no matter what that config says. In particular apps/,
-# connectors/, docs/apps/, docs/connectors/, public/, scripts/, src/ and
-# supabase/migrations/ are all needed by the build or at runtime and must stay
-# in. The Dockerfile has a post-build assertion that catches the apps/ and docs/
-# cases specifically.
+# connectors/, public/, scripts/, src/ and supabase/migrations/ are all needed
+# by the build or at runtime and must stay in. The Dockerfile has a post-build
+# assertion that catches the apps/ case specifically.
 
 # Host dependency tree. darwin/arm64 binaries (@next/swc, esbuild) cannot run in
 # the container, and shipping ~500MB into the context slows every build.
@@ -36,12 +35,11 @@ supabase/.branches
 # Incremental TypeScript state; stale entries can skip type errors.
 *.tsbuildinfo
 
-# Editor / OS / agent scaffolding and CI config — none of it is read by the
-# build, and docs/plans is design documentation, unlike docs/apps and
-# docs/connectors which the guide pages serve at runtime.
+# Editor / OS / agent scaffolding, CI config and the documentation — none of it
+# is read by the build or at runtime.
 .DS_Store
 **/.DS_Store
-docs/plans
+docs
 .claude
 .vscode
 .github

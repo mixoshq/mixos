@@ -2,9 +2,9 @@
 
 ## Hook Scoping
 
-Hooks are scoped by the app's folder name using a `:` separator. Core platform hooks use hyphens and are never prefixed (e.g., `user-login`). App hooks are automatically prefixed with the folder name of your app.
+Hooks are scoped by the app's folder name using a `:` separator. Core platform hooks use hyphens and are never prefixed (e.g., `brand-name`). App hooks are automatically prefixed with the folder name of your app.
 
-- **Core hooks** (`init`, `user-login`, etc.) — no prefix, accessible to all apps
+- **Core hooks** (the [brand hooks](#brand-hooks), such as `brand-name`) — no prefix, accessible to all apps
 - **App hooks** — auto-prefixed with your app folder name. `doAction("ready")` in `apps/_example` fires as `_example:ready`
 - **Listening across apps requires two-sided consent.** An emitter declares who may listen; a listener declares what it listens for. Both halves are build-enforced and default-deny.
 - **Firing** — apps can only fire their own custom hooks and core hooks. Another app's hook, named in full, is refused: the build skips an app that fires one by a literal name, and the registrar throws on one built at runtime
@@ -39,8 +39,8 @@ at runtime is checked when it is registered: the registrar throws.
 a declaration, just a broad one.
 
 This applies to **cross-app** hooks only. An app firing and listening to its own
-hooks, and any app listening to a **core** hook (`init`, `user-login`), needs no
-declaration.
+hooks needs no declaration, and a core hook needs none here: the brand hooks are
+declared under `branding` instead (see [Brand hooks](#brand-hooks)).
 
 ## The hook entrypoint: `hooks.ts`
 
@@ -92,12 +92,6 @@ methods:
 import type { HookRegistrar } from "@/lib/hooks";
 
 export default function register(hooks: HookRegistrar) {
-  // A core filter keeps its bare name (no prefix). This one is declared but
-  // not applied yet, so it has no effect: see Available Core Hooks below.
-  hooks.addFilter("user-display-name", async (name, user) => {
-    return `${name} (VIP)`;
-  });
-
   // Listen to your own hook (stored as "my-app:ready")
   hooks.addAction("ready", async () => {
     console.log("[my-app] ready");
@@ -124,19 +118,11 @@ have been applied.
 
 ## Available Core Hooks
 
-### Actions
+The core hooks are the brand hooks, and all three are filters. Every action is
+an app's own.
 
 | Name | Description | Args |
 | --- | --- | --- |
-| `init` | Declared, but **nothing currently fires it.** | (none) |
-| `user-login` | Declared, but **nothing currently fires it.** Its trigger was the SSO sign-in callback, which no longer exists. | `{ id, email }` |
-| `user-sync` | Declared, but **nothing currently fires it.** Its trigger was the SSO profile sync, which no longer exists. | `{ id, email, name }` |
-
-### Filters
-
-| Name | Description | Args |
-| --- | --- | --- |
-| `user-display-name` | Declared, but **nothing currently applies it**, so a filter on it has no effect. | `displayName: string, user: { id, email }` |
 | `brand-name` | The product name in the menu bar, on the sign-in page, in the tab title and as the installed PWA's name. **Bounded**, see [Brand hooks](#brand-hooks). | `name: string` |
 | `menu-bar-logo` | The mark beside the name in the menu bar. **Bounded.** | `logo: { src, width, height } \| null` |
 | `login-logo` | The mark above the name on the sign-in page. **Bounded.** | `logo: { src, width, height } \| null` |

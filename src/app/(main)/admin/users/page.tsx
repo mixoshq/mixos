@@ -38,13 +38,9 @@ export default async function UsersAdminPage() {
       `,
       supabase.from("user_apps").select("user_id, app_slug"),
       /*
-        THE CONNECTOR GATE LIVES HERE NOW.
-
-        It used to sit on registration: an app whose declared connectors had no
-        credentials could not be switched on, so nobody could be given it. With
-        registration gone, granting is where that consequence has to land —
-        every connector is tenant-scoped, so an app missing one does not work
-        for the person you just gave it to, whoever they are.
+        THE CONNECTOR GATE. Granting is where an app's unready connectors land:
+        an app whose tenant connector isn't ready doesn't work for the person
+        you give it to, whoever they are.
       */
       // For display: the grant itself checks again, and refuses.
       Promise.all(

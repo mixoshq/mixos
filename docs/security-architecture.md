@@ -115,11 +115,9 @@ up checking the wrong table.
 | 14   | Connector-call and wall-clock budget | 429 / 504 | `runRoute`                    |
 | 15   | Output matches the declared schema | 500  | `runRoute`                           |
 
-**Authorization is `hasAppGrant`, not `hasAppAccess`.** The former reads
-`user_app_grants` and short-circuits true for a `global` app; the latter reads
-`user_apps`, which records that a user *installed* the app on their dashboard — a
-layout preference. The gateway used the second until this was corrected, which
-403'd every user of every global app.
+**Authorization is `hasAppGrant`.** It reads `user_app_grants` and
+short-circuits true for a `global` app. `user_apps` records that a user
+*installed* the app on their dashboard — a layout preference, never access.
 
 **Tier resolution is strongest-first**: `session` > `signed-in` > `password` >
 `key` > `public`, intersected with what the mount can serve. A route declaring
@@ -381,10 +379,8 @@ tell counts as not behind. An app that is also switched off answers as a
 switched-off app does, so the 503 never gives a switched-off app away.
 
 **Do not confuse this with `user_apps`.** That table records which apps a user has
-*installed* on their dashboard — a layout preference, not a permission. The
-function that reads it, `hasAppAccess()`, has **no callers** and should not
-acquire any; the gateway used it once, which 403'd every user of every global
-app.
+*installed* on their dashboard — a layout preference, not a permission, and
+nothing reads it to decide access.
 
 ### 3.2 Database table isolation
 
@@ -1427,7 +1423,7 @@ with none (§3.1).
 
 Consent is a **ceiling**, the live grant is a **floor**. A refresh copies
 `granted_apps` forward verbatim, so consent can never silently widen. `hasAppGrant`
-(not `hasAppAccess`) is used deliberately — it is the authorization fact, and it
+is used deliberately — it is the authorization fact, and it
 matches what the App Services broker already enforces for the same question.
 Revoking a grant therefore leaves the user's MCP tokens alone: the app's tools
 leave every token on its next call, and the user's other apps are untouched.
@@ -2538,9 +2534,7 @@ pending. Either way, in the checkout:
    or `.gitattributes`, so the content hash, which records the execute bit and
    covers the package as published, can't be recomputed from disk. A folder
    with a file changed, added or removed since install, or a link in it, is
-   refused, so what runs is what was verified and checked. A pending install
-   from before installs kept a record has none, and is refused: discard it and
-   install it again.
+   refused, so what runs is what was verified and checked.
 2. The release's `requiresMixOS`, from the record, holds for the version this
    checkout builds.
 3. The sidecar records the registration (the checkout lock's token, the pid and
@@ -2739,7 +2733,7 @@ release from the same repository is not one. Reinstalling an extension from
 another repository is, and so is deleting a record to make an installed
 extension local.
 
-Extensions installed before installs kept a record are local. Reinstalling one
+An extension copied in by hand, with no record, is local. Reinstalling it
 from the Registry gives it a record, and the next release step on each
 instance treats it as a different extension, once.
 

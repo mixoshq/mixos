@@ -204,16 +204,11 @@ max_indexes = 5
 # [storage.vector.buckets.documents-openai]
 
 [auth]
-# Unused: NextAuth owns authentication end to end (src/lib/auth/), and MixOS no
-# longer talks to the Supabase API at all — every query goes over DATABASE_URL
-# (src/lib/db/query.ts).
-#
-# It was kept on because CLI 2.115.0 only emits SERVICE_ROLE_KEY from
-# `supabase status -o json` while auth is enabled, and scripts/docker-up.ts used
-# to read that key. Nothing reads it now. Turning this off saves a container
-# (gotrue); check that `supabase status -o json` still reports API_URL, DB_URL
-# and STUDIO_URL with it off, since docker-up.ts reads those, before you do.
-enabled = true
+# Off: NextAuth owns authentication end to end (src/lib/auth/), and MixOS doesn't
+# call the Supabase API — every query goes over DATABASE_URL (src/lib/db/query.ts).
+# With it off, `supabase status -o json` still reports API_URL, DB_URL and
+# STUDIO_URL, the three scripts/docker-up.ts reads.
+enabled = false
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
 site_url = "http://127.0.0.1:3000"
@@ -233,9 +228,9 @@ enable_refresh_token_rotation = true
 # Requires enable_refresh_token_rotation = true.
 refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
-# Closed deliberately. gotrue runs only so the CLI hands us a service_role key
-# (see above); no MixOS code path should ever create a user in auth.users, and a
-# reachable open signup endpoint on 54321 is surface for nothing.
+# Closed deliberately, should [auth] ever run: no MixOS code path creates a user
+# in auth.users, and an open signup endpoint on the API port is surface for
+# nothing.
 enable_signup = false
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false

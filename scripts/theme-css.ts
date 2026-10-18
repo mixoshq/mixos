@@ -67,16 +67,11 @@ export class ThemeError extends Error {
 /**
  * The one block a theme may declare tokens in. Anything else is an error.
  *
- * A theme has exactly one palette. The mode axis this file used to carry — a
- * second `:root[data-mode="dark"]` block, verified separately — was collapsed
- * into the theme axis, because "which colours am I looking at" already had an
- * answer and two answers could disagree. A dark look is a different theme.
+ * A theme has exactly one palette: "which colours am I looking at" has one
+ * answer, the theme an admin selected. A dark look is a different theme.
  * See docs/plans/20260826_2041-single-palette-themes.md.
  */
 const TOKEN_SELECTOR = ":root";
-
-/** Recognised only to give its author a message that names the replacement. */
-const LEGACY_DARK_SELECTOR = ':root[data-mode="dark"]';
 
 const ALLOWED_AT_RULES = new Set([
   "font-face",
@@ -500,18 +495,6 @@ export function compileTheme(args: {
     const selectors = rule.selectors.map(norm);
 
     for (const sel of selectors) {
-      // Caught explicitly. Without this the selector would fall through to
-      // assertSurfaceSelector and the author would be told their theme "reaches
-      // a class that is not an allowlisted surface", which is true and useless.
-      if (sel === LEGACY_DARK_SELECTOR) {
-        throw new ThemeError(
-          `themes/${slug}/theme.css: "${sel}" is no longer a token block. A theme now declares ` +
-            `exactly ONE palette, in :root — the light/dark mode axis was collapsed into the theme ` +
-            `axis. Move this block into its own theme (themes/${slug}-dark/theme.css, as its :root) ` +
-            `and an admin selects it at /admin/themes. See docs/themes/architecture.md.`,
-        );
-      }
-
       if (sel === TOKEN_SELECTOR) {
         if (selectors.length > 1) {
           throw new ThemeError(
