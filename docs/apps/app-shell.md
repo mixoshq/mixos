@@ -230,14 +230,9 @@ Expose the current user's capability through a context that **defaults to `false
 const CanEditContext = createContext<boolean>(false); // fail-closed
 
 export function CanEditProvider({ children }: { children: ReactNode }) {
-  const [canEdit, setCanEdit] = useState(false);
-  useEffect(() => {
-    let active = true;
-    createAppClient(SLUG).get<{ canEdit?: boolean }>("/me")
-      .then((r) => { if (active) setCanEdit(!!r?.canEdit); })
-      .catch(() => { if (active) setCanEdit(false); });
-    return () => { active = false; };
-  }, []);
+  const { state } = useAppQuery<{ canEdit?: boolean }>(SLUG, "GET /me");
+  // False while loading and after any error: true only once the server says so.
+  const canEdit = state.data?.canEdit === true;
   return <CanEditContext.Provider value={canEdit}>{children}</CanEditContext.Provider>;
 }
 ```

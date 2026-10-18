@@ -289,11 +289,10 @@ export async function clearAppPasswordAction(slug: string): Promise<void> {
 }
 
 /**
- * Whether anything in the app asks for the unlock password. Read through the
- * shared surface walk, which takes the hoisted route contracts first: this used
- * to read only the manifest's legacy `pageVisibility` / `apiVisibility` maps, so
- * an app declaring `password` in `defineRoute` — the recommended place — was
- * refused a password it needed, and its password routes failed closed for good.
+ * Whether anything in the app asks for the unlock password: a page whose
+ * `pageVisibility` accepts `password`, or a route whose `defineRoute` does.
+ * Read through the shared surface walk (./access-surfaces.ts), so the action
+ * and the Access tab agree.
  */
 function appHasPasswordVisibility(
   manifest: import("@/lib/apps/types").AppManifest,

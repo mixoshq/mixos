@@ -234,7 +234,7 @@ function scanPages(dir: string, slug: string, prefix: string, out: string[]) {
  * How many pages an app serves.
  *
  * Same rule `scanPages` uses to build the loader map, and the same terminal
- * files `validateVisibilityMap` resolves a `pageVisibility` key against: a page
+ * files `validatePageVisibility` resolves a `pageVisibility` key against: a page
  * IS a directory holding `Main.tsx`/`Main.ts`, at any depth. Counting entries in
  * `pages/` instead would count the folders on the way down, and counting the
  * `pageVisibility` keys would count only the pages whose auth was overridden —
@@ -313,29 +313,29 @@ function readAppJson(appDir: string): Record<string, unknown> | null {
 }
 
 /**
- * Validate a `pageVisibility` or `apiVisibility` map from app.json.
+ * Validate the `pageVisibility` map from app.json.
  *
  * The Zod schema has already checked the *values* — that each is a non-empty,
  * duplicate-free array of known auths, and that no page claims `key`. What a
  * schema cannot check is the filesystem, so that is all this does: each key
- * must be POSIX-shaped and must resolve to a real terminal file on disk.
+ * must be POSIX-shaped and must resolve to a real `Main.tsx` (or `Main.ts`)
+ * under `pages/`.
  *
  * Any failure throws `FatalManifestError`, which aborts the generator. Being
- * lenient here is not an option — a typo'd path silently leaves a surface at
- * the default (fine) while the developer believes they published it (not fine),
+ * lenient here is not an option — a typo'd path silently leaves a page at the
+ * default (fine) while the developer believes they published it (not fine),
  * and the inverse typo publishes something nobody reviewed.
  *
- * `subdir` is "pages" or "api"; `terminalFiles` are the candidate leaf files
- * (`Main.tsx`/`Main.ts` for pages, `route.ts`/`route.tsx` for APIs).
+ * An API route declares its auth beside its handler, in `defineRoute`, so
+ * there is no map for routes.
  */
-function validateVisibilityMap(
+function validatePageVisibility(
   raw: unknown,
   slug: string,
   appDir: string,
-  field: "pageVisibility" | "apiVisibility",
-  subdir: "pages" | "api",
-  terminalFiles: readonly string[],
 ): Record<string, RouteAuth[]> | undefined {
+  const field = "pageVisibility";
+  const terminalFiles = ["Main.tsx", "Main.ts"];
   if (raw === undefined || raw === null) return undefined;
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new FatalManifestError(
@@ -352,15 +352,9 @@ function validateVisibilityMap(
         `apps/${slug}/app.json: ${field}["${key}"] — keys must be POSIX paths without leading or trailing slashes (use "" for the root)`,
       );
     }
-    // The API root's declaration key is "" but its file is api/index/route.ts —
-    // `path.join(appDir, "api", "", f)` would look for api/route.ts, which no
-    // dispatcher serves, so declaring the root route's auth was impossible.
-    const onDiskKey = subdir === "api" && key === "" ? "index" : key;
-    const candidates = terminalFiles.map((f) =>
-      path.join(appDir, subdir, onDiskKey, f),
-    );
+    const candidates = terminalFiles.map((f) => path.join(appDir, "pages", key, f));
     if (!candidates.some((p) => fs.existsSync(p))) {
-      const expected = `${subdir}/${onDiskKey ? onDiskKey + "/" : ""}${terminalFiles[0]}`;
+      const expected = `pages/${key ? key + "/" : ""}${terminalFiles[0]}`;
       throw new FatalManifestError(
         `apps/${slug}/app.json: ${field}["${key}"] does not match any file on disk. Expected ${expected}.`,
       );
@@ -459,8 +453,8 @@ function findRouteFiles(appDir: string, slug: string): RouteFile[] {
         );
       }
 
-      // The root route is `api/index/route.ts`, and its declaration key is the
-      // empty string, matching `apiVisibility`.
+      // The root route is `api/index/route.ts`, and its path is the empty
+      // string, as the root page's `pageVisibility` key is.
       const routePath =
         segments.join("/") === "index" ? "" : segments.join("/");
 
@@ -567,16 +561,14 @@ async function scanApiRoutes(appDir: string, slug: string): Promise<RouteContrac
 /**
  * Cross-check hoisted route contracts against the rest of the manifest.
  *
- * Two things a route can declare that only make sense relative to its app:
- * a role the app never defined (which would gate the route on something no user
- * can ever hold — a silent 403 forever), and an auth set that contradicts what
- * `apiVisibility` says about the same path.
+ * A route can declare a role the app never defined, which would gate the route
+ * on something no user can ever hold — a silent 403 forever — and roles beside
+ * an auth that carries none.
  */
 function validateRouteContracts(
   contracts: RouteContract[],
   slug: string,
   declaredRoles: { key: string }[],
-  apiVisibility: Record<string, RouteAuth[]> | undefined,
 ): void {
   for (const contract of contracts) {
     for (const m of contract.methods) {
@@ -612,31 +604,6 @@ function validateRouteContracts(
           );
         }
       }
-
-      const declared = apiVisibility?.[contract.path];
-      if (declared) {
-        const a = [...m.auth].sort().join(",");
-        const b = [...declared].sort().join(",");
-        if (a !== b) {
-          throw new FatalManifestError(
-            `apps/${slug}: apiVisibility["${contract.path}"] says [${b}] but ${m.method} in that route declares [${a}]. ` +
-              `Two declarations of the same fact will drift — keep the one on the route and delete the manifest entry, ` +
-              `or make them agree.`,
-          );
-        }
-      }
-    }
-  }
-
-  // A manifest entry naming a path no route serves is a typo that silently
-  // publishes nothing (or, worse, reads as published in review).
-  const known = new Set(contracts.map((c) => c.path));
-  for (const key of Object.keys(apiVisibility ?? {})) {
-    if (!known.has(key)) {
-      throw new FatalManifestError(
-        `apps/${slug}/app.json: apiVisibility["${key}"] does not match any route on disk. ` +
-          `Expected api/${key ? key + "/" : "index/"}route.ts exporting a defineRoute({...}).`,
-      );
     }
   }
 }
@@ -1415,7 +1382,6 @@ interface AppText {
    * and each widget carries only the config `app.json` declares.
    */
   manifest: AppManifest;
-  apiVisibility: Record<string, RouteAuth[]> | undefined;
   /** Every `route.ts`, found and not imported. */
   routeFiles: RouteFile[];
   /** Whether a `widgets.ts` will add config fields once the code is loaded. */
@@ -1501,22 +1467,7 @@ async function readAppText(
 
   // Schema validates the visibility *values*; this additionally verifies
   // each key resolves to a real file on disk.
-  const pageVisibility = validateVisibilityMap(
-    r.pageVisibility,
-    slug,
-    appDir,
-    "pageVisibility",
-    "pages",
-    ["Main.tsx", "Main.ts"],
-  );
-  const apiVisibility = validateVisibilityMap(
-    r.apiVisibility,
-    slug,
-    appDir,
-    "apiVisibility",
-    "api",
-    ["route.ts"],
-  );
+  const pageVisibility = validatePageVisibility(r.pageVisibility, slug, appDir);
 
   // Schema validates the schedule shape; this verifies each job name
   // resolves to a real handler file on disk.
@@ -1593,7 +1544,6 @@ async function readAppText(
       ...(r.optionalConnectors ?? []),
     ]),
     ...(pageVisibility ? { pageVisibility } : {}),
-    ...(apiVisibility ? { apiVisibility } : {}),
   };
 
   const unscanned = unscannedEntryPoints(appDir, manifest);
@@ -1616,7 +1566,6 @@ async function readAppText(
     dir: appDir,
     raw,
     manifest,
-    apiVisibility,
     routeFiles,
     hasWidgetsTs: fs.existsSync(path.join(appDir, "widgets.ts")),
   };
@@ -1649,7 +1598,7 @@ async function loadAppCode(app: AppText): Promise<AppManifest> {
   // Import every api/**/route.ts and hoist its declared contract. This is
   // also where a bare `export async function GET` fails the build.
   const routes = await importRouteContracts(slug, app.routeFiles);
-  validateRouteContracts(routes, slug, app.manifest.roles, app.apiVisibility);
+  validateRouteContracts(routes, slug, app.manifest.roles);
 
   // The one remaining escape is load-bearing: a route that owns its own
   // Response registers only when the manifest says so, with a reason, where
@@ -2453,11 +2402,11 @@ ${hookImports.join("\n")}
   // `defineRoute` result. `typeof import(...)` is an inline type query, so
   // nothing here survives compilation and no app module is loaded at runtime.
   //
-  // This is what turns `client.get<T>()` — an assertion the author could get
-  // wrong silently — into `client.call("GET /items", …)` with the input and
-  // output inferred from the schemas the route actually declared. It only works
-  // because `RouteDefinition` is generic in those two shapes; a non-generic one
-  // would erase them at the export boundary.
+  // This is what types `client.call("GET /items", …)`: its input and output are
+  // inferred from the schemas the route actually declared, not asserted by the
+  // caller, who could get them wrong silently. It only works because
+  // `RouteDefinition` is generic in those two shapes; a non-generic one would
+  // erase them at the export boundary.
   // Templates are skipped by the registry (they are scaffolds, not apps) but
   // they ARE the canonical worked example, and an example that does not compile
   // as written teaches the wrong thing. So their routes get type entries here —

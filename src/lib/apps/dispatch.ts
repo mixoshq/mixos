@@ -253,8 +253,7 @@ async function dispatch({
   // publicly and keep POST behind a session.
   const contract = manifest.routes?.find((r) => r.path === routeKey);
   const methodContract = contract?.methods.find((m) => m.method === method);
-  const registryAuth: RouteAuth[] | undefined =
-    methodContract?.auth ?? manifest.apiVisibility?.[routeKey];
+  const registryAuth: RouteAuth[] | undefined = methodContract?.auth;
   if (registryAuth && !servedHere(registryAuth, mount)) return notFound();
 
   // 6 — the app gate, before the import, because importing runs the module's

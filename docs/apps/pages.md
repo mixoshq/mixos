@@ -101,32 +101,28 @@ Client pages that fetch data must show skeleton placeholders while loading — n
 ```tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import { createAppClient } from "@/lib/apps/sdk";
+import { useAppQuery } from "@/lib/apps/use-app-query";
+import { AsyncView } from "@/components/ui/async-view";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableSkeleton } from "@/components/ui/data-table";
 
 export default function MyPage() {
-  const [data, setData] = useState<Data | null>(null);
-  const [loading, setLoading] = useState(true);
+  const query = useAppQuery<Data>("my-app", "GET /items");
 
-  useEffect(() => {
-    createAppClient("my-app")
-      .get<Data>("/items")
-      .then(setData)
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="p-6">
-        <Skeleton className="h-8 w-48 mb-6" />
-        <TableSkeleton columns={3} rows={6} />
-      </div>
-    );
-  }
-
-  return <div>{/* render data */}</div>;
+  return (
+    <AsyncView
+      query={query}
+      skeleton={
+        <div className="p-6">
+          <Skeleton className="h-8 w-48 mb-6" />
+          <TableSkeleton columns={3} rows={6} />
+        </div>
+      }
+      empty={{ cause: "no-data", body: "No items yet." }}
+    >
+      {(data) => <div>{/* render data */}</div>}
+    </AsyncView>
+  );
 }
 ```
 

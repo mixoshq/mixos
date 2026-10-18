@@ -274,8 +274,7 @@ export interface RouteDefinition<S = unknown, TOut = unknown> {
    * This is what makes the generated client typed. `defineRoute` knows `TIn`
    * and `TOut` from the Zod schemas, but a non-generic `RouteDefinition` would
    * throw both away at the export boundary, leaving the client with nothing to
-   * infer from and `client.call()` no better than the `get<T>()` assertion it
-   * replaces.
+   * infer from and `client.call()` typed by whatever its caller asserts.
    */
   readonly __types?: { schema: S; output: TOut };
 }

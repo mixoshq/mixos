@@ -53,7 +53,7 @@ flowchart TD
 
     PAGE --> SDK
     WIDGET --> SDK
-    SDK["createAppClient(slug).get('/path')"]
+    SDK["createAppClient(slug).call('GET /path')"]
 
     SDK --> FETCH
 
@@ -296,14 +296,15 @@ Widgets and client pages reach their app through
 [`sdk.ts`](../src/lib/apps/sdk.ts):
 
 ```ts
-const client = createAppClient("my-app");
-const { message } = await client.get<{ message: string }>("/hello");
-await client.post("/items", { body: { name: "Widget" } });
+const client = createAppClient<"my-app">("my-app");
+const { message } = await client.call("GET /hello");
+await client.call("POST /items", { name: "Widget" });
 ```
 
-The SDK prefixes every path with `/api/apps/<slug>/`, sends JSON (or passes
-`FormData` through untouched), supports `AbortSignal`, and throws
-`AppClientError` carrying the status and parsed body. On mutating methods it
+The SDK prefixes every path with `/api/apps/<slug>/`, fills the spec's
+`[param]` segments from the input, sends the rest as the query string or a JSON
+body (or, to a raw route, a `FormData` body), and throws `AppClientError`
+carrying the status and parsed body. On mutating methods it
 attaches an `X-CSRF-Token` header, which the dispatcher verifies at step 9; on a
 403 it clears the cached token, refetches, and retries once, which is what
 recovers a token that went stale mid-session. See
