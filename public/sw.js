@@ -8,9 +8,9 @@
 // Registered globally by src/components/push/register-sw.tsx. The payload is
 // produced by src/lib/push/server.ts (PushPayload: title, body, url?, tag?, icon?).
 //
-// Deliberately NOT a caching proxy. It used to precache an image for the
-// offline screen; that screen is now text-only, so there is nothing to cache
-// and no install/activate/fetch handling to reason about on every deploy.
+// Deliberately NOT a caching proxy. The offline screen is text-only, so there is
+// nothing to cache and no install/activate/fetch handling to reason about on
+// every deploy.
 
 self.addEventListener("push", (event) => {
   let data = {};
@@ -43,7 +43,7 @@ self.addEventListener("notificationclick", (event) => {
     self.clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((clientList) => {
-        // Focus an existing MOS tab if one is open; otherwise open a new one.
+        // Focus an existing MixOS tab if one is open; otherwise open a new one.
         for (const client of clientList) {
           if ("focus" in client) {
             client.navigate(url);

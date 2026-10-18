@@ -43,8 +43,8 @@ function lint(themes: Record<string, Record<string, string>> | null, className: 
         {
           files: ["**/*.jsx"],
           languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } },
-          plugins: { mos: { rules: { contrast: rule } } },
-          rules: { "mos/contrast": "error" },
+          plugins: { "mixos-design": { rules: { "no-low-contrast-token-pairs": rule } } },
+          rules: { "mixos-design/no-low-contrast-token-pairs": "error" },
         },
       ],
       "fixture.jsx",

@@ -88,7 +88,7 @@ describe("the webhook route while the platform schema is behind", { skip }, () =
   let p: Awaited<ReturnType<typeof loadPlatform>>;
 
   async function deliver(name: string, body: BodyInit, headers: Record<string, string> = {}) {
-    const request = new Request(`https://mos.test/api/webhooks/${name}`, {
+    const request = new Request(`https://mixos.test/api/webhooks/${name}`, {
       method: "POST",
       body,
       headers: { "content-type": "application/json", "x-forwarded-for": "192.0.2.60", ...headers },
@@ -110,7 +110,7 @@ describe("the webhook route while the platform schema is behind", { skip }, () =
     await migratePlatform(sql, path.join(REPO, "supabase", "migrations"), () => {});
 
     process.env.CONNECTOR_ENCRYPTION_KEY = randomBytes(32).toString("hex");
-    process.env.NEXTAUTH_URL = "https://mos.test";
+    process.env.NEXTAUTH_URL = "https://mixos.test";
     (globalThis as { __pg?: Sql }).__pg = recording(postgres(u.toString(), { max: 4, onnotice: () => {} }));
     p = await loadPlatform();
 
@@ -122,7 +122,7 @@ describe("the webhook route while the platform schema is behind", { skip }, () =
     );
     const [user] = await sql`
       insert into public.users (email, display_name, is_admin)
-      values (${`maint-${run}@mos.test`}, 'Admin', true) returning id
+      values (${`maint-${run}@mixos.test`}, 'Admin', true) returning id
     `;
     await p.saveConnectorConfig(NAME, { clientId: "cid", clientSecret: "sec", webhookSecret: SECRET }, user.id);
 

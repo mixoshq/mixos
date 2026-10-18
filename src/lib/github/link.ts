@@ -130,7 +130,7 @@ import {
 export const MANIFEST_STATE_TTL_MS = 15 * 60 * 1000;
 
 /** The cookie holding the round trip's state, in the admin's browser only. */
-export const MANIFEST_STATE_COOKIE = "mos_github_manifest";
+export const MANIFEST_STATE_COOKIE = "mixos_github_manifest";
 /** The cookie's path: the route GitHub sends the admin back to. */
 export const MANIFEST_STATE_COOKIE_PATH = "/api/admin/github";
 

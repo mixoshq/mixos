@@ -23,11 +23,10 @@
  *     global app, an undeclared role, a person who isn't a user, a role for
  *     someone without a grant. A second grant or revoke changes nothing, says
  *     so, and still refreshes the pages;
- *   - a role on a global app is only a role: the release step decides a row
- *     no build has (./grant-rule.ts), and once the app stops being global
- *     nobody has it through a role, by any path, until an admin grants it,
- *     which the admin is shown. A grant outlasts the app's being global, and
- *     setting a role on a global app never demotes one;
+ *   - a role on a global app is only a role (./grant-rule.ts): once the app
+ *     stops being global nobody has it through a role, by any path, until an
+ *     admin grants it, which the admin is shown. A grant outlasts the app's
+ *     being global, and setting a role on a global app never demotes one;
  *   - an app this build doesn't carry: its grants and keys can be listed and
  *     revoked, by an admin, audited, and nothing else;
  *   - the search behind Grant access: name or email, holders left out, LIKE's
@@ -742,18 +741,16 @@ describe("the Access tab's server actions", { skip }, () => {
       }
     };
 
-    // Roles set while it's global, and a row as /admin/users wrote one before
-    // rows said which they were: a role, with nobody recorded granting it.
+    // Roles set while it's global: rows that record only a role.
     assert.deepEqual(await p.grants.setAppRoleAction(TEAM, ids.alice, "lead"), { ok: true, changed: true });
     assert.deepEqual(await p.grants.setAppRoleAction(TEAM, ids.bob, "member"), { ok: true, changed: true });
-    await sql`insert into public.user_app_grants (user_id, app_slug, role) values (${ids.carol}, ${TEAM}, 'lead')`;
-    assert.deepEqual(await roleOnly(), { [ids.alice]: true, [ids.bob]: true, [ids.carol]: null });
-
-    // The release step decides the undecided row: a role.
-    const first = await p.sync.syncAppRegistry(sql, mirrored(), appsDir, []);
-    assert.deepEqual([first.marked, first.globalEnded], [[{ slug: TEAM, roleOnly: 1 }], []]);
+    assert.deepEqual(await p.grants.setAppRoleAction(TEAM, ids.carol, "lead"), { ok: true, changed: true });
     assert.deepEqual(await roleOnly(), { [ids.alice]: true, [ids.bob]: true, [ids.carol]: true });
-    assert.deepEqual((await audited("app.grants.marked", TEAM)).map((r) => r.details), [{ roleOnly: 1 }]);
+
+    // A release step while it's global changes none of them.
+    const first = await p.sync.syncAppRegistry(sql, mirrored(), appsDir, []);
+    assert.deepEqual(first.globalEnded, []);
+    assert.deepEqual(await roleOnly(), { [ids.alice]: true, [ids.bob]: true, [ids.carol]: true });
     // While it's global, everyone has it.
     assert.equal(await route("dave"), "resolved");
 
@@ -762,7 +759,7 @@ describe("the Access tab's server actions", { skip }, () => {
       const ended = await p.sync.syncAppRegistry(sql, mirrored(), appsDir, []);
       // Alice, Bob and Carol had it, by a role, and have no grant: it needs
       // grants, because the app stopped being global.
-      assert.deepEqual([ended.marked, ended.globalEnded], [[], [{ slug: TEAM, roleOnly: 3, lost: 3 }]]);
+      assert.deepEqual(ended.globalEnded, [{ slug: TEAM, roleOnly: 3, lost: 3 }]);
       assert.deepEqual((await audited("app.global.ended", TEAM)).map((r) => r.details), [{ roleOnly: 3, lost: 3 }]);
       const endedAt = (await p.access.getAppBuildStatus()).needsGrants[TEAM];
       assert.equal(endedAt?.reason, "global-ended");
@@ -820,7 +817,7 @@ describe("the Access tab's server actions", { skip }, () => {
     // Global again: Alice's grant stays a grant, and a role set on it now
     // doesn't make it a role. Back to Default, it's still a grant.
     const again = await p.sync.syncAppRegistry(sql, mirrored(), appsDir, []);
-    assert.deepEqual([again.marked, again.globalEnded], [[], []]);
+    assert.deepEqual(again.globalEnded, []);
     assert.deepEqual(await roleOnly(), { [ids.alice]: false, [ids.carol]: true });
     assert.equal(await route("dave"), "resolved");
     assert.deepEqual(await p.grants.setAppRoleAction(TEAM, ids.alice, "member"), { ok: true, changed: true });
@@ -942,7 +939,7 @@ describe("the Access tab's server actions", { skip }, () => {
   test("an app this build doesn't carry: an admin can list and revoke its grants and keys, audited, and nothing else", async () => {
     signIn("admin");
     await sql`insert into public.apps (slug, name, is_active) values (${GONE}, 'Gone App', true)`;
-    await sql`insert into public.user_app_grants (user_id, app_slug, granted_by) values (${ids.carol}, ${GONE}, ${ids.admin})`;
+    await sql`insert into public.user_app_grants (user_id, app_slug, granted_by, role_only) values (${ids.carol}, ${GONE}, ${ids.admin}, false)`;
     const key = await p.apiKeys.mintApiKey({ appSlug: GONE, label: "Old sync", scopes: ["*"], createdBy: ids.admin, expiresAt: null });
 
     const list = await p.grants.listAppAccess(GONE);
@@ -998,7 +995,7 @@ describe("the Access tab's server actions", { skip }, () => {
     if (!result.ok) return;
     scopedKey = result.minted.key;
     scopedId = result.minted.id;
-    assert.match(scopedKey, /^mosk_[A-Za-z0-9_-]{43}$/);
+    assert.match(scopedKey, /^mixk_[A-Za-z0-9_-]{43}$/);
     assert.equal(result.minted.hint, scopedKey.slice(0, 11));
 
     const [row] = await sql`select row_to_json(k)::text as row, label, scopes, expires_at, created_by from public.app_api_keys k where id = ${scopedId}`;

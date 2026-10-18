@@ -12,7 +12,7 @@ import { JOB_TIMEOUT_MS, MAX_SYNC_BUDGET_MS } from "../src/lib/apps/job-limits";
 const sync = (budgetMs = 200_000) => ({
   name: "calls",
   schedule: { everyMinutes: 60 },
-  source: "ros",
+  source: "mixos",
   window: { coldStartDays: 30, defaultDays: 7, minDays: 1 },
   budgetMs,
 });

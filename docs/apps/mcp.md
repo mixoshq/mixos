@@ -51,7 +51,7 @@ It can never see something that user couldn't already see in your app.
 | `name` | yes | Lowercase-hyphenated. Exposed to clients as `<slug>__<name>`. |
 | `description` | yes | Written **for a model**. See below — this is the whole product. |
 | `hint` | no | *When* to reach for the tool, as a shape of question rather than a subject area. |
-| `sources` | yes | Where the data comes from: connector slugs your app declares, or `"ros"` for data that exists only in MixOS. The build rejects a slug you haven't declared. |
+| `sources` | yes | Where the data comes from: connector slugs your app declares, or `"mixos"` for data that exists only in MixOS. The build rejects a slug you haven't declared. |
 | `notCovered` | no | What a reader might expect and won't get. Strongly encouraged — see below. |
 
 Those four strings are assembled into the one description a client sees:
@@ -131,7 +131,7 @@ keep the useful signal without asserting jurisdiction:
 
 - **`sources`** names the upstream systems. Rendered as the `Built from:` line,
   which also tells the model those systems' own connectors hold the raw records.
-  Entries must be connectors your app declares, or `"ros"` for records that live
+  Entries must be connectors your app declares, or `"mixos"` for records that live
   only in MixOS. **Only list what the tool actually reads.** If your app
   declares `dock` but the MCP handler never calls it, `dock` is not a source —
   a provenance claim you don't honour is worse than one you never made.
@@ -212,13 +212,12 @@ never authorize on it.
 | **Connectors** | A tool can call only the methods a connector declares as reads. A method declared `mutates`, or one it doesn't declare at all (`request()` included), throws. |
 | **App Services** | A provider reached through `ctx.services` runs read-only too: its `db` refuses writes and its connectors are narrowed the same way. |
 
-**Connectors used to be the gap the platform couldn't close**, because it could
-not know which connector methods mutate. A connector now declares that
-(`mutates: true` on a method in its manifest), and the MCP context wraps
-`ctx.connectors` so that only the declared reads can be called — so a write from
-a read-only tool is a runtime error, not a blocking review finding somebody has
-to catch. Anything a connector doesn't declare is refused as well, including the
-base class's `request()`: it is protected, but `as any` reaches it, and it sends
+**A connector declares which of its methods mutate** (`mutates: true` on a
+method in its manifest), because the platform could not know otherwise. The MCP
+context wraps `ctx.connectors` so that only the declared reads can be called —
+so a write from a read-only tool is a runtime error, not a blocking review
+finding somebody has to catch. Anything a connector doesn't declare is refused
+as well, including the base class's `request()`: it is protected, but `as any` reaches it, and it sends
 whatever verb it is given.
 
 **A tool can't write by asking another app to.** When it calls

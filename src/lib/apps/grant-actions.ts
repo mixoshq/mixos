@@ -23,9 +23,8 @@ import type { AppManifest } from "@/lib/apps/types";
  * Who holds an app, and the three things that change it: grant, revoke, role.
  *
  * ONE IMPLEMENTATION, TWO SCREENS. The app's Access tab and /admin/users both
- * call these. Granting used to be an inline server action on the users page,
- * which was fine while it was the only way in; with a second screen, a copy of
- * the connector gate on each would be a gate with a door next to it.
+ * call these, because with two screens, a copy of the connector gate on each
+ * would be a gate with a door next to it.
  *
  * A ROLE IS NEVER ACCESS. A row that records only a role, on a global app,
  * grants nothing, and ./grant-rule.ts says which rows those are, here as in
@@ -403,9 +402,9 @@ export async function grantAppAccess(
  * an app this build doesn't carry: its grants come back with it otherwise.
  * Someone who doesn't hold it is left as they are, with `changed: false`.
  *
- * The install row and the user's widgets go with the grant: the foreign key
- * from grants to installs was removed so a global app can be installed without
- * a grant, so both are deleted explicitly, the install row first. MCP tokens
+ * The install row and the user's widgets go with the grant. No foreign key ties
+ * installs to grants, so that a global app can be installed without a grant, so
+ * both are deleted explicitly, the install row first. MCP tokens
  * are left alone on purpose: every tool call re-checks the grant, so this
  * app's tools disappear from a token on its next call without disturbing the
  * user's other apps.

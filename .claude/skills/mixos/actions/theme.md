@@ -46,7 +46,7 @@ Report the measured table to the user before writing the theme. A brand owner wi
 
 - **A theme change is not an OS change.** `themes/` sits on the authoring side of the boundary with `apps/` and `connectors/`, so it takes no `os-change` label and no admin review. Commit it as `theme:<slug>`, never `os`. Changing the theme *system* — the token contract, the allowlisted `.mix-*` surfaces, the compiler — **is** an OS change. See [`OS-UPDATES.md`](OS-UPDATES.md).
 - Folder name is the slug (lowercase, digits, hyphens). No leading underscore on a shipped theme.
-- **One palette per theme.** Tokens only in one top-level `:root` — not in a `.mix-*` rule, and not in a `:root` inside `@media` or `@supports`. A `:root[data-mode="dark"]` block fails the build, and there is no light/dark/system setting: a dark look is a sibling theme, `themes/<slug>-dark/` (as `mixos-dark` is to `mixos`), a full copy with its own `assets/` that an admin selects at `/admin/themes`. The token set is closed; unknown names fail the build.
+- **One palette per theme.** Tokens only in one top-level `:root` — not in a `.mix-*` rule, and not in a `:root` inside `@media` or `@supports`. There is no light/dark/system setting: a dark look is a sibling theme, `themes/<slug>-dark/` (as `mixos-dark` is to `mixos`), a full copy with its own `assets/` that an admin selects at `/admin/themes`. The token set is closed; unknown names fail the build.
 - Every required token present.
 - Colour values must be opaque hex / `rgb()` / `hsl()` literals or a `var()` chain ending in one, for every colour token, gated or not. No `color-mix()` or `oklch()` in token values, and no alpha except on `--border`, which the build composites over `--background`.
 - Beyond tokens, only the ten `.mix-*` surfaces. `surfaces` in `theme.json` must match `theme.css` in both directions.
@@ -58,7 +58,7 @@ Report the measured table to the user before writing the theme. A brand owner wi
 ## Verify before reporting done
 
 1. `THEME_REPORT=1 npx tsx scripts/generate-project-registry.ts` — read the ratio table, don't just check the exit code. A pair at 4.51:1 has no headroom.
-2. `npm run typecheck` and `npm run lint`. The lint rule `mos-design/no-low-contrast-token-pairs` measures the elements in `src/` and `apps/` under every installed theme, this one included.
+2. `npm run typecheck` and `npm run lint`. The lint rule `mixos-design/no-low-contrast-token-pairs` measures the elements in `src/` and `apps/` under every installed theme, this one included.
 3. `npm run build`.
 4. Activate at `/admin/themes`, then load: dashboard, an app page, a form, a table, a modal, **the sign-in page while signed out**, and an app's public `/p/<app-slug>` page. There is no light/dark toggle to try: the theme is the whole palette. If you changed a sibling (`<slug>-dark`) too, activate and check each one.
 5. Hard-reload. The active theme is resolved on the server, so the first paint should already be in its colours.

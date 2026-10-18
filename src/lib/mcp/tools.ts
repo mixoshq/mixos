@@ -6,7 +6,7 @@ import { z } from "zod";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import type { AppManifest, McpToolDefinition } from "@/lib/apps/types";
-import { MOS_SOURCE } from "@/lib/apps/types";
+import { MIXOS_SOURCE } from "@/lib/apps/types";
 import type { McpToolContext } from "@/lib/hooks/types";
 import { hasAppGrant } from "@/lib/apps/access";
 import { checkAppGate } from "@/lib/apps/app-gate";
@@ -32,9 +32,9 @@ import { enabledToolsBySlug } from "./tool-settings";
  * imported: while the app's own migrations are behind this build its tools
  * are not listed, and a call to one refuses until the release step has run.
  *
- * `hasAppGrant` — not `hasAppAccess` — is deliberate. "Installed" is a
- * dashboard-layout preference; "granted" is the authorization fact, and it is
- * what the App Services broker already uses for exactly this question.
+ * `hasAppGrant` is the check. "Granted" is the authorization fact, where
+ * "installed" (`user_apps`) is a dashboard-layout preference, and it is what
+ * the App Services broker uses for exactly this question.
  */
 
 /** Separator between app slug and tool name in the client-facing tool name. */
@@ -195,14 +195,14 @@ function conjoin(names: readonly string[]): string {
  * tool can beat.
  */
 function builtFrom(sources: readonly string[]): string {
-  const upstream = sources.filter((s) => s !== MOS_SOURCE);
+  const upstream = sources.filter((s) => s !== MIXOS_SOURCE);
   if (upstream.length === 0) {
     return "Built from: records kept in MixOS itself, not mirrored from a connected system.";
   }
   const labels = upstream.map((s) => CONNECTOR_LABELS.get(s) ?? s);
-  const alsoRos = sources.length > upstream.length ? ", plus records kept in MixOS" : "";
+  const alsoMixos = sources.length > upstream.length ? ", plus records kept in MixOS" : "";
   return (
-    `Built from: ${conjoin(labels)}${alsoRos} — joined and cached in MixOS, ` +
+    `Built from: ${conjoin(labels)}${alsoMixos} — joined and cached in MixOS, ` +
     `scoped to what you can already see there; ` +
     `${upstream.length === 1 ? "that system's own connector holds" : "those systems' own connectors hold"} the raw records.`
   );

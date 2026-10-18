@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * The canonical public origin of this deployment, e.g. `https://mos.example.com`.
+ * The canonical public origin of this deployment, e.g. `https://mixos.example.com`.
  * No trailing slash.
  *
  * SECURITY: this is resolved from the environment ONLY — never from the
@@ -18,7 +18,7 @@
  */
 export function getAppOrigin(): string {
   // 1. Explicit override always wins. This is the value to set in production.
-  const explicit = process.env.NEXTAUTH_URL ?? process.env.APP_ORIGIN;
+  const explicit = process.env.NEXTAUTH_URL;
   if (explicit) return normalize(explicit);
 
   // 2. On Vercel, fall back to the platform's own (server-side, non-spoofable)
@@ -41,7 +41,7 @@ export function getAppOrigin(): string {
 
   throw new Error(
     "Cannot resolve the application origin. Set NEXTAUTH_URL to the full " +
-      "public URL of this deployment (e.g. https://mos.example.com).",
+      "public URL of this deployment (e.g. https://mixos.example.com).",
   );
 }
 

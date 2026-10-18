@@ -25,7 +25,7 @@ import type { AddressInfo } from "node:net";
 // the environment has none. Never overrides a real one.
 process.env.CONNECTOR_ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
 process.env.USER_OAUTH_ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
-process.env.NEXTAUTH_URL ??= "https://mos.test";
+process.env.NEXTAUTH_URL ??= "https://mixos.test";
 import { HttpConnector } from "../src/lib/connectors/http-connector";
 import { ConnectorError } from "../src/lib/connectors/errors";
 import { classifyStatus } from "../src/lib/connectors/status-map";
@@ -743,7 +743,7 @@ async function main() {
     "redirect URI built from configured origin, not a header",
     q.get("redirect_uri") === redirectUriFor("acme") &&
       redirectUriFor("acme").startsWith(
-        "https://mos.test/api/connectors/acme/oauth/",
+        "https://mixos.test/api/connectors/acme/oauth/",
       ),
   );
 
@@ -1548,7 +1548,7 @@ async function main() {
         await import("../src/lib/connectors/user-grant");
       const { saveUserTokens, getUserTokens } =
         await import("../src/lib/connectors/user-config");
-      const email = `verify-${randomBytes(6).toString("hex")}@mos.test`;
+      const email = `verify-${randomBytes(6).toString("hex")}@mixos.test`;
       const [person] = await sql<{ id: string }[]>`
         insert into public.users (email, display_name)
         values (${email}, 'Verify probe') returning id

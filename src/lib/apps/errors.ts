@@ -238,8 +238,8 @@ export function toErrorResponse(
   // route is told to do with one. It already carries a message written for the
   // person reading it, the status its cause deserves (503 for a connector
   // nobody has finished setting up, 429 and a Retry-After for a throttle), and
-  // admin detail gated on `isAdmin`. It used to fall through to the generic 500
-  // below, so none of that reached a widget and its "Not connected" and Retry
+  // admin detail gated on `isAdmin`. Falling through to the generic 500 below
+  // would keep all of that from a widget, and its "Not connected" and Retry
   // states could not render.
   if (isConnectorError(err)) {
     const envelope = connectorErrorEnvelope(err, {

@@ -46,8 +46,8 @@ const TENANT = "_template-oauth";
 const MINE = `mine-${run}`;
 const TOKEN_URL = "https://provider.example.com/oauth/token";
 
-const ADMIN_EMAIL = `admin-${run}@mos.test`;
-const MEMBER_EMAIL = `member-${run}@mos.test`;
+const ADMIN_EMAIL = `admin-${run}@mixos.test`;
+const MEMBER_EMAIL = `member-${run}@mixos.test`;
 const CLIENT_SECRET = `client-secret-${randomBytes(8).toString("hex")}`;
 
 /** A token pair the provider hands out, unique enough to search the logs for. */
@@ -151,7 +151,7 @@ describe("the connector OAuth callback's audit row", { skip }, () => {
     process.env.PGSSLMODE = u.searchParams.get("sslmode") ?? "disable";
     process.env.CONNECTOR_ENCRYPTION_KEY = randomBytes(32).toString("hex");
     process.env.USER_OAUTH_ENCRYPTION_KEY = randomBytes(32).toString("hex");
-    process.env.NEXTAUTH_URL = "https://mos.test";
+    process.env.NEXTAUTH_URL = "https://mixos.test";
     p = await loadPlatform();
 
     p.connectorRegistry.push(manifestOf(TENANT), {

@@ -83,7 +83,7 @@ const SYNC: SyncDefinition[] = [
   {
     name: "feed",
     schedule: { everyMinutes: 60 },
-    source: "ros",
+    source: "mixos",
     window: { coldStartDays: 7, defaultDays: 1, minDays: 1 },
     budgetMs: 10_000,
   },
@@ -243,7 +243,7 @@ describe("Delete data against a real database", { skip }, () => {
     `;
     for (const slug of [NOTES, ARCHIVE]) {
       await sql`update public.apps set is_active = true where slug = ${slug}`;
-      await sql`insert into public.user_app_grants (user_id, app_slug, role) values (${user}, ${slug}, 'editor')`;
+      await sql`insert into public.user_app_grants (user_id, app_slug, role, role_only) values (${user}, ${slug}, 'editor', false)`;
       await sql`insert into public.user_apps (user_id, app_slug) values (${user}, ${slug})`;
       await sql`insert into public.app_passwords (app_slug, password_hash) values (${slug}, 'HASH')`;
       await sql`insert into public.dashboard_widgets (user_id, app_slug, widget_id) values (${user}, ${slug}, 'latest')`;

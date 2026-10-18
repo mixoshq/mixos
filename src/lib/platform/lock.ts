@@ -24,10 +24,10 @@
  * the transaction: a register holds this across a network download and a child
  * process, and holding a database transaction open for that is its own problem.
  *
- * So the lock is a row with an expiry, per
- * `supabase/migrations/0007_platform_schema_version.sql`. A row because it has
- * to outlive a connection, and an expiry because it has to self-heal when the
- * holder dies mid-operation without releasing.
+ * So the lock is a row in `public._platform_locks`
+ * (`supabase/migrations/0001_platform_schema.sql`), with an expiry. A row because
+ * it has to outlive a connection, and an expiry because it has to self-heal when
+ * the holder dies mid-operation without releasing.
  *
  * ── A LEASE, RENEWED AND FENCED ─────────────────────────────────────────────
  *

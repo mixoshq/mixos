@@ -249,7 +249,7 @@ describe("proposing an install as a pull request", { skip }, () => {
     process.env.DATABASE_URL = u.toString();
     process.env.PGSSLMODE = u.searchParams.get("sslmode") ?? "disable";
     process.env.GITHUB_APP_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
-    process.env.NEXTAUTH_URL = "https://mos.test";
+    process.env.NEXTAUTH_URL = "https://mixos.test";
     process.env.MIXOS_REPOSITORY_URL = CATALOGUE;
     // A built deployment, on Vercel: the only place Browse proposes.
     process.env.VERCEL = "1";
@@ -257,7 +257,7 @@ describe("proposing an install as a pull request", { skip }, () => {
     p = await loadModules();
 
     const [a] = await sql`
-      insert into public.users (email, display_name, is_admin) values (${`admin-${run}@mos.test`}, 'Admin', true)
+      insert into public.users (email, display_name, is_admin) values (${`admin-${run}@mixos.test`}, 'Admin', true)
       returning id, email`;
     ADMIN = { id: a.id, email: a.email };
 
@@ -387,7 +387,7 @@ describe("proposing an install as a pull request", { skip }, () => {
     assert.equal(posts().length, 0, "nothing written");
     assert.equal((await audited("app.propose.rejected")).at(-1)?.details.reason, "checklist");
 
-    const linkCtx = { ...ctx, origin: () => "https://mos.test" };
+    const linkCtx = { ...ctx, origin: () => "https://mixos.test" };
     const partial = await p.confirmPreviewChecklist({ items: ["render", "railway"] }, linkCtx);
     assert.equal(partial.ok, false);
     const confirmed = await p.confirmPreviewChecklist({ items: ["render", "railway", "coolify", "other"] }, linkCtx);
@@ -595,7 +595,7 @@ describe("proposing an install as a pull request", { skip }, () => {
     const target = await p.proposalTarget("app");
     assert.match(target?.off ?? "", /No pull_request rule applies to main/);
 
-    const linkCtx = { ...ctx, origin: () => "https://mos.test" };
+    const linkCtx = { ...ctx, origin: () => "https://mixos.test" };
     const override = await p.confirmBranchProtection({ reason: "classic-protection", typedRepository: "acme/mixos" }, linkCtx);
     assert.ok(override.ok, JSON.stringify(override));
     const allowed = await propose("e2e-board");

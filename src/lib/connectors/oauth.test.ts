@@ -18,7 +18,7 @@ import type { ConnectorAuthPolicy } from "./types";
 // ── fixtures ────────────────────────────────────────────────────────────────
 
 // The code exchange sends this deployment's redirect URI, built from its origin.
-process.env.NEXTAUTH_URL ??= "https://mos.test";
+process.env.NEXTAUTH_URL ??= "https://mixos.test";
 
 const POLICY: ConnectorAuthPolicy = {
   strategy: "oauth2_authorization_code",
@@ -102,15 +102,15 @@ test("the trip back names the connector once, so the registry dialog reopens", (
   // The registry's Connect link returns to a path that already names the
   // connector. Appending a second "?…" made `connector` read
   // "gmail?connector=gmail", which matched no connector.
-  const url = oauthReturnUrl("/admin/connectors?connector=gmail", "https://mos.test", "gmail", "connected");
-  assert.equal(url.origin, "https://mos.test");
+  const url = oauthReturnUrl("/admin/connectors?connector=gmail", "https://mixos.test", "gmail", "connected");
+  assert.equal(url.origin, "https://mixos.test");
   assert.equal(url.pathname, "/admin/connectors");
   assert.deepEqual(url.searchParams.getAll("connector"), ["gmail"]);
   assert.equal(url.searchParams.get("oauth"), "connected");
 
   assert.equal(
-    oauthReturnUrl("/account/connections", "https://mos.test", "mail", "denied").href,
-    "https://mos.test/account/connections?connector=mail&oauth=denied",
+    oauthReturnUrl("/account/connections", "https://mixos.test", "mail", "denied").href,
+    "https://mixos.test/account/connections?connector=mail&oauth=denied",
   );
 });
 
@@ -120,8 +120,8 @@ test("a return path that would resolve to another host is refused", () => {
   for (const path of ["/\t/evil.example", "/\n/evil.example", "/\r/evil.example"]) {
     assert.equal(safeReturnPath(path), "/admin/connectors", JSON.stringify(path));
     assert.equal(
-      oauthReturnUrl(path, "https://mos.test", "gmail", "connected").origin,
-      "https://mos.test",
+      oauthReturnUrl(path, "https://mixos.test", "gmail", "connected").origin,
+      "https://mixos.test",
       JSON.stringify(path),
     );
   }

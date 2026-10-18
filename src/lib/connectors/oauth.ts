@@ -17,12 +17,14 @@ import type { ConnectorAuthPolicy } from "./types";
 import { platformKey } from "@/lib/env/keys";
 
 /**
- * Tenant-level three-legged OAuth.
+ * Three-legged OAuth.
  *
- * One admin consents once on behalf of the whole deployment; the resulting
- * tokens live in that connector's existing `connector_configs` row alongside
- * the client id and secret. This is NOT the per-user model that was removed —
- * there is still exactly one credential set per connector, shared by everyone.
+ * For a tenant connector, one admin consents once on behalf of the whole
+ * deployment, and the tokens live in that connector's `connector_configs` row
+ * alongside the client id and secret. For a `userScoped` connector each person
+ * consents for their own account, and their tokens live in
+ * `user_connector_oauth` (./user-config.ts); the client id and secret stay in
+ * the tenant row.
  *
  * The PKCE verifier never leaves this server: it travels in an encrypted,
  * HttpOnly cookie, while the provider only ever sees an opaque random `state`.
@@ -38,7 +40,7 @@ export const TOKEN_KEYS = {
   scope: "oauth_scope",
 } as const;
 
-export const OAUTH_STATE_COOKIE = "mos_connector_oauth";
+export const OAUTH_STATE_COOKIE = "mixos_connector_oauth";
 /** The consent round trip is a few seconds of real time; 10 minutes is slack. */
 const FLOW_TTL_MS = 10 * 60 * 1000;
 

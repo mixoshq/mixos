@@ -12,8 +12,8 @@
  *   - the pull-request check (scripts/ci-extensions.ts `activate`): by SQL, on
  *     the job's own database, each grant audited as the CLI.
  *
- * Both record who granted what, so a release step after either leaves the
- * grants they made grants (src/lib/apps/grant-rule.ts).
+ * Both write their grants as grants (src/lib/apps/grant-rule.ts) and record
+ * who granted them, so a release step after either leaves them grants.
  *
  * Skipped unless MIXOS_TEST_DATABASE_URL names a server this may create and
  * drop a database on. Its name ends in this run's own suffix, and it is
@@ -280,7 +280,7 @@ describe("activating an app for a smoke test", { skip }, () => {
     assert.match(audit.actor_email as string, /^cli:/);
     assert.deepEqual(audit.details, { appSlug: ci, via: "ci" });
 
-    // The release step, carrying both apps, decides nothing about them.
+    // The release step, carrying both apps, leaves both grants as they are.
     const appsDir = fs.mkdtempSync(path.join(os.tmpdir(), "mixos-smoke-release-"));
     try {
       for (const slug of [plain, ci]) {
@@ -290,7 +290,7 @@ describe("activating an app for a smoke test", { skip }, () => {
       const { syncAppRegistry } = await import("./sync-app-registry");
       const mirror = (slug: string) => ({ slug, name: slug, description: "", icon: "box", global: false });
       const result = await syncAppRegistry(sql, [mirror(plain), mirror(ci)], appsDir, []);
-      assert.deepEqual(result.marked, []);
+      assert.deepEqual(result.globalEnded, []);
     } finally {
       fs.rmSync(appsDir, { recursive: true, force: true });
     }

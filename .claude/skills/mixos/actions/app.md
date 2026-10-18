@@ -124,7 +124,7 @@ changed.
 ### 2. Inventory the surfaces
 
 List every page under `pages/`, every widget, every modal component, and any public/password
-surface from `app.json`'s `pageVisibility` / `apiVisibility`. Audit each. An app is only as good
+surface from `app.json`'s `pageVisibility` and the routes' own `auth`. Audit each. An app is only as good
 as its worst screen, and the worst screen is usually the one nobody demos.
 
 ### 3. Audit against this checklist

@@ -20,10 +20,9 @@ export default async function AppsPage() {
     getUserGrantedSlugs(userId),
   ]);
 
-  // The grant is the only gate now. Registration used to be a second one —
-  // every app had to be switched on by an admin before anyone could be given
-  // it — but an app in the registry passed build-time validation, which is what
-  // that switch was standing in for.
+  // What the user holds is what they can turn on: their grants and the global
+  // apps, less any app that is switched off. An app in the registry passed
+  // build-time validation, so nothing else stands between it and a grant.
   const granted = new Set(grantedSlugs);
   const availableApps = appRegistry.filter((a) => granted.has(a.slug));
 
@@ -40,26 +39,13 @@ export default async function AppsPage() {
 
       <div className="mt-6">
         {/*
-          Always empty: user-scoped (per-user OAuth) connectors were removed
-          from the platform — see docs/connectors/architecture.md, "One
-          credential set per connector". Every connector is tenant-scoped now,
-          and that gate is enforced upstream: an app whose declared connectors
-          an admin has not configured cannot be GRANTED
-          (src/lib/apps/connector-gates.ts, applied in
-          src/app/(main)/admin/users/page.tsx), so it never reaches this list.
-          There is nothing left for this prop to carry, and nothing is lost by
-          passing {}.
-
-          The prop itself is dead weight that AppManagerList and AppToggleList
-          still declare, along with a "Connect →" link to /account/connections —
-          a route that no longer exists. Deleting the prop chain in those two
-          components is the real fix; this file cannot reach them.
+          No connector gate here: granting is the gate. An app whose tenant
+          connectors aren't ready can't be granted (src/lib/apps/connector-gates.ts),
+          so it never reaches this list, and a user-scoped connector the user
+          hasn't connected is simply absent from the app's context, which the
+          app handles (docs/apps/connectors.md).
         */}
-        <AppManagerList
-          apps={availableApps}
-          installedSlugs={installedSlugs}
-          missingUserConnectorsBySlug={{}}
-        />
+        <AppManagerList apps={availableApps} installedSlugs={installedSlugs} />
       </div>
     </SettingsShell>
   );

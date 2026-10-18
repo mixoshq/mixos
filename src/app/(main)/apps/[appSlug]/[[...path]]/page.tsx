@@ -33,13 +33,12 @@ export default async function AppPage({ params }: Props) {
   const dbUser = await getUserById(session.user.id);
   if (!dbUser) redirect("/");
 
-  // `hasAppGrant`, not `hasAppAccess`: the latter reads `user_apps`, which
-  // records that a user installed the app on their dashboard — a layout
-  // preference, not authorization — and has no global-app short-circuit, so it
-  // redirected every user of every global app away from a page they were
-  // entitled to. The API mount was corrected in the same change; a page and its
-  // own API answering differently is worse than either answer alone. A page
-  // whose `pageVisibility` accepts `signed-in` needs no grant, as on the API.
+  // Authorization is `hasAppGrant`: a grant, or a global app. `user_apps`
+  // records that a user installed the app on their dashboard, a layout
+  // preference and never access. The app's API decides the same way, since a
+  // page and its own API answering differently is worse than either answer
+  // alone. A page whose `pageVisibility` accepts `signed-in` needs no grant,
+  // as on the API.
   const allowed = await canOpenAppPage(manifest, path.join("/"), dbUser.id, {
     hasAppGrant,
     isAppActive,

@@ -87,9 +87,8 @@ export interface BrandLogoAsset {
 export const BRAND_LOGO_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"] as const;
 
 /**
- * A THEME's logos may also be SVG. Theme assets have always been, and the theme
- * docs recommended SVG for the mark, so refusing it would break themes written
- * to that advice. The build reads the size from the root element's
+ * A THEME's logos may also be SVG, like every theme asset, and the theme docs
+ * recommend SVG for the mark. The build reads the size from the root element's
  * `width`/`height` or `viewBox`; next/image serves an `.svg` unoptimized.
  */
 export const THEME_LOGO_EXTENSIONS = [...BRAND_LOGO_EXTENSIONS, ".svg"] as const;

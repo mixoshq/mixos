@@ -112,7 +112,7 @@ test("an app route that calls a disabled connector answers with what the app SDK
   console.error = () => {};
   let res: Response;
   try {
-    res = await runRoute(route, new Request("https://mos.test/api/apps/acme-app/items"), {
+    res = await runRoute(route, new Request("https://mixos.test/api/apps/acme-app/items"), {
       context: {
         user: { id: "user-1", isAdmin: false },
         connectors: { acme: disabledConnector("acme", "Acme") },

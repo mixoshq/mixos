@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { AlertCircle, Search } from "lucide-react";
 import type { AppManifest, EscapeRule } from "@/lib/apps/types";
-import { MOS_SOURCE } from "@/lib/apps/types";
+import { MIXOS_SOURCE } from "@/lib/apps/types";
 import {
   getAppSchema,
   type AppSchemaColumn,
@@ -401,9 +401,8 @@ function SchemaBrowser({ tables }: { tables: AppSchemaTable[] }) {
  * who opened it to find out what the strip was about. Same component both
  * places, so the two cannot drift into saying different things.
  *
- * It is a warning, not a gate. It used to block registration; registration is
- * gone, and what a connector that isn't ready now blocks is activating the
- * app and granting it to anyone, both enforced on the server
+ * It is a warning, not a gate. What a connector that isn't ready blocks is
+ * activating the app and granting it to anyone, both enforced on the server
  * (src/lib/apps/connector-gates.ts). Each connector is named with what it
  * still needs, in the Connector Registry's words: configured, connected after
  * its client ID is saved, or enabled after an admin switched it off.
@@ -495,11 +494,8 @@ export function AppReachPanel({
         {app.connectors.length > 0 ? (
           <>
             {/*
-              Every connector is tenant-scoped, so the name is the whole story
-              here. This list used to badge some of them "(per-user)"; the
-              user-scoped OAuth model that badge described was removed along
-              with the generated `userScopedConnectorNames` set it read from.
-              See docs/connectors/architecture.md.
+              The name, and what the connector still needs before the app can
+              be activated or granted.
             */}
             <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
               {app.connectors.map((name) => (
@@ -702,11 +698,11 @@ export function McpToolsPanel({ app }: { app: AppManifest }) {
                     <dd className="flex flex-wrap items-center gap-1">
                       {tool.sources.map((s) => (
                         <span key={s}>
-                          {/* "ros" is not a connector — it is the marker
+                          {/* "mixos" is not a connector — it is the marker
                               for data that exists only in MixOS, and
                               rendering it as a slug would send an admin
                               hunting the connector registry for it. */}
-                          {s === MOS_SOURCE ? (
+                          {s === MIXOS_SOURCE ? (
                             <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">
                               MixOS records
                             </span>
@@ -946,9 +942,9 @@ export default function AppDetailsDialog({
     table count is on Overview — and a facts panel that fills in a row several
     seconds after you looked at it is worse than one query per open.
 
-    The in-flight guard is a ref rather than state for the same reason it was in
-    the row this replaced: setting it in the effect body is the cascading-render
-    pattern React's rule flags, and it only ever existed to stop a second fetch.
+    The in-flight guard is a ref rather than state: setting state in the effect
+    body is the cascading-render pattern React's rule flags, and the guard only
+    exists to stop a second fetch.
   */
   const schemaRequested = useRef(false);
   useEffect(() => {

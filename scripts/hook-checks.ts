@@ -30,8 +30,8 @@ export interface HookCall {
 }
 
 export interface HookScan {
-  // Emitted-hook counts, including dynamic (non-literal) calls — preserves the
-  // historical `hookCounts` semantics.
+  // Emitted-hook counts, including dynamic (non-literal) calls: the registry's
+  // `hookCounts`.
   counts: { actions: number; filters: number };
   // String-literal hook names this app fires / listens for, slug-qualified.
   emits: { actions: string[]; filters: string[] };
@@ -41,7 +41,7 @@ export interface HookScan {
 
 const HOOK_METHODS = new Set(["doAction", "applyFilters", "addAction", "addFilter"]);
 
-/** The files scanned, as before this read the syntax tree, and how each parses. */
+/** The files scanned, and how each parses. */
 const SCRIPT_KINDS = new Map<string, ts.ScriptKind>([
   [".ts", ts.ScriptKind.TS],
   [".tsx", ts.ScriptKind.TSX],

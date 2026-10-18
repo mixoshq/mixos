@@ -1,13 +1,28 @@
 # What's new in MixOS
 
 Recent, developer-facing changes — newest first. When you ship something worth
-announcing (a new command, a workflow change, a breaking change), add a short
-`## <date>` section at the top. Keep entries brief; this is not a full changelog.
+announcing (a new command, a new capability, a workflow change), add a short
+`## <date>` section at the top. Keep entries brief; this is not a full changelog,
+and upgrade steps belong in the release notes (`CHANGELOG.md`).
 
 The newest section is shown automatically after you `git pull` (via the
 `.githooks/post-merge` hook), but only when this file was among the commits you
 just pulled.
 
+
+## 2026-10-18
+
+- **Names an extension may need to change.** The ESLint rules are
+  `mixos-apps/app-imports` and `mixos-design/no-low-contrast-token-pairs`, which
+  is how an `eslint-disable` comment names them. An MCP tool's `sources` and a
+  sync's `source` say `"mixos"` for data that exists only in MixOS. App API keys
+  start `mixk_`, and a key minted before is refused: mint a new one.
+- **`call()` is the client.** `createAppClient()` has no `get`, `post`, `put`,
+  `patch` or `delete`. To upload a file, pass a `FormData` to a `raw: true`
+  route (`docs/apps/api-routes.md#uploading-a-file`).
+- **`apiVisibility` is gone**, and a manifest with it fails the build: a route's
+  auth is its `defineRoute({ auth })`. So are the core hooks `init`,
+  `user-login`, `user-sync` and `user-display-name`, which never fired.
 
 ## 2026-10-16
 
@@ -31,27 +46,16 @@ just pulled.
 - **MCP tools are off until an admin turns them on.** Each tool has a switch on
   its app's MCP tab (Admin > Apps > Details), and the tab's heading says how
   many are on. A tool that is off isn't listed or callable for anyone, from its
-  next call, and an app with none on is left off the consent screen. Switching
-  is audited as `app.mcp.tool.enable` and `app.mcp.tool.disable`. When a
-  different extension takes an app's slug, the release step turns its tools
-  off again, as it revokes its API keys. Migration 0014; run
-  `npm run db:local` to apply it. **Breaking:** every tool starts off,
-  including tools people already use. After upgrading, open each app that has
-  MCP tools and turn on the ones you want; until then Claude sees none of them.
-  A connection made before keeps its consent and sees a tool again once it is
-  on. One approved while an app had no tool on doesn't include that app:
-  connect again.
+  next call, and an app with none on is left off the consent screen, so a
+  connection approved then doesn't include it: connect again once a tool is on.
+  Switching is audited as `app.mcp.tool.enable` and `app.mcp.tool.disable`.
+  When a different extension takes an app's slug, the release step turns its
+  tools off again, as it revokes its API keys.
 - **A role in a global app is only a role.** When an app stops being global,
   the people who had only a role in it don't keep the app; the people an admin
   granted it to do. Admin > Apps marks the app **Needs grants**, and its
   Access tab lists the people with a role apart from the people with access,
-  with **Grant**, which keeps their role, and **Clear role**. A row counts as
-  a grant when an admin or the CLI is recorded granting it. Migration 0013;
-  run `npm run db:local` to apply it. **After upgrading**, look on Admin > Apps
-  for **Needs grants**. It marks each app where someone who only had a role,
-  and was never granted the app, no longer has it through that role: grant it
-  from the app's Access tab to whoever should still have it. A grant written
-  straight into the database, outside MixOS, counts as a role too.
+  with **Grant**, which keeps their role, and **Clear role**.
 - **Who can reach an app, in one place.** The app dialog's Access tab filters
   between Users, Password-gated, Public and API keys, each with a count. Users
   lists everyone with access, with their role, who granted it and when: grant
@@ -59,30 +63,29 @@ just pulled.
   filter by role. A role the manifest no longer declares is marked **Unknown
   role**. A global app lists everyone, with roles and no grant or revoke.
   Password-gated and Public list the pages and routes each tier reaches, read
-  from the route contracts, and Password-gated sets the password, which an app
-  declaring `password` only in `defineRoute` can now be given. Admin > Users
-  keeps its controls, through the same actions, and its role select now has
-  **Default**: a user on it follows the app's `defaultRole`, and changes when
-  it does. A new grant starts there. Granting someone who already has the app,
-  or revoking someone who doesn't, changes nothing and says so. An app under
-  **Not in this build** has **Revoke access…**, for its grants and API keys.
+  from the route contracts, and Password-gated sets the password, for an app
+  that declares `password` in `defineRoute` too. Admin > Users has the same
+  controls, through the same actions, and its role select has **Default**: a
+  user on it follows the app's `defaultRole`, and changes when it does. A new
+  grant starts there. Granting someone who already has the app, or revoking
+  someone who doesn't, changes nothing and says so. An app under **Not in this
+  build** has **Revoke access…**, for its grants and API keys.
 - **API keys can be created.** The Access tab's API keys view makes a key for
   an app's `key` routes: a label, the routes it may call or every key route,
   and an expiry. The key is shown once. Each key lists its routes, who made it
   and when, when it was last used and whether it is active, expired or
-  revoked, and Revoke works from its next request. Until now nothing created a
-  key, so `key` routes refused every caller. Audited as `app.apikey.create` and
-  `app.apikey.revoke`, never with the key.
+  revoked, and Revoke works from its next request. Audited as
+  `app.apikey.create` and `app.apikey.revoke`, never with the key.
 - **A connector has to be ready before its app is activated or granted.** A
   three-legged OAuth connector with a saved client ID that was never
-  connected, and a connector an admin disabled, now block both, as an
-  unconfigured one does; a user-scoped connector needs only its client ID and
-  secret. The check used to look only for a saved row. The tile, the dialog and
-  Admin > Users say what to do: configure, connect or enable. For an app that
+  connected, and a connector an admin disabled, block both, as an unconfigured
+  one does; a user-scoped connector needs only its client ID and secret. The
+  tile, the dialog and Admin > Users say what to do: configure, connect or
+  enable. For an app that
   is already active, they say it can't be granted until then.
-- **Reach tab.** The app dialog's Connectors tab is now Reach. Under the
-  connectors it lists the hosts the app's own code may call, its `egress`, or
-  says it makes no outbound calls of its own.
+- **Reach tab.** The app dialog's Reach tab lists the app's connectors and,
+  under them, the hosts the app's own code may call, its `egress`, or says it
+  makes no outbound calls of its own.
 
 ## 2026-10-14
 
@@ -91,8 +94,6 @@ just pulled.
   copy (`development.md`), Install at popular providers (`providers/`: Vercel
   with Supabase, Render, Railway and Self-hosted), and After you install
   (`after-you-install/`: extensions, upgrading, securing and the GitHub App).
-  The per-host pages moved into `providers/`, and the README's local setup and
-  troubleshooting moved to `development.md`.
 - **CI runs the database tests, and Danger fails a committed version bump.**
   `ci.yml` starts a throwaway Postgres 17 for `npm test`, so the suites that
   skip without `MIXOS_TEST_DATABASE_URL` run on every pull request. A pull
@@ -105,8 +106,8 @@ just pulled.
 - **Each app's tables are in a schema of its own.** An app with
   `"database": true` gets `app_<slug>`, owned by a database role of its own,
   `mixos_app_<slug>`, which the release step and `npm run migrate:apps` create.
-  The `_app_<slug>_` table prefix is gone: write bare names, as before, and
-  `context.db` reads the app's schema. The release step's role needs
+  Write bare table names: `context.db` reads the app's schema. The release
+  step's role needs
   `CREATEROLE`, which every supported host's default role has, and a Postgres
   server holds one MixOS database: app roles belong to the whole server.
 - **App migrations are checked before they run, and run as the app.** Every
@@ -115,22 +116,21 @@ just pulled.
   in the app's schema. Triggers, functions, `DO`, policies, grants, `SET`,
   extensions, anything outside the app's schema, and function calls beyond a
   short list of built-ins fail the build and the release step, with the file
-  and line. See `docs/apps/database.md`. **Breaking:** an app that ships
-  `migrations/` must set `"database": true`, and an app slug must be lowercase
-  letters and digits joined by single hyphens or underscores.
+  and line. See `docs/apps/database.md`. An app that ships `migrations/` sets
+  `"database": true`, and an app slug is lowercase letters and digits joined by
+  single hyphens or underscores.
 - **`updatedAt` in `app.json`** lists columns the platform sets to `now()` on
-  every update, with its own trigger, since an app migration can no longer
-  create one.
+  every update, with its own trigger, since an app migration can't create
+  one.
 - **An app that leaves the build keeps its data.** The release step and
-  `npm run migrate:apps` used to delete an app the build no longer carried,
-  with its grants, installs, password and widgets, even when the build had only
-  skipped it. They now mark it missing and keep everything, scheduled jobs
-  included, and Admin > Apps lists it under **Not in this build**. If it comes
+  `npm run migrate:apps` mark an app the build no longer carries as missing,
+  even when the build only skipped it, and keep everything: its grants,
+  installs, password, widgets and scheduled jobs. Admin > Apps lists it under
+  **Not in this build**. If it comes
   back with the same files it is as it left; with different files it comes
   back inactive and flagged until an admin activates it. The audit log records
   both, as `app.missing` and `app.returned`. Renaming an app's folder makes a
-  new app, and the old slug keeps the old data. Migration 0010; run
-  `npm run db:local` to apply it.
+  new app, and the old slug keeps the old data.
 - **Registry installs take turns safely.** While another install is running,
   the dialog says so and offers **Try again**. If an install is paused for more
   than 15 minutes (a laptop asleep mid-download) and another starts meanwhile,
@@ -143,22 +143,21 @@ just pulled.
   the environment. Installs also refuse a package with paths that differ only
   in case or Unicode form, a control or bidi character in a path, or a `.git`
   at any depth, and leave out any `.gitignore` or `.gitattributes`. The
-  generator now skips folders whose names start with a dot.
+  generator skips folders whose names start with a dot.
 - **Every build knows its version.** The admin pages show it with the commit,
-  e.g. `MixOS 0.1.0 · commit 3e1f0a2`. The version is `package.json`'s, stamped
-  into every build, and `MIXOS_RELEASE` is no longer read. The commit comes
+  e.g. `MixOS 0.4.2 · commit 3e1f0a2`. The version is `package.json`'s, stamped
+  into every build. The commit comes
   from Vercel, Render and Railway's own variables; on Docker Compose, build with
   `MIXOS_COMMIT=$(git rev-parse HEAD)`, and on Coolify set
   `MIXOS_COMMIT=$SOURCE_COMMIT`. See
-  `docs/hosting/after-you-install/README.md#which-build-is-running`.
-  **Breaking:** an extension's `requiresMixOS` is now checked in a checkout too, against
-  `package.json`; bump it locally to try an extension that needs a newer MixOS,
-  but don't commit the bump: `/mixos deploy` leaves it out.
+  `docs/hosting/after-you-install/README.md#which-build-is-running`. An
+  extension's `requiresMixOS` is checked in a checkout too, against
+  `package.json`: bump it locally to try an extension that needs a newer MixOS,
+  but don't commit the bump, which `/mixos deploy` leaves out.
 - **A built deployment browses mixos.org.** The Docker image on any host, and
   Vercel, ignore `MIXOS_REPOSITORY_URL` unless it names their own machine
-  (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), and log it.
-  **Breaking:** a deployment pointed at another catalogue now browses
-  mixos.org; a source checkout still honours the override.
+  (`localhost`, `127.0.0.1`, `[::1]`, `host.docker.internal`), and log it. A
+  source checkout honours the override.
 - **Releases.** A version of MixOS is an annotated tag `vX.Y.Z` on `main` with
   a GitHub Release, whose notes are its section of `CHANGELOG.md`.
   `/mixos deploy release` opens the release PR, which sets the version in
@@ -169,21 +168,19 @@ just pulled.
   into your fork rather than `upstream/main`
   (`docs/hosting/after-you-install/upgrading.md`). Prereleases are `vX.Y.Z-rc.N`.
 - **Two platform migrations can't share a number.** The ledger records a
-  migration by its number, so the release step and `npm run db:migrate` applied
-  one of two files with the same number and silently skipped the other. Now
-  they apply nothing, the build and `npm run dev:docker` stop, and Danger fails
-  a PR that adds a number already on `main`, each naming both files and the
-  next free number. If a merge brings in a migration with your number, rename
-  yours to the next free number and change its `platform_schema_version` value
-  to match.
+  migration by its number, so of two files with one number, one would be
+  skipped. The release step and `npm run db:migrate` apply nothing then, the
+  build and `npm run dev:docker` stop, and Danger fails a PR that adds a number
+  already on `main`, each naming both files and the next free number. If a
+  merge brings in a migration with your number, rename yours to the next free
+  number and change its `platform_schema_version` value to match.
 - **A maintenance page while the database is behind.** When the platform
   schema is behind the build, every page shows a plain maintenance page and
   every API route, `/api/cron`, `/api/webhooks` and `/api/mcp` included,
   answers 503 with `Retry-After: 30` until the release step runs. Only
   `/api/health/live` and `/api/health/ready` answer as usual. Locally,
-  `npm run db:local` brings it back. **Breaking:** `/api/health/ready` returns
-  only `status` and `reason`. The schema versions, the count of pending app
-  migrations and the message are gone; the server log has them.
+  `npm run db:local` brings it back. `/api/health/ready` returns `status` and
+  `reason`; the server log has the detail.
 - **Vercel production builds run the release step.** `vercel.json` makes
   `npm run vercel-build` the build command: `npm run build`, then the release
   step when `VERCEL_ENV` is `production`, over Neon's `DATABASE_URL_UNPOOLED`
@@ -194,11 +191,9 @@ just pulled.
   first deploy creates the admin. Migrations have to work with the deployment
   still serving: add in one release, remove in a later one. See
   `docs/hosting/providers/vercel-supabase.md`.
-- **`scripts/smoke-test-app.ts` tests real routes.** It looked for routes
-  with a pattern no `defineRoute` route matches, so it sent no requests, and
-  it skipped apps without connectors. It now reads routes from the generated
-  registry and tests every app, or the slugs you name, with GET and HEAD
-  only. Sign in with `SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`;
+- **`scripts/smoke-test-app.ts` tests real routes.** It reads routes from the
+  generated registry and tests every app, or the slugs you name, with GET and
+  HEAD only. Sign in with `SMOKE_EMAIL` and `SMOKE_PASSWORD`, or `SMOKE_COOKIE`;
   `--base-url` points it at another server. Activate and grant an app first:
   one that isn't is reported, not worked around. It exits 1 when a route
   fails or can't be reached, and its last line is a JSON verdict.
@@ -208,13 +203,13 @@ just pulled.
   Jobs shows as **App inactive**, and a consumer calling one of its services
   gets `PROVIDER_INACTIVE`. Activating it takes effect on the next request,
   with no restart. Run now, a job's Enable and Disable, and Start and Stop
-  tick are now audited, as `app.job.run`, `app.job.enable`, `app.job.disable`,
+  tick are audited, as `app.job.run`, `app.job.enable`, `app.job.disable`,
   `scheduler.start` and `scheduler.stop`.
 - **Disable a connector.** Admin > Connectors has Disable and Enable on each
   connector. Disabling names the apps that use it and asks first. While it is
   off, apps' calls to it fail with "disabled by an administrator", and its
   webhooks, Connect and Test Connection are refused. Its credentials are kept.
-  The audit log records `connector.disable` and `connector.enable`, and now
+  The audit log records `connector.disable` and `connector.enable`, and
   `theme.apply` too. See `docs/connectors/credentials.md`.
 - **The Docker image is read-only to the server.** Its files are owned by root,
   so the server can't change its own code on any host, and
@@ -246,12 +241,12 @@ just pulled.
   the generator refuses it. Then commit the folder and deploy. On its own,
   `npm run register` lists what is waiting; `--discard` drops one, `--recover`
   tidies up after one that stopped midway, and `--break-lock` asks before
-  clearing a stuck lock. A theme still registers when it is installed.
+  clearing a stuck lock. A theme registers when it is installed.
   Installs, registrations and the registry generator take turns through
   `.mixos/lock`, so `npm run dev` or `npm run registry` waits while one runs.
-  **Breaking:** in the audit log an install is `<kind>.install`, and
-  `<kind>.register` means registering a pending one; `npm run register`'s
-  rows name `cli:<user>@<host>`, with no user id, and show as unverified.
+  In the audit log an install is `<kind>.install`, and `<kind>.register` is
+  registering a pending one; `npm run register`'s rows name
+  `cli:<user>@<host>`, with no user id, and show as unverified.
 - **Register and Discard in Admin.** Admin > Apps and Admin > Connectors list
   what is waiting in `.mixos/pending/`, with **Review and register** and
   **Discard**. The review shows what will run (`hooks.ts`, `api/`,
@@ -261,9 +256,8 @@ just pulled.
   source at the installed commit. Register waits until you confirm you've read
   it. Afterwards, **Activate in this checkout** is offered only when the
   checkout's database is on the same machine; otherwise activate the app on the
-  instance that serves it. Browse no longer has Install & Activate, and a
-  deployment that runs a build says to install and register in a checkout,
-  commit, and deploy.
+  instance that serves it. A deployment that runs a build says to install and
+  register in a checkout, commit, and deploy.
 - **Installs keep a record in the extension's folder.** An install from the
   Registry writes `.registry.json` into the extension's folder: the catalogue
   it came from, the release, its commit and the hashes that were verified. It
@@ -278,13 +272,11 @@ just pulled.
   added, give a commit message built from the record and the commands to
   commit and push it, link to the source at the verified commit, and say what
   shipping means on each host. The pre-commit stamp leaves installed folders
-  alone. **Breaking:** an install made before this has no record, so Register
-  refuses it: discard it and install it again. An extension installed before
-  this counts as local; reinstall it to give it a record.
-- **Fix:** a seed `insert ... on conflict` in an app migration no longer fails,
-  and `my-app` and `my_app` no longer share tables.
+  alone.
+- **Fix:** a seed `insert ... on conflict` in an app migration works, and
+  `my-app` and `my_app` don't share tables.
 - **Fix:** a connection string that doesn't parse is reported by its variable's
-  name, and the release step and the app no longer print it, password included.
+  name, and the release step and the app don't print it, password included.
 - **Fix:** sign-in attempts are limited on every route that checks a password,
   including Auth.js's own callback, and those routes share one budget per IP.
 - **Fix:** the password re-checks, webhooks and MCP bearer checks are limited,
@@ -294,8 +286,7 @@ just pulled.
 - **Fix:** app API routes get request bodies over 10 MB whole. Up to 27 MB, a
   body reaches a route on `/api/apps` or `/api/p` exactly as sent, and a larger
   one gets a 413, with or without a `content-length`. Without a session cookie,
-  `/api/apps` now answers with a JSON 401 or 404 instead of a redirect to
-  `/login`.
+  `/api/apps` answers with a JSON 401 or 404, not a redirect to `/login`.
 - **Fix:** `/api/analytics/track` and `/api/analytics/app-open` record an event
   only for an app the user holds, while it is active and not being updated.
   Any other event gets a 404, as an app that doesn't exist does, and records
@@ -311,15 +302,15 @@ just pulled.
   version: a committed local bump makes `scripts/release-prep.ts` refuse the
   next release.
 - **Fix:** the headers of Admin > Apps, Connectors, Themes, Analytics and the
-  Browse pages no longer run off a phone or tablet screen. Below 1024px wide,
-  the buttons sit under the title and wrap.
+  Browse pages fit a phone or tablet screen. Below 1024px wide, the buttons sit
+  under the title and wrap.
 - **Fix:** an extension whose repository has a `.gitignore` can be installed.
-  Installs refused a package with a `.gitignore` or `.gitattributes` at any
-  depth; now they leave those files out, in any case, and install the rest.
-  The content hash is still checked over the package as published, and the
+  Installs leave out a `.gitignore` or `.gitattributes` at any depth, in any
+  case, and install the rest. The content hash is checked over the package as
+  published, and the
   files hash in `.registry.json` covers what was written. The install result,
   `npm run register` and the install's audit row say what was left out. A
-  `.git` or a `.registry.json` is still refused.
+  `.git` or a `.registry.json` is refused.
 - **A different extension under the same name starts off.** The release step
   and `npm run migrate:apps` record where each app, connector and theme came
   from: the catalogue and GitHub repository in its `.registry.json`, or local.
@@ -330,23 +321,17 @@ just pulled.
   loses its API keys; activating it needs its slug typed. A connector is
   disabled, keeping its credentials, until an admin enables it by typing its
   name. A theme's change is only recorded. The audit log records each as
-  `<kind>.identity.changed`, with both identities. Migration 0011; run
-  `npm run db:local` to apply it. **Breaking:** every app the database already
-  knows, and every connector with saved credentials, counts as local. Each one
-  installed from the Registry, before or after this change, is switched off
-  once at the first release step that carries it, and an app's API keys are
-  revoked.
+  `<kind>.identity.changed`, with both identities.
 - **The build checks each installed extension's MixOS floor.** When an
   extension's `.registry.json` says it needs a newer MixOS than the version
   being built, `package.json`'s, the registry generator stops the build, naming
   the extension, its floor and the version: upgrade MixOS, or install an older
   release of the extension. A local extension isn't checked, and a floor that
   isn't a version is a warning, as at install. The install dialog and the
-  review before Register now say whether this checkout meets a release's floor:
-  "Requires MixOS 0.2.0 or newer. This checkout runs 0.1.0, which doesn't meet
-  it." **Breaking:** a checkout or a deploy that carries such an extension no
-  longer builds. To try one before its MixOS is released, bump `package.json`
-  locally, and don't ship the extension until that release is merged.
+  review before Register say whether this checkout meets a release's floor:
+  "Requires MixOS 0.5.0 or newer. This checkout runs 0.4.2, which doesn't meet
+  it." To try one before its MixOS is released, bump `package.json` locally,
+  and don't ship the extension until that release is merged.
 - **Withdrawn releases reach the instances running them.** Once a day the tick
   asks mixos.org about the extensions installed from it. Admin > Apps,
   Connectors and Themes then show a release its publisher withdrew, with the
@@ -388,8 +373,8 @@ just pulled.
   theme. The data stays in each database. It hands back the commit that
   deletes the folder, `.registry.json` included. The audit log records
   `<kind>.remove`, and `npm run remove -- --recover` puts back one that stopped
-  midway. The registry generator now also deletes its copies in `public/` of
-  an extension that is gone.
+  midway. The registry generator also deletes its copies in `public/` of an
+  extension that is gone.
 - **Delete an extension's data.** Admin > Apps and Admin > Connectors list
   under **Not in this build** what the database keeps for an app or a
   connector the build no longer has, each with **Delete data…**: destructive,
@@ -398,12 +383,11 @@ just pulled.
   its credentials and every user's connection. It is refused while the build
   serving the instance has it, until a release step has run without it, and
   while another build that used the database in the last 24 hours has it. The
-  release step now marks a connector its build lacks, as it does an app, and
+  release step marks a connector its build lacks, as it does an app, and
   each build records which apps and connectors it carries at its release step,
   when its server starts and on the cron tick. The Remove dialog adds **Remove
   code and delete this checkout's data**, under the same checks. The audit log
   records `<kind>.data.delete`, `connector.missing` and `connector.returned`.
-  Migration 0012; run `npm run db:local` to apply it.
 - **Link your repository on Admin > GitHub.** An admin creates a private GitHub
   App from the page, installs it on the one repository the instance is built
   from, and finishes linking. The instance refuses an installation on every
@@ -436,7 +420,7 @@ just pulled.
   confirmation on Admin > GitHub that no host builds previews of the App's
   branches. Admin > Apps, Connectors and Themes list the App's open pull
   requests with their checks, including "No CI ran" and "Changed since
-  proposed". `vercel.json` now turns off deployments of `mixos/**`,
+  proposed". `vercel.json` turns off deployments of `mixos/**`,
   `render.yaml` turns off the web service's previews, Danger skips App
   branches, and CI checks out without keeping its token. See
   `docs/hosting/after-you-install/github-app.md#proposing-an-extension`.
@@ -488,13 +472,9 @@ just pulled.
 
 ## 2026-10-07
 
-- **Runs on any Postgres.** The platform no longer uses supabase-js or
-  PostgREST: a query builder (`src/lib/db/query.ts`) runs every query over
-  `DATABASE_URL`. `context.db` keeps its method names and `{ data, error }`
-  results, but joins, `or()`, `filter()` and `rpc()` are gone, so an app that
-  used one no longer compiles; `docs/apps/database.md` lists the full surface.
-  `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are no longer read, so delete
-  them from your deployments.
+- **Runs on any Postgres.** A query builder (`src/lib/db/query.ts`) runs every
+  query over `DATABASE_URL`, with supabase-js's method names and
+  `{ data, error }` results. `docs/apps/database.md` lists its surface.
 - **Hosting guides** in `docs/hosting/`: your own server with Docker Compose
   (`deploy/`, which Coolify and Dokploy can also deploy), a Render Blueprint
   (`render.yaml`), Railway (`railway.json`), and Vercel with Neon, Supabase or
@@ -503,28 +483,27 @@ just pulled.
   shares the Supabase CLI's migration ledger, so it and `db:push` can be mixed.
   **`npm run release`** runs everything a deploy needs, and the Docker image
   carries the same step as `node ops/release.cjs`.
-- Platform keys may now be base64 as well as hex, so hosting platforms can
+- Platform keys may be base64 as well as hex, so hosting platforms can
   generate them.
 - **`INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES`** (default `true`).
   Set one to `false` and that kind's Browse page and button disappear, and its
   install actions refuse. The instance runs only what it was deployed with.
   See `docs/hosting/after-you-install/README.md#fixing-what-an-instance-runs`.
 - **Brand hooks.** An app can change the install's name and marks
-  (`brand-name`, `menu-bar-logo`, `login-logo`) from a new
+  (`brand-name`, `menu-bar-logo`, `login-logo`) from an
   `apps/<slug>/hooks.ts` entrypoint, declared in `app.json` under `branding`;
   the build fails if the two disagree. A theme claims a slot outright with its
   own `branding` block. See `docs/apps/hooks.md#brand-hooks`.
 - **Theme logos are measured.** An SVG `assets.logo` needs a `viewBox` (or an
   absolute `width` and `height`), and anything else must be `.png`, `.jpg` or
-  `.webp`, or the build fails. Both bundled themes already comply.
+  `.webp`, or the build fails.
 - **`npm test`** runs the unit tests (`*.test.ts` under `src/` and `scripts/`)
   with Node's built-in runner, and CI runs it after typecheck.
 - **`raw-response` is the only app escape, and it is required.** A route with
   `raw: true` registers only when `app.json` declares
   `escapes: [{ "rule": "raw-response", "reason": "…" }]`, and an admin sees the
-  declaration and its reason in the app's details. `process-env`, `raw-fetch`,
-  `raw-html` and `output-validate-dev-only` are gone; a manifest naming one
-  fails the build.
+  declaration and its reason in the app's details. A manifest naming any other
+  rule fails the build.
 - **App containment is enforced by the build, not just lint.** The registry
   generator reads every app's source on every build and every Registry install,
   and skips an app that references `process`, raw network access (`fetch`,
@@ -534,27 +513,26 @@ just pulled.
 - **`Markdown` for text you did not write.** `@/components/ui/markdown` renders
   GitHub-flavoured Markdown with raw HTML dropped and `javascript:` links
   blanked, styled from the theme's tokens.
-- **Route output is validated on every response.** The
-  `output: { schema, validate: "dev-only" }` form is removed; pass the schema.
-- **Theme checks the build used to skip now fail it:** a custom property
-  outside the top-level `:root` (in a `.mix-*` rule, or a `:root` inside
-  `@media` or `@supports`), a colour token the build cannot evaluate or that is
-  translucent, a `var()` naming a token `:root` never sets, and an `@font-face`
-  missing from `fonts[]`. Only `--border` may be translucent; the build
-  composites it over `--background`. Both bundled themes already comply.
-- **The colour fence covers app widgets and pages again.** Raw palette classes,
-  an opaque `bg-white` / `bg-black` and `dark:` variants are lint errors in
-  `apps/**/*.tsx`, where a later config block had been switching them off.
+- **Route output is validated on every response**, in every environment.
+- **Theme checks that fail the build:** a custom property outside the
+  top-level `:root` (in a `.mix-*` rule, or a `:root` inside `@media` or
+  `@supports`), a colour token the build cannot evaluate or that is
+  translucent, a `var()` naming a token `:root` never sets, and an
+  `@font-face` missing from `fonts[]`. Only `--border` may be translucent; the
+  build composites it over `--background`.
+- **The colour fence covers app widgets and pages.** Raw palette classes, an
+  opaque `bg-white` / `bg-black` and `dark:` variants are lint errors in
+  `apps/**/*.tsx`.
 - **The contrast lint rule checks every installed theme**, not only `mixos`,
   and names each theme an element fails under.
 - **`npm run lint` generates the registry first**, so the contrast rule has
-  theme tokens to read in CI, where it had been inactive.
+  theme tokens to read in CI.
 - **The theme picker shows `assets.preview`** above the theme's swatch row,
   cropped to 16:9 from its top-left corner.
 - **More manifest rules fail the build.** A `sync` needs `"database": true`
   and a `budgetMs` of at most 200000, because the scheduler stops a run at 240
   seconds. Role keys must be unique. A `widgets.ts` that disagrees with
-  `app.json` now fails the build, where it used to leave the app out.
+  `app.json` fails the build.
 - **`ctx.signal` for route handlers.** It aborts when the caller disconnects or
   the route's `budget.ms` runs out. Pass it to connector calls and
   `context.http.fetch` so the work stops, not just the wait.
@@ -585,29 +563,26 @@ just pulled.
   to an imported module.
 - **`callAppRoute` takes the app's own slug** as a string literal. The build
   refuses another app's slug, one built at runtime, and any other use of it.
-- **Fix:** per-user connector scope status was never saved (migration 0008).
-  Run `npm run db:local` to apply it.
-- **Fix:** a deactivated app's `/p` pages return 404, as its API routes already
-  did.
+- **Fix:** per-user connector scope status is saved.
+- **Fix:** a deactivated app's `/p` pages return 404, as its API routes do.
 
 ## 2026-10-05
 
 - **Local Docker on Linux and Windows.** `npm run dev:docker` and `/mixos init`
-  now run on Linux (Docker Engine) and on Windows through WSL 2 (Docker Desktop
-  with its WSL integration), not only on macOS. On Linux and in WSL the dev
-  container writes the checkout as you rather than as root. The cron sidecar
-  now reaches the app over the compose network, so a second instance's cron no
-  longer calls the first instance's app.
+  run on macOS, on Linux (Docker Engine) and on Windows through WSL 2 (Docker
+  Desktop with its WSL integration). On Linux and in WSL the dev container
+  writes the checkout as you rather than as root. The cron sidecar reaches the
+  app over the compose network, so each instance's cron calls its own app.
 - **Contributing terms.** `CONTRIBUTING.md` asks for a DCO sign-off on every
   commit (`git commit -s`) and the MPL notice on every new platform file.
   `TRADEMARK.md` sets out what forks, extensions and hosting services can be
   called.
-- **Node 24.** `.nvmrc`, the Docker images and CI now run Node 24. 22 is still
-  the minimum, until it reaches end of life on 30 April 2027. `npm run dev`,
-  `build`, `typecheck`, `dev:docker` and the pre-commit hook now stop on an
-  older Node with an explanation, instead of failing deep inside the registry
-  generator. When a newer Node is installed but hidden from the shell, they say
-  where it is and how to put it first. The README has a requirements table.
+- **Node 24.** `.nvmrc`, the Docker images and CI run Node 24. 22 is the
+  minimum, until it reaches end of life on 30 April 2027. `npm run dev`,
+  `build`, `typecheck`, `dev:docker` and the pre-commit hook stop on an older
+  Node with an explanation. When a newer Node is installed but hidden from the
+  shell, they say where it is and how to put it first. The README has a
+  requirements table.
 
 
 ## 2026-09-23
@@ -632,84 +607,63 @@ just pulled.
   its own Supabase stack and its own database, alongside an existing one. This
   is what makes it possible to author an extension in one tree and install it
   from the catalogue into another, which registration otherwise refuses because
-  the directory already exists. **Without the file nothing changes:** a checkout
-  is still `mixos` on port 3000 with Supabase on 54321. One consequence — since
-  `supabase/config.toml` now reads its project id and ports from `env(...)`,
-  reach the CLI through `npm run supabase -- <command>`; a bare `supabase …`
-  resolves an empty project id.
+  the directory already exists. Without the file, a checkout is `mixos` on
+  port 3000 with Supabase on 54321. `supabase/config.toml` reads its project id
+  and ports from `env(...)`, so reach the CLI through
+  `npm run supabase -- <command>`; a bare `supabase …` resolves an empty project
+  id.
 
 ## 2026-09-13
 
-- **`app.json` is the only app manifest form.** An app whose whole manifest was
-  the default export of `app.ts` no longer loads. The reason is the install
-  path: a manifest that is static text can be schema-checked *before* any of the
-  package executes, and a manifest that is a module has to be imported before
-  there is anything to validate — the wrong order for a package that just
-  arrived from the Registry. **Migrating:** move every field to `app.json`, and
-  move widget `config` arrays built from preset helpers into an optional
-  `widgets.ts` beside it, default-exporting an object keyed by each widget's
-  `component` path. The generator refuses to guess when the two disagree: a key
-  matching no widget is an error, and so is a widget declaring `config` in both
-  files. Plain config needs no `widgets.ts` at all — leave it inline in the JSON.
+- **`app.json` is the only app manifest form.** A manifest that is static text
+  can be schema-checked *before* any of the package executes, and a manifest
+  that is a module has to be imported before there is anything to validate —
+  the wrong order for a package that just arrived from the Registry. Widget
+  `config` arrays built from preset helpers go in an optional `widgets.ts`
+  beside it, default-exporting an object keyed by each widget's `component`
+  path. The generator refuses to guess when the two disagree: a key matching
+  no widget is an error, and so is a widget declaring `config` in both files.
+  Plain config needs no `widgets.ts` at all — leave it inline in the JSON.
 
 - **Connectors and themes get listing metadata and a `README.md`.** Both
-  manifests now take the same optional catalogue fields apps already had —
+  manifests take the same optional catalogue fields as apps —
   `tagline`, `keywords` (max 10, lowercase, no duplicates), `license`, and a
   pair of URLs (`connectorUrl` / `connectorSupportUrl`, `themeUrl` /
   `themeSupportUrl`). Alongside them, an optional `README.md` at the extension's
-  root is its long-form description on the public listing, the same convention
-  apps adopted. Templates ship both, filled in as placeholders.
-
-- **Guide diagrams render as diagrams.** A ```` ```mermaid ```` fence in
-  `docs/` now draws in the in-app guides instead of showing an admin the raw
-  source, matching how mixos.org renders the same files. The ASCII diagrams in
-  the apps, connectors, theme and security docs are converted. Mermaid is a
-  dynamic import, so only an opened guide tab pays for it.
+  root is its long-form description on the public listing, as for apps.
+  Templates ship both, filled in as placeholders.
 
 ## 2026-08-29
 
-- **Six independent platform keys.** Five of them used to be
-  `CONNECTOR_ENCRYPTION_KEY` itself or derived from it, which made the base key
-  impossible to rotate: changing it broke every stored connector credential,
-  every MCP token, every app API key and every unlock cookie at once. Each
-  purpose now has its own environment variable with a bounded blast radius.
-  Generate them with **`npm run keys:generate`** (or `--missing` to fill gaps),
-  and check a deployment with **`npm run keys:check`**. Local Docker already has
-  them in `.env.docker` — nothing to do there.
+- **Six independent platform keys.** Each purpose has its own environment
+  variable with a bounded blast radius, so each key rotates alone. Generate
+  them with **`npm run keys:generate`** (or `--missing` to fill gaps), and check
+  a deployment with **`npm run keys:check`**. Local Docker has them in
+  `.env.docker`.
 
-- **Lint gates PRs again, and CI audits dependencies.** The `continue-on-error`
-  on CI's lint step is gone now that the 10 pre-existing react-hooks errors are
-  fixed. This matters more than style: `eslint.config.mjs` is where the
-  client/server boundary is enforced — no raw `fetch` in app code, no
-  `process.env`, no connector or DB client outside the server tier — and all of
-  it was advisory while the step could not fail a build. A new
-  `npm audit --audit-level=high` step runs beside it.
+- **Lint gates PRs, and CI audits dependencies.** That matters more than
+  style: `eslint.config.mjs` is where the client/server boundary is enforced —
+  no raw `fetch` in app code, no `process.env`, no connector or DB client
+  outside the server tier — so a lint error fails the PR. An `npm audit` step
+  runs beside it.
 
-- **Connector scopes live in `connector.json`.** `auth.scopes` is now the
+- **Connector scopes live in `connector.json`.** `auth.scopes` is the
   provider's whole documented catalogue, each entry flagged with whether this
   connector asks for it, and only
   `npx tsx scripts/check-scopes.ts <name> --write` writes it — so a provider
   quietly adding a write scope shows up in a diff rather than in a database row
   an admin populated by pressing a button. What the provider *actually granted*
   is recorded per-scope at the OAuth callback, which is the only moment it can
-  change. `icon` is now a full path (`"assets/icon.svg"`, not `"icon.svg"`).
+  change. `icon` is a full path (`"assets/icon.svg"`).
 
-- **Admin actions are recorded.** Who configured a connector, who granted a
-  person access to an app, who set the password on a public page — none of it
-  was written down before, on a platform whose admins hold every third-party
-  credential in the deployment. Values are never logged, only which keys were set.
+- **Admin actions are recorded**: who configured a connector, who granted a
+  person access to an app, who set the password on a public page, on a
+  platform whose admins hold every third-party credential in the deployment.
+  Values are never logged, only which keys were set.
 
 - **Sessions can be revoked one user at a time.** A `session_version` counter
   carried in the JWT and compared on every session resolution, so "this person
-  left" no longer means rotating `AUTH_SECRET` and signing out everybody.
-
-- **RLS is enforced by a backstop, not a hand-kept list.** `npm run migrate:apps`
-  now enables row-level security on every uncovered table in `public`, app
-  tables included — they were never covered, because an app's own `create table`
-  lands in `public` exactly as written.
-
-- **`-q` on any `/mix-*` command** makes it ask you 3–5 clarifying questions
-  before it plans or writes anything.
+  left" doesn't mean rotating `AUTH_SECRET` and signing out everybody.
 
 
 ## 2026-08-28
@@ -723,10 +677,10 @@ just pulled.
 - **`/mixos convert`** turns an existing application into a MixOS app under
   `apps/`.
 
-- **Connectors carry their own setup guide.** `connector.json` gained a
+- **Connectors carry their own setup guide.** `connector.json` has a
   structured `setup` block — the provider-side steps, links, and a note that can
   hang off each of the registry's own "save credentials / connect / verify"
-  buttons, including this deployment's redirect URI. `description` is now capped
+  buttons, including this deployment's redirect URI. `description` is capped
   at 140 characters and describes *the service*; provisioning prose belongs in
   `setup`. A connector can also ship `assets/icon.png` for its registry tile.
 
@@ -739,7 +693,7 @@ just pulled.
 
 ## 2026-08-24
 
-- **Local development now runs in Docker.** One command brings up Supabase
+- **Local development runs in Docker.** One command brings up Supabase
   (Postgres, PostgREST, Studio), applies every migration, seeds the admin user
   and starts the app:
 
@@ -758,13 +712,11 @@ just pulled.
   `--detach` composes with `--prod`. Reference:
   [docs/local-docker.md](docs/local-docker.md).
 
-- **There is no `.env.local` to fill in any more.** `.env.docker` is committed,
-  so a fresh clone has nothing to generate — every value in it is a public,
-  dev-only placeholder, the admin login included. The Supabase URL, service key
-  and DSN are written to `.env.docker.local` on each boot from
-  `supabase status`, so there is no dashboard to visit either. The flip side of
-  committing them: never reuse a value from `.env.docker` anywhere reachable
-  from the internet.
+- **`.env.docker` is committed**, so a fresh clone has nothing to generate:
+  every value in it is a public, dev-only placeholder, the admin login
+  included. The database URL is written to `.env.docker.local` on each boot
+  from `supabase status`, so there is no dashboard to visit either. Never reuse
+  a value from `.env.docker` anywhere reachable from the internet.
 
 - **Use `npm run db:local` for the local schema, not `npm run db:push`.**
   `db:push` targets the *linked remote* project, so reaching for it to repair
@@ -773,21 +725,18 @@ just pulled.
   (`db:local`) and then the app migrations (`npm run migrate:apps`) on every
   boot. See [docs/apps/database.md](docs/apps/database.md).
 
-- **Scheduled jobs tick locally now.** A `cron` sidecar in `docker-compose.yml`
+- **Scheduled jobs tick locally.** A `cron` sidecar in `docker-compose.yml`
   runs under both profiles and GETs `/api/cron` every 5 minutes with the same
   bearer header Vercel Cron sends, so the scheduler exercises the production
   path rather than a dev-only timer. Watch it with
   `docker compose -p mixos logs -f cron`.
-  `npx tsx scripts/run-scheduled-jobs.ts` still works, on either path, for when
+  `npx tsx scripts/run-scheduled-jobs.ts` works, on either path, for when
   you don't want to wait up to five minutes for the next tick. See
   [docs/apps/scheduled-jobs.md](docs/apps/scheduled-jobs.md).
 
-- **The standalone scripts now find the Docker stack on their own.**
+- **The standalone scripts find the Docker stack on their own.**
   `npm run migrate:apps`, `npm run seed-admin` and
-  `npx tsx scripts/run-scheduled-jobs.ts` used to read only `.env.local` and
-  `.env` — neither of which the Docker path creates — so they worked when
-  `npm run dev:docker` spawned them and failed with "No Postgres connection
-  configured" when you ran them yourself. They now share
+  `npx tsx scripts/run-scheduled-jobs.ts` share
   [`scripts/load-env.ts`](scripts/load-env.ts), which falls back to
   `.env.docker` + `.env.docker.local` and rewrites `host.docker.internal` to
   `127.0.0.1` (a container address does not resolve from your shell). The
@@ -795,67 +744,16 @@ just pulled.
   untouched — importantly, `.env.docker`'s `PGSSLMODE=disable` must never leak
   into a connection to a hosted database.
 
-- **Fixed: `/api/cron` was missing from the proxy's public-route list.** Every
-  tick was 307-redirected to `/login` before the route's bearer check could run
-  — **in production as well as locally**, so Vercel Cron has been hitting a
-  redirect instead of the handler and no scheduled job has actually been firing.
-  If a job of yours looked dead, that is why. Nothing about the route's auth
-  changed: the timing-safe `CRON_SECRET` comparison in
-  `src/app/api/cron/route.ts` always was the real gate, and it still is.
+- **Fix:** `/api/cron` is on the proxy's public-route list, so the tick reaches
+  the route's bearer check, in production as well as locally, rather than a
+  redirect to `/login`. The timing-safe `CRON_SECRET` comparison in
+  `src/app/api/cron/route.ts` is the real gate.
 
-- **Publishing is automatic — there is no publish command.** `/mos-publish` is
-  gone. `.githooks/pre-commit` runs
+- **Publishing is automatic — there is no publish command.**
+  `.githooks/pre-commit` runs
   [`scripts/stamp-updated.ts`](scripts/stamp-updated.ts), which stamps
   `lastUpdated` on every app or connector with a file in the commit and
   re-stages the manifest, so the date in the App Manager and Connector Registry
   always matches the last commit that touched it. Preview what would be stamped
   with `npx tsx scripts/stamp-updated.ts --dry-run`. The hook is activated by
   `core.hooksPath`, which the `prepare` script sets on `npm install`.
-
-## 2026-08-23
-
-- **MixOS runs on Vercel, backed by Supabase Postgres.** Vercel builds
-  and deploys straight from GitHub — a Preview deployment per pull request,
-  Production on merge to `main`. CI
-  ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) gates pull requests
-  with lint, typecheck, and build; it deploys nothing itself.
-
-- **Setting up.** *(Superseded 2026-08-24 — local development runs in Docker;
-  there is no `.env.local` to create, and `npm run db:push` is the wrong command
-  locally. See the entry above.)* Local development points at a Supabase
-  project, so it has the same shape as production. Copy `.env.local.example` to
-  `.env.local` and fill in `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
-  `DATABASE_URL` — use the **transaction pooler** connection string (port 6543),
-  which is what serverless functions need. Then apply the schema:
-
-  ```bash
-  npm run db:push       # platform schema  → supabase/migrations/
-  npm run migrate:apps  # per-app tables   → apps/*/migrations/
-  ```
-
-  Full walkthrough in [README.md](README.md), or run `/mixos init` for a guided
-  setup.
-
-- **Publishing an app or connector.** *(Superseded 2026-08-24 — `/mos-publish`
-  is gone and `lastUpdated` stamps automatically on commit. See the entry above.)*
-  Each one carries a `lastUpdated` date in
-  its `app.json` / `connector.json`, stamped by one command:
-
-  ```bash
-  /mos-publish <slug>          # or: npm run mos-publish -- <slug>
-  ```
-
-  It validates the manifest first — a broken one never publishes — writes the
-  date as an ISO 8601 string, and regenerates the registry. The date means *the
-  author published this*, so a formatting pass or a dependency bump never makes
-  an app look freshly updated. Run it as part of the work and commit the
-  one-line manifest change alongside it. Until it runs, the App Manager and
-  Connector Registry show **"Never published"**.
-
-- **Background jobs run on Vercel Cron.** *(Superseded 2026-08-24 — jobs tick
-  locally too, via the compose cron sidecar, and `/api/cron` was being redirected
-  to `/login` in production. See the entry above.)* Apps declare `schedules` in
-  their manifest; `vercel.json` registers a 5-minute tick against `/api/cron`.
-  Nothing ticks under `npm run dev` — run
-  `npx tsx scripts/run-scheduled-jobs.ts` to fire one by hand. See
-  [docs/apps/scheduled-jobs.md](docs/apps/scheduled-jobs.md).

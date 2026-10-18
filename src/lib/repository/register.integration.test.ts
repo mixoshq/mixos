@@ -249,7 +249,7 @@ describe("npm run register, against a real Postgres", { skip }, () => {
   test("an admin's row reads as verified, and the release step's as unverified", async () => {
     const [user] = await sql`
       insert into public.users (email, display_name, is_admin)
-      values (${`admin-${run}@mos.test`}, 'Admin', true)
+      values (${`admin-${run}@mixos.test`}, 'Admin', true)
       returning id, email
     `;
     await audit.recordAdminAction({ id: user.id, email: user.email }, { action: "test.admin", targetType: "app", targetId: run });

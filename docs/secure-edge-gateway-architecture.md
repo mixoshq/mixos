@@ -53,7 +53,7 @@ flowchart TD
 
     PAGE --> SDK
     WIDGET --> SDK
-    SDK["createAppClient(slug).get('/path')"]
+    SDK["createAppClient(slug).call('GET /path')"]
 
     SDK --> FETCH
 
@@ -120,14 +120,13 @@ A route declaring `["session", "public"]` therefore serves a granted user their
 own data and a stranger the public view, from one handler, with `context.user`
 typed nullable so the compiler forces both branches to exist.
 
-**Authorization is `hasAppGrant`, not `hasAppAccess`.** The former reads
-`user_app_grants` and short-circuits true for a `global` app. The latter reads
-`user_apps`, which records that a user *installed* the app on their dashboard — a
-layout preference, not a permission. `hasAppAccess` has no callers and should not
-acquire any.
+**Authorization is `hasAppGrant`.** It reads `user_app_grants` and
+short-circuits true for a `global` app. `user_apps` records that a user
+*installed* the app on their dashboard — a layout preference, not a permission,
+and nothing reads it to decide access.
 
 **The `key` tier is implemented** ([`api-keys.ts`](../src/lib/apps/api-keys.ts)):
-keys are `mosk_`-prefixed random strings stored as HMAC-SHA256 digests, bound to
+keys are `mixk_`-prefixed random strings stored as HMAC-SHA256 digests, bound to
 one app, and scope-checked per method and route pattern — a key minted for one
 endpoint does not become a key for the whole app. It is served on the public
 mount only: `/api/p` is the surface for a caller with no session cookie, and
@@ -297,14 +296,15 @@ Widgets and client pages reach their app through
 [`sdk.ts`](../src/lib/apps/sdk.ts):
 
 ```ts
-const client = createAppClient("my-app");
-const { message } = await client.get<{ message: string }>("/hello");
-await client.post("/items", { body: { name: "Widget" } });
+const client = createAppClient<"my-app">("my-app");
+const { message } = await client.call("GET /hello");
+await client.call("POST /items", { name: "Widget" });
 ```
 
-The SDK prefixes every path with `/api/apps/<slug>/`, sends JSON (or passes
-`FormData` through untouched), supports `AbortSignal`, and throws
-`AppClientError` carrying the status and parsed body. On mutating methods it
+The SDK prefixes every path with `/api/apps/<slug>/`, fills the spec's
+`[param]` segments from the input, sends the rest as the query string or a JSON
+body (or, to a raw route, a `FormData` body), and throws `AppClientError`
+carrying the status and parsed body. On mutating methods it
 attaches an `X-CSRF-Token` header, which the dispatcher verifies at step 9; on a
 403 it clears the cached token, refetches, and retries once, which is what
 recovers a token that went stale mid-session. See
@@ -337,12 +337,11 @@ The boundary holds in five places:
    anywhere: a handler needs `import type { ScopedClient }` to type
    `context.db`, and a type cannot construct a client for another app's schema.
 
-   This replaced three ESLint `no-restricted-imports` blocks, a denylist of
-   spellings that had to restate itself in every tier because flat config
-   *replaces* a rule's options rather than merging them. One omission had made
-   pages and widgets the only tier able to import the server context builder.
-   ESLint now runs the policy's own code (`mos-apps/app-imports`), so the editor
-   and the build give the same answer.
+   ESLint runs the policy's own code (`mixos-apps/app-imports`), so the editor
+   and the build give the same answer. It is an allowlist rather than a
+   denylist of spellings, which would have to restate itself in every tier,
+   because flat config *replaces* a rule's options rather than merging them,
+   and one omission would leave a tier open.
 4. **The registry generator.** Lint runs on pull requests to this repository
    and nowhere else, so for an extension installed from the Registry it is
    advice. The generator runs on every build and on every install, and before
@@ -359,13 +358,10 @@ The boundary holds in five places:
    route with `raw: true` registers only when the manifest declares it, so the
    declaration is the switch rather than a label beside one. Naming a rule
    outside the set is a build failure, because a typo'd escape reads as
-   "declared" to a reviewer while enforcing nothing. The set once held four
-   more — `process-env`, `raw-fetch` and `raw-html`, which disclaimed the
-   environment boundary, the egress containment and the injection boundary,
-   and `output-validate-dev-only` — removed in
-   [`plans/20261005_2150-app-escapes.md`](plans/20261005_2150-app-escapes.md).
-   Declared escapes appear in the generated registry and in the app's details
-   in admin.
+   "declared" to a reviewer while enforcing nothing. The environment boundary,
+   the egress containment, the injection boundary and output validation are
+   not in the set, so no app can disclaim them. Declared escapes appear in the
+   generated registry and in the app's details in admin.
 
 ---
 

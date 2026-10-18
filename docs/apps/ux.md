@@ -10,8 +10,8 @@ The platform ships a design system: Tailwind, plus a fixed set of colour tokens 
 
 ## Compose from the primitives
 
-Most of this guide used to be rules a reviewer had to check. The ones that could
-become components have:
+Where a rule could become a component, it is one, so a reviewer doesn't have to
+check it:
 
 | Instead of | Use | What it makes impossible |
 | --- | --- | --- |
@@ -78,35 +78,35 @@ Match the skeleton to the shape of the real content. The goal is that the transi
 
 ```tsx
 "use client";
-import { useEffect, useState } from "react";
+import { AsyncView } from "@/components/ui/async-view";
 import { Skeleton } from "@/components/ui/skeleton";
-import { createAppClient } from "@/lib/apps/sdk";
+import { useAppQuery } from "@/lib/apps/use-app-query";
 import type { WidgetProps } from "@/lib/hooks/types";
 
 export default function RevenueStat({ appSlug }: WidgetProps) {
-  const [data, setData] = useState<{ total: number } | null>(null);
-
-  useEffect(() => {
-    createAppClient(appSlug).get("/revenue").then(setData);
-  }, [appSlug]);
-
-  if (!data) {
-    // Mirrors the loaded layout: a label line + a big number block.
-    return (
-      <div className="space-y-2">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-9 w-32" />
-      </div>
-    );
-  }
+  const query = useAppQuery<{ total: number }>(appSlug, "GET /revenue");
 
   return (
-    <div className="space-y-2">
-      <p className="text-sm text-muted-foreground">Total revenue</p>
-      <p className="text-3xl font-semibold text-foreground">
-        ${data.total.toLocaleString()}
-      </p>
-    </div>
+    <AsyncView
+      query={query}
+      // Mirrors the loaded layout: a label line + a big number block.
+      skeleton={
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-9 w-32" />
+        </div>
+      }
+      empty={{ cause: "no-data", body: "No revenue recorded yet." }}
+    >
+      {(data) => (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">Total revenue</p>
+          <p className="text-3xl font-semibold text-foreground">
+            ${data.total.toLocaleString()}
+          </p>
+        </div>
+      )}
+    </AsyncView>
   );
 }
 ```
@@ -173,7 +173,7 @@ Measured, light theme, tint composited over `bg-card`:
 
 Read those last five together, because they are the argument for the rule over the convention: **the same construction passes in success and fails in warning and destructive.** Nobody eyeballs a 0.4 difference. The three status tokens are equally legible *on the page*, and equally illegible *on their own tint* — but not at the same alpha, so there is no threshold to memorise.
 
-**This is lint-enforced, as an error.** `mos-design/no-low-contrast-token-pairs` reads every installed theme's tokens from the generated `theme-tokens.json`, resolves the classes on each element per variant state, composites any alpha over that theme's own ground, and computes the ratio under each theme. Which theme is active is an admin's choice at runtime, so an element has to clear the floor in all of them. It shipped as a warning while ~215 pre-existing elements across 16 apps were outstanding; that backlog is gone, and a floor that only warns is not a floor.
+**This is lint-enforced, as an error.** `mixos-design/no-low-contrast-token-pairs` reads every installed theme's tokens from the generated `theme-tokens.json`, resolves the classes on each element per variant state, composites any alpha over that theme's own ground, and computes the ratio under each theme. Which theme is active is an admin's choice at runtime, so an element has to clear the floor in all of them. It shipped as a warning while ~215 pre-existing elements across 16 apps were outstanding; that backlog is gone, and a floor that only warns is not a floor.
 
 It earns its keep on new code too. Promoting it immediately caught two elements in the primitives above: `hover:bg-destructive/90` under `text-destructive-foreground` composites to **4.11:1** — while the identical treatment on `primary` and `secondary` passes, which is exactly the "no threshold to memorise" asymmetry this section describes. The destructive button signals hover with a ring instead. Its blind spots are documented in the rule file — runtime-assembled class names and imported constants are invisible to it, exactly as they are to the colour rule.
 
@@ -324,7 +324,7 @@ The middle case — *"it matters to someone, sometimes"* — is the one that kee
 - [ ] User-triggered refetches say what they're loading.
 - [ ] Colors come from semantic tokens; no raw hex, no `text-<palette>-<n>`, no opaque `bg-white` / `bg-gray-*`.
 - [ ] No `dark:` variants — colours fork in the theme, not here.
-- [ ] No same-element token pair below the floor, and no dimmed colour token — `mos-design/no-low-contrast-token-pairs` reports zero for the files you touched. See [Verified pairs](#verified-pairs-two-legal-tokens-can-make-an-illegal-element).
+- [ ] No same-element token pair below the floor, and no dimmed colour token — `mixos-design/no-low-contrast-token-pairs` reports zero for the files you touched. See [Verified pairs](#verified-pairs-two-legal-tokens-can-make-an-illegal-element).
 - [ ] Nothing meaningful lives only in a `title=` attribute.
 - [ ] Skeletons reproduce the card chrome, not only the content blocks.
 - [ ] Empty states name their cause; error and not-connected states are designed and were actually viewed.

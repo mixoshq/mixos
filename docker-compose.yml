@@ -248,13 +248,13 @@ services:
     # The target is the `mixos-app` network alias, which both app services
     # carry, so one URL works under either profile without branching.
     #
-    # It used to be host.docker.internal:3000 — the published port, a closer
-    # imitation of Vercel Cron calling a deployment URL. That only ever worked
-    # on Docker Desktop, whose proxy carries a host.docker.internal connection
-    # through to a 127.0.0.1-only publish. Docker Engine on Linux does not: the
-    # request arrives at the bridge gateway, nothing listens there, and every
-    # tick was refused. It also always meant port 3000, so a second instance
-    # (MIXOS_PORT) had its cron calling the first instance's app.
+    # Not host.docker.internal and the published port, which would be a closer
+    # imitation of a host's cron calling a deployment URL: that works only on
+    # Docker Desktop, whose proxy carries a host.docker.internal connection
+    # through to a 127.0.0.1-only publish. On Docker Engine on Linux the request
+    # arrives at the bridge gateway, where nothing listens, and every tick is
+    # refused. A fixed port would also send a second instance's (MIXOS_PORT)
+    # ticks to the first instance's app.
     #
     # host.docker.internal survives as the FALLBACK, for host mode: with
     # app-dev stopped and `npm run dev` running on the host instead

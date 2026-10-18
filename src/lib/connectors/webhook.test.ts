@@ -123,7 +123,7 @@ function countedBody(count: number, size: number) {
 }
 
 function post(body: BodyInit | null, headers: Record<string, string> = {}): Request {
-  return new Request("https://mos.test/api/webhooks/x", {
+  return new Request("https://mixos.test/api/webhooks/x", {
     method: "POST",
     body,
     headers,

@@ -47,7 +47,7 @@ test("every action requires an admin before it reads anything, or asks GitHub", 
     admin: async () => {
       throw new Error("Admin access required");
     },
-    origin: () => (origin++, "https://mos.example.com"),
+    origin: () => (origin++, "https://mixos.example.com"),
   };
   const calls: [string, () => Promise<unknown>][] = [
     ["start", () => startAppCreation({ account: "user", name: "MixOS" }, notAdmin)],
@@ -67,7 +67,7 @@ test("every action requires an admin before it reads anything, or asks GitHub", 
 });
 
 test("with GITHUB_APP_ENCRYPTION_KEY unset or malformed, every action says the App is off", async () => {
-  const admin: LinkContext = { admin: async () => ({ id: "u1", email: "admin@example.com" }), origin: () => "https://mos.example.com" };
+  const admin: LinkContext = { admin: async () => ({ id: "u1", email: "admin@example.com" }), origin: () => "https://mixos.example.com" };
   for (const [value, code] of [[undefined, "off"], ["not-a-key", "malformed-key"]] as const) {
     if (value === undefined) delete process.env.GITHUB_APP_ENCRYPTION_KEY;
     else process.env.GITHUB_APP_ENCRYPTION_KEY = value;

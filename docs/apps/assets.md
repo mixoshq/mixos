@@ -4,7 +4,7 @@
 
 Apps can include CSS, images, fonts, and other static assets. There are two approaches depending on how the asset is used: co-located imports (bundled by the build) and CSS modules or Tailwind for styling. All assets must live inside your app folder.
 
-> **There is no opt-out from the design system.** Every app page renders with the platform's Tailwind layer and design tokens. An app supplies its own CSS *on top of* that baseline — it cannot replace it. The `disableOsStyles` manifest flag that used to grant a blank slate has been removed: it was an escape from the contrast, spacing, and state guarantees every other rule depends on. Those guarantees have no escape either: the only rule an app can escape in `app.json` is `raw-response`, for a route that returns its own Response.
+> **There is no opt-out from the design system.** Every app page renders with the platform's Tailwind layer and design tokens. An app supplies its own CSS *on top of* that baseline — it cannot replace it. No manifest flag grants a blank slate: it would be an escape from the contrast, spacing, and state guarantees every other rule depends on, and those guarantees have no escape. The only rule an app can escape in `app.json` is `raw-response`, for a route that returns its own Response.
 
 ## Co-located Imports (Recommended)
 

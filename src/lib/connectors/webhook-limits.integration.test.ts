@@ -106,7 +106,7 @@ describe("webhook body cap and per-IP limit", { skip }, () => {
   let p: Awaited<ReturnType<typeof loadPlatform>>;
 
   async function deliver(ip: string, body: BodyInit, headers: Record<string, string> = {}) {
-    const request = new Request(`https://mos.test/api/webhooks/${NAME}`, {
+    const request = new Request(`https://mixos.test/api/webhooks/${NAME}`, {
       method: "POST",
       body,
       headers: { "content-type": "application/json", "x-forwarded-for": ip, ...headers },
@@ -141,7 +141,7 @@ describe("webhook body cap and per-IP limit", { skip }, () => {
     await migratePlatform(sql, path.join(REPO, "supabase", "migrations"), () => {});
 
     process.env.CONNECTOR_ENCRYPTION_KEY = randomBytes(32).toString("hex");
-    process.env.NEXTAUTH_URL = "https://mos.test";
+    process.env.NEXTAUTH_URL = "https://mixos.test";
     (globalThis as { __pg?: Sql }).__pg = recording(postgres(u.toString(), { max: 8, onnotice: () => {} }));
     p = await loadPlatform();
 
@@ -152,7 +152,7 @@ describe("webhook body cap and per-IP limit", { skip }, () => {
     );
     const [user] = await sql`
       insert into public.users (email, display_name, is_admin)
-      values (${`hooks-${run}@mos.test`}, 'Admin', true) returning id
+      values (${`hooks-${run}@mixos.test`}, 'Admin', true) returning id
     `;
     await p.saveConnectorConfig(NAME, { clientId: "cid", clientSecret: "sec", webhookSecret: SECRET }, user.id);
   });

@@ -150,7 +150,7 @@ describe("a MixOS update as a pull request", { skip }, () => {
     process.env.DATABASE_URL = u.toString();
     process.env.PGSSLMODE = u.searchParams.get("sslmode") ?? "disable";
     process.env.GITHUB_APP_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
-    process.env.NEXTAUTH_URL = "https://mos.test";
+    process.env.NEXTAUTH_URL = "https://mixos.test";
     process.env.MIXOS_REPOSITORY_URL = "https://mixos.org";
     // A built deployment, on Vercel: the only place the notice offers.
     process.env.VERCEL = "1";
@@ -162,7 +162,7 @@ describe("a MixOS update as a pull request", { skip }, () => {
     TAG = `v${major}.${minor + 1}.${patch}`;
 
     const [a] = await sql`
-      insert into public.users (email, display_name, is_admin) values (${`admin-${run}@mos.test`}, 'Admin', true)
+      insert into public.users (email, display_name, is_admin) values (${`admin-${run}@mixos.test`}, 'Admin', true)
       returning id, email`;
     ADMIN = { id: a.id, email: a.email };
 
@@ -295,7 +295,7 @@ describe("a MixOS update as a pull request", { skip }, () => {
     const refused = await propose();
     assert.equal(!refused.ok && refused.code, "checklist", JSON.stringify(refused));
     assert.equal(posts().length, 0, "nothing written");
-    const confirmed = await p.confirmPreviewChecklist({ items: ["render", "railway", "coolify", "other"] }, { ...ctx, origin: () => "https://mos.test" });
+    const confirmed = await p.confirmPreviewChecklist({ items: ["render", "railway", "coolify", "other"] }, { ...ctx, origin: () => "https://mixos.test" });
     assert.ok(confirmed.ok, JSON.stringify(confirmed));
     const o = await offer();
     assert.equal(o?.kind === "fork" ? o.off : "not a fork", null, "on, once the checklist holds");

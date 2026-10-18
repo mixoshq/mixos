@@ -170,18 +170,17 @@ export const config = {
   // logo behind the auth redirect, the one page every user sees before they
   // have a session is the one page that renders unstyled. A theme asset is a
   // font file, a logo or a favicon — the same "public by nature" category as
-  // the icons above. The pattern is `themes/<id>/`, not `themes/`, because
-  // /themes/guide is a signed-in page and stays under the proxy, as
-  // /connectors/guide does below.
+  // the icons above. The pattern is `themes/<id>/`, not `themes/`: only a
+  // theme's own files are exempt, so a page under /themes would stay under the
+  // proxy.
   //
   // `connector-assets/` is a connector's icon, copied out of
   // connectors/<name>/assets by the registry generator. Same category again: a
   // third party's logo, committed in the repo, never a place a secret can hide.
-  // It is deliberately NOT served from `/connectors/`, which is a signed-in
-  // page route (/connectors/guide) — exempting that prefix would take the guard
-  // off a real page, and leaving it unexempted breaks the icons, because
-  // next/image's optimizer fetches the source URL server-side with no cookies
-  // and gets the redirect to /login.
+  // It has a prefix of its own rather than `/connectors/`, so the exemption
+  // can't take the guard off a page, and it must be exempt: next/image's
+  // optimizer fetches the source URL server-side with no cookies and would get
+  // the redirect to /login.
   //
   // `screenshots/` is an app's or theme's listing gallery, copied out of
   // <ext>/screenshots/ by the same generator. The category argument is the

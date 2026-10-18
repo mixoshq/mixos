@@ -269,11 +269,10 @@ export function instrumentConnector<T extends BaseConnector>(
           /*
             Recorded when the call SETTLES, not when it starts.
 
-            The event used to be written up front, which made it a record of
-            "someone tried" — enough to attribute usage, useless for answering
-            "does this connector actually have the access it claims". The
-            tradeoff is real and deliberate: a call that never settles now
-            records nothing, where before it recorded an attempt.
+            Written up front, the event would be a record of "someone tried" —
+            enough to attribute usage, useless for answering "does this
+            connector actually have the access it claims". The tradeoff is real
+            and deliberate: a call that never settles records nothing.
 
             The category comes off ConnectorError rather than off an HTTP
             status, which is what keeps "denied" separate from "throttled" — a

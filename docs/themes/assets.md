@@ -14,8 +14,6 @@ A theme may not `@import` anything, or `url()` another host. `data:` URIs are fi
 
 This is a hard rule with two reasons behind it. A third-party asset is a request on **every page load** for every user, and a webfont fetched at render time is a flash of unstyled text on every cold load. It is also a channel: a theme is CSS, and CSS that can reach the network can report who loaded it and when.
 
-The platform previously pulled Roboto from `fonts.googleapis.com` in `globals.css`. Self-hosting three variable fonts replaced it with about 107 KB served from the same origin.
-
 ## Fonts
 
 Declare each family in `theme.json` **and** `@font-face` it in `theme.css`. The build cross-checks: a manifest entry nobody `@font-face`s is a file shipped to every user for nothing, and an `@font-face` with no manifest entry hides a dependency from review.

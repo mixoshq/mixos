@@ -93,7 +93,7 @@ function fixture(slug: string, file: string, body: string): void {
 /** A `defineRoute()` result, written out so the fixture imports nothing. */
 const route = (name: string) => `
 export const GET = {
-  brand: Symbol.for("mos.route.definition"),
+  brand: Symbol.for("mixos.route.definition"),
   auth: ["public"],
   roles: [],
   budget: { connectorCalls: 0, ms: 5000 },
@@ -129,7 +129,7 @@ function writeFixtures(): void {
     UPDATING,
     "sync/feed.ts",
     `export default {
-  brand: Symbol.for("mos.sync.definition"),
+  brand: Symbol.for("mixos.sync.definition"),
   fetchPage: async () => { ran(); return { items: [] }; },
   upsert: async () => {},
 };
@@ -195,7 +195,7 @@ function manifest(slug: string, name: string, extra: Partial<AppManifest>): AppM
     emits: [],
     listensTo: [],
     branding: null,
-    mcp: [{ name: "peek", description: "Peek.", sources: ["ros"] }],
+    mcp: [{ name: "peek", description: "Peek.", sources: ["mixos"] }],
     ...extra,
   };
 }
@@ -381,7 +381,7 @@ describe("an app whose own migrations are behind", { skip }, () => {
     // being updated stays off until the tests of a switched-off app are done.
     await releaseStep();
     await setActive(OTHER, true);
-    // Every MCP tool starts off (migration 0014). What is tested here is the
+    // Every MCP tool starts off. What is tested here is the
     // app gate, so both apps' tools are switched on, as an admin would.
     await sql`
       insert into public.app_mcp_tool_settings (app_slug, tool_name, enabled)

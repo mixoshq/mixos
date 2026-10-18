@@ -87,22 +87,6 @@ function record(kind: PendingKind, slug: string): InstallRecord {
   };
 }
 
-/** What a sidecar from before the record moved into the folder held. */
-function earlierSidecar() {
-  return {
-    ...sidecar(),
-    source: "https://mixos.org",
-    version: "1.2.0",
-    gitTag: "v1.2.0",
-    commitSha: "a".repeat(40),
-    contentHash: hashFileTree(TREE),
-    filesHash: filesHash(TREE),
-    requiresMixOS: null,
-    fileCount: TREE.length,
-    byteCount: 42,
-  };
-}
-
 // ── filesHash ───────────────────────────────────────────────────────────────
 
 describe("filesHash", () => {
@@ -249,17 +233,6 @@ describe("the sidecar", () => {
   });
 });
 
-describe("a sidecar an earlier version wrote", () => {
-  test("is told apart, since it held what install verified, which is now in the folder's record", () => {
-    const file = path.join(tmp, `sidecar-${n++}.json`);
-    fs.writeFileSync(file, JSON.stringify(earlierSidecar(), null, 2));
-    const read = readSidecar(file);
-    assert.equal(read.state, "unreadable");
-    assert.equal(read.state === "unreadable" && read.earlier, true);
-    assert.match(read.state === "unreadable" ? read.reason : "", /earlier version of MixOS/);
-  });
-});
-
 // ── where things are, and what is pending ───────────────────────────────────
 
 describe("locations", () => {
@@ -314,15 +287,11 @@ describe("listPendingInstalls", () => {
     const borrowed = pendWith("app", "borrowed", ["app", "other"]);
     writeSidecar(borrowed.sidecar, sidecar({ slug: "borrowed" }));
 
-    const earlier = pendWith("app", "earlier", null);
-    fs.writeFileSync(earlier.sidecar, JSON.stringify(earlierSidecar()));
-
     const listing = listPendingInstalls(root);
     const listed = listing.map((p) => ({ id: `${p.kind}/${p.slug}`, problem: p.problem && p.problem.split(" ").slice(0, 4).join(" ") }));
     assert.deepEqual(listed, [
       { id: "app/bare", problem: "It has no record" },
       { id: "app/borrowed", problem: "Its install record (.mixos/pending/apps/borrowed/.registry.json)" },
-      { id: "app/earlier", problem: "An earlier version of" },
       { id: "app/good", problem: null },
       { id: "app/unrecorded", problem: "It has no install" },
       { id: "connector/gone", problem: ".mixos/pending/connectors/gone/ is missing, so" },
@@ -332,7 +301,6 @@ describe("listPendingInstalls", () => {
     assert.equal(byId.get("app/good")?.record?.version, "1.2.0");
     assert.equal(byId.get("app/borrowed")?.record, null);
     assert.match(byId.get("app/borrowed")?.problem ?? "", /it records app\/other, not app\/borrowed\. Discard it and install it again\./);
-    assert.match(byId.get("app/earlier")?.problem ?? "", /Discard it and install it again\./);
   });
 
   test("is empty for a checkout with nothing pending", () => {

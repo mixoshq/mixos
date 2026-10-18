@@ -222,7 +222,7 @@ function show(plan: RemovalPlan, say: (line: string) => void): void {
     plan.installed
       ? `  It was installed from ${sourceHost(plan.installed.source)} · ${plan.installed.version}, and its ` +
           "install record goes with it."
-      : "  It has no install record: it was written here, or installed before installs kept one.",
+      : "  It has no install record: it was written or copied here, not installed from a Registry.",
   );
   if (plan.pending) say(`  The install waiting in ${plan.pending}/ is discarded with it.`);
   say(`  ${KEPT_BEFORE[plan.kind]}`);
