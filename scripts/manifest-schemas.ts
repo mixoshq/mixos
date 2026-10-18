@@ -396,7 +396,7 @@ const syncDefinitionSchema = z.strictObject({
   name: z.string().min(1),
   schedule: cadenceSchema,
   // Cross-checked by the generator against the app's declared `connectors`
-  // (plus the literal "ros"), exactly as mcp[].sources is — a schema can't see
+  // (plus the literal "mixos"), exactly as mcp[].sources is — a schema can't see
   // sibling fields from inside a nested object.
   source: z.string().min(1),
   window: syncWindowSchema,
@@ -650,12 +650,12 @@ const mcpToolDefinitionSchema = z.strictObject({
   description: modelFacingText(),
   hint: modelFacingText().optional(),
   // Each entry additionally cross-checked by the generator against the app's
-  // declared `connectors` (plus the literal "ros") — a schema can't see them.
+  // declared `connectors` (plus the literal "mixos") — a schema can't see them.
   sources: z
     .array(z.string().min(1))
     .min(
       1,
-      'every MCP tool must declare where its data comes from: connector slugs the app declares, or "ros" for data that exists only in MixOS',
+      'every MCP tool must declare where its data comes from: connector slugs the app declares, or "mixos" for data that exists only in MixOS',
     ),
   notCovered: modelFacingText().optional(),
 });

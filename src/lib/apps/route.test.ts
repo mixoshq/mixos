@@ -36,7 +36,7 @@ function failingRoute(init: Omit<ConnectorErrorInit, "connectorName">) {
 
 /** Run a route as a signed-in caller, through the same pipeline the gateway uses. */
 function call(route: RouteDefinition, opts: { isAdmin?: boolean } = {}) {
-  return runRoute(route, new Request("https://mos.test/api/apps/acme-app/items"), {
+  return runRoute(route, new Request("https://mixos.test/api/apps/acme-app/items"), {
     context: {
       user: { id: "user-1", isAdmin: opts.isAdmin ?? false },
       connectors: {},
@@ -144,7 +144,7 @@ function rawRoute(before: (ctx: { user: unknown }) => void = () => {}) {
 /** Run a route as a caller on `tier`, through the same pipeline the gateway uses. */
 function callAs(route: RouteDefinition, tier: Tier, isAdmin = false) {
   const identity = tier === "session" || tier === "signed-in";
-  return runRoute(route, new Request("https://mos.test/api/apps/acme-app/items"), {
+  return runRoute(route, new Request("https://mixos.test/api/apps/acme-app/items"), {
     context: {
       user: identity ? { id: "user-1", isAdmin } : null,
       connectors: {},

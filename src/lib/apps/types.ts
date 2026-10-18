@@ -396,7 +396,7 @@ export interface SyncWindow {
 export interface SyncDefinition {
   name: string;
   schedule: ScheduleCadence;
-  /** A connector slug the app declares, or `"ros"` for MixOS-only data. */
+  /** A connector slug the app declares, or `"mixos"` for MixOS-only data. */
   source: string;
   window: SyncWindow;
   /** Wall-clock ceiling for one tick, under the platform job timeout. */
@@ -514,7 +514,7 @@ export interface ServiceDefinition {
  * that no other connected server can answer the question, which is the one
  * situation where a MixOS tool genuinely has no competition.
  */
-export const MOS_SOURCE = "ros";
+export const MIXOS_SOURCE = "mixos";
 
 /**
  * A read-only MCP tool as declared in `app.json`.
@@ -553,7 +553,7 @@ export interface McpToolDefinition {
   hint?: string;
   /**
    * Where this tool's data actually comes from: connector slugs the app
-   * declares in `connectors`, or the literal `"ros"` for data that lives only
+   * declares in `connectors`, or the literal `"mixos"` for data that lives only
    * in MixOS (curated in the app's own database, with no upstream system
    * holding a copy). Non-empty; the generator rejects a slug the app has not
    * declared, so a tool cannot claim provenance it doesn't have.

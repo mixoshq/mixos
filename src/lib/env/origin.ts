@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * The canonical public origin of this deployment, e.g. `https://mos.example.com`.
+ * The canonical public origin of this deployment, e.g. `https://mixos.example.com`.
  * No trailing slash.
  *
  * SECURITY: this is resolved from the environment ONLY — never from the
@@ -41,7 +41,7 @@ export function getAppOrigin(): string {
 
   throw new Error(
     "Cannot resolve the application origin. Set NEXTAUTH_URL to the full " +
-      "public URL of this deployment (e.g. https://mos.example.com).",
+      "public URL of this deployment (e.g. https://mixos.example.com).",
   );
 }
 

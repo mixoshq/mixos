@@ -15,7 +15,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const definition: SyncDefinition = {
   name: "calls",
   schedule: { everyMinutes: 60 },
-  source: "ros",
+  source: "mixos",
   window: { coldStartDays: 30, defaultDays: 7, minDays: 1 },
   budgetMs: 10_000,
 };

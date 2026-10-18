@@ -85,7 +85,7 @@ export interface SyncHandler<Item> {
   onDrained?: (ctx: SystemAppContext) => Promise<void>;
 }
 
-const BRAND = Symbol.for("mos.sync.definition");
+const BRAND = Symbol.for("mixos.sync.definition");
 
 export interface DefinedSync<Item = unknown> extends SyncHandler<Item> {
   brand: typeof BRAND;

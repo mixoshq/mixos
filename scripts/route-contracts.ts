@@ -35,7 +35,7 @@ import { FatalManifestError } from "./manifest-errors";
  * build script. `Symbol.for` is registry-backed, so the comparison holds across
  * module instances.
  */
-const ROUTE_BRAND = Symbol.for("mos.route.definition");
+const ROUTE_BRAND = Symbol.for("mixos.route.definition");
 
 export const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];

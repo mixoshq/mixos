@@ -40,7 +40,7 @@ export const TOKEN_KEYS = {
   scope: "oauth_scope",
 } as const;
 
-export const OAUTH_STATE_COOKIE = "mos_connector_oauth";
+export const OAUTH_STATE_COOKIE = "mixos_connector_oauth";
 /** The consent round trip is a few seconds of real time; 10 minutes is slack. */
 const FLOW_TTL_MS = 10 * 60 * 1000;
 

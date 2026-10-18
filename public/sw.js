@@ -43,7 +43,7 @@ self.addEventListener("notificationclick", (event) => {
     self.clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((clientList) => {
-        // Focus an existing MOS tab if one is open; otherwise open a new one.
+        // Focus an existing MixOS tab if one is open; otherwise open a new one.
         for (const client of clientList) {
           if ("focus" in client) {
             client.navigate(url);

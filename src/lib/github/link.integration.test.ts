@@ -33,7 +33,7 @@ const skip = serverUrl ? false : "set MIXOS_TEST_DATABASE_URL to run against a r
 
 const run = randomBytes(3).toString("hex");
 const database = `mixos_github_${run}`;
-const ORIGIN = "https://mos.test";
+const ORIGIN = "https://mixos.test";
 const KEY_1 = randomBytes(32);
 const KEY_2 = randomBytes(32);
 
@@ -141,10 +141,10 @@ describe("the GitHub link", { skip }, () => {
     p = await loadPlatform();
 
     const [a] = await sql`
-      insert into public.users (email, display_name, is_admin) values (${`admin-${run}@mos.test`}, 'Admin', true)
+      insert into public.users (email, display_name, is_admin) values (${`admin-${run}@mixos.test`}, 'Admin', true)
       returning id, email`;
     const [b] = await sql`
-      insert into public.users (email, display_name, is_admin) values (${`other-${run}@mos.test`}, 'Other', true)
+      insert into public.users (email, display_name, is_admin) values (${`other-${run}@mixos.test`}, 'Other', true)
       returning id, email`;
     ADMIN = { id: a.id, email: a.email };
     OTHER = { id: b.id, email: b.email };

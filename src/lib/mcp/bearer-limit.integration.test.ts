@@ -70,7 +70,7 @@ describe("failed MCP bearer checks", { skip }, () => {
 
   /** A ping to the MCP route from `ip`, bearing `token`. */
   async function ping(ip: string, token: string) {
-    const request = new Request("https://mos.test/api/mcp", {
+    const request = new Request("https://mixos.test/api/mcp", {
       method: "POST",
       headers: {
         authorization: `Bearer ${token}`,
@@ -95,12 +95,12 @@ describe("failed MCP bearer checks", { skip }, () => {
     await migratePlatform(sql, path.join(REPO, "supabase", "migrations"), () => {});
 
     process.env.MCP_TOKEN_KEY = randomBytes(32).toString("hex");
-    process.env.NEXTAUTH_URL = "https://mos.test";
+    process.env.NEXTAUTH_URL = "https://mixos.test";
     (globalThis as { __pg?: Sql }).__pg = recording(postgres(u.toString(), { max: 4, onnotice: () => {} }));
     p = await loadPlatform();
 
     const [user] = await sql`
-      insert into public.users (email, display_name) values (${`mcp-${run}@mos.test`}, 'MCP')
+      insert into public.users (email, display_name) values (${`mcp-${run}@mixos.test`}, 'MCP')
       returning id
     `;
     const client = await p.registerClient({
@@ -162,7 +162,7 @@ describe("failed MCP bearer checks", { skip }, () => {
       lookups += 1;
       return p.resolveAccessToken(token);
     }, p.createRateLimiter(p.BEARER_FAILURE_LIMIT));
-    const request = new Request("https://mos.test/api/mcp", { headers: { "x-forwarded-for": ip } });
+    const request = new Request("https://mixos.test/api/mcp", { headers: { "x-forwarded-for": ip } });
     assert.equal((await elsewhere(valid, request)).status, "limited");
     assert.equal(lookups, 0);
   });

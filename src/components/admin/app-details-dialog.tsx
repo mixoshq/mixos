@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { AlertCircle, Search } from "lucide-react";
 import type { AppManifest, EscapeRule } from "@/lib/apps/types";
-import { MOS_SOURCE } from "@/lib/apps/types";
+import { MIXOS_SOURCE } from "@/lib/apps/types";
 import {
   getAppSchema,
   type AppSchemaColumn,
@@ -699,11 +699,11 @@ export function McpToolsPanel({ app }: { app: AppManifest }) {
                     <dd className="flex flex-wrap items-center gap-1">
                       {tool.sources.map((s) => (
                         <span key={s}>
-                          {/* "ros" is not a connector — it is the marker
+                          {/* "mixos" is not a connector — it is the marker
                               for data that exists only in MixOS, and
                               rendering it as a slug would send an admin
                               hunting the connector registry for it. */}
-                          {s === MOS_SOURCE ? (
+                          {s === MIXOS_SOURCE ? (
                             <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">
                               MixOS records
                             </span>

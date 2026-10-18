@@ -54,16 +54,16 @@ test("the two token shapes, and the listing token, ask for no more than they nee
 });
 
 test("the manifest: private, those permissions, no events, an inactive webhook, URLs on this instance", () => {
-  const manifest = appManifest("https://mos.example.com", "MixOS mos.example.com");
+  const manifest = appManifest("https://mixos.example.com", "MixOS mixos.example.com");
   assert.equal(manifest.public, false);
   assert.deepEqual(manifest.default_permissions, APP_PERMISSIONS);
   assert.deepEqual(manifest.default_events, []);
   assert.equal(manifest.hook_attributes.active, false);
-  assert.equal(manifest.redirect_url, "https://mos.example.com/api/admin/github/created");
-  assert.equal(manifest.setup_url, "https://mos.example.com/api/admin/github/installed");
+  assert.equal(manifest.redirect_url, "https://mixos.example.com/api/admin/github/created");
+  assert.equal(manifest.setup_url, "https://mixos.example.com/api/admin/github/installed");
   assert.equal(manifest.setup_on_update, true);
   assert.equal(manifest.request_oauth_on_install, false);
-  assert.ok(manifest.hook_attributes.url.startsWith("https://mos.example.com/"));
+  assert.ok(manifest.hook_attributes.url.startsWith("https://mixos.example.com/"));
   // Exactly these keys: nothing GitHub would read as a callback or an event.
   assert.deepEqual(Object.keys(manifest).sort(), [
     "default_events",
@@ -95,7 +95,7 @@ test("where the manifest is posted, and the App's and installation's settings, f
 });
 
 test("the default name fits GitHub's 34 characters", () => {
-  assert.equal(defaultAppName("https://mos.example.com"), "MixOS mos.example.com");
+  assert.equal(defaultAppName("https://mixos.example.com"), "MixOS mixos.example.com");
   const long = defaultAppName("https://a-very-long-subdomain-name.of-some-company.example.com");
   assert.ok(long.length <= 34 && isAppName(long), long);
   assert.equal(defaultAppName("not a url"), "MixOS");
@@ -133,6 +133,6 @@ test("identifiers that reach a path are GitHub's own shapes, and nothing strange
   }
   assert.ok(isManifestCode("a180b1a3d263c81bc6441d7b990bae27d4c10679"));
   for (const bad of ["", "short", "a/b/c/d/e/f", "../../app", "x".repeat(129)]) assert.ok(!isManifestCode(bad), bad);
-  assert.ok(isAppName("MixOS mos.example.com"));
+  assert.ok(isAppName("MixOS mixos.example.com"));
   for (const bad of ["", " padded ", "x".repeat(35), "a\nb", "a‮b"]) assert.ok(!isAppName(bad), JSON.stringify(bad));
 });

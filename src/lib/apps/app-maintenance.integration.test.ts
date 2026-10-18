@@ -93,7 +93,7 @@ function fixture(slug: string, file: string, body: string): void {
 /** A `defineRoute()` result, written out so the fixture imports nothing. */
 const route = (name: string) => `
 export const GET = {
-  brand: Symbol.for("mos.route.definition"),
+  brand: Symbol.for("mixos.route.definition"),
   auth: ["public"],
   roles: [],
   budget: { connectorCalls: 0, ms: 5000 },
@@ -129,7 +129,7 @@ function writeFixtures(): void {
     UPDATING,
     "sync/feed.ts",
     `export default {
-  brand: Symbol.for("mos.sync.definition"),
+  brand: Symbol.for("mixos.sync.definition"),
   fetchPage: async () => { ran(); return { items: [] }; },
   upsert: async () => {},
 };
@@ -195,7 +195,7 @@ function manifest(slug: string, name: string, extra: Partial<AppManifest>): AppM
     emits: [],
     listensTo: [],
     branding: null,
-    mcp: [{ name: "peek", description: "Peek.", sources: ["ros"] }],
+    mcp: [{ name: "peek", description: "Peek.", sources: ["mixos"] }],
     ...extra,
   };
 }

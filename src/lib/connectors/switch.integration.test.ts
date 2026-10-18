@@ -148,7 +148,7 @@ describe("the connector switch", { skip }, () => {
     process.env.DATABASE_URL = u.toString();
     process.env.PGSSLMODE = u.searchParams.get("sslmode") ?? "disable";
     process.env.CONNECTOR_ENCRYPTION_KEY = randomBytes(32).toString("hex");
-    process.env.NEXTAUTH_URL = "https://mos.test";
+    process.env.NEXTAUTH_URL = "https://mixos.test";
     p = await loadPlatform();
 
     p.connectorRegistry.push(manifestOf(KEYED), manifestOf(OAUTH));
@@ -170,7 +170,7 @@ describe("the connector switch", { skip }, () => {
 
     const [user] = await sql`
       insert into public.users (email, display_name, is_admin)
-      values (${`admin-${run}@mos.test`}, 'Admin', true)
+      values (${`admin-${run}@mixos.test`}, 'Admin', true)
       returning id, email, display_name, is_admin
     `;
     actor = { id: user.id, email: user.email };
@@ -315,7 +315,7 @@ describe("the connector switch", { skip }, () => {
       const body = JSON.stringify({ type: "thing.created", data: { n: ++n } });
       const ts = String(Math.floor(Date.now() / 1000));
       const sig = createHmac("sha256", secret).update(`${ts}.${body}`).digest("hex");
-      return new Request(`https://mos.test/api/webhooks/${OAUTH}`, {
+      return new Request(`https://mixos.test/api/webhooks/${OAUTH}`, {
         method: "POST",
         body,
         headers: {

@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
  *
  * Failure handling is deliberately asymmetric:
  *  - A bad `client_id`, unregistered `redirect_uri`, or missing PKCE renders an
- *    error ON mos. Redirecting an unvalidated URI is exactly the open-redirect
+ *    error ON MixOS. Redirecting an unvalidated URI is exactly the open-redirect
  *    an attacker is fishing for.
  *  - A valid request the user declines DOES redirect, with `access_denied`, so
  *    the client can fail cleanly instead of hanging.

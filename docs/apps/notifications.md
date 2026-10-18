@@ -112,7 +112,7 @@ export const POST = defineRoute({
 - **Browser support:** desktop Chrome/Edge/Firefox deliver in the background reliably; on iOS, Web Push only works for a PWA **installed to the Home Screen** (iOS 16.4+).
 - **Push services:** the platform sends only to the browser vendors' push services — Google's (Chrome and other Chromium browsers), Mozilla's, Apple's and Microsoft's — because the server POSTs to whatever endpoint a browser hands it. A browser using any other push service can't subscribe; the list is in `src/lib/push/endpoint.ts`.
 - **HTTPS** is required in production (localhost is exempt for local dev).
-- This is not email/SMS — it reaches browsers, not people who have never opened mos. For broader reach, use a connector (e.g. Slack/email) instead.
+- This is not email/SMS — it reaches browsers, not people who have never opened MixOS. For broader reach, use a connector (e.g. Slack/email) instead.
 
 ## Configuration (platform operators)
 

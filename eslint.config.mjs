@@ -109,8 +109,8 @@ const eslintConfig = defineConfig([
   // See docs/plans/20261007_0153-app-import-allowlist.md.
   {
     files: [APP_SOURCE],
-    plugins: { "mos-apps": { rules: { "app-imports": appImports } } },
-    rules: { "mos-apps/app-imports": "error" },
+    plugins: { "mixos-apps": { rules: { "app-imports": appImports } } },
+    rules: { "mixos-apps/app-imports": "error" },
   },
   // ── Design system: apps use semantic colour tokens, never raw palette ──
   // Two rules, one reason.
@@ -181,7 +181,7 @@ const eslintConfig = defineConfig([
   // docs/plans/20261005_2150-app-escapes.md.
   //
   // How code is LOADED — `require`, `module`, `import()` and the rest — is the
-  // import policy's, and mos-apps/app-imports above reports it with the scan's
+  // import policy's, and mixos-apps/app-imports above reports it with the scan's
   // own words.
   //
   // Only this block sets these rules for apps/**, so nothing here is replaced
@@ -306,11 +306,11 @@ const eslintConfig = defineConfig([
   {
     files: ["apps/**/*.{ts,tsx}", "src/**/*.{ts,tsx}"],
     plugins: {
-      "mos-design": {
+      "mixos-design": {
         rules: { "no-low-contrast-token-pairs": noLowContrastTokenPairs },
       },
     },
-    rules: { "mos-design/no-low-contrast-token-pairs": "error" },
+    rules: { "mixos-design/no-low-contrast-token-pairs": "error" },
   },
 ]);
 

@@ -819,7 +819,7 @@ test("ESLint reports what the scan reports, at the same lines, in the same words
   const [result] = await new ESLint({ cwd: ROOT }).lintText(source, {
     filePath: path.join(ROOT, "apps/probe/api/a/route.ts"),
   });
-  const linted = result.messages.filter((m) => m.ruleId === "mos-apps/app-imports").map((m) => `${m.line} ${m.message}`);
+  const linted = result.messages.filter((m) => m.ruleId === "mixos-apps/app-imports").map((m) => `${m.line} ${m.message}`);
 
   assert.equal(scanned.length, 17);
   assert.deepEqual(linted, scanned);

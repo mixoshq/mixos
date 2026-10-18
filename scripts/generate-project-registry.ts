@@ -21,7 +21,7 @@ import type {
   TelemetryEventDefinition,
   UpdatedAtColumn,
 } from "../src/lib/apps/types";
-import { MOS_SOURCE } from "../src/lib/apps/types";
+import { MIXOS_SOURCE } from "../src/lib/apps/types";
 import type {
   ConnectorAuthPolicy,
   ConnectorHttpPolicy,
@@ -692,7 +692,7 @@ function validateSyncs(
 ): SyncDefinition[] {
   if (!raw || raw.length === 0) return [];
   const seen = new Set<string>();
-  const allowedSources = new Set([...connectors, MOS_SOURCE]);
+  const allowedSources = new Set([...connectors, MIXOS_SOURCE]);
 
   for (const sync of raw) {
     if (seen.has(sync.name)) {
@@ -705,7 +705,7 @@ function validateSyncs(
     if (!allowedSources.has(sync.source)) {
       throw new FatalManifestError(
         `apps/${slug}/app.json: sync "${sync.name}" names source "${sync.source}", ` +
-          `which is neither a connector this app declares nor "${MOS_SOURCE}".`,
+          `which is neither a connector this app declares nor "${MIXOS_SOURCE}".`,
       );
     }
 
@@ -808,7 +808,7 @@ function validateProvides(
  * of executing app code at build time.
  *
  * Also checks that every `sources` entry is a connector the app actually
- * declares (or `"ros"`, for data with no upstream system). That claim is shown
+ * declares (or `"mixos"`, for data with no upstream system). That claim is shown
  * to the model as the tool's provenance, and it is the thing that lets a client
  * tell our cached join apart from the source system's own connector — so a
  * wrong or aspirational entry is worse than a missing one.
@@ -845,14 +845,14 @@ function validateMcpTools(
     }
 
     for (const src of t.sources) {
-      if (src === MOS_SOURCE || connectors.includes(src)) continue;
+      if (src === MIXOS_SOURCE || connectors.includes(src)) continue;
       const declared = connectors.length
         ? `Declared connectors: ${connectors.join(", ")}.`
         : "This app declares no connectors.";
       throw new FatalManifestError(
         `apps/${slug}/app.json: mcp tool "${t.name}" lists source "${src}", ` +
           `which is not a connector this app declares. ${declared} ` +
-          `Use "${MOS_SOURCE}" for data that exists only in MixOS.`,
+          `Use "${MIXOS_SOURCE}" for data that exists only in MixOS.`,
       );
     }
 

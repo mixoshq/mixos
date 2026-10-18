@@ -51,7 +51,7 @@ It can never see something that user couldn't already see in your app.
 | `name` | yes | Lowercase-hyphenated. Exposed to clients as `<slug>__<name>`. |
 | `description` | yes | Written **for a model**. See below — this is the whole product. |
 | `hint` | no | *When* to reach for the tool, as a shape of question rather than a subject area. |
-| `sources` | yes | Where the data comes from: connector slugs your app declares, or `"ros"` for data that exists only in MixOS. The build rejects a slug you haven't declared. |
+| `sources` | yes | Where the data comes from: connector slugs your app declares, or `"mixos"` for data that exists only in MixOS. The build rejects a slug you haven't declared. |
 | `notCovered` | no | What a reader might expect and won't get. Strongly encouraged — see below. |
 
 Those four strings are assembled into the one description a client sees:
@@ -131,7 +131,7 @@ keep the useful signal without asserting jurisdiction:
 
 - **`sources`** names the upstream systems. Rendered as the `Built from:` line,
   which also tells the model those systems' own connectors hold the raw records.
-  Entries must be connectors your app declares, or `"ros"` for records that live
+  Entries must be connectors your app declares, or `"mixos"` for records that live
   only in MixOS. **Only list what the tool actually reads.** If your app
   declares `dock` but the MCP handler never calls it, `dock` is not a source —
   a provenance claim you don't honour is worse than one you never made.

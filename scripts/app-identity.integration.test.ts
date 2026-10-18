@@ -123,7 +123,7 @@ describe("an app under a slug a different extension had", { skip }, () => {
   async function addKey(slug = files): Promise<void> {
     await sql`
       insert into public.app_api_keys (app_slug, label, digest, hint)
-      values (${slug}, 'CI', ${randomBytes(16).toString("hex")}, 'mosk_abc')
+      values (${slug}, 'CI', ${randomBytes(16).toString("hex")}, 'mixk_abc')
     `;
   }
 
@@ -153,7 +153,7 @@ describe("an app under a slug a different extension had", { skip }, () => {
     // Revoked long ago: it keeps its own date.
     await sql`
       insert into public.app_api_keys (app_slug, label, digest, hint, revoked_at)
-      values (${files}, 'Old', ${randomBytes(16).toString("hex")}, 'mosk_old', '2026-01-01T00:00:00Z')
+      values (${files}, 'Old', ${randomBytes(16).toString("hex")}, 'mixk_old', '2026-01-01T00:00:00Z')
     `;
 
     writeApp(files);

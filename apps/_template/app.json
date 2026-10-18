@@ -37,7 +37,7 @@
       "description": "Greets the connected user by name. Returns { message, askedBy }.",
       "hint": "Only useful as an example \u2014 remove this when you add real tools.",
       "sources": [
-        "ros"
+        "mixos"
       ],
       "notCovered": "Anything real. This entry exists to show the shape of a declaration: what the tool returns, when to reach for it, where the data came from, and where it stops."
     }

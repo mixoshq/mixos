@@ -26,7 +26,7 @@ import { platformKey } from "@/lib/env/keys";
  * because those are low-entropy and human-chosen.
  */
 
-const PREFIX = "mosk_";
+const PREFIX = "mixk_";
 
 /**
  * The HMAC key for API-key digests: its own environment variable

@@ -121,7 +121,7 @@ describe("a connector or a theme under a name a different one had", { skip }, ()
     await quietly(() => migratePlatform(sql, MIGRATIONS));
     const [user] = await sql`
       insert into public.users (email, display_name, is_admin)
-      values (${`admin-${run}@mos.test`}, 'Admin', true)
+      values (${`admin-${run}@mixos.test`}, 'Admin', true)
       returning id, email
     `;
     actor = { id: user.id, email: user.email };

@@ -138,13 +138,13 @@ function manifest(slug: string, name: string, extra: Partial<AppManifest>): AppM
 const APPS = [
   manifest(LEDGER, "Ledger", {
     mcp: [
-      { name: "peek", description: "Peek at the ledger.", sources: ["ros"] },
-      { name: "poke", description: "Poke the ledger.", sources: ["ros"] },
+      { name: "peek", description: "Peek at the ledger.", sources: ["mixos"] },
+      { name: "poke", description: "Poke the ledger.", sources: ["mixos"] },
     ],
   }),
   manifest(ALMANAC, "Almanac", {
     global: true,
-    mcp: [{ name: "glance", description: "Glance at the almanac.", sources: ["ros"] }],
+    mcp: [{ name: "glance", description: "Glance at the almanac.", sources: ["mixos"] }],
   }),
 ];
 

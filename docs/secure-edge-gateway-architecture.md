@@ -126,7 +126,7 @@ short-circuits true for a `global` app. `user_apps` records that a user
 and nothing reads it to decide access.
 
 **The `key` tier is implemented** ([`api-keys.ts`](../src/lib/apps/api-keys.ts)):
-keys are `mosk_`-prefixed random strings stored as HMAC-SHA256 digests, bound to
+keys are `mixk_`-prefixed random strings stored as HMAC-SHA256 digests, bound to
 one app, and scope-checked per method and route pattern — a key minted for one
 endpoint does not become a key for the whole app. It is served on the public
 mount only: `/api/p` is the surface for a caller with no session cookie, and
@@ -341,7 +341,7 @@ The boundary holds in five places:
    spellings that had to restate itself in every tier because flat config
    *replaces* a rule's options rather than merging them. One omission had made
    pages and widgets the only tier able to import the server context builder.
-   ESLint now runs the policy's own code (`mos-apps/app-imports`), so the editor
+   ESLint now runs the policy's own code (`mixos-apps/app-imports`), so the editor
    and the build give the same answer.
 4. **The registry generator.** Lint runs on pull requests to this repository
    and nowhere else, so for an extension installed from the Registry it is

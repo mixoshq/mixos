@@ -58,7 +58,7 @@ Report the measured table to the user before writing the theme. A brand owner wi
 ## Verify before reporting done
 
 1. `THEME_REPORT=1 npx tsx scripts/generate-project-registry.ts` — read the ratio table, don't just check the exit code. A pair at 4.51:1 has no headroom.
-2. `npm run typecheck` and `npm run lint`. The lint rule `mos-design/no-low-contrast-token-pairs` measures the elements in `src/` and `apps/` under every installed theme, this one included.
+2. `npm run typecheck` and `npm run lint`. The lint rule `mixos-design/no-low-contrast-token-pairs` measures the elements in `src/` and `apps/` under every installed theme, this one included.
 3. `npm run build`.
 4. Activate at `/admin/themes`, then load: dashboard, an app page, a form, a table, a modal, **the sign-in page while signed out**, and an app's public `/p/<app-slug>` page. There is no light/dark toggle to try: the theme is the whole palette. If you changed a sibling (`<slug>-dark`) too, activate and check each one.
 5. Hard-reload. The active theme is resolved on the server, so the first paint should already be in its colours.

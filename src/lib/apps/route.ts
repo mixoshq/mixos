@@ -247,7 +247,7 @@ export interface RawRouteSpec<S, A extends readonly RouteAuth[] = ["session"]>
 }
 
 /** Runtime brand. `Symbol.for` so it survives two copies of this module. */
-export const ROUTE_DEFINITION = Symbol.for("mos.route.definition");
+export const ROUTE_DEFINITION = Symbol.for("mixos.route.definition");
 
 /**
  * The hoisted, inspectable form of a route. The generator reads the plain

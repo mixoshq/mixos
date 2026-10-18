@@ -83,7 +83,7 @@ const SYNC: SyncDefinition[] = [
   {
     name: "feed",
     schedule: { everyMinutes: 60 },
-    source: "ros",
+    source: "mixos",
     window: { coldStartDays: 7, defaultDays: 1, minDays: 1 },
     budgetMs: 10_000,
   },

@@ -130,7 +130,7 @@ the **public mount only**. `/api/p` is the non-cookie surface an integration
 needs; `/api/apps` is the mount the browser SDK calls with its session cookie,
 and does not read a key.
 
-A key is `mosk_` + 32 random bytes, shown once and stored only as an
+A key is `mixk_` + 32 random bytes, shown once and stored only as an
 HMAC-SHA256 digest, keyed with `APP_API_KEY_SECRET` (§5). It is bound to one
 app — presenting app A's key on app B's route resolves to nothing — and
 **scope-checked per method and route pattern**, so a key minted for one endpoint
@@ -1855,7 +1855,7 @@ retention exceeds the penalty with a full lockout of headroom.
 
 The `key` tier (§1), for machine-to-machine callers. Public mount only.
 
-- Format `mosk_` + 32 random bytes, base64url. Shown **once** at mint time.
+- Format `mixk_` + 32 random bytes, base64url. Shown **once** at mint time.
 - Stored as `HMAC-SHA256(key, k)` in `app_api_keys`, where `k` is
   `APP_API_KEY_SECRET`, a key of its own (§5). HMAC rather than bcrypt because
   these are high-entropy random values with nothing to brute-force, and lookup
@@ -2038,7 +2038,7 @@ rendered in [`docs/apps/architecture.md`](apps/architecture.md#what-an-app-can-i
 **No escape hatch here either.** A function worth granting one app is either safe
 for every app, and is added to the list for all of them by a reviewed change,
 or it is a capability, and belongs on `context` behind a manifest declaration.
-ESLint runs the same policy code in an editor (`mos-apps/app-imports`), so the
+ESLint runs the same policy code in an editor (`mixos-apps/app-imports`), so the
 two cannot disagree.
 
 **What it does not stop.** The import rules read syntax too, and three things

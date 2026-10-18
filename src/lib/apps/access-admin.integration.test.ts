@@ -995,7 +995,7 @@ describe("the Access tab's server actions", { skip }, () => {
     if (!result.ok) return;
     scopedKey = result.minted.key;
     scopedId = result.minted.id;
-    assert.match(scopedKey, /^mosk_[A-Za-z0-9_-]{43}$/);
+    assert.match(scopedKey, /^mixk_[A-Za-z0-9_-]{43}$/);
     assert.equal(result.minted.hint, scopedKey.slice(0, 11));
 
     const [row] = await sql`select row_to_json(k)::text as row, label, scopes, expires_at, created_by from public.app_api_keys k where id = ${scopedId}`;

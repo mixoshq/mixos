@@ -183,7 +183,7 @@ time rather than degrading silently in production.
   "maxAttempts": 3,                      // TOTAL tries, not retries
   "retryOn": ["rate_limited", "upstream_error"],
   "rateLimitOn403": true,                // this API throttles with 403
-  "defaultHeaders": { "X-Client": "mos" },
+  "defaultHeaders": { "X-Client": "mixos" },
   "maxResponseBytes": 8388608,
   "pagination": {
     "style": "cursor",                   // cursor | offset | page | link-header

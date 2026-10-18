@@ -191,7 +191,7 @@ back: revoke them from **Revoke access…** on its entry under **Not in this
 build**.
 
 ```
-curl -H "Authorization: Bearer mosk_…" https://mos.example.com/api/p/my-app/items
+curl -H "Authorization: Bearer mixk_…" https://mixos.example.com/api/p/my-app/items
 ```
 
 Three properties worth knowing:
