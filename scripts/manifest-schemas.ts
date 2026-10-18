@@ -941,7 +941,6 @@ export const RawAppManifestSchema = z
     // The auth set is validated here; the generator additionally verifies each
     // key resolves to a real file on disk (which a schema can't check).
     pageVisibility: z.record(z.string(), acceptedAuths).optional(),
-    apiVisibility: z.record(z.string(), acceptedAuths).optional(),
     roles: rolesSchema.optional(),
     defaultRole: z.string().min(1).optional(),
     telemetry: z.array(appTelemetryEventSchema).optional(),

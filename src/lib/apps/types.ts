@@ -316,19 +316,6 @@ export interface AppManifest {
    * resolves to a real `Main.tsx` on disk and refuses to build otherwise.
    */
   pageVisibility?: Record<string, RouteAuth[]>;
-  /**
-   * Per-API-route visibility declarations. Keys are POSIX paths relative
-   * to `apps/<slug>/api/`, with the same conventions as `pageVisibility`
-   * (`""` is the index route at `api/index/route.ts` — practically uncommon).
-   * Unlisted routes default to `["session"]`.
-   *
-   * PREFER DECLARING THE AUTH ON THE ROUTE ITSELF. `defineRoute({ auth: [...] })`
-   * sits next to the handler it governs, and the compiler uses it to type
-   * `context.user`. This map exists for the page-parity case and as the
-   * manifest-level view an admin reads; where both are present the generator
-   * requires them to agree.
-   */
-  apiVisibility?: Record<string, RouteAuth[]>;
 }
 
 /**
