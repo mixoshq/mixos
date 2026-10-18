@@ -336,7 +336,7 @@ none of the app's code is started, with no restart. The second half matters
 because the release step keeps an app's row, and the grants, installs and
 widgets that hang off it, when the app leaves the build
 ([`scripts/sync-app-registry.ts`](../scripts/sync-app-registry.ts)): a rollback
-or a build that skips an app no longer deletes them. A kept row could hand an
+or a build that skips an app deletes none of them. A kept row could hand an
 old activation, and with it the old grants, to different code that comes back
 under the same slug, so the release step records a hash of each app's files.
 An app that returns with different files comes back inactive and flagged on
@@ -701,23 +701,18 @@ them into browser bundles — do not add one.
 
 ### The key inventory, and why there are six
 
-Five of those six used to be one secret, or derived from it: `MCP_TOKEN_KEY`,
-`APP_API_KEY_SECRET`, `APP_SETTINGS_ENCRYPTION_KEY` and `APP_UNLOCK_SECRET` were
-all `HMAC(CONNECTOR_ENCRYPTION_KEY, label)`, and per-user OAuth grants were
-encrypted with the base key directly.
-
-The PRF separation was sound — leaking a derivative could not recover the base
-key — but it made the base key **un-rotatable in practice**. Changing it
-simultaneously made every stored connector credential undecryptable, invalidated
-every MCP token, every app API key and every unlock cookie. A key that cannot be
-rotated is a key whose compromise is unrecoverable, so "no new environment
-secret" was buying the wrong thing.
-
-Each key is now independent, declared in
+Each key is independent, declared in
 [`src/lib/env/keys.ts`](../src/lib/env/keys.ts) with its purpose and its
-**rotation blast radius** stated next to it. There is **no derivation fallback**:
-a missing key fails closed naming the variable, because a fallback would mean
-nobody sets the others and the single point of failure quietly survives.
+**rotation blast radius** stated next to it, so each one rotates alone. Deriving
+them from one base secret (`HMAC(base, label)`) would stop a leaked derivative
+recovering the base, but it would make the base **un-rotatable in practice**:
+changing it would at once make every stored connector credential undecryptable
+and invalidate every MCP token, every app API key and every unlock cookie. A key
+that cannot be rotated is a key whose compromise is unrecoverable.
+
+There is **no derivation fallback**: a missing key fails closed naming the
+variable, because a fallback would mean nobody sets the others and the single
+point of failure quietly survives.
 
 ```
 npm run keys:generate     # all six, plus AUTH_SECRET and CRON_SECRET, paste-ready, with rotation notes
@@ -761,13 +756,13 @@ Response:   429 Too Many Requests + Retry-After header
 
 ### Why it is not in-memory
 
-It used to be, with a comment saying that was "suitable for single-process
-deployments". The deployment is serverless: every function instance held its own
-Map, so the documented burst was **per instance** and, across a fleet that scales
-with the very traffic being limited, close to no limit at all. A control that
-reads as enforced and is not is worse than an absent one.
+An in-memory limiter suits a single process only. The deployment is serverless:
+every function instance would hold its own Map, so the documented burst would be
+**per instance** and, across a fleet that scales with the very traffic being
+limited, close to no limit at all. A control that reads as enforced and is not is
+worse than an absent one.
 
-The authority is now a Postgres table. The refill arithmetic lives inside the
+The authority is a Postgres table. The refill arithmetic lives inside the
 `ON CONFLICT DO UPDATE SET` expression, which Postgres evaluates against the
 locked current row — a CTE or an `UPDATE ... FROM (SELECT ...)` reads the
 statement snapshot instead and is silently racy under concurrency.
@@ -951,18 +946,13 @@ RLS is **enabled on every table, with zero policies** (see the header of
 That combination is deny-all for the `anon` and `authenticated` roles while the
 owning role — the one MixOS connects as — passes straight through.
 
-**How that is enforced matters, because it failed once already.** It used to be a
-hand-maintained `foreach t in array array['users', 'apps', ...]` list. A list has
-to be edited every time a table is added, and it was not: `connector_webhook_events`
-shipped without RLS, and after that was fixed three more tables were added
-without being transcribed into it — `user_connector_oauth` (which holds per-user
-OAuth grants), `connector_scope_docs`, and `connector_scope_status`. All were
-readable through PostgREST by anyone holding the publishable anon key.
-
-The list is now a **catalog sweep**: the migration enables RLS on every ordinary
-table in `public` that lacks it, skipping extension-owned tables. A rule that
-says "every table in `public`" is enforced by asking for every table in `public`.
-Adding a table cannot miss it, and there is nothing to remember.
+**How that is enforced matters.** It is a **catalog sweep**: the migration
+enables RLS on every ordinary table in `public` that lacks it, skipping
+extension-owned tables. A rule that says "every table in `public`" is enforced by
+asking for every table in `public`. Adding a table cannot miss it, and there is
+nothing to remember. A hand-maintained list of tables would have to be edited
+every time a table is added, and a table left off it would be readable through
+PostgREST by anyone holding the publishable anon key.
 
 **App tables are swept too.** Each app's tables are in its own schema, which
 PostgREST does not publish unless someone configures it to, and belong to the
@@ -973,7 +963,7 @@ app's tables are hardened by the run that creates them.
 This is load-bearing on Supabase and would not be on a plain Postgres instance.
 Every Supabase project publishes the `public` schema through PostgREST,
 reachable with the project's publishable (anon) key — whether or not MixOS uses
-that API, and it no longer does. A table with RLS switched off is therefore
+that API, and it doesn't. A table with RLS switched off is therefore
 readable by anyone who has that key, which is not a secret. Enabling RLS with no
 policies is what closes that door. Off Supabase there is no such API, the lock
 costs nothing, and it is kept so that moving a database onto Supabase never
@@ -1030,11 +1020,10 @@ Entirely at the application layer:
   **The schema bounds the table name, not the app.** `createScopedClient(slug)`
   accepts *any* slug and builds its own full-access client for that app's
   schema, so the guarantee rests entirely on app code never calling it —
-  `context.db` is the client the dispatcher pins to the calling app. That
-  factory used to be importable from every app tier, including widgets, with no
-  lint error; an app could have written
-  `createScopedClient("other-app").table("secrets")` and read or written another
-  app's data. `@/lib/apps/scoped-db` is not on the app import list (§24), so no
+  `context.db` is the client the dispatcher pins to the calling app. An app that
+  could import the factory could write
+  `createScopedClient("other-app").table("secrets")` and read or write another
+  app's data, so `@/lib/apps/scoped-db` is not on the app import list (§24): no
   app code can import it at runtime, while `import type { ScopedClient }`, how a
   handler types the client it is given, still works: a type may come from
   anywhere.
@@ -1093,7 +1082,7 @@ Because server actions are directly invocable POST endpoints, each admin action
 Nothing upstream does it for them, so an action that forgets the call is fully
 exposed to any signed-in user.
 
-**The review checklist item for any new admin action is now two lines**, not one:
+**The review checklist item for any new admin action is two lines**, not one:
 call `requireAdmin()` (the gate, §9) *and* `recordAdminAction()` (the record,
 §28). Nothing upstream does either for you.
 
@@ -1176,10 +1165,10 @@ concurrent revocations cannot both read the same value and collapse into one.
 `service_role` where those Supabase roles exist; MixOS itself calls it as the
 function's owner.
 
-**The cost, stated plainly.** This is one indexed read per session resolution
-where the token was previously trusted for its whole lifetime. The same read
-re-checks `is_admin`, so a demotion now takes effect everywhere rather than only
-inside `requireAdmin()`. The dispatcher already reads the same row via
+**The cost, stated plainly.** This is one indexed read per session resolution,
+rather than trusting the token for its whole lifetime. The same read re-checks
+`is_admin`, so a demotion takes effect everywhere rather than only inside
+`requireAdmin()`. The dispatcher already reads the same row via
 `getUserById` on identity tiers, so an authenticated API call reads it twice —
 worth merging, but correctness came first. It fails **closed** on a missing row
 (a deleted user's token stops working) and **open** on a query error, so a
@@ -1190,10 +1179,9 @@ database blip does not sign out the entire platform.
 ## 13. Server-Side Request Forgery (SSRF)
 
 **Platform-level SSRF containment exists** and is exposed to app code as
-`context.http` (`src/lib/apps/http.ts`). This section previously said the
-opposite — that there was no defence because no platform code fetched a
-user-supplied URL. That was wrong in both halves: app routes could already call
-`fetch` on anything, and the containment below was built to close it.
+`context.http` (`src/lib/apps/http.ts`). An app route runs on the server, where
+an unchecked `fetch` could reach anything the server can, so `context.http` is
+how app code reaches the network.
 
 `context.http` is non-null only when the app declares `egress` in `app.json`. It
 implements **both** halves, and the second is the one people skip:
@@ -1232,7 +1220,7 @@ packages. Lint flags them in the editor, and the registry generator's containmen
 scan refuses the app on every build and every install (§24). Anything with a
 fixed, admin-configured upstream belongs in a connector instead.
 
-**There is no escape hatch.** The `raw-fetch` escape was removed: if
+**There is no escape hatch.** No app can declare its way out of this: if
 `context.http` cannot do something an app needs, that is a platform gap to fix,
 not a rule for the app to disclaim.
 
@@ -1460,8 +1448,8 @@ tables is the worst outcome this feature could have:
    declared as reads. A `mutates` method throws, and so does anything the
    manifest does not declare — the base class's `request()` included, which is
    protected to the compiler but reachable with `as any`, and sends whatever
-   verb it is handed. This used to be the acknowledged hole: the platform could
-   not know which connector methods write, so it was reviewer-enforced.
+   verb it is handed. Without the declaration the platform could not know which
+   connector methods write, and read-only would rest on review alone.
 
    Two details make the declaration trustworthy rather than decorative. The
    generator parses the connector class **from the AST** and fails the build if
@@ -1818,10 +1806,10 @@ The `password` tier (§1) gates a public app behind a shared password.
   pin CPU on cost-12 hashing or read timing signal off the comparison. Only
   *failures* count; a correct password clears the row.
 
-**Storage is `public.app_unlock_failures`, not memory.** This counter used to be
-an in-process `Map`, which is the control §6 argues is close to worthless on a
-serverless deployment: every instance holds its own, so the real allowance was
-five failures *per instance* across a fleet that scales with the attack.
+**Storage is `public.app_unlock_failures`, not memory.** An in-process counter
+is the control §6 argues is close to worthless on a serverless deployment: every
+instance would hold its own, so the real allowance would be five failures *per
+instance* across a fleet that scales with the attack.
 
 It is deliberately **not** a `rate_buckets` limiter. A token bucket charges every
 call and refills continuously; this charges only failures, resets on success, and
@@ -1842,9 +1830,9 @@ counting) hold a live lockout steady, so hammering can neither extend a lockout
 nor inflate the counter past the threshold.
 
 **Failing open**, as in §6: if Postgres is unreachable the check falls back to the
-in-memory result, which is the behaviour this control had *entirely* until now —
-a rarer exposure, not a new one. And bcrypt at cost 12 still costs the attacker
-~250ms per guess regardless.
+in-memory result, a per-instance count — a weaker control for the length of the
+outage, not an open door. And bcrypt at cost 12 still costs the attacker ~250ms
+per guess regardless.
 
 GC runs on the cron tick and keeps rows for twice the lockout duration, so the
 retention exceeds the penalty with a full lockout of headroom.
@@ -1983,14 +1971,11 @@ can assemble a name at runtime or reach the same object through another module.
 What it does is make accidental and naive use impossible to ship, and evasion
 conspicuous in review.
 
-**There is no escape hatch.** `process-env`, `raw-fetch` and `raw-html` used to
-be declarable; they were removed in
-[`plans/20261005_2150-app-escapes.md`](plans/20261005_2150-app-escapes.md),
-because `env` and `context.http` cover every legitimate need, and a reviewer
-told "this app declares `process-env`" was being asked to approve an app that
-could read the keys to the whole instance. The one remaining escape,
-`raw-response`, lets a route return its own Response and loosens nothing in this
-section.
+**There is no escape hatch.** Nothing in this section can be declared away,
+because `env` and `context.http` cover every legitimate need, and a reviewer told
+"this app reads the environment" would be asked to approve an app that could read
+the keys to the whole instance. The one escape, `raw-response`, lets a route
+return its own Response and loosens nothing in this section.
 
 ### What app code can import
 

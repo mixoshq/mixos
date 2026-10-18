@@ -169,13 +169,11 @@ one — see below — and then every number here moves with it.
 
 ## More than one instance on one machine
 
-A checkout used to *be* the instance. The compose project was the literal
-`mixos`, the app was published on 3000, and `supabase/config.toml` pinned
-`project_id = "mixos"`. Two checkouts were therefore not two instances: they
-were the same compose project sharing the same named volumes, and the same
-Supabase containers by name. Booting the second recreated the first.
+An instance is a compose project, its named volumes and its Supabase containers,
+all named after the instance. Two checkouts with the same instance name are the
+same instance: booting the second recreates the first.
 
-That gets in the way of the thing a second tree is usually for. Registering an
+A second tree is usually for something one instance can't do. Registering an
 extension refuses a slug whose directory already exists, so the instance you
 *author* an extension in cannot also be the one you *install* it into to check
 that a stranger gets what you meant. That needs two instances, running at once.
@@ -193,8 +191,8 @@ Then `npm run dev:docker` there boots `mixos-dev` alongside `mixos`, with its
 own containers, its own volumes and its own database. `npm run docker:down` in
 either checkout stops only that one.
 
-**The file is absent by default and every value falls back to what it has
-always been**, so an existing checkout is unaffected: `mixos`, 3000, 54321.
+**The file is absent by default, and every value then falls back to its
+default**: `mixos`, 3000, 54321.
 A shell value beats the file, which makes a one-off possible without a file at
 all:
 
@@ -207,7 +205,7 @@ MIXOS_INSTANCE=mixos-test MIXOS_PORT=3002 npm run dev:docker
 
 ### Reaching the Supabase CLI directly
 
-Because `config.toml` now resolves its project id and ports from `env(...)`,
+Because `config.toml` resolves its project id and ports from `env(...)`,
 the CLI has to be started with those variables set. A bare `supabase db reset`
 gets an EMPTY project id and looks for containers called `supabase_db_`, which
 fails with a message that says nothing about why.
@@ -238,7 +236,7 @@ nothing, `supabase/config.toml` turns off.
 | Service | State | Why |
 |---|---|---|
 | Postgres | **on** | Both data paths end here. |
-| PostgREST + Kong | **on, unused** | MixOS no longer calls the Supabase API. They are part of the CLI's core stack, and Studio goes through them. |
+| PostgREST + Kong | **on, unused** | MixOS doesn't call the Supabase API. They are part of the CLI's core stack, and Studio goes through them. |
 | Studio + pg-meta | **on** | Browsing local data at :54323. Pure convenience; harmless to disable. |
 | GoTrue (`[auth]`) | **off** | MixOS has no Supabase Auth — NextAuth owns authentication. The boot script reads only the API, database and Studio addresses from `supabase status -o json`, which the CLI reports with it off. |
 | Storage | **off** | No `supabase.storage` / `.storage.from(` anywhere in the codebase. |
@@ -249,10 +247,10 @@ nothing, `supabase/config.toml` turns off.
 
 Two `config.toml` details worth knowing before you edit that file:
 
-- **`[api] auto_expose_new_tables = true` no longer matters to MixOS.** It grants
-  new `public` tables to `anon` / `authenticated` / `service_role`, which the
-  PostgREST path needed. MixOS connects as the tables' owner and needs no
-  grants. Turning it on does **not** widen the `anon` surface either way: RLS
+- **`[api] auto_expose_new_tables = true` doesn't matter to MixOS.** It grants
+  new `public` tables to `anon` / `authenticated` / `service_role`, which only a
+  client of the Supabase API needs. MixOS connects as the tables' owner and needs
+  no grants. Turning it on does **not** widen the `anon` surface either way: RLS
   is enabled with zero policies, so `anon` reads an empty set.
 - **The section is `[local_smtp]`, not `[inbucket]`.** `[inbucket]` still parses
   but prints a deprecation warning.
@@ -317,9 +315,9 @@ docker compose -p mixos logs -f cron   # watch ticks (-p is the instance name)
 curl -i http://localhost:3000/api/cron # expect 401 — no bearer header
 ```
 
-Reviving the old in-process `croner` timer would have been less machinery, and
-was rejected: a timer inside the app process is a code path production never
-takes, so scheduler bugs would only show up after deploy.
+A timer inside the app process would be less machinery, and isn't used: it is a
+code path production never takes, so scheduler bugs would only show up after
+deploy.
 
 ---
 
@@ -363,8 +361,8 @@ breakage.
 
 ## Running Next.js on the host against the container backend
 
-Still supported, and the right fallback if hot reload is slow on your machine —
-but no longer the default advice.
+Supported, and the right fallback if hot reload is slow on your machine, but
+not the default: the container is.
 
 Next's own docs do recommend against containerized dev, on the grounds that
 Docker's filesystem layer on macOS can push HMR into seconds or minutes. That

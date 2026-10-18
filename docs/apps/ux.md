@@ -10,8 +10,8 @@ The platform ships a design system: Tailwind, plus a fixed set of colour tokens 
 
 ## Compose from the primitives
 
-Most of this guide used to be rules a reviewer had to check. The ones that could
-become components have:
+Where a rule could become a component, it is one, so a reviewer doesn't have to
+check it:
 
 | Instead of | Use | What it makes impossible |
 | --- | --- | --- |

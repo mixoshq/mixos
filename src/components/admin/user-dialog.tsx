@@ -142,7 +142,7 @@ export default function UserDialog({
   user,
   open,
   onClose,
-  registeredApps,
+  grantableApps,
   blockedBySlug,
   currentAdminId,
   toggleAction,
@@ -151,7 +151,7 @@ export default function UserDialog({
   user: UserRow;
   open: boolean;
   onClose: () => void;
-  registeredApps: AppManifest[];
+  grantableApps: AppManifest[];
   /** Slug → the connectors it needs that nobody configured, already formatted. */
   blockedBySlug: Record<string, string>;
   /** The admin doing the looking, so the page can refuse to demote them. */
@@ -426,7 +426,7 @@ export default function UserDialog({
         {tab === "access" && (
           <AppAccessPanel
             user={user}
-            registeredApps={registeredApps}
+            grantableApps={grantableApps}
             blockedBySlug={blockedBySlug}
             toggleAction={toggleAction}
             setRoleAction={setRoleAction}
@@ -453,29 +453,25 @@ function initialsOf(name: string): ReactNode {
 }
 
 /**
- * Grants and per-app roles — the tab this page originally existed for.
- *
- * Moved wholesale out of the accordion it used to live in. The controls, the
- * connector gate and its wording are unchanged: what changed is that it is now
- * one tab of a record rather than the only thing the page could show.
- * Exported for its test, which renders it on its own.
+ * Grants and per-app roles: one tab of the person's record, with the connector
+ * gate and its wording. Exported for its test, which renders it on its own.
  */
 export function AppAccessPanel({
   user,
-  registeredApps,
+  grantableApps,
   blockedBySlug,
   toggleAction,
   setRoleAction,
 }: {
   user: UserRow;
-  registeredApps: AppManifest[];
+  grantableApps: AppManifest[];
   blockedBySlug: Record<string, string>;
   toggleAction: (formData: FormData) => Promise<GrantToggleOutcome>;
   setRoleAction: (formData: FormData) => void | Promise<void>;
 }) {
   const toast = useToast();
 
-  if (registeredApps.length === 0) {
+  if (grantableApps.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
         No apps found. Add an app to the /apps directory.
@@ -491,7 +487,7 @@ export function AppAccessPanel({
         Manager. Revoking also uninstalls it.
       </p>
       <div className={cn(CARD_SHELL, "divide-y divide-border overflow-hidden")}>
-        {registeredApps.map((app) => {
+        {grantableApps.map((app) => {
           const granted = user.grantedSlugs.includes(app.slug);
           const isGlobal = app.global;
           // A role can be assigned whenever the user effectively has the app

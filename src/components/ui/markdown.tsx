@@ -134,8 +134,8 @@ const COMPONENTS: Components = {
  *
  * Apps may not render raw markup. `dangerouslySetInnerHTML`, `innerHTML` and
  * the rest are refused by lint and by the registry generator's containment scan
- * (scripts/app-containment.ts), and the `raw-html` escape that once let an app
- * do its own sanitizing is gone — see docs/plans/20261005_2150-app-escapes.md.
+ * (scripts/app-containment.ts), and no escape lets an app do its own
+ * sanitizing.
  * Text from a CMS connector, a README or a person's notes comes through here:
  *
  *  - Raw HTML tags in the Markdown are DROPPED (`skipHtml`) and never become

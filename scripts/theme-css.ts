@@ -268,10 +268,10 @@ function rewriteUrls(value: string, slug: string): string {
 /**
  * Resolve a block's declarations to concrete values, following `var()` chains.
  *
- * A chain that ends in nothing fails the build. It used to drop the token from
- * the result, and every check after this one reads the result: a
- * `--primary: var(--brand-cyan)` with no `--brand-cyan` passed the completeness
- * check (`--primary` IS declared) and then skipped both primary pairs.
+ * A chain that ends in nothing fails the build, because every check after this
+ * one reads the result: dropping the token instead would let a
+ * `--primary: var(--brand-cyan)` with no `--brand-cyan` pass the completeness
+ * check (`--primary` IS declared) and then skip both primary pairs.
  */
 function resolveBlock(
   raw: Map<string, string>,
@@ -503,9 +503,9 @@ export function compileTheme(args: {
         }
 
         // A :root inside @media or @supports is a palette that applies only
-        // some of the time. It used to be read like the top-level block, each
-        // value overwriting the last, so a prefers-color-scheme dark palette
-        // built cleanly with only its final value of each token measured.
+        // some of the time. Read like the top-level block, each value would
+        // overwrite the last, so a prefers-color-scheme dark palette would build
+        // cleanly with only its final value of each token measured.
         if (!isTokenBlock(rule)) {
           const at = rule.parent?.type === "atrule" ? (rule.parent as AtRule) : null;
           const where = at ? `@${at.name} ${at.params}`.trim() : "another rule";
@@ -552,10 +552,9 @@ export function compileTheme(args: {
   });
 
   // ── tokens live in :root and nowhere else ─────────────────────────────────
-  // Only :root's declarations used to be inspected; a surface rule had its
-  // selector checked and its body ignored. So `.mix-button { --primary: … }`
-  // built cleanly and repainted every button in a colour the contrast gate
-  // never saw.
+  // Every rule's body is inspected, not only :root's: a custom property set in
+  // a surface rule, such as `.mix-button { --primary: … }`, would repaint every
+  // button in a colour the contrast gate never saw.
   root.walkDecls((decl: Declaration) => {
     if (!decl.prop.startsWith("--") || isTokenBlock(decl.parent)) return;
     throw new ThemeError(

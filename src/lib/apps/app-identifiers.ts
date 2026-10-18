@@ -10,12 +10,11 @@
  * schema (scripts/app-migrations.ts), the client that reads them
  * (./scoped-db.ts), the admin database viewer (./admin-actions.ts) and the build
  * check that no two apps share them (scripts/generate-project-registry.ts) all
- * call this module. The table prefix it replaces was spelled out by hand in each
- * of those places.
+ * call this module, so none of them spells the encoding out by hand.
  *
  * WHY IT HAS TO BE ONE-TO-ONE. A slug may contain `-`, which an unquoted
- * Postgres name cannot. Turning `-` into `_`, as the prefix did, sends `my-app`
- * and `my_app` to the same name, and two apps that share a schema share every
+ * Postgres name cannot. Turning `-` into `_` alone would send `my-app` and
+ * `my_app` to the same name, and two apps that share a schema share every
  * table in it. Here `-` becomes `_` and `_` becomes `__`. A slug may not start
  * or end with a separator or put two side by side, so every run of underscores
  * in an encoded name is one or two long and reads back to exactly one slug.

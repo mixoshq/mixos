@@ -58,12 +58,12 @@ every request.
 
 ## If a release you run is withdrawn
 
-From MixOS 0.2.0, when a publisher withdraws a release of an extension you
-installed from mixos.org, for a security problem say, a notice at the top of
-Admin > Apps, Connectors and Themes says so within about a day, with their
-reason. Nothing is switched off or updated for you. Only extensions installed
-with MixOS 0.2.0 or newer are checked, since they keep an install record, and
-nothing is checked while `MIXOS_UPDATE_CHECK=false`. Each withdrawn release is
+When a publisher withdraws a release of an extension you installed from
+mixos.org, for a security problem say, a notice at the top of Admin > Apps,
+Connectors and Themes says so within about a day, with their reason. Nothing is
+switched off or updated for you. Only extensions installed from mixos.org, which
+keep a `.registry.json`, are checked, and nothing is checked while
+`MIXOS_UPDATE_CHECK=false`. Each withdrawn release is
 also logged on the server as a warning starting `[update-check]`, for an alert to
 catch.
 

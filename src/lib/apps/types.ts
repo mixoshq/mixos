@@ -319,8 +319,8 @@ export interface AppManifest {
 }
 
 /**
- * The rules an app may escape. One, now: see ESCAPE_RULES in
- * scripts/manifest-schemas.ts for the four that were removed and why.
+ * The rules an app may escape: one. See ESCAPE_RULES in
+ * scripts/manifest-schemas.ts for why nothing else is escapable.
  */
 export type EscapeRule = "raw-response";
 

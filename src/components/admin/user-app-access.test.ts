@@ -95,7 +95,7 @@ const panel = (row: UserRow) =>
   renderToStaticMarkup(
     createElement(AppAccessPanel, {
       user: row,
-      registeredApps: [notes],
+      grantableApps: [notes],
       blockedBySlug: {},
       toggleAction: async () => ({ changed: true }),
       setRoleAction: () => {},

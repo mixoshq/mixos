@@ -8,14 +8,14 @@ import { appRegistry } from "@/generated/app-registry";
 /**
  * Aggregation queries backing the admin Analytics page.
  *
- * These use the raw postgres.js client (`sql`) rather than the Supabase-style
- * shim (`createServiceClient`) because the shim does not support GROUP BY /
- * COUNT / aggregates. Everything here is admin-gated by the caller.
+ * These use the raw postgres.js client (`sql`) rather than the query builder
+ * (`createServiceClient`), which has no GROUP BY / COUNT / aggregates.
+ * Everything here is admin-gated by the caller.
  *
  * Note on data completeness:
  * - Install and widget counts are LIVE SNAPSHOTS of current state (all-time).
- * - App-open and top-user metrics only reflect events recorded since the
- *   analytics beacon shipped — there is no historical backfill.
+ * - App-open and top-user metrics reflect only the events recorded; nothing is
+ *   backfilled.
  */
 
 /** Resolve an app slug to its display name, falling back to the slug itself. */

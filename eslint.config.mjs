@@ -100,13 +100,13 @@ const eslintConfig = defineConfig([
   // nothing it imported. An import is judged by the file it lands on, so no
   // spelling (`@/lib/db/../db/client`, a relative path into src/) gets round it.
   //
-  // This replaces three `no-restricted-imports` blocks, a denylist of spellings
-  // that had to restate itself in every tier because flat config replaces a
-  // rule's options. The rule runs src/lib/apps/import-policy.mjs, the same code
-  // the registry generator runs on every build and every Registry install
-  // (scripts/app-containment.ts), so the editor and the build cannot drift.
-  // The page/widget → lib/server tier rule moved into the policy unchanged.
-  // See docs/plans/20261007_0153-app-import-allowlist.md.
+  // An allowlist, in one rule, rather than `no-restricted-imports` blocks: a
+  // denylist of spellings would have to restate itself in every tier, because
+  // flat config replaces a rule's options. The rule runs
+  // src/lib/apps/import-policy.mjs, the same code the registry generator runs on
+  // every build and every Registry install (scripts/app-containment.ts), so the
+  // editor and the build cannot drift. The page/widget → lib/server tier rule is
+  // part of the policy.
   {
     files: [APP_SOURCE],
     plugins: { "mixos-apps": { rules: { "app-imports": appImports } } },
@@ -128,15 +128,10 @@ const eslintConfig = defineConfig([
   //    other side: it hard-codes a second answer somewhere the contrast gate
   //    cannot see, and it is wrong the moment a third theme appears.
   //
-  // WHY src/ IS IN SCOPE AS OF THE THEME ABSTRACTION. This block used to read
-  // "the platform is light-only today — nothing applies the `.dark` class", and
-  // was scoped to apps/** on the strength of it. `feat/theme-abstraction` made a
-  // dark palette reachable and that assumption expired: the platform's own
-  // chrome had accumulated ~120 raw palette utilities and 13 `dark:` variants
-  // that apps/ had been forbidden from writing for years. Extending the glob is
-  // what makes that a one-time repair rather than a recurring cleanup — the
-  // platform is now held to the rule it wrote. See
-  // docs/plans/20260826_1959-dark-mode-legibility.md.
+  // WHY src/ IS IN SCOPE. Any installed theme can be dark, so the platform's own
+  // chrome renders under every palette an app does, and a raw palette utility
+  // or a `dark:` variant there fails the same way. The platform is held to the
+  // rule it sets for apps.
   //
   // OPAQUE FILLS ONLY. `bg-white/10` as a hover on a navy panel and
   // `bg-black/70` as a modal scrim are alpha over a *known* ground and stay
@@ -162,12 +157,11 @@ const eslintConfig = defineConfig([
   // connection string that owns every table. `context.env` can read only what
   // the manifest declared and an admin filled in.
   //
-  // A raw `fetch` is the SSRF hole docs/security-architecture.md §13 flagged as
-  // "a gap to close BEFORE the next feature that fetches a URL", while app
-  // routes could already do it. `context.http` checks the hostname against the
-  // manifest's `egress`, resolves it, re-checks every returned address, and
-  // repeats both on each redirect hop. Fixed, admin-configured hosts belong in a
-  // connector instead.
+  // A raw `fetch` in app code is an SSRF hole (docs/security-architecture.md
+  // §13): it can reach anything the server can. `context.http` checks the
+  // hostname against the manifest's `egress`, resolves it, re-checks every
+  // returned address, and repeats both on each redirect hop. Fixed,
+  // admin-configured hosts belong in a connector instead.
   //
   // Markup the app did not author is an XSS sink; Markdown renders through
   // <Markdown> from @/components/ui/markdown. And a string run as code is the

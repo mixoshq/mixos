@@ -2,13 +2,11 @@
 
 ## Declare the sync; don't hand-roll it
 
-Everything below describes a shape apps used to build by hand — and one app got
-it wrong in the most expensive way available: it persisted a provider's
-pagination cursor between scheduler ticks, the provider expired it before the
-next tick, and the job failed on the same dead cursor **278 times over 19 days**
-without the watermark advancing once.
-
-That shape is now the platform's, and the cursor never leaves the run:
+An incremental sync is the platform's, not something each app builds by hand.
+The most expensive way to get one wrong is to persist a provider's pagination
+cursor between scheduler ticks: the provider expires it before the next tick,
+and the job fails on the same dead cursor on every tick without the watermark
+advancing once. In a declared sync, the cursor never leaves the run:
 
 ```jsonc
 // app.json — a sync needs "database": true, where its watermark is kept
@@ -353,13 +351,6 @@ create table if not exists swr_cache (
 
 Note that this caches in the **tenant-scoped DB**, not a module-level map — a
 process-local cache has no tenant key on this platform.
-
-> **Earlier versions of this guide said "copy it rather than reinventing it"**,
-> pointing at one app's implementation, while also listing "copying a cache helper
-> and letting it drift" as an anti-pattern below. Those pulled against each other,
-> and the copy that resulted proved the anti-pattern right. The implementation was
-> promoted into `src/`; apps now import it and keep only their namespace and
-> TTLs.
 
 Caching here is a database layer, not an HTTP one. Don't reach for
 `Cache-Control` or `revalidate` on an app route.

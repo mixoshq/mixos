@@ -172,7 +172,7 @@ export interface FloorVerdict {
 
 /**
  * The verdict as the install and review dialogs say it, for example
- * "Requires MixOS 0.2.0 or newer. This checkout runs 0.1.0, which doesn't
+ * "Requires MixOS 0.5.0 or newer. This checkout runs 0.4.2, which doesn't
  * meet it." The update dialog says it the same way, for the release it would
  * update to.
  */

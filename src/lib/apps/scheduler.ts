@@ -236,8 +236,7 @@ async function claim(slug: string, job: string): Promise<boolean> {
 
 /**
  * The durable global on/off switch for recurring scheduling, stored in
- * `platform_settings`. Defaults to enabled if the row is missing (fresh DB
- * before the seed, or a settings table that predates this key).
+ * `platform_settings`. Defaults to enabled if the row is missing.
  */
 export async function getSchedulerEnabled(): Promise<boolean> {
   const rows = (await sql`

@@ -203,16 +203,16 @@ export default async function UsersAdminPage() {
       </div>
 
       {/*
-        The "admin is a database flag, set it yourself" notice that used to sit
-        here is gone: the Profile tab sets it now, with the guards that a hand
-        edit never had — you cannot demote yourself, and you cannot remove the
-        last administrator. `npm run seed-admin` is still how the FIRST one is
-        made, which is a bootstrap concern and belongs in the setup guide rather
-        than on a page you can only reach by already being an admin.
+        No notice about the admin flag here: the Profile tab sets it, with the
+        guards a hand edit of the database lacks — you cannot demote yourself,
+        and you cannot remove the last administrator. `npm run seed-admin` is how
+        the FIRST one is made, which is a bootstrap concern and belongs in the
+        setup guide rather than on a page you can only reach by already being an
+        admin.
       */}
       <UserTable
         users={rows}
-        registeredApps={grantableApps}
+        grantableApps={grantableApps}
         blockedBySlug={Object.fromEntries(blockedBySlug)}
         currentAdminId={pageAdmin.id}
         toggleAction={toggleUserGrant}

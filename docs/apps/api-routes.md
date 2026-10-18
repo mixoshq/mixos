@@ -88,7 +88,7 @@ if (!monday?.configured) {
 
 Anything *else* your handler throws becomes a 500, with the message passed
 through `safeErrorMessage()` so a driver error naming a column never reaches the
-browser. You no longer write `safeErrorMessage` yourself — the pipeline does.
+browser. You don't call `safeErrorMessage` yourself — the pipeline does.
 
 The one exception is a failed connector call. Let the `ConnectorError`
 propagate: the response is that connector's envelope with its own status (503

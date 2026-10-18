@@ -36,9 +36,9 @@
  *
  * It lints against EVERY installed theme. Which theme is *active* is a database
  * value the build cannot know, so an element has to clear the floor under each
- * palette it could be rendered in. It used to read only the fallback theme, so
- * a combination that failed under `mixos-dark`, or under a theme you authored,
- * was never reported. scripts/theme-css.ts verifies each palette wholesale;
+ * palette it could be rendered in, so a combination that fails under
+ * `mixos-dark`, or under a theme you authored, is reported too.
+ * scripts/theme-css.ts verifies each palette wholesale;
  * this rule exists for the one thing that pass cannot see, which is which two
  * tokens a given element puts together.
  *

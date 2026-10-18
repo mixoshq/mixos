@@ -29,9 +29,9 @@ const getServerSnapshot = () => true;
  * Mounted only in the (main) layout, so it never shows on the login screen or
  * the public customer pages (/p/...).
  *
- * Deliberately text-only. It previously rendered an image, which had to be
- * precached by a service worker to be available at the one moment the overlay
- * exists — the network being down. Text needs no such machinery.
+ * Deliberately text-only. An image would have to be precached by a service
+ * worker to be available at the one moment the overlay exists — the network
+ * being down. Text needs no such machinery.
  */
 export default function OfflineOverlay() {
   const online = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);

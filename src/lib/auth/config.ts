@@ -121,26 +121,26 @@ export async function buildAuthOptions(): Promise<NextAuthConfig> {
       /*
        * Runs on EVERY session resolution, not only at sign-in.
        *
-       * It used to re-read the user row only on sign-in or an explicit
-       * `update`, which meant the token was trusted for its whole lifetime.
-       * Two things were wrong with that, and the second is the serious one:
+       * Re-reading the user row only on sign-in or an explicit `update` would
+       * trust the token for its whole lifetime. Two things would be wrong with
+       * that, and the second is the serious one:
        *
-       *   · `isAdmin` went stale. A demotion kept working until the token
-       *     expired. `requireAdmin()` compensates by re-reading the row itself,
-       *     but anything reading `session.user.isAdmin` did not.
-       *   · There was NO WAY TO REVOKE A SESSION. With `strategy: "jwt"` there
-       *     is no session row to delete, so an offboarded user's token stayed
-       *     valid until expiry and the only lever was rotating AUTH_SECRET,
-       *     which signs everybody out.
+       *   · `isAdmin` would go stale. A demotion would keep working until the
+       *     token expired. `requireAdmin()` re-reads the row itself, but
+       *     anything reading `session.user.isAdmin` would not.
+       *   · There would be NO WAY TO REVOKE A SESSION. With `strategy: "jwt"`
+       *     there is no session row to delete, so an offboarded user's token
+       *     would stay valid until expiry and the only lever would be rotating
+       *     AUTH_SECRET, which signs everybody out.
        *
-       * `session_version` fixes the second: it is minted into the token and
+       * `session_version` answers the second: it is minted into the token and
        * compared here. Returning `null` invalidates the session — Auth.js
        * treats a null token as "no session", so the user lands on /login.
        *
-       * THE COST, stated plainly: one indexed read per session resolution where
-       * there was none. The dispatcher already reads the same row via
-       * `getUserById` on identity tiers, so an authenticated API call now reads
-       * it twice; that is worth merging later, but correctness first.
+       * THE COST, stated plainly: one indexed read per session resolution. The
+       * dispatcher already reads the same row via `getUserById` on identity
+       * tiers, so an authenticated API call reads it twice; that is worth
+       * merging later, but correctness first.
        *
        * FAILS CLOSED on a missing row — a deleted user's token stops working.
        * It fails OPEN on a query error, deliberately: a database blip must not
