@@ -1,6 +1,6 @@
 ---
 name: mixos
-description: Build on MixOS — set up a machine, decide what to build, create or update an app, connector or theme, convert an existing application, and ship it. Run `/mixos` for the list of actions, or `/mixos <action>`.
+description: Build on MixOS — set up a machine, decide what to build, create or update an app, connector or theme, convert an existing application, remix a component from one app into another, and ship it. Run `/mixos` for the list of actions, or `/mixos <action>`.
 argument-hint: "[action] [arguments] [-q]"
 ---
 
@@ -69,6 +69,7 @@ Call one of these actions:
 | **`help`** | You're not sure what to build. | Plain-language guide for non-technical builders. Recommends what to build and which action to run next; builds nothing itself. | `/mixos help` `[what you want to build]` |
 | **`app`** | You want to create, change, or design-review an app under `apps/`. | Writes a build plan into `apps/<slug>/plans/`, builds against the platform's invariants, verifies in a real browser. `review` audits design and UX before writing anything. | `/mixos app <create\|update\|review> <app-slug>` `[notes]` |
 | **`convert`** | You already have an application and want it as a MixOS app. | Inventories the source, writes a conversion plan, and stops for approval; then builds the first slice. Pass a plan path to resume at the build. | `/mixos convert <source-path\|git-url\|plan-path>` `[app-slug] [notes]` |
+| **`remix`** | You saw a component in one installed app and want it in another. | Abstracts the component into a card — what it needs, what it gives, every action it takes — asks whether each action does the same, something different or nothing in your app, and writes a plan, then stops. After approval, builds it into your app and records the commit it came from. | `/mixos remix <source-app>[:<widget-id\|page-path>] <target-app>` `[notes]` |
 | **`connector`** | An app needs an outside service no connector covers yet, here or in the Registry. | Creates or updates a connector under `connectors/`: client, credentials and OAuth, scopes, admin setup wizard. A developer's job. | `/mixos connector <create\|update> <connector-name>` `[notes]` |
 | **`theme`** | You want to change how the whole install looks. | Creates, updates, or reviews a theme under `themes/`, optionally from a brand book. Checks contrast and looks at it signed in and signed out. A dark look is a theme of its own. `review` audits a theme without changing it. | `/mixos theme <create\|update\|review> <theme-name>` `[brand book path or notes]` |
 | **`deploy`** | You're ready to ship, a PR has merged, or it's time to release a version. | Commits the working tree in logical commits, pushes, and opens a PR against `main` (branching first if you are on `main`; updating the PR if one is open). Never merges. With `--reset`, instead returns to `main`, pulls, and deletes local branches whose PR has merged. With `release`, instead opens a version's release PR, then gives you the commands that tag it and publish its GitHub Release (`--pre` for a prerelease). | `/mixos deploy` `[--reset \| release [--pre]]` |

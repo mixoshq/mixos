@@ -63,6 +63,9 @@ you want, and Claude builds it through a few guided commands:
 - **`/mixos theme`** — Claude builds a theme, from your brand book if you have one.
 - **`/mixos convert`** — already have a tool that works? Claude can bring it over
   instead of starting from scratch.
+- **`/mixos remix`** — seen a table, a card or a page in another app here that
+  you'd like in yours? Claude can bring that piece over, and asks you what each
+  of its buttons should do in your app.
 - **`/mixos deploy`** — publish it so the rest of the team can use it.
 
 You can reassure them: they only decide what the app should show and do — the code,
@@ -169,6 +172,8 @@ Write a short, plain-language summary (in chat — don't save a file):
    - To build it → run **`/mixos app`**, and Claude will build the app for them.
    - Bringing over a tool that already exists → run **`/mixos convert`**, pointing it
      at where that tool lives.
+   - Wanting a piece of another app already in MixOS → run **`/mixos remix`**, naming
+     that app and theirs.
    - A connection that's in the Registry → an admin installs it from **Admin >
      Connectors > Browse Connectors** on their own computer's MixOS.
    - Need a connection nobody has built yet? → a developer runs **`/mixos connector`**.
