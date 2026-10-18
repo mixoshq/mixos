@@ -245,9 +245,6 @@ export interface AppPagePath {
 export function appPagePath(pathname: string): AppPagePath | null {
   const [root, surface, slug, ...rest] = pathname.split("/");
   if (root !== "" || (surface !== "apps" && surface !== "p") || !slug) return null;
-  // The platform's own page, which Next serves ahead of the root page of an
-  // app with that slug.
-  if (surface === "apps" && slug === "guide" && rest.length === 0) return null;
   let pageKey: string;
   try {
     // Decoded, as Next decodes the page's params.

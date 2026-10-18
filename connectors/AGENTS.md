@@ -2,7 +2,7 @@
 
 You are about to create or modify a connector under `connectors/`. **Read the sections below in order before writing any code.** The linked guides under `docs/connectors/` are the authoritative reference; do not guess based on training data.
 
-The same content is rendered in the UI at the Connector Registry admin page by [`src/components/connectors/connector-guide-tabs.tsx`](../src/components/connectors/connector-guide-tabs.tsx), which reads these markdown files directly. Editing a guide updates the UI; adding a new one means registering it in that component's `TABS` list.
+The same guides are published on mixos.org, which the Connector Registry admin page links to.
 
 **Before you start: write a plan.** For anything beyond a trivial tweak, write a build plan to `connectors/<slug>/plans/YYYYMMDD_HHMM-<plan-name>.md` first — **beside the connector it describes**, so the design history travels with the code (Context, decisions, file-level changes, verification). Every connector has a `plans/` directory, [`_template`](_template/plans/) included, so a scaffolded connector inherits the convention. A change to the connector *base layer* (`src/lib/connectors/`) is a *platform* plan and goes to `docs/plans/` instead. See [`../docs/plans/README.md`](../docs/plans/README.md).
 

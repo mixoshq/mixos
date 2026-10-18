@@ -27,11 +27,10 @@ const isConsentError = (err: unknown) => err instanceof HookConsentError;
 
 test("a bare name is the app's own; core names and full names are kept", () => {
   assert.equal(qualifyHookName("ready", "crm"), "crm:ready");
-  assert.equal(qualifyHookName("user-display-name", "crm"), "user-display-name");
   assert.equal(qualifyHookName("brand-name", "crm"), "brand-name");
   assert.equal(qualifyHookName("sales:deal-won", "crm"), "sales:deal-won");
   assert.equal(hookOwner("sales:deal-won"), "sales");
-  assert.equal(hookOwner("init"), null);
+  assert.equal(hookOwner("brand-name"), null);
   assert.equal(hookOwner("ready"), null);
 });
 
@@ -97,11 +96,11 @@ test("an app listens to its own hooks and to core hooks with no declaration", as
   const heard: string[] = [];
   crm.addAction("ready", () => void heard.push("own, bare"));
   crm.addAction("crm:ready", () => void heard.push("own, full"));
-  crm.addFilter("user-display-name", (name: string) => `${name}!`);
+  crm.addFilter("brand-name", (name: string) => `${name}!`);
 
   await crm.doAction("ready");
   assert.deepEqual(heard, ["own, bare", "own, full"]);
-  assert.equal(await sys.applyFilters("user-display-name", "Ada"), "Ada!");
+  assert.equal(await sys.applyFilters("brand-name", "Ada"), "Ada!");
 });
 
 // ── firing (RB-16) ──────────────────────────────────────────────────────────
@@ -127,8 +126,8 @@ test("the bare singleton can neither fire nor listen to an app's hook", async ()
   assert.throws(() => sys.addFilter("sales:price", (v) => v), isConsentError);
 
   // Core hooks are what it is for.
-  sys.addFilter("user-display-name", (name: string) => name.toUpperCase());
-  assert.equal(await sys.applyFilters("user-display-name", "ada"), "ADA");
+  sys.addFilter("brand-name", (name: string) => name.toUpperCase());
+  assert.equal(await sys.applyFilters("brand-name", "ada"), "ADA");
 });
 
 test("the bare singleton is no back channel: an unprefixed custom name is refused too", async () => {
@@ -175,41 +174,47 @@ test("activation is read on every dispatch: switching an app off stops its liste
   assert.equal(calls, 2);
 });
 
+/** A filter on a core hook that records who ran, and passes the value on. */
+const recording = (ran: string[], who: string) => (value: string) => {
+  ran.push(who);
+  return value;
+};
+
 test("unattributed listeners always run; an app's need its app active", async () => {
   const { sys } = system(["on-app"]);
   const ran: string[] = [];
-  sys.addAction("init", () => void ran.push("platform"));
-  sys.createRegistrar("on-app").addAction("init", () => void ran.push("on-app"));
-  sys.createRegistrar("off-app").addAction("init", () => void ran.push("off-app"));
+  sys.addFilter("brand-name", recording(ran, "platform"));
+  sys.createRegistrar("on-app").addFilter("brand-name", recording(ran, "on-app"));
+  sys.createRegistrar("off-app").addFilter("brand-name", recording(ran, "off-app"));
 
-  await sys.doAction("init");
+  await sys.applyFilters("brand-name", "Acme");
   assert.deepEqual(ran.sort(), ["on-app", "platform"]);
 });
 
 test("with no activation check installed, or one that fails, an app's listeners do not run", async () => {
   const bare = new HookSystem();
   const ran: string[] = [];
-  bare.addAction("init", () => void ran.push("platform"));
-  bare.createRegistrar("crm").addAction("init", () => void ran.push("crm"));
-  await bare.doAction("init");
+  bare.addFilter("brand-name", recording(ran, "platform"));
+  bare.createRegistrar("crm").addFilter("brand-name", recording(ran, "crm"));
+  await bare.applyFilters("brand-name", "Acme");
   assert.deepEqual(ran, ["platform"]);
 
   const failing = new HookSystem();
   failing.setActivation(async () => {
     throw new Error("database unreachable");
   });
-  failing.createRegistrar("crm").addAction("init", () => void ran.push("crm"));
-  await failing.doAction("init");
+  failing.createRegistrar("crm").addFilter("brand-name", recording(ran, "crm"));
+  await failing.applyFilters("brand-name", "Acme");
   assert.deepEqual(ran, ["platform"]);
 });
 
 test("listeners still run in priority order across apps", async () => {
   const { sys } = system(["a", "b"]);
   const order: string[] = [];
-  sys.createRegistrar("b").addAction("init", () => void order.push("b:5"), 5);
-  sys.createRegistrar("a").addAction("init", () => void order.push("a:20"), 20);
-  sys.addAction("init", () => void order.push("platform:10"));
+  sys.createRegistrar("b").addFilter("brand-name", recording(order, "b:5"), 5);
+  sys.createRegistrar("a").addFilter("brand-name", recording(order, "a:20"), 20);
+  sys.addFilter("brand-name", recording(order, "platform:10"));
 
-  await sys.doAction("init");
+  await sys.applyFilters("brand-name", "Acme");
   assert.deepEqual(order, ["b:5", "platform:10", "a:20"]);
 });

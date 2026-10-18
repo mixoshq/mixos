@@ -10,9 +10,8 @@
  *
  * A theme is a single palette. There is no light/dark switch inside a theme —
  * a dark look is a SECOND THEME that an admin selects at /admin/themes, which
- * is how `themes/mixos` and `themes/mixos-dark` relate. If you are copying a
- * palette that has a `:root[data-mode="dark"]` block, split it into its own
- * theme folder; the build rejects that selector and tells you so.
+ * is how `themes/mixos` and `themes/mixos-dark` relate. A palette with a dark
+ * variant splits into two theme folders.
  *
  * Every colour must be an opaque hex, rgb() or hsl() literal, or a var()
  * chain ending in one; only --border may be translucent. The build computes

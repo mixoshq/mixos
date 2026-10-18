@@ -15,8 +15,8 @@
     }
   ],
   "license": "MPL-2.0",
-  "themeUrl": "https://github.com/italianst4/mixos/tree/main/themes/mixos-dark",
-  "themeSupportUrl": "https://github.com/italianst4/mixos/issues",
+  "themeUrl": "https://github.com/mixoshq/mixos/tree/main/themes/mixos-dark",
+  "themeSupportUrl": "https://github.com/mixoshq/mixos/issues",
   "authors": [
     {
       "name": "MixOS Core Team",
@@ -54,5 +54,5 @@
   },
   "surfaces": [],
   "escapes": [],
-  "lastUpdated": "2026-10-11T03:43:02.248Z"
+  "lastUpdated": "2026-10-18T17:45:45.256Z"
 }

@@ -21,13 +21,8 @@ import OfflineOverlay from "@/components/offline-overlay";
 
 /**
  * Every page under `(main)` is session-dependent and must render per request.
- *
- * This used to be true only by accident: the layout called `isLocalRequest()`,
- * which reads `headers()`, and that opted the whole segment into dynamic
- * rendering as a side effect. When that call went away with the localhost band,
- * `/apps/guide` started prerendering at build time and failed reaching for
- * Supabase, which is not available during a build. Stating it directly is what
- * that side effect was silently buying.
+ * Said directly, because a page Next could prerender at build time would reach
+ * for a database that isn't there during a build.
  */
 export const dynamic = "force-dynamic";
 

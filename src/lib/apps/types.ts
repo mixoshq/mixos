@@ -103,9 +103,10 @@ export interface AppManifest {
   tagline: string | null;
   icon: string;
   /**
-   * Names of connectors this app uses. Every connector is tenant-scoped: one
+   * Names of connectors this app uses. A tenant connector has one
    * admin-configured credential set in `connector_configs`, shared by all
-   * users. An admin must configure each one before the app can be registered.
+   * users; a `userScoped` one is each user's own account. An admin must make
+   * each one ready before the app can be activated or granted.
    */
   connectors: string[];
   /**

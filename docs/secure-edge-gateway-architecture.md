@@ -120,11 +120,10 @@ A route declaring `["session", "public"]` therefore serves a granted user their
 own data and a stranger the public view, from one handler, with `context.user`
 typed nullable so the compiler forces both branches to exist.
 
-**Authorization is `hasAppGrant`, not `hasAppAccess`.** The former reads
-`user_app_grants` and short-circuits true for a `global` app. The latter reads
-`user_apps`, which records that a user *installed* the app on their dashboard — a
-layout preference, not a permission. `hasAppAccess` has no callers and should not
-acquire any.
+**Authorization is `hasAppGrant`.** It reads `user_app_grants` and
+short-circuits true for a `global` app. `user_apps` records that a user
+*installed* the app on their dashboard — a layout preference, not a permission,
+and nothing reads it to decide access.
 
 **The `key` tier is implemented** ([`api-keys.ts`](../src/lib/apps/api-keys.ts)):
 keys are `mosk_`-prefixed random strings stored as HMAC-SHA256 digests, bound to

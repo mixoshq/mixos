@@ -18,7 +18,7 @@
  */
 export function getAppOrigin(): string {
   // 1. Explicit override always wins. This is the value to set in production.
-  const explicit = process.env.NEXTAUTH_URL ?? process.env.APP_ORIGIN;
+  const explicit = process.env.NEXTAUTH_URL;
   if (explicit) return normalize(explicit);
 
   // 2. On Vercel, fall back to the platform's own (server-side, non-spoofable)

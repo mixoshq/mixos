@@ -15,7 +15,7 @@ A theme repaints every app in the install at once. That is why it is the most co
 1. **Folder name *is* the slug.** It ends up in a CSS attribute selector (`[data-theme="<slug>"]`), so use lowercase letters, digits and hyphens. Do not put a `slug` field in `theme.json` — the platform derives it from the folder name.
 2. **Underscore-prefixed folders are templates** (`themes/_template/`). The registry skips them. Never ship a real theme with a leading underscore. It skips dot-prefixed folders too, such as a copy set aside as `themes/.old-<slug>/`, so never start a theme's folder name with a dot either.
 3. **A theme sets values; it never adds a utility.** The utility → variable mapping (`@theme inline`) lives in [`src/app/globals.css`](../src/app/globals.css) and is not themeable. That asymmetry is the whole point: `bg-card` means the same thing under every theme, which is what lets an app be written once and survive a rebrand untouched.
-4. **Tokens live in exactly one block: `:root`.** A theme is a single palette. A custom property anywhere else, or a non-custom-property inside that block, fails the build. `:root[data-mode="dark"]` is rejected with a message telling you to split it into its own theme — the light/dark mode axis was collapsed into the theme axis, so a dark look is a sibling theme an admin selects, never a second block. See [`../docs/plans/20260826_2041-single-palette-themes.md`](../docs/plans/20260826_2041-single-palette-themes.md).
+4. **Tokens live in exactly one block: `:root`.** A theme is a single palette. A custom property anywhere else, or a non-custom-property inside that block, fails the build. A dark look is a sibling theme an admin selects, never a second block. See [`../docs/plans/20260826_2041-single-palette-themes.md`](../docs/plans/20260826_2041-single-palette-themes.md).
 5. **The token set is closed.** Every name is in [`src/lib/themes/tokens.ts`](../src/lib/themes/tokens.ts) and rendered in [`docs/themes/tokens.md`](../docs/themes/tokens.md). An unknown token is a build error, because a typo'd property is not a no-op — it is a token that keeps its old value while you believe you changed it.
 6. **Every required token must be present.** An undefined custom property does not fall back to something sensible; it renders as `unset`, which is a transparent surface or invisible text.
 7. **A dark counterpart is a separate theme, and a full one.** Copy the folder to `themes/<slug>-dark/`, including its `assets/` — a theme is self-contained and there is no cross-theme asset path. It gets its own manifest, its own contrast run, and no obligation to stay in step with its sibling.
@@ -72,7 +72,7 @@ From the repo root:
 - Adding a `dark:` variant anywhere. There is nothing for it to fork into: a theme has one palette, and a dark look is a different theme.
 - Selecting an app's internal class, an id, or a bare element from `theme.css`.
 - Declaring a token the platform does not read, or misspelling one that it does.
-- Shipping a `:root[data-mode="dark"]` block. The build rejects it; author a sibling theme instead.
+- Shipping a second palette in one theme, such as a dark block. The build rejects it; author a sibling theme instead.
 - Using `color-mix()` or `oklch()` in a token value to work around the contrast gate.
 - Declaring an escape without a reason a reviewer can act on, or leaving one behind after the pair was fixed.
 - Reusing `--destructive` / `--warning` / `--success` in the categorical ramp.

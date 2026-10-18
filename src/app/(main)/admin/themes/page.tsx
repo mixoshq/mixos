@@ -59,8 +59,7 @@ export default async function ThemesAdminPage() {
           have goes first. The docs are for the case where nobody has built it
           yet, so they keep the brand fill and the second position rather than
           competing with the action most visits to this page want. They open on
-          mixos.org in a new tab: the in-app copy at /themes/guide still exists but
-          is no longer linked, so the site is the one place the guide is current.
+          mixos.org in a new tab, where the guides are published.
 
           Browse is absent when installing this kind is turned off
           (lib/repository/policy.ts); the page it leads to is a 404 then anyway.

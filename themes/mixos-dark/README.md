@@ -5,7 +5,7 @@ The dark counterpart to the default MixOS theme.
 ## What it looks like
 
 Slate and cyan on a dark ground. The same brand palette as
-[MixOS](https://github.com/italianst4/mixos/tree/main/themes/mixos), with the
+[MixOS](https://github.com/mixoshq/mixos/tree/main/themes/mixos), with the
 roles deliberately reassigned rather than inverted — a dark theme built by
 flipping a light one produces washed accents and text that is technically
 readable and tiring in practice.

@@ -309,7 +309,6 @@ test("nothing else is an app page: the gateway answers for API routes", () => {
     "/",
     "/apps",
     "/apps/",
-    "/apps/guide",
     "/p",
     "/p/",
     "/api/apps/notes/items",
