@@ -518,11 +518,6 @@ Only with `npm run docker:prod`: `apps/` didn't make it into the image. Test a
 route works even when the folder is missing. Check with
 `docker compose -p mixos exec app ls apps`.
 
-### In-app guide pages return 500
-
-Only with `npm run docker:prod`: `docs/` didn't make it into the image. Check
-with `docker compose -p mixos exec app ls docs/apps`.
-
 ### Scheduled jobs don't run
 
 On the dev container they do: a `cron` container calls the tick every five

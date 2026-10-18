@@ -40,26 +40,13 @@ export default async function AppsPage() {
 
       <div className="mt-6">
         {/*
-          Always empty: user-scoped (per-user OAuth) connectors were removed
-          from the platform — see docs/connectors/architecture.md, "One
-          credential set per connector". Every connector is tenant-scoped now,
-          and that gate is enforced upstream: an app whose declared connectors
-          an admin has not configured cannot be GRANTED
-          (src/lib/apps/connector-gates.ts, applied in
-          src/app/(main)/admin/users/page.tsx), so it never reaches this list.
-          There is nothing left for this prop to carry, and nothing is lost by
-          passing {}.
-
-          The prop itself is dead weight that AppManagerList and AppToggleList
-          still declare, along with a "Connect →" link to /account/connections —
-          a route that no longer exists. Deleting the prop chain in those two
-          components is the real fix; this file cannot reach them.
+          No connector gate here: granting is the gate. An app whose tenant
+          connectors aren't ready can't be granted (src/lib/apps/connector-gates.ts),
+          so it never reaches this list, and a user-scoped connector the user
+          hasn't connected is simply absent from the app's context, which the
+          app handles (docs/apps/connectors.md).
         */}
-        <AppManagerList
-          apps={availableApps}
-          installedSlugs={installedSlugs}
-          missingUserConnectorsBySlug={{}}
-        />
+        <AppManagerList apps={availableApps} installedSlugs={installedSlugs} />
       </div>
     </SettingsShell>
   );

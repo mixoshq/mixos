@@ -7,7 +7,7 @@ This is a two-phase command with a **hard stop between them**:
 - **Phase 1 — Analyze.** Inventory the source, map every piece onto a MixOS primitive, decide the app boundary, slice the work into phases, and write a build plan. **Then stop and wait for approval.** Write no app code in Phase 1.
 - **Phase 2 — Build.** Build **phase 1 of the slice only**, following [`/mixos app`](.claude/skills/mixos/actions/app.md) end to end, and close out the parity checklist.
 
-**If the first argument is a path to an existing conversion plan — `apps/<slug>/plans/*.md`, or a legacy `docs/plans/*.md` — skip Phase 1 and resume at [Phase 2](#phase-2--build-the-first-slice).** Re-read the plan in full first; it is the contract you agreed to. If the plan is still at the legacy `docs/plans/` path, move it to `apps/<slug>/plans/` as your first action so it sits beside the app you are about to build.
+**If the first argument is a path to an existing conversion plan — `apps/<slug>/plans/*.md` — skip Phase 1 and resume at [Phase 2](#phase-2--build-the-first-slice).** Re-read the plan in full first; it is the contract you agreed to.
 
 A conversion is a **re-architecture, not a port.** The original code is a *specification* of behaviour — what the app does, what data it holds, what rules it enforces. It is not source material to paste. Everything the platform already owns (auth, routing, HTTP, styling, state, secrets, tenancy) gets discarded and re-expressed in MixOS terms. See [What does not come over](#18-what-does-not-come-over--say-this-out-loud).
 

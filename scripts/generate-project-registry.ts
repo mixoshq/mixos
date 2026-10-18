@@ -184,11 +184,11 @@ const REGISTRY_INSTALLS_FILE = path.resolve(OUTPUT_DIR, "registry-installs.ts");
 const REMIX_INDEX_FILE = path.resolve(OUTPUT_DIR, "remix-index.ts");
 // What each extension publishes for pages read without a session is copied
 // into public/, each into a folder of its own, at one of five places:
-// themes/<slug>/ (a theme's assets/), connector-assets/<name>/ (NOT
-// connectors/: `/connectors/*` is already a signed-in page route,
-// /connectors/guide, so assets served from there redirect to /login for anyone
-// without a session — including next/image's optimizer, which fetches the
-// source URL server-side with no cookies and would fail on every icon),
+// themes/<slug>/ (a theme's assets/), connector-assets/<name>/ (a prefix of
+// its own rather than connectors/, so exempting it can't take the sign-in
+// guard off a page; and exempt it must be, because next/image's optimizer
+// fetches the source URL server-side with no cookies and would fail on every
+// icon),
 // screenshots/<apps|themes>/<slug>/ (listing galleries: one prefix for both
 // kinds, because the rules are identical and a second prefix would be a second
 // proxy exemption to keep in step) and branding/apps/<slug>/ (an app's marks

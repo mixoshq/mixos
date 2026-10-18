@@ -2,7 +2,7 @@
 
 You are about to create or modify an app under `apps/`. **Read the sections below in order before writing any code.** The linked guides under `docs/apps/` are the authoritative reference; do not guess based on training data.
 
-The same content is rendered in the UI at `/admin/apps` by [`src/components/apps/guide-tabs.tsx`](../src/components/apps/guide-tabs.tsx). Keep the tab component and the `docs/apps/*.md` files in sync until the UI is migrated to render markdown directly.
+The same guides are published on mixos.org, which the admin pages link to.
 
 **Before you start: write a plan.** For anything beyond a trivial tweak, write a build plan to `apps/<slug>/plans/YYYYMMDD_HHMM-<plan-name>.md` first — **beside the app it describes**, so the design history travels with the code (Context, decisions, file-level changes, verification). Every app has a `plans/` directory, [`_template`](_template/plans/) included, so a scaffolded app inherits the convention. A change to the platform itself (`src/`, `scripts/`, the build) is a *platform* plan and goes to `docs/plans/` instead. See [`../docs/plans/README.md`](../docs/plans/README.md).
 

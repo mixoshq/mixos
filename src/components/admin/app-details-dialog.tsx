@@ -495,11 +495,8 @@ export function AppReachPanel({
         {app.connectors.length > 0 ? (
           <>
             {/*
-              Every connector is tenant-scoped, so the name is the whole story
-              here. This list used to badge some of them "(per-user)"; the
-              user-scoped OAuth model that badge described was removed along
-              with the generated `userScopedConnectorNames` set it read from.
-              See docs/connectors/architecture.md.
+              The name, and what the connector still needs before the app can
+              be activated or granted.
             */}
             <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
               {app.connectors.map((name) => (

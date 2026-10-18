@@ -19,10 +19,10 @@
  * reason each copy exists: a theme's fonts and logo and a brand mark render on
  * the sign-in page, before anyone has a session; a listing's screenshots are
  * read by someone deciding whether to install; and next/image's optimizer
- * fetches a connector's icon server-side with no cookies. Connector assets are
- * not under public/connectors/ because `/connectors/*` is already a signed-in
- * page route (/connectors/guide), so assets served from there would redirect to
- * /login. All five are git-ignored: the committed files are the extensions'.
+ * fetches a connector's icon server-side with no cookies. Connector assets have
+ * a prefix of their own, public/connector-assets/, so exempting it can't take
+ * the guard off a page. All five are git-ignored: the committed files are the
+ * extensions'.
  *
  * Each copy is recorded in src/generated/public-copies.json before it is made.
  * At the end of a full run, a folder an earlier run recorded and this run

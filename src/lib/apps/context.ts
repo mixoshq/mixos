@@ -85,9 +85,10 @@ export async function buildAppContext(
   const registrar = appRegistrar(manifest.slug);
   const containment = await buildContainment(manifest);
 
-  // Initialize declared connectors. Every connector is tenant-scoped: one
-  // admin-configured credential set in `connector_configs`, shared by every
-  // user. Apps declare names only; the platform resolves credentials.
+  // Initialize declared connectors: the admin-configured credentials in
+  // `connector_configs`, shared by every user, or for a `userScoped` connector
+  // the signed-in user's own grant. Apps declare names only; the platform
+  // resolves credentials.
   const connectors = await loadTenantConnectors(
     manifest,
     "buildAppContext",
@@ -169,9 +170,10 @@ export async function buildPublicAppContext(
  * Load and initialize the connectors an app declares.
  *
  * The single loader for every surface: the authenticated context, the public
- * surface, and the scheduler's system context. Connector credentials are
- * deployment-global, so the only thing that varies is who to attribute a call
- * to — `userId` is null on the surfaces that have no logged-in user.
+ * surface, and the scheduler's system context. A tenant connector's
+ * credentials are deployment-global; a `userScoped` one resolves against
+ * `userId`'s own grant, and `userId` is also who a call is attributed to. It is
+ * null on the surfaces that have no logged-in user.
  */
 async function loadTenantConnectors(
   manifest: AppManifest,
