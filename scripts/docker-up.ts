@@ -356,9 +356,9 @@ function probeSupabaseRunning(): boolean {
  * connection error several minutes downstream rather than as "this address is
  * out of date". So we read, and we refuse to continue if any key is absent.
  *
- * Only the database URL reaches the app. MixOS no longer talks to the Supabase
- * API, so the service-role key this used to read is not needed; the API and
- * Studio addresses are read for the banner.
+ * Only the database URL reaches the app. MixOS doesn't talk to the Supabase
+ * API, so no API key is read; the API and Studio addresses are read for the
+ * banner.
  */
 function readSupabaseStatus(): SupabaseStatus {
   const r = capture(supabaseBin(), ["status", "-o", "json"]);

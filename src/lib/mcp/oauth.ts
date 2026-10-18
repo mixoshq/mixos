@@ -22,8 +22,8 @@ import { platformKey } from "@/lib/env/keys";
  *  - Clients are PUBLIC — no client_secret is ever issued. PKCE S256 is the
  *    proof of possession, per OAuth 2.1 for native/browser clients.
  *  - Codes and tokens are high-entropy random strings, stored only as HMAC
- *    digests. A DB leak yields nothing replayable without the HMAC key, which
- *    is derived from CONNECTOR_ENCRYPTION_KEY (an env secret, not Postgres).
+ *    digests. A DB leak yields nothing replayable without the HMAC key,
+ *    MCP_TOKEN_KEY (an env secret, not Postgres).
  *  - HMAC, not bcrypt: these are 256-bit random values, so there is nothing to
  *    brute-force, and lookup has to be by exact digest. (The app *passwords* in
  *    app-password-store.ts use bcrypt because those are low-entropy and

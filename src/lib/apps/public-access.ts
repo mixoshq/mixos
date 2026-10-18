@@ -14,9 +14,9 @@
  * `/api/p/<slug>` (API route) — so the cookie is only sent on requests
  * for the app that was unlocked, and never leaks to other apps.
  *
- * The signing key comes from `getUnlockSigningKey()` (APP_UNLOCK_SECRET, else
- * derived from CONNECTOR_ENCRYPTION_KEY). Kept separate from NextAuth's secret
- * so a NextAuth-secret rotation doesn't invalidate every unlock and vice versa.
+ * The signing key comes from `getUnlockSigningKey()` (APP_UNLOCK_SECRET). Kept
+ * separate from NextAuth's secret so a NextAuth-secret rotation doesn't
+ * invalidate every unlock and vice versa.
  */
 
 import { createHmac, timingSafeEqual } from "crypto";

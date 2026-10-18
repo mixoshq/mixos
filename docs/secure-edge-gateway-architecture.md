@@ -337,12 +337,11 @@ The boundary holds in five places:
    anywhere: a handler needs `import type { ScopedClient }` to type
    `context.db`, and a type cannot construct a client for another app's schema.
 
-   This replaced three ESLint `no-restricted-imports` blocks, a denylist of
-   spellings that had to restate itself in every tier because flat config
-   *replaces* a rule's options rather than merging them. One omission had made
-   pages and widgets the only tier able to import the server context builder.
-   ESLint now runs the policy's own code (`mixos-apps/app-imports`), so the editor
-   and the build give the same answer.
+   ESLint runs the policy's own code (`mixos-apps/app-imports`), so the editor
+   and the build give the same answer. It is an allowlist rather than a
+   denylist of spellings, which would have to restate itself in every tier,
+   because flat config *replaces* a rule's options rather than merging them,
+   and one omission would leave a tier open.
 4. **The registry generator.** Lint runs on pull requests to this repository
    and nowhere else, so for an extension installed from the Registry it is
    advice. The generator runs on every build and on every install, and before
@@ -359,13 +358,10 @@ The boundary holds in five places:
    route with `raw: true` registers only when the manifest declares it, so the
    declaration is the switch rather than a label beside one. Naming a rule
    outside the set is a build failure, because a typo'd escape reads as
-   "declared" to a reviewer while enforcing nothing. The set once held four
-   more — `process-env`, `raw-fetch` and `raw-html`, which disclaimed the
-   environment boundary, the egress containment and the injection boundary,
-   and `output-validate-dev-only` — removed in
-   [`plans/20261005_2150-app-escapes.md`](plans/20261005_2150-app-escapes.md).
-   Declared escapes appear in the generated registry and in the app's details
-   in admin.
+   "declared" to a reviewer while enforcing nothing. The environment boundary,
+   the egress containment, the injection boundary and output validation are
+   not in the set, so no app can disclaim them. Declared escapes appear in the
+   generated registry and in the app's details in admin.
 
 ---
 

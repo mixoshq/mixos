@@ -74,9 +74,8 @@ function people(n: number): string {
  *
  * FOUR WAYS IN, ONE FILTER. A signed-in person with a grant, a visitor with
  * the app's password, anyone at all on a public surface, and a machine holding
- * an API key. They used to live in two places — grants on /admin/users, the
- * public surface and password here — so the one question an admin brings to an
- * app's access screen, "who can get in?", had no single answer.
+ * an API key. All four are here, in one filter, so the one question an admin
+ * brings to an app's access screen, "who can get in?", has a single answer.
  *
  * Every segment shows, whatever the app declares, with a count: the dialog's
  * rule is that a tab band does not reorder between apps, and the same goes for

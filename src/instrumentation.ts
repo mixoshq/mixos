@@ -36,7 +36,7 @@
 // in-process timer here would fire a second, uncoordinated tick beside them —
 // runDueJobs() survives that (the Postgres claim is atomic), but the duplicate
 // wastes a connection every 5 minutes and makes job timing impossible to reason
-// about. Do not "restore" startScheduler(); it no longer exists, on purpose.
+// about. Don't add one.
 export async function register() {
   // Every import is gated on the Node runtime — `register()` also runs in the
   // Edge runtime, where a module that touches the DB or a connector cannot

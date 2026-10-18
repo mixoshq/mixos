@@ -4,10 +4,9 @@
 
 // Applies the platform schema — supabase/migrations/*.sql — to any Postgres.
 //
-// The Supabase CLI used to be the only way to apply these files, which made it
-// the only way to run MixOS. This does the same job with nothing but a
-// DATABASE_URL, so a plain Postgres, Neon, RDS or a container works, and so
-// does Supabase itself.
+// It needs nothing but a DATABASE_URL, so a plain Postgres, Neon, RDS or a
+// container works, and so does Supabase itself: running MixOS doesn't need the
+// Supabase CLI.
 //
 // ── The ledger is the Supabase CLI's own ─────────────────────────────────────
 // Applied files are recorded in supabase_migrations.schema_migrations, the table

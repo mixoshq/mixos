@@ -10,12 +10,10 @@ import { getBrandName } from "@/lib/branding/resolve";
 /*
  * There is no mode-resolution script here, and that is the point.
  *
- * This file used to carry a blocking inline `matchMedia` script to resolve
- * `system` before first paint, because an effect would run after it and flash a
- * white page at a dark-mode user. Collapsing the mode axis into the theme axis
- * deleted the problem rather than the workaround: the active theme is a server
- * value, so `data-theme` is correct in the first byte of HTML and there is
- * nothing left to resolve on the client.
+ * The active theme is a server value, so `data-theme` is correct in the first
+ * byte of HTML and there is nothing to resolve on the client: no blocking inline
+ * script before first paint, and no white flash for a dark theme while an effect
+ * catches up.
  */
 
 export async function generateMetadata(): Promise<Metadata> {

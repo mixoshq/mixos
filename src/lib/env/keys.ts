@@ -5,17 +5,14 @@
 /**
  * The platform's cryptographic key inventory — one env var per purpose.
  *
- * WHY THIS EXISTS. Five of these six keys used to be `CONNECTOR_ENCRYPTION_KEY`
- * itself, or derived from it via HMAC under distinct labels. The PRF separation
- * was sound — leaking a derivative could not recover the base key — but it made
- * the base key un-rotatable in practice: changing it simultaneously made every
- * stored connector credential undecryptable, invalidated every MCP token, every
- * app API key and every unlock cookie. A key that cannot be rotated is a key
- * whose compromise is unrecoverable, so the convenience of "no new environment
- * secret" was buying the wrong thing.
- *
- * Each key is now independent. Rotating one has a bounded, predictable blast
- * radius, listed per key below and in `docs/security-architecture.md` §5.
+ * WHY THIS EXISTS. Each key is independent, so rotating one has a bounded,
+ * predictable blast radius, listed per key below and in
+ * `docs/security-architecture.md` §5. Deriving them from one base key via HMAC
+ * under distinct labels would be sound — leaking a derivative could not recover
+ * the base — but it would make the base un-rotatable in practice: changing it
+ * would at once make every stored connector credential undecryptable and
+ * invalidate every MCP token, every app API key and every unlock cookie. A key
+ * that cannot be rotated is a key whose compromise is unrecoverable.
  *
  * NO DERIVATION FALLBACK, deliberately. A fallback to `CONNECTOR_ENCRYPTION_KEY`
  * would mean nobody ever sets the others and the single point of failure quietly

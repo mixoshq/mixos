@@ -30,10 +30,10 @@ export { missingConnectorSteps };
  * Why one connector can't serve the app's requests, or null when it can.
  *
  * READINESS IS THE CONNECTOR REGISTRY'S RULE (`registryConfigState`, in
- * src/lib/connectors/status.ts). This used to ask only whether a
- * `connector_configs` row existed. For a three-legged OAuth connector that row
- * appears the moment an admin saves the client ID and secret, before anyone
- * presses Connect, so the gate passed for a connector that refuses every call.
+ * src/lib/connectors/status.ts). A `connector_configs` row existing is not
+ * enough: for a three-legged OAuth connector that row appears the moment an
+ * admin saves the client ID and secret, before anyone presses Connect, and the
+ * connector refuses every call until then.
  * Under the registry's rule a tenant connector has to be `ready`. A
  * user-scoped one only needs its client credentials, because each person's
  * grant is their own and is never stored tenant-wide. A connector that asks

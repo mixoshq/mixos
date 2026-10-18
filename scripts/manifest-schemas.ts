@@ -170,13 +170,13 @@ const rolesSchema = z.array(roleSchema).superRefine((roles, ctx) => {
  * rule name is a build failure rather than a no-op, because a typo'd escape
  * reads as "declared" to a reviewer while enforcing nothing at all.
  *
- * Four more used to be here, and went in docs/plans/20261005_2150-app-escapes.md.
- * `process-env` and `raw-fetch` reached exactly what apps sharing the platform's
- * process must not — the service-role and encryption keys, and the network past
- * `egress` — and nothing ever needed them. `raw-html` became the `Markdown`
- * primitive. `output-validate-dev-only` was unused and only ever traded a
- * production 500 for a log line. All four are now unconditional: the generator's
- * containment scan (app-containment.ts) rejects them in every app.
+ * Nothing else is escapable. The environment and the network past `egress` are
+ * exactly what apps sharing the platform's process must not reach — the
+ * encryption keys, and the network itself — and nothing needs them. Formatted
+ * text goes through the `Markdown` primitive, not raw HTML. Output validation
+ * runs on every response, because skipping it only trades a production 500 for
+ * a log line. The generator's containment scan (app-containment.ts) enforces
+ * the first three in every app.
  */
 const ESCAPE_RULES = [
   /** A route returns its own Response (`defineRoute({ raw: true })`). */

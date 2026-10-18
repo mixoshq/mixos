@@ -8,9 +8,9 @@
 // Registered globally by src/components/push/register-sw.tsx. The payload is
 // produced by src/lib/push/server.ts (PushPayload: title, body, url?, tag?, icon?).
 //
-// Deliberately NOT a caching proxy. It used to precache an image for the
-// offline screen; that screen is now text-only, so there is nothing to cache
-// and no install/activate/fetch handling to reason about on every deploy.
+// Deliberately NOT a caching proxy. The offline screen is text-only, so there is
+// nothing to cache and no install/activate/fetch handling to reason about on
+// every deploy.
 
 self.addEventListener("push", (event) => {
   let data = {};

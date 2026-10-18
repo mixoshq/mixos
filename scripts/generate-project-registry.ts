@@ -293,14 +293,13 @@ function unscannedEntryPoints(appDir: string, manifest: AppManifest): string[] {
  *
  * `app.json` is the only manifest form. It is static text, which means the
  * install path can schema-check the bytes BEFORE anything executes — see
- * preflight() in src/lib/repository/install.ts, and `--check` below. An earlier
- * design also accepted an `app.ts` whose default export was the whole manifest;
- * that inverted the order, because the module had to be imported before there
- * was anything to validate. For apps arriving from the Registry that is the
- * wrong way round.
+ * preflight() in src/lib/repository/install.ts, and `--check` below. A manifest
+ * in code (an `app.ts` exporting it) would invert that order: the module would
+ * have to be imported before there was anything to validate, which for apps
+ * arriving from the Registry is the wrong way round.
  *
  * The one thing JSON cannot express is a config field built from a helper, so
- * that — and only that — moved to an optional `widgets.ts`, merged in once the
+ * that — and only that — lives in an optional `widgets.ts`, merged in once the
  * app's code is loaded (loadAppCode() below, and applyWidgetConfigs() in
  * ./widget-configs.ts).
  */

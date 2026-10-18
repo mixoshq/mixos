@@ -4,20 +4,19 @@
 
 // Makes public.apps a mirror of the generated app registry.
 //
-// WHY THIS EXISTS AT ALL. `public.apps` used to be a decision: an admin flipped
-// a toggle and a row appeared. That decision is gone — an app in the registry
-// was validated at build time, so it is valid, full stop — but the TABLE has to
-// stay, because four tables hang off it by foreign key:
+// WHY THIS EXISTS AT ALL. An app in the registry was validated at build time,
+// so it is valid, full stop, and no person decides that a row exists. The TABLE
+// stays all the same, because four tables hang off it by foreign key:
 //
 //   user_app_grants · user_apps · app_passwords · dashboard_widgets
 //
 // all `on delete cascade`. Those constraints are the only thing at the database
 // level that stops a grant, an install, a password or a dashboard widget
-// referring to an app that does not exist. Dropping the table to remove the
-// toggle would have taken that guarantee with it and left nothing in its place.
+// referring to an app that does not exist. Without the table, nothing would
+// take that guarantee's place.
 //
-// So the row is no longer something a person creates. It is derived state, and
-// this is what derives it:
+// So the row is not something a person creates. It is derived state, and this
+// is what derives it:
 //
 //   - a NEWLY seen app arrives INACTIVE: its code is present but it serves
 //     nothing until an admin activates it on the Apps page. `is_active` is
@@ -40,12 +39,11 @@
 //
 // WHY MARK RATHER THAN DELETE. This cannot tell an app removed on purpose from
 // one the registry generator skipped for a problem in it, or from a rollback to
-// a build that predates it. Deleting made every one of those destroy the app's
-// grants, installs and widgets, so nothing here deletes.
+// a build that predates it. Deleting would make every one of those destroy the
+// app's grants, installs and widgets, so nothing here deletes.
 //
-// WHY THE HASH. The delete was also what made a slug that came back arrive
-// inactive with no grants. A kept row must not hand that activation, and with it
-// the grants, to different code that comes back under the slug. The same files
+// WHY THE HASH. A kept row must not hand its activation, and with it the grants,
+// to different code that comes back under the slug. The same files
 // coming back (a rollback, a skip that ended) are the same app; anything else
 // waits for an admin.
 //

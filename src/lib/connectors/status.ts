@@ -8,13 +8,12 @@ import type { ConnectorAuthPolicy } from "./types";
 /**
  * How ready a connector's stored credentials actually are.
  *
- * WHY THIS IS ITS OWN MODULE. This rule used to live only inside
- * `HttpConnector.configured`, and the admin page answered the same question a
- * second way — by asking whether a `connector_configs` row existed at all. The
- * two disagreed in the case that matters most: an admin who saves a client ID
- * and secret for a three-legged connector and never presses Connect had a row,
- * so the registry said **Configured**, while the runtime correctly reported
- * `configured: false` and refused every call. Invariant 12 says `configured`
+ * WHY THIS IS ITS OWN MODULE. `HttpConnector.configured` and the admin page
+ * answer the same question, and two answers disagree in the case that matters
+ * most: an admin who saves a client ID and secret for a three-legged connector
+ * and never presses Connect has a `connector_configs` row, so "a row exists"
+ * would say **Configured** while the runtime correctly reports
+ * `configured: false` and refuses every call. Invariant 12 says `configured`
  * must reflect reality; one exported function is what makes that checkable
  * instead of a thing two files each promise separately.
  *

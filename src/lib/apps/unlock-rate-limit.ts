@@ -21,10 +21,10 @@
  * turning the lockout into a drip.
  *
  * ── Two tiers, and why the asymmetry is sound ───────────────────────────────
- * Postgres is the authority; the in-process `Map` survives as a pre-filter.
- * This module used to be memory ONLY, which on a serverless deployment is close
- * to no control: each instance counts separately, so the real allowance is five
- * failures *per instance* across a fleet that grows with the attack.
+ * Postgres is the authority; the in-process `Map` is a pre-filter. Memory alone,
+ * on a serverless deployment, is close to no control: each instance counts
+ * separately, so the real allowance would be five failures *per instance*
+ * across a fleet that grows with the attack.
  *
  * The pre-filter is safe for the same reason `src/lib/rate-limit.ts` gives:
  *
