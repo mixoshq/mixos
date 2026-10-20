@@ -1,19 +1,20 @@
 # Vercel with Supabase
 
-Vercel builds your fork from source and gives every pull request a preview
-deployment. Supabase provides the database, and MixOS uses only its Postgres.
-Neon, or any Postgres Vercel can reach, works the same way: see
+Vercel builds your repository from source and gives every pull request a
+preview deployment. Supabase provides the database, and MixOS uses only its
+Postgres. Neon, or any Postgres Vercel can reach, works the same way: see
 [Another Postgres](#another-postgres).
 
 ## What you need
 
-- **Your fork** of `mixoshq/mixos` on GitHub.
+- **Your own repository** on GitHub, with your copy of MixOS: see
+  [Step 1 of How to install](../install.md#step-1-get-your-own-copy).
 - **Vercel's Pro plan.** [`vercel.json`](../../../vercel.json) schedules the
   tick every five minutes, and on the Hobby plan Vercel allows only daily cron
   jobs: it fails a deployment whose cron runs more often.
 - **A Supabase project for this install alone.** Each install needs a Postgres
   server of its own: see [Step 3 of How to install](../install.md#step-3-create-the-database).
-- **The keys**, from `npm run keys:generate` in a checkout of your fork.
+- **The keys**, from `npm run keys:generate` in your copy.
 
 ## Steps
 
@@ -21,8 +22,9 @@ Neon, or any Postgres Vercel can reach, works the same way: see
    pooler** connection string, on port 6543. Serverless functions open many
    short-lived connections, which is what the pooler is for. Supabase is only the
    Postgres here: `SUPABASE_URL` and the service-role key aren't used.
-2. **Import your fork into Vercel.** The framework preset is detected, and
-   `vercel.json` sets the build command, `npm run vercel-build`, and the tick.
+2. **Import your repository into Vercel.** The framework preset is detected,
+   and `vercel.json` sets the build command, `npm run vercel-build`, and the
+   tick.
 3. **Set the environment variables** for Production, from the
    [environment table](../install.md#step-4-set-the-environment): `DATABASE_URL`
    (the pooler string), `AUTH_SECRET`, `CRON_SECRET`, the six platform keys, and

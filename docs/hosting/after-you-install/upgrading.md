@@ -1,9 +1,9 @@
 # Upgrading MixOS
 
-Upgrading means merging a new release of MixOS into your fork and deploying it.
-Your apps, connectors and themes come along, because they live in the same
-repository. How smooth it is depends mostly on whether you changed anything
-under `src/`.
+Upgrading means merging a new release of MixOS into your repository and
+deploying it. Your apps, connectors and themes come along, because they live in
+the same repository. How smooth it is depends mostly on whether you changed
+anything under `src/`.
 
 Each version of MixOS is a release: an annotated tag on `mixoshq/mixos`'s `main`,
 such as `v0.2.0`, listed on the
@@ -23,9 +23,8 @@ sends nothing about the instance; see
 [New releases of MixOS](README.md#new-releases-of-mixos) for what it does, and how
 to turn it off.
 
-With the [GitHub App](github-app.md) linked and your copy a fork of
-`mixoshq/mixos`, the notice can open the upgrade as a pull request for you; see
-[Through the GitHub App](#through-the-github-app).
+With the [GitHub App](github-app.md) linked, the notice also shows the commands
+for step 2; see [Through the GitHub App](#through-the-github-app).
 
 ## Upgrade in five steps
 
@@ -43,7 +42,9 @@ With the [GitHub App](github-app.md) linked and your copy a fork of
    Compose, dump from inside the container, as in
    [Backups and access](../providers/self-hosted.md#backups-and-access).
 
-2. **Merge the release, on a branch.** Add `mixoshq/mixos` as `upstream` once:
+2. **Merge the release, on a branch.** Your copy takes MixOS's releases from
+   `upstream`, which `/mixos init` sets up. If `git remote get-url upstream`
+   finds none, add it once:
    `git remote add upstream https://github.com/mixoshq/mixos.git`. Then:
 
    ```bash
@@ -71,8 +72,8 @@ With the [GitHub App](github-app.md) linked and your copy a fork of
    npm run build && npm run typecheck
    ```
 
-5. **Push the branch, and merge it** into your fork's `main` through a pull
-   request against your fork, not `mixoshq/mixos`. Merging deploys it, and every
+5. **Push the branch, and merge it** into `main` through a pull request on your
+   own repository, not `mixoshq/mixos`. Merging deploys it, and every
    host runs the release step, which applies the new migrations before the new
    version takes over. When it's done, the admin pages show the new version and
    its commit ([Which build is running](README.md#which-build-is-running)).
@@ -103,11 +104,11 @@ Wherever the release step fails, the old version keeps serving while you fix it.
 
 ## Through the GitHub App
 
-With the [GitHub App](github-app.md) linked and your copy a fork of
-`mixoshq/mixos`, the release notice does steps 2 and 5 for you: it opens the pull
-request at the release's commit, after checking the tag with GitHub. Backing up,
-reading the notes, trying it and merging stay yours. A private copy that isn't a
-fork follows the steps above. See
+With the [GitHub App](github-app.md) linked, the release notice shows the
+commands for step 2 and a link to what changed. The steps are yours, as above.
+Only on a fork of `mixoshq/mixos`, which shares upstream's commits, can the
+notice do steps 2 and 5 for you, by opening the pull request at the release's
+commit. See
 [Updating MixOS through the App](github-app.md#updating-mixos-through-the-app).
 
 ## What breaks

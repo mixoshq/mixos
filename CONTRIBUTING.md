@@ -99,25 +99,13 @@ line 1 and the notice directly below it.
   `main` into your branch doesn't re-stamp the ones only `main` changed.
 - **Extensions:** the core carries only each kind's template, Wall-E and the
   built-in themes (`scripts/core-extensions.ts`), and Danger fails a pull
-  request that adds another. Keep your own in your fork. To keep them out of
-  `git status` in a clone of the core, ignore them there in
-  `.git/info/exclude`:
-
-  ```
-  /apps/*
-  !/apps/AGENTS.md
-  !/apps/_template/
-  !/apps/wall-e/
-  /connectors/*
-  !/connectors/AGENTS.md
-  !/connectors/_template/
-  !/connectors/_template-oauth/
-  /themes/*
-  !/themes/AGENTS.md
-  !/themes/_template/
-  !/themes/mixos/
-  !/themes/mixos-dark/
-  ```
+  request that adds another. Keep your own in your own repository. In a clone
+  whose `origin` is `mixoshq/mixos`, `npm ci` keeps every other extension
+  folder out of `git status`: `scripts/core-excludes.ts` writes a marked block
+  into `.git/info/exclude`, which is the clone's own and never committed. Where
+  `origin` is anything else, such as your fork, it removes the block, so those
+  folders show: keep them out of your pull request. `npm run prepare` runs it
+  again after you change `origin`.
 
 - **Larger changes:** open an issue first, or add a plan under
   [`docs/plans/`](docs/plans/README.md), so the approach can be agreed before
