@@ -494,26 +494,34 @@ export function AppReachPanel({
         {app.connectors.length > 0 ? (
           <>
             {/*
-              The name, and what the connector still needs before the app can
-              be activated or granted.
+              The name, the version the app was built against, whether it
+              changes data there, and what the connector still needs before
+              the app can be activated or granted.
             */}
             <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-              {app.connectors.map((name) => (
-                <li key={name} className="flex flex-wrap items-center gap-2">
-                  <Mono>{name}</Mono>
-                  {missing.get(name) && (
-                    <StatusPill tone="warning">
-                      {BLOCK_LABEL[missing.get(name)!.state]}
-                    </StatusPill>
-                  )}
-                </li>
-              ))}
+              {app.connectorRequirements
+                .filter((need) => !need.optional)
+                .map((need) => (
+                  <li key={need.name} className="flex flex-wrap items-center gap-2">
+                    <Mono>{need.name}</Mono>
+                    <span>{need.version} or later</span>
+                    {need.access === "write" && (
+                      <StatusPill tone="warning">Changes data</StatusPill>
+                    )}
+                    {missing.get(need.name) && (
+                      <StatusPill tone="warning">
+                        {BLOCK_LABEL[missing.get(need.name)!.state]}
+                      </StatusPill>
+                    )}
+                  </li>
+                ))}
             </ul>
             {missingConnectors.length > 0 && (
               <p className="mt-3 text-xs text-muted-foreground">
                 A connector this app requires must be ready before the app
                 can be activated or granted to anyone: configured, connected
-                if it signs in with OAuth, and not disabled.{" "}
+                if it signs in with OAuth, not disabled, and allowed to change
+                data if the app changes data in it.{" "}
                 <Link
                   href="/admin/connectors"
                   className="font-medium text-primary underline underline-offset-2"

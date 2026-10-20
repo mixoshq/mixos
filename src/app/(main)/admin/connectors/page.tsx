@@ -25,6 +25,8 @@ import { getConnectorDependents } from "@/lib/connectors/dependents";
 import { getConnectorsNotInBuild } from "@/lib/connectors/not-in-build";
 import { getDisabledConnectors, getReplacedConnectors } from "@/lib/connectors/switch";
 import { setConnectorEnabled } from "@/lib/connectors/switch-admin";
+import { getWritableConnectors } from "@/lib/connectors/writable";
+import { setConnectorChanges } from "@/lib/connectors/writable-admin";
 import { TOKEN_KEYS, redirectUriFor } from "@/lib/connectors/oauth";
 import { runConnectorTest } from "@/lib/connectors/test-connection";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
@@ -114,6 +116,10 @@ export default async function ConnectorsAdminPage({
   const replaced = await getReplacedConnectors(
     connectorRegistry.map((c) => c.name),
   );
+  // Which connectors an admin has allowed to change data: one read for the grid.
+  const writable = await getWritableConnectors(
+    connectorRegistry.map((c) => c.name),
+  );
   // Connectors this database keeps credentials or connections for that this
   // build doesn't carry, each with Delete data.
   const notInBuild = await getConnectorsNotInBuild(
@@ -156,6 +162,7 @@ export default async function ConnectorsAdminPage({
       const dependents = getConnectorDependents(c.name);
       const disabledAt = disabled.get(c.name) ?? null;
       const replacement = replaced.get(c.name) ?? null;
+      const changesAllowed = writable.has(c.name);
 
       if (c.auth?.strategy !== "oauth2_authorization_code") {
         return {
@@ -167,6 +174,7 @@ export default async function ConnectorsAdminPage({
           dependents,
           disabledAt,
           replacement,
+          changesAllowed,
           oauth: null,
         };
       }
@@ -192,6 +200,7 @@ export default async function ConnectorsAdminPage({
         dependents,
         disabledAt,
         replacement,
+        changesAllowed,
         oauth: {
           connected: Boolean(
             grant?.[TOKEN_KEYS.refresh] || grant?.[TOKEN_KEYS.access],
@@ -304,6 +313,28 @@ export default async function ConnectorsAdminPage({
     revalidatePath("/account/connections");
   }
 
+  /**
+   * Allow changes, or make the connector read-only again. Takes effect on the
+   * next request: the app context reads it per request. Allowing changes on
+   * an OAuth connector asks for its write scopes from the next Connect on;
+   * the grant it holds now keeps the scopes it was given until then.
+   */
+  async function changesConnector(
+    connectorName: string,
+    allowed: boolean,
+  ): Promise<void> {
+    "use server";
+    const session = await requireReadOnlySession();
+    const admin = await requireAdmin(session);
+    await setConnectorChanges(connectorName, allowed, {
+      id: admin.id,
+      email: admin.email,
+    });
+    // Apps' readiness depends on it, as well as this page.
+    revalidatePath("/admin/connectors");
+    revalidatePath("/admin/apps");
+  }
+
   return (
     <div>
       <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-0">
@@ -372,6 +403,7 @@ export default async function ConnectorsAdminPage({
         configureAction={configureConnector}
         testAction={testConnector}
         switchAction={switchConnector}
+        changesAction={changesConnector}
       />
       <ConnectorsNotInBuild connectors={notInBuild} />
     </div>

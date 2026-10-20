@@ -128,6 +128,7 @@ function manifest(slug: string, name: string, extra: Partial<AppManifest>): AppM
     icon: "box",
     connectors: [],
     optionalConnectors: [],
+    connectorRequirements: [],
     database: false,
     updatedAt: [],
     notifications: false,

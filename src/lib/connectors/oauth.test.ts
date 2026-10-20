@@ -6,10 +6,15 @@ import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import {
   TOKEN_KEYS,
+  buildAuthorizeUrl,
   exchangeAuthorizationCode,
   grantedScope,
+  newFlowState,
   oauthReturnUrl,
+  openFlowState,
+  requestedScopes,
   safeReturnPath,
+  sealFlowState,
   tokensToCredentials,
 } from "./oauth";
 import { classifyGrant } from "./scope-status";
@@ -50,6 +55,7 @@ const exchange = () =>
     clientSecret: "secret",
     code: "the-code",
     codeVerifier: "v".repeat(43),
+    writes: false,
   });
 
 const verdicts = (scope: string | undefined) =>
@@ -125,4 +131,43 @@ test("a return path that would resolve to another host is refused", () => {
       JSON.stringify(path),
     );
   }
+});
+
+// ── writes ──────────────────────────────────────────────────────────────────
+
+const WRITES: ConnectorAuthPolicy = {
+  ...POLICY,
+  scopes: [
+    { scope: "things:read", requested: true },
+    { scope: "things:write", requested: "write" },
+    { scope: "admin", requested: false },
+  ],
+};
+
+test("a scope requested with \"write\" is asked for only once changes are allowed", () => {
+  assert.deepEqual(requestedScopes(WRITES), ["things:read"]);
+  assert.deepEqual(requestedScopes(WRITES, { writes: true }), ["things:read", "things:write"]);
+
+  const scopeOf = (writes: boolean) =>
+    new URL(
+      buildAuthorizeUrl(WRITES, { connector: "things", clientId: "cid", flow: newFlowState("things", "/admin/connectors", null, writes) }),
+    ).searchParams.get("scope");
+  assert.equal(scopeOf(false), "things:read");
+  assert.equal(scopeOf(true), "things:read things:write");
+});
+
+test("the flow carries what it asked for, and the callback reads the grant against that", () => {
+  process.env.CONNECTOR_ENCRYPTION_KEY ??= "a".repeat(64);
+  const sealed = sealFlowState(newFlowState("things", "/admin/connectors", null, true));
+  assert.equal(openFlowState(sealed)?.writes, true);
+
+  // A token response with no scope granted what was asked: with writes, both.
+  assert.equal(grantedScope(undefined, WRITES, { writes: true }), "things:read things:write");
+  assert.equal(grantedScope(undefined, WRITES), "things:read");
+
+  const verdicts = (granted: string[], writes: boolean) =>
+    classifyGrant(WRITES.scopes!, granted, { writes }).map((r) => `${r.scope}=${r.status}`);
+  assert.deepEqual(verdicts(["things:read"], false), ["things:read=granted", "things:write=unknown", "admin=unknown"]);
+  assert.deepEqual(verdicts(["things:read"], true), ["things:read=granted", "things:write=refused", "admin=unknown"]);
+  assert.deepEqual(verdicts(["things:read", "things:write"], true), ["things:read=granted", "things:write=granted", "admin=unknown"]);
 });

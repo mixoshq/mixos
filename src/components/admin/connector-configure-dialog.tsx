@@ -31,6 +31,12 @@ import type {
 import type { ConnectorConfigState } from "@/lib/connectors/status";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
 import { describeDependents } from "@/lib/connectors/dependents";
+import {
+  grantHoldsWriteScopes,
+  isScopeRequested,
+  writeMethods,
+  writeScopes,
+} from "@/lib/connectors/write-policy";
 import type { ConnectorWithStatus } from "./connector-registry-list";
 
 type DialogTab = "details" | "configure" | "scopes" | "logs";
@@ -49,6 +55,8 @@ interface Props {
   /** Returns whether the connector now holds a usable credential set. */
   configureAction: (formData: FormData) => Promise<boolean>;
   testAction: (connectorName: string) => Promise<ConnectorTestOutcome>;
+  /** Allow the connector to change data, or make it read-only again. */
+  changesAction: (connectorName: string, allowed: boolean) => Promise<void>;
 }
 
 /** "in 52 minutes" / "3 days ago" — enough for an admin to judge freshness. */
@@ -424,13 +432,16 @@ export default function ConnectorConfigureDialog({
   initialTab = "details",
   configureAction,
   testAction,
+  changesAction,
 }: Props) {
   const [tab, setTab] = useState<DialogTab>(initialTab);
   const [saving, startSave] = useTransition();
+  const [changing, startChange] = useTransition();
   const [testing, startTest] = useTransition();
   const [outcome, setOutcome] = useState<ConnectorTestOutcome | null>(null);
   const [copied, setCopied] = useState(false);
   const [showDependents, setShowDependents] = useState(false);
+  const [showMethods, setShowMethods] = useState(false);
   /**
    * Which step the admin has navigated to, or `undefined` to follow the
    * checklist — the first unfinished step. Clearing it after a successful
@@ -453,10 +464,28 @@ export default function ConnectorConfigureDialog({
     () => connector.auth?.scopes ?? [],
     [connector.auth],
   );
+  /**
+   * Whether an admin allowed this connector to change data. It decides which
+   * scopes Connect asks for, so it is read before any of them are listed.
+   */
+  const changesAllowed = connector.changesAllowed;
   /** Only what this connector actually asks for, for the consent step. */
   const requestedScopes = useMemo(
-    () => catalogue.filter((s) => s.requested),
-    [catalogue],
+    () => catalogue.filter((s) => isScopeRequested(s, changesAllowed)),
+    [catalogue, changesAllowed],
+  );
+  /** The methods that change data, which Allow changes is about. */
+  const writes = writeMethods(connector);
+  /** The scopes asked for only once changes are allowed. */
+  const scopesForWrites = writeScopes(connector.auth);
+  /**
+   * Whether the grant holds those scopes: false for one taken while the
+   * connector was read-only, which needs connecting again.
+   */
+  const grantWrites = grantHoldsWriteScopes(
+    connector.auth,
+    connector.access.granted,
+    connector.access.grantedKnown,
   );
   /** The grant snapshot, keyed for lookup while rendering rows. */
   const statusByScope = useMemo(
@@ -465,7 +494,20 @@ export default function ConnectorConfigureDialog({
   );
 
   const credentialsSaved = state !== "unconfigured";
-  const authorized = isOAuth ? oauth.connected : true;
+  /*
+    Allowed to change data, on a grant taken before that was allowed: the
+    provider never granted the write scopes, so Connect has to run again.
+  */
+  const reconnectForWrites =
+    isOAuth && oauth.connected && changesAllowed && grantWrites === false;
+  const authorized = isOAuth ? oauth.connected && !reconnectForWrites : true;
+  /*
+    Read-only again, on a grant that still holds the write scopes: nothing
+    here calls them, and connecting again gives them back.
+  */
+  const writeScopesUnused =
+    isOAuth && oauth.connected && !changesAllowed && scopesForWrites.length > 0 &&
+    grantHoldsWriteScopes(connector.auth, connector.access.granted, connector.access.grantedKnown) === true;
   const verified = verification.verifiedAt !== null;
   const disabled = connector.disabledAt !== null;
 
@@ -699,6 +741,97 @@ export default function ConnectorConfigureDialog({
   const hasCredentials = connector.credentialFields.length > 0;
   if (hasCredentials) steps.push(credentialsStep);
 
+  /*
+    Whether the connector may change data, for one that declares a method
+    doing so. Before Connect, because it decides which scopes Connect asks for.
+
+    Read-only is a finished choice, so the step needs nothing done — except
+    while an app asks to change data in it and changes aren't allowed: that
+    app can't be activated, so the checklist stops here and says which app.
+    It never blocks a later step: keeping a connector read-only is allowed.
+  */
+  if (writes.length > 0) {
+    const neededBy = connector.dependents.writes;
+    steps.push({
+      id: "changes",
+      title: "Choose whether it can change data",
+      done: changesAllowed || neededBy.length === 0,
+      body: (
+        <>
+          <p className="flex flex-wrap items-center gap-2 text-sm text-foreground">
+            <StatusPill tone={changesAllowed ? "warning" : "neutral"}>
+              {changesAllowed ? "Changes allowed" : "Read-only"}
+            </StatusPill>
+            <span className="text-muted-foreground">
+              {changesAllowed
+                ? "Apps that ask to change data can call these methods."
+                : "Apps can read, and nothing calls these methods."}
+            </span>
+          </p>
+          <ul className="space-y-1 text-sm">
+            {writes.map((m) => (
+              <li key={m.method} className="flex flex-wrap items-baseline gap-x-2">
+                <span className="font-mono text-foreground">{m.method}</span>
+                <span className="text-muted-foreground">
+                  {m.description ?? m.operation}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm text-muted-foreground">
+            {neededBy.length > 0
+              ? `${neededBy.join(", ")} ${neededBy.length === 1 ? "asks" : "ask"} to change data in ${connector.displayName}${changesAllowed ? "." : ", and can't be activated until changes are allowed."}`
+              : "No app asks to change data in it yet. An app that does says so in its app.json, and still needs this."}
+          </p>
+          {isOAuth && scopesForWrites.length > 0 && (
+            <div>
+              <p className="text-xs text-muted-foreground">
+                Allowing changes also asks for, at Connect:
+              </p>
+              <ul className="mt-1 space-y-0.5">
+                {scopesForWrites.map((scope) => (
+                  <li key={scope} className="break-all font-mono text-[11px] text-muted-foreground">
+                    {scope}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {reconnectForWrites && (
+            <StepNote>
+              Changes are allowed, but the grant was made while it was read-only.
+              Connect again so the provider grants the write access.
+            </StepNote>
+          )}
+          {writeScopesUnused && (
+            <StepNote>
+              It is read-only, but its grant still holds write access at the
+              provider. Connect again to give that up.
+            </StepNote>
+          )}
+        </>
+      ),
+      action: (
+        <Button
+          size="sm"
+          variant={changesAllowed || neededBy.length === 0 ? "secondary" : "primary"}
+          busy={changing}
+          busyLabel="Saving…"
+          onClick={() =>
+            startChange(async () => {
+              await changesAction(connector.name, !changesAllowed);
+              // Allowing changes on an OAuth connector is finished by
+              // Connect, which asks for the write scopes; go there.
+              advanceFrom("changes");
+            })
+          }
+        >
+          {changesAllowed ? "Make read-only" : "Allow changes"}
+        </Button>
+      ),
+    });
+  }
+
   if (isOAuth) {
     steps.push({
       id: "authorize",
@@ -728,6 +861,12 @@ export default function ConnectorConfigureDialog({
           )}
           {setup?.notes?.authorize && (
             <StepNote>{setup.notes.authorize}</StepNote>
+          )}
+          {reconnectForWrites && (
+            <StepNote>
+              Changes are now allowed. Connect again to grant the write access,
+              which the current grant doesn&apos;t hold.
+            </StepNote>
           )}
 
           {/* Only the requested subset. `oauth.scopes` is the provider's whole
@@ -783,7 +922,7 @@ export default function ConnectorConfigureDialog({
               className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Link2 className="h-4 w-4" aria-hidden />
-              {authorized ? "Reconnect" : "Connect"}
+              {oauth.connected ? "Reconnect" : "Connect"}
             </a>
           ) : (
             <Button
@@ -1127,6 +1266,52 @@ export default function ConnectorConfigureDialog({
                 )}
               </section>
             )}
+
+            {/* ── What apps can call ───────────────────────────────────────
+                The declared methods, each with the provider operation it
+                calls: everything an app can reach through this connector,
+                and the only things. */}
+            <section>
+              <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                What apps can call
+              </h3>
+              <p className="mt-1 text-sm text-foreground">
+                Version {connector.version} ·{" "}
+                {connector.telemetry.length === 1
+                  ? "1 method"
+                  : `${connector.telemetry.length} methods`}
+                {writes.length > 0
+                  ? `, ${writes.length} of which ${writes.length === 1 ? "changes" : "change"} data${
+                      changesAllowed ? "" : `, off while it is read-only`
+                    }.`
+                  : ", none of which changes data."}
+              </p>
+              {connector.telemetry.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowMethods((v) => !v)}
+                    aria-expanded={showMethods}
+                    className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary underline underline-offset-2 hover:no-underline"
+                  >
+                    {showMethods ? "Hide" : "Show"} methods
+                  </button>
+                  {showMethods && (
+                    <ul className="mt-2 space-y-1 text-sm">
+                      {connector.telemetry.map((m) => (
+                        <li key={m.method} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <span className="font-mono text-foreground">{m.method}</span>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {m.operation}
+                          </span>
+                          {m.mutates && <StatusPill tone="warning">Changes data</StatusPill>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </section>
           </div>
         )}
 
@@ -1195,7 +1380,7 @@ export default function ConnectorConfigureDialog({
                    scope across to its verdict on the right. */
                 <ul className="mt-2 divide-y divide-border overflow-hidden rounded-md border border-border">
                   {catalogue.map((sc, i) => {
-                    const verdict: ScopeVerdict = sc.requested
+                    const verdict: ScopeVerdict = isScopeRequested(sc, changesAllowed)
                       ? (STATUS_TO_VERDICT[statusByScope.get(sc.scope) ?? ""] ??
                         "unused")
                       : "unused";
@@ -1233,6 +1418,13 @@ export default function ConnectorConfigureDialog({
                             {sc.access && (
                               <StatusPill tone={SCOPE_TONE[sc.access]}>
                                 {SCOPE_LABEL[sc.access]}
+                              </StatusPill>
+                            )}
+                            {/* Asked for only on an install that allows
+                                changes, which the verdict beside it follows. */}
+                            {sc.requested === "write" && (
+                              <StatusPill tone="neutral">
+                                {changesAllowed ? "Requested: changes allowed" : "Requested once changes are allowed"}
                               </StatusPill>
                             )}
                           </span>
@@ -1457,6 +1649,11 @@ export default function ConnectorConfigureDialog({
               {hasCredentials && (
                 <Button size="sm" onClick={() => jumpTo("credentials")}>
                   Update credentials
+                </Button>
+              )}
+              {writes.length > 0 && (
+                <Button size="sm" onClick={() => jumpTo("changes")}>
+                  Change access
                 </Button>
               )}
               {isOAuth && (

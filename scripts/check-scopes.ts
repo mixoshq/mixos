@@ -32,17 +32,19 @@ interface ManifestScope {
   scope: string;
   description?: string;
   access?: string;
-  requested: boolean;
+  /** `true` always, `"write"` once an admin allows changes, `false` never. */
+  requested: boolean | "write";
 }
 
 /**
  * Merge a fresh parse over the manifest's existing entries.
  *
  * Every documented scope survives; `requested` comes from the old entry when it
- * had one and defaults to false otherwise. A requested scope the page no longer
- * documents is KEPT rather than dropped — silently un-requesting a scope the
- * connector actually needs would break authorization at the next reconnect, and
- * a provider reorganising their docs is not consent to change what we ask for.
+ * had one, `"write"` included, and defaults to false otherwise. A requested
+ * scope the page no longer documents is KEPT, as it was, rather than dropped —
+ * silently un-requesting a scope the connector actually needs would break
+ * authorization at the next reconnect, and a provider reorganising their docs
+ * is not consent to change what we ask for.
  */
 function merge(
   existing: ManifestScope[],
@@ -58,12 +60,11 @@ function merge(
     requested: wasRequested.get(p.scope) ?? false,
   }));
 
-  const orphans = existing
-    .filter((e) => e.requested && !documented.has(e.scope))
-    .map((e) => e.scope);
-  for (const scope of orphans) {
-    scopes.push({ scope, requested: true });
+  const orphaned = existing.filter((e) => e.requested !== false && !documented.has(e.scope));
+  for (const e of orphaned) {
+    scopes.push({ scope: e.scope, requested: e.requested });
   }
+  const orphans = orphaned.map((e) => e.scope);
 
   return { scopes, orphans };
 }
@@ -113,10 +114,11 @@ async function main() {
 
   const existing = (connector.auth?.scopes ?? []) as ManifestScope[];
   const { scopes, orphans } = merge(existing, parsed);
-  const requestedCount = scopes.filter((s) => s.requested).length;
+  const requestedCount = scopes.filter((s) => s.requested === true).length;
+  const writeCount = scopes.filter((s) => s.requested === "write").length;
 
   for (const s of scopes) {
-    const mark = s.requested ? "*" : " ";
+    const mark = s.requested === true ? "*" : s.requested === "write" ? "w" : " ";
     const short = s.scope.replace(/\/$/, "").split("/").pop()!;
     console.log(
       `${mark} ${(s.access ?? "?").padEnd(11)} ${short.slice(0, 34).padEnd(36)} ${(s.description ?? "").slice(0, 60)}`,
@@ -128,7 +130,10 @@ async function main() {
     `\n${parsed.length} scopes parsed — ${count("read")} read, ${count("write")} write, ` +
       `${count("read-write")} read+write.`,
   );
-  console.log(`${requestedCount} requested by this connector, marked *.`);
+  console.log(
+    `${requestedCount} requested by this connector, marked *; ` +
+      `${writeCount} requested once an admin allows changes, marked w.`,
+  );
 
   if (orphans.length > 0) {
     console.log(

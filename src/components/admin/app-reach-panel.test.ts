@@ -33,6 +33,7 @@ function app(extra: Partial<AppManifest>): AppManifest {
     icon: "notebook",
     connectors: [],
     optionalConnectors: [],
+    connectorRequirements: [],
     database: false,
     updatedAt: [],
     notifications: false,
@@ -89,7 +90,27 @@ test("a wildcard entry says what it covers", () => {
 });
 
 test("an app declaring no egress says it reaches outside services only through its connectors", () => {
-  const words = text(reach(app({ connectors: ["crm"] })));
+  const words = text(
+    reach(
+      app({
+        connectors: ["crm"],
+        connectorRequirements: [{ name: "crm", optional: false, access: "read", version: "1.2.0" }],
+      }),
+    ),
+  );
   assert.match(words, /Network This app makes no outbound calls of its own\. It reaches outside services only through its connectors\./);
-  assert.match(words, /Connectors crm/);
+  assert.match(words, /Connectors crm 1\.2\.0 or later/);
+  assert.doesNotMatch(words, /Changes data/);
+});
+
+test("a connector the app changes data in says so", () => {
+  const words = text(
+    reach(
+      app({
+        connectors: ["crm"],
+        connectorRequirements: [{ name: "crm", optional: false, access: "write", version: "2.0.0" }],
+      }),
+    ),
+  );
+  assert.match(words, /Connectors crm 2\.0\.0 or later Changes data/);
 });

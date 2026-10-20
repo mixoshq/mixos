@@ -4,6 +4,7 @@
 
 import type { Screenshot } from "../screenshots";
 import type { BrandHook, BrandLogoAsset } from "../branding/types";
+import type { ConnectorRequirement } from "../connectors/requirements";
 
 /**
  * How a caller may authenticate to a page or API route.
@@ -115,6 +116,12 @@ export interface AppManifest {
    * code must handle the entry being missing.
    */
   optionalConnectors: string[];
+  /**
+   * Every connector in either list, with the version the app was built against
+   * and whether it changes data: what the app's entries say, which
+   * `connectors` and `optionalConnectors` give as names alone.
+   */
+  connectorRequirements: ConnectorRequirement[];
   /**
    * When true, the app has a schema of its own, `app_<slug>`, reached as
    * `context.db`, and may ship `migrations/`. An app without it may not.

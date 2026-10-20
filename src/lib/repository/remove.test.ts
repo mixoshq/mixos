@@ -335,7 +335,7 @@ describe("removing an extension's code", () => {
 describe("what refuses a removal", () => {
   test("a connector an app requires: nothing moves, nothing runs, and the refusal is audited", async () => {
     connector("probe");
-    app("mailer", { name: "Mailer", connectors: ["probe"] });
+    app("mailer", { name: "Mailer", connectors: [{ name: "probe", version: "1.0.0" }] });
     const plan = await planRemoval("connector", "probe", root);
     assert.deepEqual(plan.blockers.map((b) => b.code), ["required-by"]);
     assert.deepEqual(plan.blockers[0].apps, [{ slug: "mailer", name: "Mailer" }]);
@@ -377,12 +377,12 @@ describe("what refuses a removal", () => {
   test("an app the build skips still counts: the next build reads the same manifest", async () => {
     connector("probe");
     // No route, an odd manifest: whatever the generator makes of it, it names the connector.
-    write("apps/broken/app.json", JSON.stringify({ connectors: ["probe"], widgets: "not a list" }));
+    write("apps/broken/app.json", JSON.stringify({ connectors: [{ name: "probe", version: "1.0.0" }], widgets: "not a list" }));
     const plan = await planRemoval("connector", "probe", root);
     assert.deepEqual(plan.blockers[0].apps, [{ slug: "broken", name: "broken" }]);
     // Templates and dot folders are not apps.
-    write("apps/_template/app.json", JSON.stringify({ connectors: ["other"] }));
-    write("apps/.old-x/app.json", JSON.stringify({ connectors: ["other"] }));
+    write("apps/_template/app.json", JSON.stringify({ connectors: [{ name: "other", version: "1.0.0" }] }));
+    write("apps/.old-x/app.json", JSON.stringify({ connectors: [{ name: "other", version: "1.0.0" }] }));
     connector("other");
     assert.deepEqual((await planRemoval("connector", "other", root)).blockers, []);
   });
@@ -469,7 +469,7 @@ describe("what refuses a removal", () => {
 describe("warnings", () => {
   test("an app that uses the connector optionally is named, and the removal goes ahead", async () => {
     connector("probe");
-    app("digest", { name: "Digest", optionalConnectors: ["probe"] });
+    app("digest", { name: "Digest", optionalConnectors: [{ name: "probe", version: "1.0.0" }] });
     // Declared both ways, it requires it.
     const plan = await planRemoval("connector", "probe", root);
     assert.deepEqual(plan.blockers, []);
@@ -480,7 +480,7 @@ describe("warnings", () => {
     assert.deepEqual(audit[0].details.optionalFor, ["digest"]);
 
     connector("again");
-    app("both", { connectors: ["again"], optionalConnectors: ["again"] });
+    app("both", { connectors: [{ name: "again", version: "1.0.0" }], optionalConnectors: [{ name: "again", version: "1.0.0" }] });
     const both = await planRemoval("connector", "again", root);
     assert.deepEqual([both.blockers.map((b) => b.code), both.warnings], [["required-by"], []]);
   });

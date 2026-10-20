@@ -55,8 +55,8 @@ class AcmeConnector implements BaseConnector {
 }
 
 const DECLARED: ConnectorTelemetryDefinition[] = [
-  { method: "listItems", description: "Listed items" },
-  { method: "createItem", description: "Created an item", mutates: true },
+  { method: "listItems", operation: "GET /items", description: "Listed items" },
+  { method: "createItem", operation: "POST /items", description: "Created an item", mutates: true },
 ];
 
 /** The connector's methods, typed as a tool would cast them. */

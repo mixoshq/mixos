@@ -36,7 +36,8 @@ import type {
  *     https://<your-deployment>/api/connectors/<connector-name>/oauth/callback
  */
 
-const Thing = z.object({ id: z.string(), title: z.string() });
+// `looseObject`, so a field the schema doesn't name still reaches the app.
+const Thing = z.looseObject({ id: z.string(), title: z.string() });
 type Thing = z.infer<typeof Thing>;
 
 export default class TemplateOAuthConnector extends HttpConnector {
@@ -60,6 +61,24 @@ export default class TemplateOAuthConnector extends HttpConnector {
       schema: z.object({ data: z.array(Thing) }),
     });
     return page?.data ?? [];
+  }
+
+  /**
+   * A write, declared `"mutates": true`. It needs `things:write`, which the
+   * manifest requests with `"write"`: asked for at Connect only once an admin
+   * has allowed this connector to change data. Until then the platform refuses
+   * this before it runs, and the grant doesn't hold the scope anyway.
+   */
+  async createThing(data: { title: string }): Promise<Thing | null> {
+    return this.request(
+      "/v1/things",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      },
+      { schema: Thing },
+    );
   }
 
   /**

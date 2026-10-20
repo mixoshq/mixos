@@ -79,6 +79,12 @@ export type ConnectorWithStatus = ConnectorManifest & {
    * and turned it off. Enabling it needs its name typed, and clears this.
    */
   replacement: ConnectorReplacement | null;
+  /**
+   * Whether an admin allowed it to change data (lib/connectors/writable.ts).
+   * Off for every connector until someone allows it, and meaningless for one
+   * with no method declared `mutates`.
+   */
+  changesAllowed: boolean;
   oauth: ConnectorOAuthStatus | null;
 };
 
@@ -100,6 +106,8 @@ interface Props {
     enabled: boolean,
     typedName?: string,
   ) => Promise<void>;
+  /** Allow a connector to change data, or make it read-only again. */
+  changesAction: (connectorName: string, allowed: boolean) => Promise<void>;
 }
 
 type StatusFilter = "all" | "configured" | "unconfigured";
@@ -116,6 +124,7 @@ export default function ConnectorRegistryList({
   configureAction,
   testAction,
   switchAction,
+  changesAction,
   proposal = null,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -326,6 +335,7 @@ export default function ConnectorRegistryList({
           onClose={() => setOpenName(null)}
           configureAction={configureAction}
           testAction={testAction}
+          changesAction={changesAction}
         />
       )}
 
