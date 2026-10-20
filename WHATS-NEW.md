@@ -12,6 +12,21 @@ just pulled.
 
 ## 2026-10-20
 
+- **Connectors mirror their provider, and building an app doesn't change one.**
+  A connector covers every operation on the resources it touches, one method
+  each, and each method names its provider `operation` in `connector.json`.
+  Every connector has a `version`, and within a major version it only adds: the
+  build, Register, the pre-commit hook and mixos.org each refuse a change that
+  removes what an app may call. See
+  [connectors/AGENTS.md](connectors/AGENTS.md#the-contract-a-connector-mirrors-its-provider).
+- **An app entry names its connector's version.** `connectors` and
+  `optionalConnectors` hold `{ "name", "version", "access"? }`, and a bare name
+  fails the build. The app is handed the connector narrowed to its declared
+  methods, so `request()` is out of reach.
+- **Writes are off until an admin allows them.** A method declared `mutates`
+  runs only for an app whose entry says `"access": "write"`, on an install whose
+  admin pressed **Allow changes** on the connector's new Configure step. Scopes
+  requested with `"requested": "write"` are asked for at Connect only then.
 - **Install without forking.** How to install
   (`docs/hosting/install.md`) starts with the quick way: a prompt for Claude
   Code that clones the newest release into `~/MixOS`, then `/mixos init` in VS

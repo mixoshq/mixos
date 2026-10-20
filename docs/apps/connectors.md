@@ -8,15 +8,26 @@ For the authoring side (how to build a connector), see [the connectors guide](..
 
 ## Using a Connector in Your App
 
-To use a connector, add its name to the `connectors` array in your `app.json`. The platform will automatically load, initialize, and inject the connector into your app context.
+To use a connector, add an entry for it to the `connectors` array in your `app.json`: its name, the version you built against, and `"access": "write"` if the app changes data in it. The platform will automatically load, initialize, and inject the connector into your app context.
 
 ```json
 // app.json
 {
   "name": "My App",
-  "connectors": ["monday", "slack"]
+  "connectors": [
+    { "name": "monday", "version": "3.0.1", "access": "write" },
+    { "name": "slack", "version": "1.4.0" }
+  ]
 }
 ```
+
+`version` comes from the connector's `connector.json`. Any later release with
+the same major version satisfies it, because within a major version a connector
+only adds; the build fails on one that doesn't satisfy it. `"access"` is
+`"read"` unless it says `"write"`, which the app needs to call a method the
+connector declares `mutates`, and which the connector's admin must also allow
+(see [Changing data](../connectors/architecture.md#changing-data)). The app can
+call the connector's declared methods and nothing else.
 
 A connector that only part of the app uses goes in `optionalConnectors` instead. It is built into `context.connectors` the same way, but an admin can activate and grant the app before it is configured, so the part that uses it must cope without it.
 
@@ -53,6 +64,7 @@ Declares the connector's metadata, what credentials it needs, and how to get the
 {
   "name": "my-service",
   "displayName": "My Service",
+  "version": "1.0.0",
   "icon": "assets/icon.svg",
   "description": "Project tracking for small teams.",
   "setup": {
@@ -74,7 +86,7 @@ Declares the connector's metadata, what credentials it needs, and how to get the
     "scopesUrl": "https://docs.myservice.example.com/api/scopes"
   },
   "http": { "baseUrl": "https://api.myservice.example.com" },
-  "telemetry": [{ "method": "listItems", "description": "Listed items" }]
+  "telemetry": [{ "method": "listItems", "operation": "GET /items", "description": "Listed items" }]
 }
 ```
 
@@ -82,6 +94,7 @@ Declares the connector's metadata, what credentials it needs, and how to get the
 | --- | --- | --- | --- |
 | `name` | ✅ | Unique identifier for the connector, matching its folder name. Used in app.json and internally. | `"name": "my-service"` |
 | `displayName` | ✅ | Human-readable name shown in the Connector Registry. | `"displayName": "My Service"` |
+| `version` | ✅ | This release, `X.Y.Z`. Apps name the version they were built against. See [Versions](../connectors/architecture.md#versions). | `"version": "1.0.0"` |
 | `icon` | ✅ | The registry tile's icon, a path inside the connector's `assets/` written with that prefix. | `"icon": "assets/icon.svg"` |
 | `description` |  | What the service is, in a sentence or two. Max 140 characters. | `"description": "Project tracking for small teams."` |
 | `setup.title` | ✅ | Label for the provider-side step of the Configure wizard. | `"title": "Create an API key"` |
@@ -91,7 +104,7 @@ Declares the connector's metadata, what credentials it needs, and how to get the
 | `credentialFields[].label` | ✅ | Label shown in the admin configuration form. | `"label": "API Key"` |
 | `credentialFields[].type` | ✅ | Either `text` for visible input or `password` for masked input. | `"type": "password"` |
 | `auth` |  | How the platform authenticates. Absent means `{ "strategy": "none" }`, a public API. Any other strategy needs `auth.scopesUrl`, the provider's page listing its scopes. | `"auth": { "strategy": "apiKey", "credentialKeys": ["apiKey"], "scopesUrl": "https://…" }` |
-| `telemetry` | ✅ | One entry per public method of the class, `{ method, description?, mutates? }`. The build fails on a public method that isn't listed. | `"telemetry": [{ "method": "listItems" }]` |
+| `telemetry` | ✅ | One entry per public method of the class, `{ method, operation, description?, mutates? }`, with the provider operation it calls. The build fails on a public method that isn't listed, or two naming the same operation. | `"telemetry": [{ "method": "listItems", "operation": "GET /items" }]` |
 
 The build fails on a connector missing any required field, and checks the icon's shape. The full reference is [connectors/architecture.md](../connectors/architecture.md#field-reference); what the registry needs, and why, is [the registry contract](../connectors/registry-ux.md#the-registry-contract).
 
@@ -139,7 +152,7 @@ async getCalendarEvents(opts: { /* … */ signal?: AbortSignal }) {
 }
 ```
 
-**Project the fields you actually map.** Ask the upstream for the columns you return, not whole objects (`$select` on Graph, an explicit field list elsewhere). Leave a comment tying the projection to the mapper so the two can't drift.
+**Let the caller choose the fields.** Asking the upstream for only the columns that get used (`$select` on Graph, an explicit field list elsewhere) is the biggest saving after page size, but which columns those are is the app's knowledge, not the connector's. Take the list as an optional parameter that defaults to the whole record, and let the job pass the fields its mapper reads. A projection fixed inside the connector fits the app that wrote it and makes the next one change the connector.
 
 **Size pages for round trips, not bytes.** Round trips dominate a multi-page pull far more than payload size does — raising the Graph calendar page size from 100 to 500 took a 9-month mailbox pull from 101s to 52s on its own.
 
@@ -174,7 +187,11 @@ Some connectors authenticate each logged-in user against an external IdP (e.g. S
 
 ```json
 {
-  "connectors": ["monday", "dock", "slack"]
+  "connectors": [
+    { "name": "monday", "version": "3.0.1" },
+    { "name": "dock", "version": "1.0.0" },
+    { "name": "slack", "version": "1.4.0" }
+  ]
 }
 ```
 

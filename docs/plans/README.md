@@ -62,6 +62,7 @@ Current platform plans:
 | [`20261007_0158-contain-app-migrations.md`](20261007_0158-contain-app-migrations.md) | A schema and a role per app, app migrations checked by Postgres's parser against an allowlist and applied as the app's role, and a platform `updatedAt` trigger in place of app triggers |
 | [`20261008_2300-extension-lifecycle.md`](20261008_2300-extension-lifecycle.md) | The extension lifecycle and MixOS's own updates: installs checked without running and held in `.mixos/pending/` until Register, data kept when an app leaves the build, activation and connector switches, update and removal, an update check against mixos.org, a stamped build, releases and their notices, a maintenance response, and a GitHub App that proposes pull requests |
 | [`20261015_2343-remix.md`](20261015_2343-remix.md) | Remix (built; phase 3 in mixos.org): `/mixos remix` abstracts a component of an installed app into a card — needs, gives, actions, hidden rules, interactions — asks Same, Different or Remove per action, builds it into another app, and records provenance that mixos.org counts for the source's creator |
+| [`20261020_0728-connector-contracts.md`](20261020_0728-connector-contracts.md) | A connector mirrors its provider's API; an admin allows each connector's writes per install, and an app declares `"access": "write"` to use them; a required `version` in `connector.json`, a version an app names on its entry, and a contract that only adds within a major version, checked at build, install, update, commit and publish |
 
 ## File naming
 

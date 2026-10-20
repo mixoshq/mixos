@@ -15,6 +15,30 @@ connectors/my-service/
 
 **Templates:** any connector directory whose name starts with an underscore (e.g. `connectors/_template/`) is treated as a template and skipped by the registry. Use this for starter scaffolds you want to keep in the repo without exposing to admins.
 
+## What a connector is for
+
+A connector is the layer between one provider's API and every app that uses it.
+Building an app never changes a connector: **a connector changes when its
+provider's API changes, and only then.** Five rules make that true:
+
+1. **It covers the API, not the first app.** Every operation on each resource it
+   touches, one public method per operation, named as the provider names it. A
+   method that combines operations or is shaped for one screen belongs in that
+   app.
+2. **Each method names its operation.** `operation` on each `telemetry` entry is
+   the provider operation the method calls, and the build allows one method per
+   operation: a variant is an option, not a second method.
+3. **It returns what the provider returns, typed.** Field selection and
+   formatting are optional parameters that default to everything.
+4. **It is versioned, and only adds within a major version.** See
+   [Versions](#versions).
+5. **It ships its writes, and each install allows them.** See
+   [Changing data](#changing-data).
+
+When an app needs something a connector lacks, and the provider has the
+operation, the connector gains it as a plain mirror of that operation, in a new
+minor version. If the provider doesn't have it, it belongs in the app.
+
 ## Connector Manifest (connector.json)
 
 The manifest declares the connector's metadata and what credentials it needs. These fields appear in the Connector Registry admin UI where an admin can configure them.
@@ -23,6 +47,7 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 {
   "name": "my-service",
   "displayName": "My Service",
+  "version": "1.0.0",
   "icon": "assets/icon.png",
   "description": "Connector for the My Service API",
   "authors": [
@@ -45,7 +70,11 @@ The manifest declares the connector's metadata and what credentials it needs. Th
     "strategy": "apiKey",
     "credentialKeys": ["apiKey"],
     "scopesUrl": "https://docs.my-service.example.com/api/scopes"
-  }
+  },
+  "telemetry": [
+    { "method": "listItems", "operation": "GET /items", "description": "Listed items" },
+    { "method": "createItem", "operation": "POST /items", "description": "Created an item", "mutates": true }
+  ]
 }
 ```
 
@@ -55,6 +84,7 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 | --- | --- | --- | --- |
 | `name` | ✅ | Unique identifier for the connector. Used in app.json and internally. Should be lowercase with hyphens. | `"name": "my-service"` |
 | `displayName` | ✅ | Human-readable name shown in the Connector Registry admin page. | `"displayName": "My Service"` |
+| `version` | ✅ | This release, as three numbers. Apps name the version they were built against, and any later release with the same major version satisfies them. See [Versions](#versions). | `"version": "1.2.0"` |
 | `icon` | ✅ | Path inside the connector's own `assets/` directory, **written out in full including the `assets/` prefix**, shown on its Connector Registry tile. A `.png` or `.webp` must be **square, at least 512x512**; an `.svg` must have a `viewBox`. The generator checks the file and aborts the build otherwise. | `"icon": "assets/icon.png"` |
 | `description` |  | What the **service** is, in a sentence or two. Not what the connector does with it, and not how to set it up. **Capped at 140 characters.** The tile shows its first 15 words; the configure dialog shows all of it. | `"description": "Highly popular email service by Google. Gmail tracks all of your email conversations."` |
 | `tagline` |  | One line for a listing card on mixos.org — the version that fits beside the icon in a grid. Max 100 characters, single line. Where it is absent, `description` is used instead; setting only one of the two is the normal case. | `"tagline": "Read Gmail messages, threads and labels"` |
@@ -79,7 +109,7 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 | `auth.scopesUrl` | ✅ (unless `strategy` is `none`) | The provider's scope reference page, which the registry's permission list is read from. See [Scopes](scopes.md). | `"scopesUrl": "https://docs.example.com/api/scopes"` |
 | `http` |  | Transport policy: base URL, timeouts, retry budget, pagination. Every value has a working default. | |
 | `webhook` |  | Inbound webhook verification. See [Webhooks](webhooks.md). | |
-| `telemetry` |  | Every public method apps can call, as `{ method, description?, mutates? }`; the build fails on one that is missing. Each is auto-instrumented. See [Telemetry](telemetry.md). | |
+| `telemetry` | ✅ | Every public method apps can call, as `{ method, operation, description?, mutates? }`: the provider `operation` it calls, and `"mutates": true` on one that changes data. The build fails on a public method that is missing, or two naming the same operation. It is the whole of what an app can call, and each is auto-instrumented. See [Telemetry](telemetry.md). | `{ "method": "getItem", "operation": "GET /items/{id}" }` |
 
 ### Setup guidance and the icon
 
@@ -209,18 +239,82 @@ at least one credential field.
 
 > **Tool-written:** `lastUpdated` lives in `connector.json` as an ISO 8601 date-time (e.g. `"2026-08-24T03:21:40.694Z"`) and is stamped automatically: `.githooks/pre-commit` runs [`scripts/stamp-updated.ts`](../../scripts/stamp-updated.ts), which rewrites the date on every connector with a file in the commit and re-stages the manifest. It records when the connector last changed, so a dependency bump or a formatting pass inside it moves the date too. A commit that touches only `lastUpdated` never re-stamps, and nor does a merge, for a connector it brings in exactly as the other branch has it. Don't edit it by hand; an invalid value fails the build. A connector with no date yet shows **"Not yet committed"**.
 
+## Versions
+
+`version` is `X.Y.Z`, and every connector has one. An app names the version it
+was built against on its entry, and any later release with the same major
+version satisfies it: an app built against 1.2.0 works with 1.2.0 and 1.7.3,
+and not with 2.0.0. That holds because within a major version a connector only
+adds:
+
+| Change | Version |
+| --- | --- |
+| A bug fixed, nothing an app can see changed | patch: 1.2.0 → 1.2.1 |
+| A new method, an optional parameter, a new field in a result | minor: 1.2.0 → 1.3.0 |
+| A method removed or renamed, what one takes or returns changed, a read made into a write | major: 1.2.0 → 2.0.0 |
+
+Where it is held to that:
+
+- **The build** fails an app whose entry the connector in the checkout doesn't
+  satisfy, saying whether to update the connector or check the app against a
+  new major version.
+- **Registry install and update** refuse an app that needs a newer connector
+  than the one installed, and a connector release with a major version an
+  installed app wasn't built against.
+- **The pre-commit hook and Danger**
+  ([`scripts/check-connector-contract.ts`](../../scripts/check-connector-contract.ts))
+  refuse a version that goes backwards, and a removed method or a read made
+  into a write without a new major version.
+- **mixos.org**, at publish, holds a release to the one before it: a higher
+  version, at least a new minor one for an added method, a new major one for a
+  removed method.
+
+What a method takes and returns can't be read from the manifest, so changing it
+is a new major version on the author's word. The Registry's checks catch the
+rest.
+
+## Changing data
+
+A method declared `"mutates": true` changes data upstream, and every install
+starts with all of them off. They run only with two keys:
+
+1. **The app asks.** Its entry for the connector says `"access": "write"`.
+2. **The admin allows.** On the connector's **Choose whether it can change data**
+   step in Administration → Connectors, an admin presses **Allow changes**. It is
+   kept in `platform_settings`, as `connector.writable.<name>`, so a publisher
+   can't set it.
+
+With either key missing, the method is refused before it runs: an app that
+didn't ask gets an error naming its own manifest, and one that asked on a
+read-only install gets a `forbidden` error telling an admin where to allow
+changes. An app that requires the connector and asks to write can't be
+activated until changes are allowed.
+
+A scope only the write methods need is requested with `"requested": "write"`.
+Connect asks for it only once changes are allowed, and so does a
+client-credentials token for a caller allowed to write. A grant taken while the
+connector was read-only doesn't hold it, so allowing changes on a connected OAuth
+connector means connecting again, which the dialog and the activation gate both
+ask for.
+
 ## How Connectors Work
 
 Connectors follow a simple lifecycle:
 
 1. The connector is **registered** automatically when the platform scans the `/connectors` directory and finds a valid `connector.json`.
-2. An admin **configures credentials** in the Connector Registry admin page. Credentials are encrypted at rest using AES-256-GCM.
-3. When an app declares a connector dependency in its `app.json`, the platform **initializes** the connector with decrypted credentials and injects it into the app context.
-4. App API routes access the connector by its manifest name, `context.connectors["my-service"]`, and call its methods.
+2. An admin **configures credentials** in the Connector Registry admin page. Credentials are encrypted at rest using AES-256-GCM. If it has methods that change data, the admin also decides whether it may.
+3. An app declares each connector it uses in its `app.json`, with the version it was built against, and the build holds the two together. The platform **initializes** the connector with decrypted credentials and injects it into the app context.
+4. App API routes access the connector by its manifest name, `context.connectors["my-service"]`, and call its declared methods.
 
 ## Security Model
 
 Connectors run exclusively on the server side behind the secure API gateway. App client code (pages and widgets) cannot import connector modules directly — they must call their app's API routes, which receive initialized connectors via the app context. This ensures credentials are never exposed to the browser.
+
+What an app receives is the connector narrowed to its declared methods
+([`src/lib/apps/connector-reach.ts`](../../src/lib/apps/connector-reach.ts)).
+`request()` and every other member the manifest doesn't declare throw, so an app
+can't reach around the declaration to send its own request with the connector's
+credential, and a write runs only with the two keys above.
 
 ## One credential set per connector
 
