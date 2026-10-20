@@ -70,7 +70,7 @@ import { recordAdminAction, type AdminActor } from "@/lib/apps/admin-audit";
 import { sql } from "@/lib/db/client";
 import { isBuiltDeployment } from "@/lib/platform/build";
 import { readReleaseCheckState } from "@/lib/platform/release-check";
-import { UPGRADE_GUIDE_URL, onChannel, releasePageUrl, type ReleaseNotice } from "@/lib/platform/releases";
+import { UPGRADE_GUIDE_URL, mergeCommand, onChannel, releasePageUrl, type ReleaseNotice } from "@/lib/platform/releases";
 import { mixosCommit, mixosVersion } from "@/lib/platform/version";
 import { compareRelease } from "@/lib/platform/version-floor";
 import { releaseChannel } from "@/lib/repository/policy";
@@ -141,12 +141,6 @@ export function upstreamCompareUrl(from: string | null, tag: string): string | n
   if (!from || !isReleaseTag(tag) || !/^(?:[0-9a-f]{40}|v[0-9A-Za-z.-]+)$/.test(from)) return null;
   const base = `${GITHUB_WEB_ORIGIN}/${encodeURIComponent(UPSTREAM_REPOSITORY.owner)}/${encodeURIComponent(UPSTREAM_REPOSITORY.name)}`;
   return `${base}/compare/${encodeURIComponent(from)}...${encodeURIComponent(tag)}`;
-}
-
-/** The merge by hand, as the upgrade guide gives it. */
-export function mergeCommand(tag: string): string {
-  if (!isReleaseTag(tag)) throw new Error("A release tag the list's schema validates.");
-  return `git fetch upstream --tags && git merge ${tag}`;
 }
 
 function compareLinks(tag: string): OutcomeLink[] {

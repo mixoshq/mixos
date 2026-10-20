@@ -145,17 +145,17 @@ When the merge deploys, an app arrives inactive: activate it on Admin > Apps.
 
 ## Updating MixOS through the App
 
-When a newer release of MixOS is out and the App is linked, the release notice at
-the top of the admin pages shows the commands that merge it into your
-repository, as [Upgrading MixOS](upgrading.md) describes, and a link to what
-changed:
+When a newer release of MixOS is out, the release notice at the top of the
+admin pages gives `/mixos upgrade` to run in Claude Code, and the merge by
+hand, as [Upgrading MixOS](upgrading.md) describes:
 
 ```bash
 git fetch upstream --tags && git merge v0.5.0
 ```
 
-The App can't open that merge as a pull request on your own repository, which
-doesn't have the release's commit until you merge it. A fork of
+With the App linked, it adds a link to what changed, on GitHub. The App can't
+open that merge as a pull request on your own repository, which doesn't have
+the release's commit until you merge it. A fork of
 `mixoshq/mixos` shares upstream's commits, so on a fork the notice offers
 **Open an update pull request** instead. It opens a pull request into your
 default branch from the branch `mixos/update-<tag>`, at the release's commit,
