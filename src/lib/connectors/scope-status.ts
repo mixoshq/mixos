@@ -4,6 +4,7 @@
 
 import { sql } from "@/lib/db/client";
 import type { ConnectorScope } from "./types";
+import { isScopeRequested } from "./write-policy";
 
 /**
  * What the provider actually granted, per scope.
@@ -37,16 +38,19 @@ export interface ScopeStatusRow {
  *
  * `unknown` deliberately carries most of the rows. A scope the provider
  * documents but this connector never asks for is not a fault, and rendering
- * those as refused would report a dozen failures on a healthy connector.
+ * those as refused would report a dozen failures on a healthy connector. A
+ * scope requested only once changes are allowed is one of them on a grant
+ * that didn't ask for it: `writes` is what the authorization asked.
  */
 export function classifyGrant(
   scopes: ConnectorScope[],
   granted: string[],
+  { writes = false }: { writes?: boolean } = {},
 ): Array<{ scope: string; status: ScopeStatus }> {
   const held = new Set(granted);
   return scopes.map((s) => ({
     scope: s.scope,
-    status: !s.requested ? "unknown" : held.has(s.scope) ? "granted" : "refused",
+    status: !isScopeRequested(s, writes) ? "unknown" : held.has(s.scope) ? "granted" : "refused",
   }));
 }
 
@@ -65,10 +69,12 @@ export async function recordScopeStatus(opts: {
   connectorName: string;
   scopes: ConnectorScope[];
   granted: string[];
+  /** Whether the authorization asked for the scopes requested with "write". */
+  writes: boolean;
   userId?: string | null;
 }): Promise<void> {
   const userId = opts.userId ?? null;
-  const rows = classifyGrant(opts.scopes, opts.granted);
+  const rows = classifyGrant(opts.scopes, opts.granted, { writes: opts.writes });
 
   // One transaction: a half-written snapshot is worse than the previous one,
   // because it reads as authoritative.

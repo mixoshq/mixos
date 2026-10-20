@@ -2,15 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import {
-  ConnectorDisabledError,
-  isDisabledConnector,
-} from "@/lib/connectors/switch";
+import { ConnectorDisabledError } from "@/lib/connectors/switch";
+import { ConnectorChangesNotAllowedError } from "@/lib/connectors/write-policy";
 import type {
   BaseConnector,
   ConnectorManifest,
   ConnectorTelemetryDefinition,
 } from "@/lib/connectors/types";
+import { narrowConnector } from "./connector-reach";
 
 /**
  * Read-only connectors, for the MCP path.
@@ -43,13 +42,15 @@ export class ReadOnlyError extends Error {
  * for anything else.
  *
  * Both brokers flatten a handler's error to a generic line in production,
- * since it may name internals. These two were written to be read: a write
- * refused here, and a call to a connector an admin has disabled. Passing them
- * on tells the model, or the calling app, why the call failed.
+ * since it may name internals. These were written to be read: a write refused
+ * here, a call to a connector an admin has disabled, and a write to one an
+ * admin hasn't allowed to change data. Passing them on tells the model, or the
+ * calling app, why the call failed.
  */
 export function refusalMessage(err: unknown): string | null {
   if (err instanceof ReadOnlyError) return err.message;
   if (err instanceof ConnectorDisabledError) return err.userMessage;
+  if (err instanceof ConnectorChangesNotAllowedError) return err.userMessage;
   return null;
 }
 
@@ -80,40 +81,19 @@ export function readOnlyConnector(
   connector: BaseConnector,
   declared: readonly ConnectorTelemetryDefinition[],
 ): BaseConnector {
-  // A connector an admin turned off arrives as the context builder's stand-in
-  // (src/lib/connectors/switch.ts), and is handed on as it is. Every call on it
-  // already fails with "disabled by an administrator", and narrowing it here
-  // would answer a write or an undeclared method with a read-only refusal
-  // instead, which names the wrong reason.
-  if (isDisabledConnector(connector)) return connector;
-
-  const reads = new Set(declared.filter((m) => !m.mutates).map((m) => m.method));
-  const writes = new Set(declared.filter((m) => m.mutates).map((m) => m.method));
-
-  return new Proxy(connector, {
-    get(target, prop) {
-      // `target` as the receiver, not the proxy: a connector's getters read
-      // their own private fields, and routing `this` back through the proxy
-      // turns a working getter into a runtime error.
-      const value: unknown = Reflect.get(target, prop, target);
-      if (typeof value !== "function") return value;
-      // `toString`, `hasOwnProperty` and the like are Object's, not the
-      // connector's, and string interpolation reaches for them.
-      if (value === Reflect.get(Object.prototype, prop)) return value;
-
-      if (typeof prop === "string" && reads.has(prop)) {
-        return (...args: unknown[]) =>
-          (value as (...a: unknown[]) => unknown).apply(target, args);
-      }
-      const method = String(prop);
-      return () => {
-        throw new ReadOnlyError(
-          writes.has(method)
-            ? `"${name}.${method}" changes data upstream and cannot be called from an MCP tool. Tools answer questions; they do not act.`
-            : `"${name}.${method}" is not one of the reads "${name}" declares, so an MCP tool cannot call it.`,
-        );
-      };
-    },
+  // A connector an admin turned off is handed on as it is (./connector-reach.ts):
+  // narrowing it would answer a write or an undeclared method with a read-only
+  // refusal, which names the wrong reason.
+  return narrowConnector(connector, declared, {
+    writes: false,
+    refuseWrite: (method) =>
+      new ReadOnlyError(
+        `"${name}.${method}" changes data upstream and cannot be called from an MCP tool. Tools answer questions; they do not act.`,
+      ),
+    refuseUndeclared: (method) =>
+      new ReadOnlyError(
+        `"${name}.${method}" is not one of the reads "${name}" declares, so an MCP tool cannot call it.`,
+      ),
   });
 }
 

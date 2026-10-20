@@ -62,6 +62,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { recordAdminAction, type AdminActor } from "../apps/admin-audit";
+import { connectorEntryNames } from "../connectors/requirements";
 import { sql } from "../db/client";
 import { BUILT_DEPLOYMENT_REMOVE_NOTICE, isBuiltDeployment } from "../platform/build";
 import { describeCheckoutLockHolder, withCheckoutLock, type CheckoutLock } from "../platform/checkout-lock";
@@ -230,9 +231,6 @@ export function extensionFolders(root: string, kind: ExtensionKind): string[] {
     .sort((a, b) => a.localeCompare(b));
 }
 
-const strings = (value: unknown): string[] =>
-  Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
-
 /** The `app` of each `{ app, … }` entry in a list, read loosely: an entry that isn't one is skipped. */
 const appsNamed = (value: unknown): string[] =>
   Array.isArray(value)
@@ -258,8 +256,8 @@ function checkoutApps(root: string): AppLinks[] {
     return {
       slug,
       name: displayName(manifest, "app", slug),
-      connectors: strings(manifest?.connectors),
-      optionalConnectors: strings(manifest?.optionalConnectors),
+      connectors: connectorEntryNames(manifest?.connectors),
+      optionalConnectors: connectorEntryNames(manifest?.optionalConnectors),
       consumes: appsNamed(manifest?.consumes),
       listensTo: appsNamed(manifest?.listensTo),
     };

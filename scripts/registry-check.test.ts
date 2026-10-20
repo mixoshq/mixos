@@ -80,8 +80,13 @@ function stageConnector(name: string, { from = "_template", declared = name, edi
   return dir;
 }
 
-/** A registered app, as the generator writes one into app-registry.ts. */
+/**
+ * A registered app, as the generator writes one into app-registry.ts. Its
+ * `connectorRequirements` follow `connectors` unless a test sets them: each
+ * built against 1.0.0, reading only.
+ */
 function registeredApp(slug: string, fields: Record<string, unknown> = {}): Record<string, unknown> {
+  const names = (fields.connectors as string[] | undefined) ?? [];
   return {
     slug,
     name: slug,
@@ -90,6 +95,7 @@ function registeredApp(slug: string, fields: Record<string, unknown> = {}): Reco
     icon: "box",
     connectors: [],
     optionalConnectors: [],
+    connectorRequirements: names.map((name) => ({ name, optional: false, access: "read", version: "1.0.0" })),
     database: false,
     updatedAt: [],
     notifications: false,
@@ -123,6 +129,11 @@ function registeredApp(slug: string, fields: Record<string, unknown> = {}): Reco
     mcp: [],
     ...fields,
   };
+}
+
+/** A registered connector, as the generator writes one into connector-registry.ts. */
+function registeredConnector(name: string, fields: Record<string, unknown> = {}): Record<string, unknown> {
+  return { name, displayName: name, version: "1.0.0", telemetry: [], ...fields };
 }
 
 /** A registry directory holding `apps` and `connectors`, in the generator's own format. */
@@ -605,10 +616,14 @@ describe("checkStaged", () => {
 
   test("a scheduled job on a registered user-scoped connector is refused", async () => {
     const app = stage("digest", {
-      "app.json": JSON.stringify({ name: "Digest", connectors: ["my-mail"], schedules: [{ name: "daily", everyMinutes: 60 }] }),
+      "app.json": JSON.stringify({
+        name: "Digest",
+        connectors: [{ name: "my-mail", version: "1.0.0" }],
+        schedules: [{ name: "daily", everyMinutes: 60 }],
+      }),
       "jobs/daily.ts": "export default async () => {};\n",
     });
-    const { problems } = await checkStaged("app", app, registered([], [{ name: "my-mail", userScoped: true }]));
+    const { problems } = await checkStaged("app", app, registered([], [registeredConnector("my-mail", { userScoped: true })]));
     assert.match(problems[0], /^apps\/digest\/app\.json declares the user-scoped connector\(s\) my-mail and also schedule "daily"/);
   });
 
@@ -623,13 +638,62 @@ describe("checkStaged", () => {
     const { problems } = await checkStaged("connector", connector, registered([digest]));
     assert.match(problems[0], /^apps\/digest\/app\.json declares the user-scoped connector\(s\) my-mail/);
   });
+
+  test("an app built against a newer connector than the one installed is refused, naming the update", async () => {
+    const app = stage("ledger", {
+      "app.json": JSON.stringify({ name: "Ledger", connectors: [{ name: "crm", version: "1.2.0" }] }),
+    });
+    const { problems } = await checkStaged("app", app, registered([], [registeredConnector("crm", { version: "1.1.4" })]));
+    assert.equal(problems.length, 1);
+    assert.match(problems[0], /^apps\/ledger\/app\.json was built against crm 1\.2\.0 or a later 1\.x release, and connectors\/crm is 1\.1\.4\./);
+    assert.match(problems[0], /Update crm to 1\.2\.0 or later first\./);
+
+    const later = await checkStaged("app", app, registered([], [registeredConnector("crm", { version: "1.4.0" })]));
+    assert.deepEqual(later.problems, []);
+  });
+
+  test("an app built against an older major version than the one installed is refused", async () => {
+    const app = stage("ledger", {
+      "app.json": JSON.stringify({ name: "Ledger", connectors: [{ name: "crm", version: "1.2.0" }] }),
+    });
+    const { problems } = await checkStaged("app", app, registered([], [registeredConnector("crm", { version: "2.0.0" })]));
+    assert.match(problems[0], /2\.0\.0 is a new major version, which may remove or change what the app calls\./);
+  });
+
+  test("an app asking to change data in a connector with no write method is refused", async () => {
+    const app = stage("ledger", {
+      "app.json": JSON.stringify({ name: "Ledger", connectors: [{ name: "crm", version: "1.0.0", access: "write" }] }),
+    });
+    const reads = registeredConnector("crm", { telemetry: [{ method: "listDeals", operation: "GET /deals" }] });
+    const { problems } = await checkStaged("app", app, registered([], [reads]));
+    assert.match(problems[0], /^apps\/ledger\/app\.json asks to change data in crm, which declares no method that changes anything\./);
+
+    const writes = registeredConnector("crm", {
+      telemetry: [{ method: "createDeal", operation: "POST /deals", mutates: true }],
+    });
+    assert.deepEqual((await checkStaged("app", app, registered([], [writes]))).problems, []);
+  });
+
+  test("a connector release with a new major version is refused while an installed app needs the old one", async () => {
+    const connector = stageConnector("crm", { edit: (m) => ({ ...m, version: "2.0.0" }) });
+    const ledger = registeredApp("ledger", { connectors: ["crm"] });
+
+    assert.deepEqual((await checkStaged("connector", connector, registered())).problems, []);
+    const { problems } = await checkStaged("connector", connector, registered([ledger]));
+    assert.match(problems[0], /^apps\/ledger\/app\.json was built against crm 1\.0\.0 or a later 1\.x release, and connectors\/crm is 2\.0\.0\./);
+
+    const minor = stageConnector("crm", { edit: (m) => ({ ...m, version: "1.3.0" }) });
+    assert.deepEqual((await checkStaged("connector", minor, registered([ledger]))).problems, []);
+  });
 });
 
 // ── the registered manifests ────────────────────────────────────────────────
 
 describe("readRegistered", () => {
   test("reads the generated modules as text, imports and loaders included", () => {
-    const read = readRegistered(registryDir([PROVIDER], [{ name: "my-mail", userScoped: true, displayName: "Mail" }]));
+    const read = readRegistered(
+      registryDir([PROVIDER], [registeredConnector("my-mail", { userScoped: true, displayName: "Mail" })]),
+    );
     assert.deepEqual(read.apps.map((a) => a.slug), ["provider"]);
     assert.deepEqual(read.connectors.map((c) => c.name), ["my-mail"]);
   });

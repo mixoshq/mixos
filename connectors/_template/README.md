@@ -25,9 +25,10 @@ repeat them here.
 
 ## Access it asks for
 
-Which scopes are requested by default and what each one lets the connector do.
-If the provider's scopes are coarser than you would like, say so; a reader
-deciding whether to connect their company's mail deserves to know.
+Which scopes are requested by default and what each one lets the connector do,
+and which it asks for only once an admin allows it to change data. If the
+provider's scopes are coarser than you would like, say so; a reader deciding
+whether to connect their company's mail deserves to know.
 
 ## Worth knowing
 

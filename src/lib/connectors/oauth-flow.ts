@@ -20,6 +20,7 @@ import {
 import { recordScopeStatus } from "./scope-status";
 import { isConnectorDisabled } from "./switch";
 import { saveUserTokens } from "./user-config";
+import { isConnectorWritable } from "./writable";
 
 /**
  * What the connector OAuth routes decide, apart from the request and the
@@ -73,7 +74,16 @@ export async function startConnectorOAuth(
     return { ok: false, outcome: "missing-client" };
   }
 
-  const flow = newFlowState(name, returnTo, flowUserId);
+  // Ask for the write scopes only on an install that allows changes
+  // (./writable.ts). Unreadable asks for less, never more.
+  let writes = false;
+  try {
+    writes = await isConnectorWritable(name);
+  } catch (err) {
+    console.error(`[connector-oauth] ${name}: could not read whether changes are allowed:`, err);
+  }
+
+  const flow = newFlowState(name, returnTo, flowUserId, writes);
   return {
     ok: true,
     authorizeUrl: buildAuthorizeUrl(policy, { connector: name, clientId, flow }),
@@ -177,6 +187,7 @@ export async function finishConnectorOAuth(opts: {
       clientSecret: credentials[secretKey] ?? "",
       code,
       codeVerifier: flow.codeVerifier,
+      writes: flow.writes,
     });
     if (userScoped) {
       // Only the grant is personal — the client id and secret above stay where
@@ -198,6 +209,7 @@ export async function finishConnectorOAuth(opts: {
         connectorName: name,
         scopes: policy.scopes ?? [],
         granted,
+        writes: flow.writes,
         userId: userScoped ? session.user.id : null,
       });
     } catch (err) {
@@ -221,7 +233,7 @@ export async function finishConnectorOAuth(opts: {
       action: "connector.connect",
       targetType: "connector",
       targetId: name,
-      details: { scopes: granted },
+      details: { scopes: granted, writes: flow.writes },
     });
   }
 

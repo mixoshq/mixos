@@ -160,6 +160,10 @@ describe("the connector switch", { skip }, () => {
       name: APP_NAME,
       connectors: [KEYED],
       optionalConnectors: [OAUTH],
+      connectorRequirements: [
+        { name: KEYED, optional: false, access: "read", version: "1.0.0" },
+        { name: OAUTH, optional: true, access: "read", version: "1.0.0" },
+      ],
       env: [],
       egress: [],
       database: false,

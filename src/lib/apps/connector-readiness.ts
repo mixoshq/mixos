@@ -12,8 +12,12 @@
  * two names.
  */
 
-/** A state that keeps an app from being activated or granted. */
-export type ConnectorBlock = "unconfigured" | "needs-authorization" | "disabled";
+/**
+ * A state that keeps an app from being activated or granted. `read-only` is
+ * a connector the app needs to change data in, whose admin hasn't allowed
+ * changes (src/lib/connectors/writable.ts).
+ */
+export type ConnectorBlock = "unconfigured" | "needs-authorization" | "disabled" | "read-only";
 
 /** A connector an app requires that isn't ready to serve it. */
 export interface MissingConnector {
@@ -27,6 +31,7 @@ export const BLOCK_LABEL: Record<ConnectorBlock, string> = {
   unconfigured: "Not configured",
   "needs-authorization": "Needs authorization",
   disabled: "Disabled",
+  "read-only": "Read-only",
 };
 
 /** What an admin does about each, in the Connector Registry. */
@@ -34,6 +39,7 @@ const STEP: Record<ConnectorBlock, string> = {
   unconfigured: "configure",
   "needs-authorization": "connect",
   disabled: "enable",
+  "read-only": "allow changes in",
 };
 
 /** What each is once it is done: "until Gong is connected". */
@@ -41,6 +47,7 @@ const DONE: Record<ConnectorBlock, string> = {
   unconfigured: "configured",
   "needs-authorization": "connected",
   disabled: "enabled",
+  "read-only": "allowed to change data",
 };
 
 /** "A", "A and B", "A, B and C". */
@@ -78,7 +85,7 @@ export function missingConnectorSteps(missing: readonly MissingConnector[]): str
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** The participle for a state: "configured", "connected", "enabled". */
+/** The participle for a state: "configured", "connected", "enabled", "allowed to change data". */
 export function blockDone(state: ConnectorBlock): string {
   return DONE[state];
 }

@@ -4,9 +4,13 @@
 
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
+import { grantedScopes } from "@/lib/connectors/access";
 import { getDecryptedConfig } from "@/lib/connectors/config";
+import type { ConnectorRequirement } from "@/lib/connectors/requirements";
 import { registryConfigState } from "@/lib/connectors/status";
 import { getDisabledConnectors } from "@/lib/connectors/switch";
+import { getWritableConnectors } from "@/lib/connectors/writable";
+import { grantHoldsWriteScopes } from "@/lib/connectors/write-policy";
 import {
   missingConnectorSteps,
   type ConnectorBlock,
@@ -41,10 +45,17 @@ export { missingConnectorSteps };
  *
  * An admin's switch comes first: a disabled connector refuses every call
  * however complete its credentials are (src/lib/connectors/switch.ts).
+ *
+ * An app that changes data in the connector also needs its admin to have
+ * allowed changes (src/lib/connectors/writable.ts). A tenant OAuth grant taken
+ * before that holds only the read scopes, so the connector needs connecting
+ * again until it holds the ones it requests with "write".
  */
 async function connectorBlock(
   name: string,
   disabled: ReadonlySet<string>,
+  writable: ReadonlySet<string>,
+  need: ConnectorRequirement | undefined,
 ): Promise<ConnectorBlock | null> {
   const connector = connectorRegistry.find((c) => c.name === name);
   if (!connector) return "unconfigured";
@@ -62,7 +73,18 @@ async function connectorBlock(
   }
 
   const state = registryConfigState(connector, credentials);
-  return state === "ready" ? null : state;
+  if (state !== "ready") return state;
+
+  if (need?.access === "write") {
+    if (!writable.has(name)) return "read-only";
+    if (connector.auth?.strategy === "oauth2_authorization_code" && !connector.userScoped) {
+      const { granted, grantedKnown } = grantedScopes(credentials);
+      if (grantHoldsWriteScopes(connector.auth, granted, grantedKnown) === false) {
+        return "needs-authorization";
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -101,9 +123,28 @@ export async function getMissingTenantConfigConnectors(
     );
     disabled = new Set();
   }
+  // Allow changes, for the connectors this app asks to change data in, read
+  // the same way: a gate that can't tell refuses, and a page that only shows
+  // the answer shows the connector as read-only. An app that only reads asks
+  // nothing of it, so nothing is read.
+  const writers = app.connectorRequirements
+    .filter((r) => !r.optional && r.access === "write")
+    .map((r) => r.name);
+  let writable: ReadonlySet<string> = new Set();
+  try {
+    if (writers.length > 0) writable = await getWritableConnectors(writers);
+  } catch (err) {
+    if (!forDisplay) throw err;
+    console.error(
+      `[connector-gates] ${appSlug}: could not read which connectors may change data; showing them as read-only:`,
+      err,
+    );
+    writable = new Set();
+  }
   const checks = await Promise.all(
     app.connectors.map(async (name): Promise<MissingConnector | null> => {
-      const state = await connectorBlock(name, disabled);
+      const need = app.connectorRequirements.find((r) => r.name === name);
+      const state = await connectorBlock(name, disabled, writable, need);
       if (state === null) return null;
       const meta = connectorRegistry.find((c) => c.name === name);
       return { name, displayName: meta?.displayName ?? name, state };

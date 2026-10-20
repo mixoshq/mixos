@@ -47,8 +47,8 @@ const APP_JSON = {
     { key: "ACME_REGION", label: "Region", type: "text" },
     { key: "ACME_TOKEN", label: "Token", type: "password" },
   ],
-  connectors: ["gmail"],
-  optionalConnectors: ["slack"],
+  connectors: [{ name: "gmail", version: "2.1.0", access: "write" }],
+  optionalConnectors: [{ name: "slack", version: "1.0.0" }],
   provides: [{ name: "boards", consumers: "*" }],
   consumes: [{ app: "files", service: "upload" }],
   emits: [{ name: "board.created", consumers: "*" }],
@@ -147,7 +147,7 @@ test("an app's manifest declarations, in the review's terms", () => {
     Egress: ["api.acme.example"],
     Env: ["ACME_REGION", "ACME_TOKEN (secret)"],
     Database: ["Its own schema and database role"],
-    Connectors: ["gmail", "slack (optional)"],
+    Connectors: ["gmail 2.1.0 or later, changes data", "slack 1.0.0 or later, optional"],
     Services: ["provides boards", "uses files/upload"],
     Hooks: ["emits board.created", "listens to crm.deal.won", "brand hook brand-name"],
     "MCP tools": ["list-boards"],
@@ -172,6 +172,11 @@ test("a connector's review: its code, and what its manifest says it reaches", ()
     ],
     userScoped: true,
     webhook: { algorithm: "hmac-sha256", signatureHeader: "x-sig", secretKey: "clientSecret" },
+    version: "1.4.0",
+    telemetry: [
+      { method: "listDeals", operation: "GET /deals" },
+      { method: "createDeal", operation: "POST /deals", mutates: true },
+    ],
   };
   pend("connector", "acme-crm", [
     file("connector.json", JSON.stringify(manifest)),
@@ -189,6 +194,8 @@ test("a connector's review: its code, and what its manifest says it reaches", ()
       "Credentials an admin enters": ["clientId", "clientSecret"],
       "Each person's own account": ["Yes: each person signs in with their own"],
       Webhooks: ["Receives signed webhooks"],
+      Version: ["1.4.0"],
+      "Methods that change data": ["createDeal"],
     },
   );
 });

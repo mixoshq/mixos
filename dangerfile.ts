@@ -18,6 +18,7 @@ import {
 } from "./scripts/release-prep";
 import { strayExtensions } from "./scripts/core-extensions";
 import { editedRemixEntries, remixEntriesFromAppJson } from "./src/lib/apps/remix";
+import { connectorSurfaceOf, contractProblems } from "./src/lib/connectors/requirements";
 
 const ALLOWED_DIRS = ["apps/", "connectors/", "themes/"];
 const OS_CHANGE_LABEL = "os-change";
@@ -457,6 +458,52 @@ if (appManifests.length > 0) {
         `An entry in \`remixedFrom\` records the moment a remix was taken, and is never ` +
         `changed afterwards. Put it back as it was. The remixed code is yours to change; ` +
         `remixing again from a newer version is a new entry. See \`docs/apps/remix.md\`.`
+    );
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/*  A connector only adds within a major version                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `fail`. An app names the connector version it was built against, and any
+ * later release with the same major version must still have what it calls. So
+ * a connector's version never goes backwards, and removing a method, or making
+ * a read into a write, needs a new major version.
+ *
+ * The pre-commit hook makes the same check (scripts/check-connector-contract.ts),
+ * and this catches a commit that skipped it. Compared against the commit the
+ * branch left its base at, like the checks above. A connector installed from a
+ * Registry is its publisher's, and skipped.
+ */
+const connectorManifests = danger.git.modified_files.filter(
+  (f) =>
+    /^connectors\/[^/_.][^/]*\/connector\.json$/.test(f) &&
+    !fs.existsSync(path.join(path.dirname(f), ".registry.json")),
+);
+
+if (connectorManifests.length > 0) {
+  schedule(async () => {
+    const from = await branchPoint("whether a connector change keeps its contract");
+    if (from === null) return;
+    const repoSlug = `${danger.github.thisPR.owner}/${danger.github.thisPR.repo}`;
+    const broken: string[] = [];
+    for (const file of connectorManifests) {
+      const diff = await danger.git.diffForFile(file);
+      if (!diff) continue;
+      const before = connectorSurfaceOf(await danger.github.utils.fileContents(file, repoSlug, from));
+      const after = connectorSurfaceOf(diff.after);
+      if (!before || !after) continue;
+      for (const problem of contractProblems(before, after)) broken.push(`- \`${file}\`: ${problem}`);
+    }
+    if (broken.length === 0) return;
+    fail(
+      `## A connector change breaks its contract\n\n` +
+        `${broken.join("\n")}\n\n` +
+        `Apps name the connector version they were built against, and any later release with the same ` +
+        `major version must still have what they call. Put the method back, or raise the major version. ` +
+        `See \`connectors/AGENTS.md\`.`
     );
   });
 }

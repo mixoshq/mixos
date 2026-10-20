@@ -135,6 +135,7 @@ function manifest(slug: string, name: string, extra: Partial<AppManifest> = {}):
     icon: "box",
     connectors: [],
     optionalConnectors: [],
+    connectorRequirements: [],
     database: false,
     updatedAt: [],
     notifications: false,

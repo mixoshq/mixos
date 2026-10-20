@@ -17,6 +17,7 @@ import {
   sanitizeBrandName,
 } from "../src/lib/branding/types";
 import { APP_SLUG_PATTERN } from "../src/lib/apps/app-identifiers";
+import { CONNECTOR_VERSION_PATTERN } from "../src/lib/connectors/requirements";
 import {
   REMIX_KEYWORDS_MAX,
   REMIX_KEYWORDS_MIN,
@@ -516,6 +517,18 @@ const appTelemetryEventSchema = z.strictObject({
 
 const connectorTelemetryEventSchema = z.strictObject({
   method: z.string().min(1),
+  /**
+   * The provider operation this method calls, as the provider's reference
+   * names it: `spreadsheets.values.get`, `GET /v1/items/{id}`, `query items`.
+   *
+   * A connector mirrors its provider's API, one method per operation, and this
+   * is where that is written down: a list anyone can read against the
+   * provider's reference, and one the build holds to one method per operation,
+   * so a variant becomes an option on the method rather than a second method.
+   * A method shaped around one app's needs, calling two operations or none,
+   * has nothing to put here. See connectors/AGENTS.md.
+   */
+  operation: z.string().trim().min(1),
   description: z.string().optional(),
   /**
    * Does this method change anything upstream?
@@ -526,10 +539,10 @@ const connectorTelemetryEventSchema = z.strictObject({
    * platform can't close. It cannot know which connector methods mutate... a
    * reviewer has to confirm it."
    *
-   * Declared here, the platform can. The MCP context wraps `ctx.connectors` and
-   * throws on a method marked `mutates`, so a read-only tool calling a write is
-   * a runtime error rather than a blocking review finding somebody has to catch.
-   * A method that is not declared at all cannot be called from a tool either.
+   * Declared here, the platform can. An app calls a method marked `mutates`
+   * only when its entry for the connector says `"access": "write"` and an admin
+   * has allowed the connector to change data, and an MCP tool never does. A
+   * method that is not declared at all cannot be called by either.
    *
    * Defaults to `false`, which is not a guarantee: a method that writes but is
    * declared without `mutates` is treated as a read. Declaring a connector's
@@ -854,6 +867,36 @@ const acceptedAuths = z
     message: "duplicate auth in the accepted set",
   });
 
+/**
+ * A connector's version, and the version an app names for one: `X.Y.Z`.
+ *
+ * Three numbers and nothing else, because the only question asked of it is
+ * whether one release may replace another for an app built against it
+ * (src/lib/connectors/requirements.ts). A `v` prefix, a pre-release or a range
+ * would each be a second way to write the same answer.
+ */
+const connectorVersionSchema = z
+  .string()
+  .regex(CONNECTOR_VERSION_PATTERN, 'a version is three numbers, "1.2.0": no "v", range or suffix');
+
+/**
+ * One connector an app uses, in `connectors` or `optionalConnectors`.
+ *
+ * `version` is the connector version the app was built against, and any later
+ * release with the same major version satisfies it: within a major version a
+ * connector only adds. Required, because an app that named none could be
+ * handed a release that removed what it calls.
+ *
+ * `access` is "read" unless it says "write", which the app needs to call a
+ * method the connector declares `mutates`. The platform holds the app to it,
+ * and the connector's admin must also have allowed changes.
+ */
+const connectorEntrySchema = z.strictObject({
+  name: z.string().min(1),
+  version: connectorVersionSchema,
+  access: z.enum(["read", "write"]).optional(),
+});
+
 export const RawAppManifestSchema = z
   .strictObject({
     name: z.string().min(1),
@@ -893,7 +936,7 @@ export const RawAppManifestSchema = z
     appUrl: listingUrlSchema.optional(),
     /** Where a user reports a problem with the app. */
     appSupportUrl: listingUrlSchema.optional(),
-    connectors: z.array(z.string().min(1)).optional(),
+    connectors: z.array(connectorEntrySchema).optional(),
     /**
      * Connectors a PART of this app uses, which the app works without.
      *
@@ -907,7 +950,7 @@ export const RawAppManifestSchema = z
      * ARE configured, and are still declarable as a sync source or MCP tool
      * dependency — app code must simply cope with the entry being absent.
      */
-    optionalConnectors: z.array(z.string().min(1)).optional(),
+    optionalConnectors: z.array(connectorEntrySchema).optional(),
     database: z.boolean().optional(),
     // Columns the platform's trigger sets to now() on every update. Requires
     // `database`; the generator checks each one against the app's migrations.
@@ -972,6 +1015,26 @@ export const RawAppManifestSchema = z
     },
   )
   .superRefine((m, ctx) => {
+    // One entry per connector across both lists. Two would disagree on the
+    // version or the access, or on whether the app works without it, and
+    // nothing could say which one was meant.
+    const seen = new Set<string>();
+    for (const [list, entries] of [
+      ["connectors", m.connectors ?? []],
+      ["optionalConnectors", m.optionalConnectors ?? []],
+    ] as const) {
+      entries.forEach((entry, i) => {
+        if (seen.has(entry.name)) {
+          ctx.addIssue({
+            code: "custom",
+            message: `"${entry.name}" is already listed: declare each connector once, in connectors or optionalConnectors`,
+            path: [list, i, "name"],
+          });
+        }
+        seen.add(entry.name);
+      });
+    }
+
     // A page is loaded by a browser following a link; there is nowhere to put a
     // bearer token. Accepting `key` there would read as an exposed surface and
     // enforce nothing.
@@ -1058,8 +1121,13 @@ const connectorAuthSchema = z
           /** The provider's own wording, as shown on their consent screen. */
           description: z.string().min(1).optional(),
           access: z.enum(["read", "write", "read-write"]).optional(),
-          /** Does this connector ask for it at authorization time? */
-          requested: z.boolean(),
+          /**
+           * Does this connector ask for it at authorization time? `true`
+           * always; `"write"` only on an install whose admin has allowed the
+           * connector to change data, which is where its write methods need
+           * it; `false` never.
+           */
+          requested: z.union([z.boolean(), z.literal("write")]),
         }),
       )
       .optional(),
@@ -1363,6 +1431,14 @@ export const RawConnectorManifestSchema = z
   .strictObject({
     name: z.string().min(1),
     displayName: z.string().min(1),
+    /**
+     * This release of the connector, `X.Y.Z`. Apps name the version they were
+     * built against, and within a major version a connector only adds: a
+     * method removed, or a read made into a write, needs a new major version.
+     * The pre-commit hook and mixos.org hold a change to that
+     * (src/lib/connectors/requirements.ts).
+     */
+    version: connectorVersionSchema,
     icon: connectorIconSchema.optional(),
     /**
      * Each person signs into their own account, rather than everyone sharing one
@@ -1489,6 +1565,40 @@ export const RawConnectorManifestSchema = z
         path: ["credentialFields"],
       });
     }
+
+    // A scope requested only once changes are allowed is for the connector's
+    // write methods. With none, allowing changes would ask the provider for
+    // access that nothing here can use.
+    const writeScopes = (m.auth?.scopes ?? []).filter((s) => s.requested === "write");
+    const writes = (m.telemetry ?? []).filter((t) => t.mutates === true);
+    if (writeScopes.length > 0 && writes.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `requests ${writeScopes.map((s) => s.scope).join(", ")} once changes are allowed, ` +
+          `but declares no method with "mutates": true that would use it. Request it only when a write method needs it.`,
+        path: ["auth", "scopes"],
+      });
+    }
+
+    // One method per provider operation: a second method for the same
+    // operation is a variant, and a variant is an option on the first.
+    const byOperation = new Map<string, string>();
+    (m.telemetry ?? []).forEach((t, i) => {
+      const key = t.operation.replace(/\s+/g, " ").toLowerCase();
+      const other = byOperation.get(key);
+      if (other) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `"${t.method}" names the operation "${t.operation}", as "${other}" does. ` +
+            `One method per provider operation: make the difference an option on "${other}".`,
+          path: ["telemetry", i, "operation"],
+        });
+      } else {
+        byOperation.set(key, t.method);
+      }
+    });
 
     // Every credential key the policy reads must be a field the admin is
     // actually asked for. A mismatch here is invariant 10 failing silently: the

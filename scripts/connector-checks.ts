@@ -21,12 +21,13 @@ import type { ConnectorTelemetryDefinition } from "../src/lib/connectors/types";
  * duplicate method (a duplicate is almost always a copy-paste bug and would make
  * the admin breakdown ambiguous). Shape is already schema-validated.
  *
- * `mutates` is carried with the rest. The MCP context reads it from the
- * generated registry to refuse a write from a read-only tool, so a list that
- * dropped it here would switch that check off without a sound.
+ * `mutates` is carried with the rest. The app and MCP contexts read it from the
+ * generated registry to refuse a write the caller may not make, so a list that
+ * dropped it here would switch that check off without a sound. `operation` is
+ * carried for the Connector Registry, which lists what the connector calls.
  */
 export function validateConnectorTelemetry(
-  raw: { method: string; description?: string; mutates?: boolean }[] | undefined,
+  raw: { method: string; operation: string; description?: string; mutates?: boolean }[] | undefined,
   name: string,
 ): ConnectorTelemetryDefinition[] {
   if (!raw || raw.length === 0) return [];
@@ -41,6 +42,7 @@ export function validateConnectorTelemetry(
   }
   return raw.map((e) => ({
     method: e.method,
+    operation: e.operation,
     ...(e.description != null ? { description: e.description } : {}),
     ...(e.mutates ? { mutates: true } : {}),
   }));
