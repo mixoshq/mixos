@@ -8,6 +8,54 @@ tests and internal changes, and is the notes of its GitHub Release.
 Releases are made with `/mixos deploy release`; see the Release section of
 [.claude/skills/mixos/actions/deploy.md](.claude/skills/mixos/actions/deploy.md).
 
+## v0.3.0 (2026-10-20)
+
+Changes since v0.2.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.3.0/WHATS-NEW.md).
+
+### Breaking changes
+
+- **os:** send a FormData to a raw route with call(), and drop the untyped client (e705fd1)
+
+  createAppClient() has no get, post, put, patch or
+  delete; use call(). An app.json with apiVisibility fails the build.
+
+- **os:** squash the platform migrations into one baseline schema (d174588)
+
+  The release step refuses a database built by migrations
+  0001-0014 until its ledger and schema are repaired to the baseline.
+
+- **os:** switch each MCP tool on or off per app, off by default (fcedd7f)
+
+  Every MCP tool starts off, including tools in use.
+  After upgrading, turn on the ones you want on each app's MCP tab.
+
+### Features
+
+- **os:** /mixos upgrade, and a banner for admins when a release is out (f413521)
+- **os:** stop /mixos deploy until origin is a repository of your own (d0e056b)
+- **os:** end /mixos init by offering a private repository of your own (733e73b)
+- **os:** ignore the extensions the core doesn't carry, in a core checkout alone (2f05f96)
+- **os:** /mixos remix, to abstract a component of one app into another (36f5e17)
+- **os:** manage who can reach an app from its Access tab (28a9952)
+- **os:** show an app's egress on a Reach tab in its admin dialog (d7ff138)
+
+### Fixes
+
+- **os:** say what to check when no CI ran, without assuming a fork (ff57512)
+- **os:** link the admin to the install guide's new pages (2a2b1e0)
+- **os:** name the moved self-hosting guide in the hand-back (9360858)
+- **os:** Danger fails a PR that adds an extension to the core (9347c79)
+- **os:** Danger fails a version bump outside a release PR (ebc9c8e)
+
+### Operations
+
+- **os:** run the database tests in CI against a throwaway Postgres (72301f3)
+
+### Other changes
+
+- Update Buy Me a Coffee username in FUNDING.yml (5aeca24)
+- added logo to readme (64bab30)
+
 ## v0.2.0 (2026-10-13)
 
 Changes since v0.1.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.2.0/WHATS-NEW.md).
