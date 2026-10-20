@@ -136,9 +136,9 @@ ENV MIXOS_COMMIT=${MIXOS_COMMIT}
 # process.cwd() at runtime is *the standalone root* — here, /app. Everything the
 # app reads via process.cwd() has to sit directly under that root.
 #
-# outputFileTracingIncludes copies apps/ and docs/ into .next/standalone/ at
-# their project-relative paths, so the single COPY below puts them at
-# /app/apps and /app/docs — exactly where cwd-relative reads expect them. No
+# outputFileTracingIncludes copies apps/ into .next/standalone/ at its
+# project-relative path, so the single COPY below puts it at /app/apps —
+# exactly where cwd-relative reads expect it. No
 # second `COPY /app/apps ./apps` is needed, and adding one would be actively
 # worse: two mechanisms for one invariant, either able to mask the other's
 # breakage, and only one of them also fixes the Vercel deployment (which relies
