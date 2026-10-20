@@ -19,8 +19,8 @@ team can reach it, see [How to install](install.md).
 | Git | Any recent version | |
 | Docker | Docker Desktop on macOS and Windows, or Docker Engine with the Compose v2 plugin on Linux | Give Docker about 4 GiB of memory, and keep several GB of disk free |
 | Free ports | 3000, 54321, 54322, 54323 | MixOS, the Supabase API, Postgres, and Supabase Studio |
-| [VS Code](https://code.visualstudio.com/) | Current | With the Claude Code and Prettier extensions. Claude Code needs a Claude account; only the guided `/mixos` commands use it |
-| [GitHub CLI](https://cli.github.com) | Optional | Lets `/mixos deploy` open pull requests for you. Without it, you get a link to paste |
+| [VS Code](https://code.visualstudio.com/) | Current | With the Claude Code and Prettier extensions. Claude Code needs a Pro, Max, Team or Enterprise plan, or a Claude Console account; only the guided `/mixos` commands use it |
+| [GitHub CLI](https://cli.github.com) | Optional | Lets `/mixos init` create your own repository on GitHub, and `/mixos deploy` open pull requests there. Without it, `/mixos deploy` gives you a link to paste |
 
 `/mixos init` checks all of this and installs what's missing. To do it yourself:
 
@@ -64,13 +64,13 @@ The easiest way to set up a development copy is to let Claude do it, in VS Code.
 You install VS Code and the Claude Code extension; Claude installs and starts
 everything else.
 
-1. **Get the code.** In VS Code, open the Command Palette (`Cmd+Shift+P` on
-   macOS, `Ctrl+Shift+P` on Linux and Windows), run **Git: Clone**, and paste
-   your fork's address, or `https://github.com/mixoshq/mixos.git` to look around
-   first. Choose **Open** when VS Code offers to open it. On macOS, if you're
-   offered the command line developer tools, choose **Install**: that's where
-   `git` comes from. On Linux, install `git` with your package manager if it's
-   missing, such as `sudo apt install git`.
+1. **Get the code**, with the prompt in
+   [the quick way](install.md#the-quick-way-with-claude-code): Claude Code
+   clones MixOS's newest release into `~/MixOS`. Or download the release's
+   `.zip`. Open the folder in VS Code. On macOS, if you're offered the command
+   line developer tools, choose **Install**: that's where `git` comes from. On
+   Linux, install `git` with your package manager if it's missing, such as
+   `sudo apt install git`.
 2. **Run `/mixos init`.** In the Claude Code panel, type `/mixos init` and press
    Enter. Claude checks what your computer is missing (Node, Docker, the VS Code
    extensions, and Homebrew on a Mac), shows you the list, and asks once before
@@ -78,7 +78,8 @@ everything else.
    migration, and creates your admin login. It stops only when it needs you: to
    type your password, or to click through Docker the first time it opens. On
    Linux, installing Docker needs administrator rights, so Claude gives you one
-   command to paste.
+   command to paste. At the end, it offers to put your copy in a private
+   repository of your own on GitHub.
 3. **Open MixOS** at [http://localhost:3000](http://localhost:3000), and sign in
    with the email and password Claude gives you.
 
@@ -111,7 +112,9 @@ This is what `/mixos init` does for you.
 1. **Start Docker once.** On macOS and Windows, Docker Desktop's first launch
    shows a licence agreement, and on macOS asks for your password to install a
    helper. That part can't be scripted.
-2. **Clone and install:**
+2. **Clone and install.** Clone your own repository, or, before you have one,
+   MixOS's newest release, as in
+   [Step 1 of How to install](install.md#step-1-get-your-own-copy):
 
    ```bash
    git clone https://github.com/<you>/mixos.git

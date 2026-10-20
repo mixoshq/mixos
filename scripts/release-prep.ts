@@ -63,7 +63,7 @@ import path from "node:path";
 /** The core repository. Release notes link into it at the release's own tag. */
 export const REPOSITORY = "https://github.com/mixoshq/mixos";
 
-/** Whether `owner/repo` is the core repository, where releases are cut. A fork takes its versions from its tags. */
+/** Whether `owner/repo` is the core repository, where releases are cut. Anyone else's copy takes its versions from the core's tags. */
 export function isCoreRepository(owner: string, repo: string): boolean {
   return `https://github.com/${owner}/${repo}`.toLowerCase() === REPOSITORY.toLowerCase();
 }

@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import ReleaseBanner from "@/components/admin/release-banner";
 import { AuthProvider } from "@/components/auth-provider";
 import { DashboardEditProvider } from "@/components/dashboard/edit-mode-context";
 import { PreferencesProvider } from "@/components/preferences-context";
@@ -11,7 +12,8 @@ import {
   getLoginLogo,
   getMenuBarLogo,
 } from "@/lib/branding/resolve";
-import { getOnboardingCompletedAt } from "@/lib/onboarding/actions";
+import { requireReadOnlySession } from "@/lib/auth/session";
+import { onboardingCompletedAtFor } from "@/lib/onboarding/completed";
 import { TourProvider } from "@/components/onboarding/tour-context";
 import WelcomeTour from "@/components/onboarding/welcome-tour";
 import Guide from "@/components/onboarding/guide";
@@ -33,12 +35,15 @@ export default async function MainLayout({
 }) {
   // Resolved on the server: the menu bar is a client component, and resolving
   // the brand there would either flash the wrong mark or mismatch on hydration
-  // — and the app filters that may change it are server code.
-  const [name, menuBarLogo, onboardingCompletedAt] = await Promise.all([
+  // — and the app filters that may change it are server code. The session is
+  // resolved once, for the tour's stamp and the release banner, which would
+  // each cost a read of the user's row otherwise.
+  const [session, name, menuBarLogo] = await Promise.all([
+    requireReadOnlySession(),
     getBrandName(),
     getMenuBarLogo(),
-    getOnboardingCompletedAt(),
   ]);
+  const onboardingCompletedAt = await onboardingCompletedAtFor(session.user.id);
   // The sign-in mark only matters while the welcome tour is showing it, so
   // every other page skips its filters. Replaying the tour refreshes from the
   // server, which lands back here with the stamp cleared.
@@ -52,6 +57,8 @@ export default async function MainLayout({
           <DashboardEditProvider>
             <div className="flex h-screen flex-col">
               <HeaderShell logo={menuBarLogo} name={name} />
+              {/* In the column, not over it: the page below starts after it, so nothing overlaps. */}
+              <ReleaseBanner isAdmin={session.user.isAdmin} userId={session.user.id} />
               <main className="flex-1 overflow-auto bg-muted">{children}</main>
             </div>
             <WelcomeTour branding={{ name, menuBarLogo, loginLogo }} />

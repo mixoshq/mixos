@@ -5,7 +5,7 @@
 import ReleaseNotice, { ReleaseCheckStatus } from "@/components/admin/release-notice";
 import { getReadOnlySession } from "@/lib/auth/session";
 import { mixosUpdateOffer } from "@/lib/github/update-pull";
-import { releaseCheckView } from "@/lib/platform/release-check";
+import { releaseCheckViewThisRequest } from "@/lib/platform/release-view";
 import { describeBuild } from "@/lib/platform/version";
 import SettingsNav from "./settings-nav";
 
@@ -35,8 +35,9 @@ export default async function SettingsShell({
 }) {
   const session = await getReadOnlySession();
   const isAdmin = session?.user.isAdmin === true;
-  // From the stored answer, never the network: read once, for both places.
-  const releases = showBuild && isAdmin ? await releaseCheckView() : null;
+  // From the stored answer, never the network: read once per request, for both
+  // places here and the banner over the page.
+  const releases = showBuild && isAdmin ? await releaseCheckViewThisRequest() : null;
   // What the GitHub App offers for the release, from what is stored alone.
   const offer = releases?.notice ? await mixosUpdateOffer(releases.notice) : null;
 

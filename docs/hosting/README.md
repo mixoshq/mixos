@@ -7,7 +7,8 @@ what you need and the choices to make first. The install itself is in
 The install guide has five parts:
 
 1. **Before you install**: this page.
-2. **[How to install](install.md)**: a quick install, then each step in detail.
+2. **[How to install](install.md)**: the quick way, with Claude Code, then the
+   manual way, step by step.
 3. **[Running a development copy](development.md)**: MixOS on your own computer,
    for building extensions and trying things before they ship.
 4. **[Install at popular providers](providers/README.md)**: the steps for Vercel
@@ -17,10 +18,13 @@ The install guide has five parts:
 
 ## What you need
 
-- **Your own copy of MixOS on GitHub.** Fork
-  [`mixoshq/mixos`](https://github.com/mixoshq/mixos) and deploy your fork. A
-  deployment runs the apps, connectors and themes in the repository it's built
-  from, so the ones you add have to be in yours.
+- **Your own private repository on GitHub**, holding your copy of
+  [MixOS](https://github.com/mixoshq/mixos). `/mixos init` creates it, or see
+  [Step 1 of How to install](install.md#step-1-get-your-own-copy). A deployment
+  runs the apps, connectors and themes in the repository it's built from, so
+  the ones you add have to be in yours.
+- **Claude Code, for the quick way**, which needs a Pro, Max, Team or
+  Enterprise plan, or a Claude Console account. The manual way doesn't use it.
 - **A Postgres database, version 13 or later.** From any provider: a container,
   Render, Railway, Supabase, Neon, RDS or Cloud SQL. MixOS connects with one
   `DATABASE_URL` and uses nothing but Postgres itself: no PostgREST, no Supabase
@@ -113,7 +117,7 @@ reach your deployment. Its keys are public, so it never goes online.
 
 | Gap | What it means for you |
 | --- | --- |
-| **No published image** | Every path builds from your fork, and an upgrade is a rebuild |
+| **No published image** | Every path builds from your repository, and an upgrade is a rebuild |
 | **No Kubernetes chart** | Docker Compose covers one server. Beyond that, you write the orchestration |
 | **No automatic rollback** | Migrations only go forward, and nothing rolls a deploy back for you. A backup is the way back: see [Upgrading MixOS](after-you-install/upgrading.md) |
 | **No key rotation tool** | Each key can be changed on its own, but changing one of the three data keys means re-entering what it encrypted. Only the GitHub App's key has a command that re-encrypts |
