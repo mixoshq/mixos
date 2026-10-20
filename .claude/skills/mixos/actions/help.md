@@ -56,7 +56,8 @@ apps that everyone on the team opens in the same place, with one sign-in.
 
 **How building actually happens.** You don't have to write code. You describe what
 you want, and Claude builds it through a few guided commands:
-- **`/mixos init`** — one-time setup of MixOS on your computer.
+- **`/mixos init`** — one-time setup of MixOS on your computer, ending with your
+  own private copy of it on GitHub, which is what gets published.
 - **`/mixos help`** (this one) — figure out what to build.
 - **`/mixos app`** — Claude builds your app. (A brand-new bridge, if one's needed, is
   a developer's job via **`/mixos connector`**.)
