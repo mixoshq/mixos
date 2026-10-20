@@ -82,9 +82,9 @@ the way back. [Rolling back](upgrading.md#rolling-back) says how to restore one.
 Each version of MixOS is a release: a tag on `mixoshq/mixos`, such as `v0.2.0`.
 When a newer one is out, the top of every admin page says so: see
 [New releases of MixOS](#new-releases-of-mixos). Upgrade by merging the
-release's tag into your fork and deploying it: see
+release's tag into your repository, from `upstream`, and deploying it: see
 [Upgrading MixOS](upgrading.md). With the [GitHub App](github-app.md) linked,
-the notice can open that merge as a pull request for you.
+the notice also shows the commands.
 
 ## Release and update notices
 
@@ -160,11 +160,10 @@ User-Agent: MixOS
   mixos.org and to [Upgrading MixOS](upgrading.md). Under the version at the foot
   of the admin pages, a line says when mixos.org last answered.
 - **Never applied.** Nothing is merged, downloaded or deployed. Taking a release
-  is up to you: merge its tag into your copy, as [Upgrading MixOS](upgrading.md)
-  says. With the [GitHub App](github-app.md) linked, the notice can open that
-  merge as a pull request for you
-  ([Updating MixOS through the App](github-app.md#updating-mixos-through-the-app));
-  merging it is still yours to do, on GitHub.
+  is up to you: merge its tag into your repository, as
+  [Upgrading MixOS](upgrading.md) says. With the [GitHub App](github-app.md)
+  linked, the notice also shows the commands for it
+  ([Updating MixOS through the App](github-app.md#updating-mixos-through-the-app)).
 
 The check keeps the update check's schedule: about once a day, and an hour after
 a failure, or later if mixos.org asks, but never more than a day later. Its last
@@ -498,6 +497,6 @@ be deleted, the code still goes and the data stays.
 
 Admin > GitHub links a deployment to the repository it's built from, through a
 private GitHub App you own, installed on that one repository. Then the
-deployment can propose extensions, updates, removals and MixOS upgrades as pull
+deployment can propose extensions, their updates and their removals as pull
 requests, which you review and merge on GitHub. It's off until
 `GITHUB_APP_ENCRYPTION_KEY` is set. See [The GitHub App](github-app.md).

@@ -40,25 +40,27 @@ Three extension points, in increasing order of scope:
 
 ## Quick start
 
-Two steps. Clone the repo:
+Three steps, which [How to install](docs/hosting/install.md#the-quick-way-with-claude-code)
+has in full:
 
-```bash
-git clone <repo-url>
-cd mixos
-```
+1. **Download MixOS**: paste that page's prompt into Claude Code, and it clones
+   the newest release into `~/MixOS`.
+2. **Open the folder in VSCode**, with the Claude Code extension, signed in to
+   Claude.
+3. **Run `/mixos init`** in Claude Code:
 
-Then open it in VSCode and run **`/mixos init`** in Claude Code:
-
-```
-/mixos init
-```
+   ```
+   /mixos init
+   ```
 
 That skill is the setup. It surveys what your machine is missing, asks once
 before changing anything, installs Node / Docker / the VSCode extensions (and
 Homebrew on a Mac), boots the whole stack in Docker, applies every migration,
 seeds an admin, and hands you a login for
 [http://localhost:3000](http://localhost:3000). Budget 5–15 minutes on a first
-run — most of it is Docker pulling images.
+run — most of it is Docker pulling images. Then it offers to put your copy in a
+private GitHub repository of your own: that's what you deploy, and where new
+releases merge in.
 
 From there, `/mixos help` explains how apps, connectors, and themes relate and
 recommends what to build first.
@@ -91,9 +93,9 @@ parts:
 1. **[Before you install](docs/hosting/README.md)**: what you need, and the
    choices to make first: where to host, which database, and how extensions get
    in.
-2. **[How to install](docs/hosting/install.md)**: a quick install, then each
-   step in detail: fork, keys, database, environment, deploy, the release step,
-   the first admin, and checking it works.
+2. **[How to install](docs/hosting/install.md)**: the quick way, with Claude
+   Code, then the manual way: your own repository, keys, database, environment,
+   deploy, the release step, the first admin, and checking it works.
 3. **[Running a development copy](docs/hosting/development.md)**: MixOS on your
    own computer, with `/mixos init` or by hand: what you need, the dev
    container, `npm run dev`, installing from the Registry in a checkout, the
@@ -115,8 +117,8 @@ A deployment is the server, a Postgres 13+ database from any provider, and a
 five-minute tick against `/api/cron`. MixOS connects to the database with one
 `DATABASE_URL` and needs nothing from it but Postgres: no PostgREST, no Supabase
 API keys. Every host runs the same release step before new code takes traffic:
-the platform schema, the app migrations, and the first admin. Deploy your fork,
-so the apps you add are in the build.
+the platform schema, the app migrations, and the first admin. Deploy your own
+repository, so the apps you add are in the build.
 
 ## Extending MixOS
 
@@ -315,9 +317,9 @@ platform is a minor version (`v0.2.0` → `v0.3.0`), and any other release is a
 patch (`v0.3.0` → `v0.3.1`). Prereleases have a suffix, such as
 `v0.3.0-rc.1`, and GitHub marks them as prereleases.
 
-**To upgrade a deployment,** merge the newest release tag into your fork, not
-`upstream/main`, which holds work that hasn't been released yet. The steps
-are in [Upgrading MixOS](docs/hosting/after-you-install/upgrading.md).
+**To upgrade a deployment,** merge the newest release tag into your own
+repository, not `upstream/main`, which holds work that hasn't been released yet.
+The steps are in [Upgrading MixOS](docs/hosting/after-you-install/upgrading.md).
 
 **To cut a release** (maintainers), run `/mixos deploy release` on an
 up-to-date `main`. It opens a release PR that sets the version in

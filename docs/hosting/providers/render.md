@@ -5,7 +5,7 @@ deployment. It creates three things:
 
 | Resource | What it is |
 | --- | --- |
-| `mixos` | A web service built from your fork's Dockerfile. Before each deploy goes live, it runs the release step as its pre-deploy command. |
+| `mixos` | A web service built from your repository's Dockerfile. Before each deploy goes live, it runs the release step as its pre-deploy command. |
 | `mixos-db` | Render Postgres 17, reachable from the private network only. |
 | `mixos-cron` | A cron job that sends the five-minute tick to the web service over the private network. |
 
@@ -14,7 +14,8 @@ keys. Each is 32 random bytes in base64, which MixOS accepts as well as hex.
 
 ## What you need
 
-- **Your fork** of `mixoshq/mixos` on GitHub.
+- **Your own repository** on GitHub, with your copy of MixOS: see
+  [Step 1 of How to install](../install.md#step-1-get-your-own-copy).
 - **A Render account, on paid instances.** The Blueprint uses Render's smallest
   paid sizes. A free web service runs no pre-deploy command, so nothing would
   apply the schema, and can't receive private network traffic, so the tick
@@ -26,8 +27,9 @@ keys. Each is 32 random bytes in base64, which MixOS accepts as well as hex.
 ## Steps
 
 1. **Create the Blueprint.** In the Render dashboard, choose **New > Blueprint**
-   and pick your fork. Or put a button in your fork's README. It must point at
-   your fork, which holds your apps, not at `mixoshq/mixos`:
+   and pick your repository. Or put a button in your repository's README. It
+   must point at your repository, which holds your apps, not at
+   `mixoshq/mixos`:
 
    ```markdown
    [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/<you>/mixos)
@@ -60,8 +62,8 @@ from the dashboard if 512 MB is tight for your apps.
 ### Trying it on the free tier
 
 To evaluate MixOS at no cost, accepting that free web services sleep when idle
-and free Postgres expires after 30 days, change `render.yaml` in your fork
-before creating the Blueprint:
+and free Postgres expires after 30 days, change `render.yaml` in your
+repository before creating the Blueprint:
 
 - Set the web service's and the database's `plan` to `free`.
 - Replace `preDeployCommand` with

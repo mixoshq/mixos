@@ -5,24 +5,26 @@ A Railway project for MixOS has three services:
 | Service | Source | What it does |
 | --- | --- | --- |
 | `Postgres` | Railway's PostgreSQL | The database. |
-| `mixos` | Your fork of `mixoshq/mixos` | The app. [`railway.json`](../../../railway.json) has Railway build the Dockerfile, run the release step before each deploy, and wait for `/api/health/ready`. |
+| `mixos` | Your own repository | The app. [`railway.json`](../../../railway.json) has Railway build the Dockerfile, run the release step before each deploy, and wait for `/api/health/ready`. |
 | `cron` | The `curlimages/curl` image | The five-minute tick, as a Railway cron service. |
 
 You set it up by hand once, in about five minutes. You can then publish the
-project as a template, and after that it's one click for anyone.
+project as a template, and after that it's one click for anyone who can read
+your repository.
 
 ## What you need
 
-- **Your fork** of `mixoshq/mixos` on GitHub.
+- **Your own repository** on GitHub, with your copy of MixOS: see
+  [Step 1 of How to install](../install.md#step-1-get-your-own-copy).
 - **A Railway account.**
-- **The keys**, from `npm run keys:generate` in a checkout of your fork, or
+- **The keys**, from `npm run keys:generate` in your copy, or
   `openssl rand -hex 32` for each.
 
 ## Steps
 
 1. **Create a project** and add **PostgreSQL** to it.
-2. **Add your fork** as a service, named `mixos`. Railway finds `railway.json`
-   and builds the Dockerfile.
+2. **Add your repository** as a service, named `mixos`. Railway finds
+   `railway.json` and builds the Dockerfile.
 3. **Give it a domain**: in the service's **Networking** settings, choose
    **Generate Domain**. MixOS takes its public address from
    `RAILWAY_PUBLIC_DOMAIN`, which Railway sets once a domain exists.
@@ -91,7 +93,7 @@ editor:
 - Keep the `${{Postgres.DATABASE_URL}}`, `${{mixos.CRON_SECRET}}` and
   `${{mixos.RAILWAY_PUBLIC_DOMAIN}}` references as they are.
 
-Publish it, and put the button in your fork's README:
+Publish it, and put the button in your repository's README:
 
 ```markdown
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/<template code>)
