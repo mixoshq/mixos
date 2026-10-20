@@ -43,6 +43,19 @@ Anything else is ignored.
 - Every commit message ends with the attribution trailer this session was
   given (the `Co-Authored-By: Claude …` line). If the session has none, omit it
   rather than invent one.
+- **`origin` is the person's own repository.** First, in every mode, `--reset`
+  and `release` included, read `git remote get-url origin`. Stop when there is
+  no `origin`, or when it is `github.com/mixoshq/mixos` (https or ssh) and the
+  person can't push there: `gh api repos/mixoshq/mixos --jq .permissions.push`
+  prints `true` only for MixOS's maintainers (without a signed-in `gh`, ask
+  them). Say that this copy has no repository of its own yet, so there is
+  nowhere to push, and that `/mixos init` makes one at the end and is safe to
+  run again (by hand: "Create your own repository" in
+  docs/hosting/install.md). With an `upstream` remote as well, gh opens pull
+  requests on `upstream` unless a default is set: when
+  `gh repo set-default --view` doesn't print origin's `owner/repo`, run
+  `gh repo set-default <owner>/<repo>`, asking first if it named another
+  repository.
 
 ## 1. Read the situation
 
@@ -603,8 +616,8 @@ Section 0's rules hold, and:
   Print the commands; a person runs them.
 - **Never run `npm run release`.** It is the database release step and has
   nothing to do with versions.
-- **Only in the core repository.** A fork takes its versions from the core's
-  tags, and a `v*` tag of its own would collide with them.
+- **Only in the core repository.** Anyone's own copy takes its versions from
+  the core's tags, and a `v*` tag of its own would collide with them.
 - **The release commit's subject is exactly `chore(os): release vX.Y.Z`.**
   That is how a later release knows not to count it.
 
