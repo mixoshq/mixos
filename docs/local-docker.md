@@ -240,20 +240,15 @@ nothing, `supabase/config.toml` turns off.
 | Studio + pg-meta | **on** | Browsing local data at :54323. Pure convenience; harmless to disable. |
 | GoTrue (`[auth]`) | **off** | MixOS has no Supabase Auth — NextAuth owns authentication. The boot script reads only the API, database and Studio addresses from `supabase status -o json`, which the CLI reports with it off. |
 | Storage | **off** | No `supabase.storage` / `.storage.from(` anywhere in the codebase. |
-| Realtime | **off** | No `.channel(` subscriptions anywhere; the UI polls. |
+| Realtime | **off** | No `.channel(` subscriptions anywhere; pages update with a router refresh. |
 | Edge Functions (`[edge_runtime]`) | **off** | There is no `supabase/functions/` directory. All server code is Next.js route handlers. |
 | Analytics / Logflare | **off** | Log aggregation only. Costs the Studio Logs Explorer, which nothing here uses. |
-| Local SMTP (`[local_smtp]`, formerly `[inbucket]`) | **off** | Only used to catch Supabase Auth emails, and there are none. |
+| Local SMTP (`[local_smtp]`) | **off** | Only used to catch Supabase Auth emails, and there are none. |
 
-Two `config.toml` details worth knowing before you edit that file:
-
-- **`[api] auto_expose_new_tables = true` doesn't matter to MixOS.** It grants
-  new `public` tables to `anon` / `authenticated` / `service_role`, which only a
-  client of the Supabase API needs. MixOS connects as the tables' owner and needs
-  no grants. Turning it on does **not** widen the `anon` surface either way: RLS
-  is enabled with zero policies, so `anon` reads an empty set.
-- **The section is `[local_smtp]`, not `[inbucket]`.** `[inbucket]` still parses
-  but prints a deprecation warning.
+Before you edit `config.toml`: **`[api] auto_expose_new_tables` is left unset**,
+so new `public` tables get no grants to `anon`, `authenticated` or
+`service_role`, which only a client of the Supabase API needs. MixOS connects as
+the tables' owner and needs none.
 
 ---
 
