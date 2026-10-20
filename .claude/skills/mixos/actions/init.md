@@ -12,7 +12,8 @@ person (a password prompt, a GUI click, a confirmation). Do not dump every
 command at once and do not make them choose between setups.
 
 The one place you ask for permission is **Step 2**. Survey first, ask once,
-then install everything.
+then install everything. **Step 7** asks once more, at the end: whether to put
+their copy in a private GitHub repository of their own.
 
 ## Step 0 — Which machine is this?
 
@@ -51,10 +52,12 @@ do, so explain and hand it over:
 >    click **Apply & restart**.
 > 3. In VS Code, install the **WSL** extension (by Microsoft). Open the Command
 >    Palette (`Ctrl+Shift+P`) and run **WSL: Connect to WSL**.
-> 4. In that new window, clone MixOS again — this time inside Linux. Run
->    **Git: Clone**, paste the same address, and save it in your Linux home
->    folder (`/home/<you>`), **not** anywhere under `/mnt/c`.
-> 5. Open the cloned folder, open Claude Code there, and run `/mixos init`.
+> 4. In that new window, get MixOS again — this time inside Linux. Open the
+>    Claude Code panel there (install the extension in WSL if VS Code asks),
+>    and paste the download prompt from https://mixos.org/docs/install. It
+>    saves MixOS in your Linux home folder (`/home/<you>/MixOS`), **not**
+>    anywhere under `/mnt/c`.
+> 5. Open that folder, open Claude Code there, and run `/mixos init`.
 
 Then stop.
 
@@ -78,7 +81,9 @@ container, and because this repo deliberately runs only a subset of the Supabase
 services it prints `Stopped services: [...]` for the rest and still exits 0.
 `docker ps` names the one container that matters and needs nothing installed.
 
-If all three are true, don't re-run setup. Tell them:
+If all three are true, don't re-run setup. Go to **Step 7** first: their own
+repository on GitHub is the one part of setup that may still be missing. If the
+copy already has one, or they say no to it, tell them:
 
 > MixOS is already set up. Run `npm run dev:docker` and open
 > http://localhost:3000. If you'd rather figure out what to build, run
@@ -109,7 +114,7 @@ this platform.
 | Checkout location — **WSL** | `pwd` | Under `/mnt/` means the repository is on the Windows drive. It boots, but every file read is slow and edits do not hot-reload. Recommend cloning again under `~` before going further. |
 | VSCode CLI | `code --version` | If missing on **macOS**: Command Palette (`Cmd+Shift+P`) → **Shell Command: Install 'code' command in PATH**, then retry. On **Linux** it comes with VS Code's package, and in **WSL** with the WSL extension. If it is still missing, skip the extensions step and name the extensions for the person to install from the Extensions view. |
 | Extensions | `code --list-extensions` | Looking for `Anthropic.claude-code` and `esbenp.prettier-vscode`. |
-| GitHub CLI (optional) | `gh --version` | Not needed to boot MixOS. `/mixos deploy` uses it to open pull requests, and falls back to a paste-ready link without it. |
+| GitHub CLI (optional) | `gh --version`, then `gh auth status` (exit 0: signed in) | Not needed to boot MixOS. Step 7 uses it to create their own private repository on GitHub, and `/mixos deploy` to open pull requests there, with a paste-ready link as its fallback. |
 
 Also check that ports **3000, 54321, 54322, and 54323** are free. On **macOS**:
 
@@ -168,6 +173,13 @@ On **WSL**, Docker is installed on the Windows side, by them:
 > 3. **Docker Desktop for Windows** — runs MixOS and its database. You install
 >    this one in Windows; I'll tell you exactly what to click.
 > 4. **VSCode extensions** — Prettier.
+
+On every platform, if `gh` is missing, add it as the last line, as optional:
+
+> **GitHub CLI** (optional) — at the end, it puts your copy in a private
+> repository of your own on GitHub, which is what you deploy.
+
+On **Linux** and **WSL** it needs administrator rights, as Docker does.
 
 Then, on every platform:
 
@@ -384,11 +396,11 @@ when it finishes. Then verify the result yourself — don't take "done" on faith
    In **WSL**, `code` installs into the WSL side, which is where the
    extensions need to be.
 
-6. **GitHub CLI** — only if they said they want it. On **macOS**,
-   `brew install gh`; on **Linux** and **WSL**, follow
+6. **GitHub CLI** — if it was on the list and they didn't turn it down. On
+   **macOS**, `brew install gh`; on **Linux** and **WSL**, follow
    https://github.com/cli/cli/blob/trunk/docs/install_linux.md, which needs
-   sudo — hand it over. Then `gh auth login` (GitHub.com → HTTPS → authenticate
-   via browser). This is interactive; hand the terminal back to them for it.
+   sudo — hand it over. Signing in waits for Step 7, which is where it's
+   needed.
 
 ## Step 4 — Get Docker running
 
@@ -591,7 +603,8 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
    - **`/mixos app`** builds something under `apps/`; **`/mixos connector`** builds
      an integration under `connectors/`; **`/mixos theme`** changes how the whole
      install looks, under `themes/`; **`/mixos deploy`** makes the branch and
-     opens the pull request when you're ready. Never commit straight to `main`.
+     opens the pull request when you're ready, on the repository Step 7 sets
+     up. Never commit straight to `main`.
    - **Your edits appear on save; brand-new apps, connectors and themes do not.** The
      container runs `next dev` over your working tree, so editing a page, a
      component, or an API route is live in about two seconds — no restart, no
@@ -616,6 +629,205 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
      is dev-only and the values are fixed on purpose — they decrypt data already
      sitting in the local database, so regenerating them on each boot would break
      every saved credential. Nothing to do here.
+5. Then offer Step 7.
+
+## Step 7 — Their own repository on GitHub
+
+Their copy becomes a private repository of their own on GitHub: hosts deploy
+from it, new releases of MixOS merge into it from `upstream`, `/mixos deploy`
+opens pull requests on it, and the GitHub App links to it. It's a repository of
+their own rather than a fork, because a fork of a public repository can't be
+private.
+
+**Change nothing until they say yes.** Detecting comes first, and the question
+second; on a no, nothing has changed.
+
+### 7.1 What the copy is
+
+From the repo root, the folder with `package.json`:
+
+```bash
+if [ -e .git ]; then git remote -v; else echo "no .git"; fi
+```
+
+Ask git nothing in a folder without `.git`: it would answer for whatever
+repository encloses the folder, such as a home folder kept in git.
+
+| It shows | The copy is | Then |
+|---|---|---|
+| `origin` is `github.com/mixoshq/mixos`, over https or ssh, with or without `.git` | a clone of MixOS | 7.2 |
+| `no .git` | a `.zip` download | 7.2 |
+| `origin` is anything else | their own repository already | Say so ("This copy already pushes to `<origin>`, so there's nothing to set up") and stop |
+| no `origin`, and `upstream` is `github.com/mixoshq/mixos` | an earlier run of this step that stopped partway | 7.2, then pick up where it stopped: 7.4 from `git fetch` on if `git rev-parse -q --verify HEAD` prints nothing, 7.5 otherwise |
+| no remotes at all | a repository they made themselves | Ask what it is, and change nothing without their say |
+
+### 7.2 Ask once
+
+> MixOS is set up on your computer. Want me to put your copy in a private
+> repository of your own on GitHub? It's what you'll deploy, where new releases
+> of MixOS merge in, and where `/mixos deploy` opens pull requests. I'd call it
+> `mixos`, under your GitHub account, unless you'd like another name or an
+> organization. Or say no, and MixOS stays on this computer only.
+
+On a no, say that MixOS stays on this computer, that `/mixos deploy` needs the
+repository, and that `/mixos init` offers it again any time. Then stop.
+
+### 7.3 The GitHub CLI, signed in
+
+```bash
+gh --version
+gh auth status
+```
+
+- **No `gh`.** Install it: on **macOS**, `brew install gh`; on **Linux** and
+  **WSL**, https://github.com/cli/cli/blob/trunk/docs/install_linux.md, which
+  needs sudo, so hand it over as in Step 3. If they'd rather not have it, the
+  same steps on github.com are under "Create your own repository" in
+  [docs/hosting/install.md](../../../../docs/hosting/install.md#create-your-own-repository):
+  point them there, and stop.
+- **Not signed in** (`gh auth status` exits non-zero). Signing in is
+  interactive, so hand it over:
+
+  > In a terminal (**Terminal → New Terminal**), run `gh auth login`. Choose
+  > **GitHub.com**, then **HTTPS**, say yes to authenticating Git with your
+  > GitHub credentials, and log in with a web browser. Tell me when it's done.
+
+  Then run `gh auth status` yourself.
+
+Then the name. The owner is their own account unless they named an
+organization, and the name must be free:
+
+```bash
+gh api user --jq .login
+gh repo view <owner>/<name> --json name   # fails with "Could not resolve to a Repository": the name is free
+```
+
+If it exists, ask for another name. Never push into a repository that already
+exists.
+
+### 7.4 Connect the copy to MixOS's history
+
+**A clone of MixOS.** MixOS's repository becomes `upstream`, which frees
+`origin` for theirs:
+
+```bash
+git remote rename origin upstream
+```
+
+If `git rev-parse --is-shallow-repository` prints `true`, run
+`git remote set-branches upstream '*'` and `git fetch --unshallow upstream`
+too: a shallow clone can't be pushed to a new repository, and one made of a
+single tag has no `upstream/main` for upgrades to read.
+
+**A `.zip` download.** Make it a repository, fetch MixOS's history, and find
+the release whose files these are:
+
+```bash
+git init -b main
+git remote add upstream https://github.com/mixoshq/mixos.git
+git fetch upstream --tags
+for tag in $(git tag -l 'v*' --sort=-v:refname); do
+  git reset -q "$tag" && [ -z "$(git status --porcelain)" ] && { echo "matched $tag"; break; }
+done
+```
+
+`git reset` without `--hard` moves `main` and the index to a tag and leaves
+every file alone, so the search touches no file. It stops at the release whose
+files match these exactly: `git status` then shows nothing, since everything
+else here (`node_modules/`, `.env.docker.local`, `src/generated/` and the like)
+is ignored.
+
+- **It printed `matched <tag>`.** Turn on the hooks, as `npm ci` does in a
+  clone:
+
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+
+- **It printed nothing.** These files aren't exactly any release, so going on
+  could lose a change. Run `git reset -q "v$(node -p "require('./package.json').version")"`
+  and `git status --short` to see what differs from the release they claim to
+  be. If every difference is a mode change (`git diff --summary`), the unzip
+  dropped the executable bit: `chmod +x` those files and search again.
+  Otherwise remove the `.git` this step made (`rm -rf .git`), so the copy is as
+  it was, and explain: files changed after the download, or the `.zip` came
+  from the green **Code** button, which is unreleased work on `main`, rather
+  than a release. Two ways on: **Source code (zip)** from
+  https://github.com/mixoshq/mixos/releases/latest, or the clone prompt in
+  [docs/hosting/install.md](../../../../docs/hosting/install.md), then copy
+  their changes across. Stop there.
+
+### 7.5 Nothing secret goes up
+
+First let git show everything a commit could take:
+
+```bash
+npx tsx scripts/core-excludes.ts
+```
+
+In a clone, `npm ci` wrote a block into `.git/info/exclude` that ignores every
+extension the core doesn't carry, as a checkout of MixOS itself should. With
+`origin` no longer MixOS's, this removes it, so their own folders under
+`apps/`, `connectors/` and `themes/` show in `git status` and can be
+committed. Nothing else in the file changes, and it prints nothing when there's
+no block, as in a `.zip` download.
+
+The push sends commits, not the folder, and the commits are MixOS's own
+unless they made some. Check both before the first push, and the branch:
+
+```bash
+git status --porcelain --untracked-files=all
+git log --name-only --format='%h %s' HEAD --not --remotes=upstream --tags
+git branch --show-current
+```
+
+- **`git status`** should print nothing. Git ignores every `.env*` file but
+  the committed `.env.docker`, whose values are public and for development
+  copies only, and the `*.example` templates, and every `*.pem`;
+  `git check-ignore -v <file>` names the rule. If it lists a `.env*` or key
+  file (`*.pem`, `*.key`), stop and show it. If it lists anything else, show it
+  and ask before going on: it isn't pushed, but the next commit could take it.
+- **`git log`** lists commits of theirs on top of the release, with their
+  files. None is fine. If one carries a `.env*` or key file, stop and show it:
+  it would be pushed.
+- **The branch** must be `main`: the first branch pushed becomes the new
+  repository's default, which is what hosts deploy. On another branch, ask
+  before switching.
+
+### 7.6 Create it, and push
+
+```bash
+gh repo create <owner>/<name> --private --source . --remote origin --push
+gh repo set-default <owner>/<name>
+```
+
+`gh repo create` makes the repository, adds it as `origin`, and runs
+`git push --set-upstream origin HEAD`: `main` goes up and tracks `origin/main`,
+and MixOS's tags stay on this computer. With two remotes, gh opens pull
+requests on the one named `upstream` unless a default is set, so
+`gh repo set-default` points it at theirs, where `/mixos deploy` needs it.
+
+If `gh repo create` fails, show the error. A name that turned out to be taken
+means asking for another; the copy is ready for another try, and running
+`/mixos init` again picks up here.
+
+### 7.7 Check it, and tell them
+
+```bash
+git remote -v
+git status -sb | head -1
+gh repo view <owner>/<name> --json url,visibility --jq '.url + " " + .visibility'
+```
+
+`origin` is theirs and `upstream` is MixOS's, `main` is level with
+`origin/main` (`## main...origin/main`), and the repository is `PRIVATE`.
+`npx tsx scripts/core-excludes.ts` prints nothing again: no block is left to
+remove. Then:
+
+> Your copy of MixOS is on GitHub now, private, at <url>. To put it online for
+> your team, a host deploys it: see docs/hosting/install.md. `/mixos deploy`
+> opens your pull requests there, and new releases of MixOS merge in from
+> `upstream` (docs/hosting/after-you-install/upgrading.md).
 
 ## Deploying somewhere real — generate the platform keys
 
@@ -673,7 +885,8 @@ token, every app API key and every unlock cookie simultaneously.
   Don't offer this unprompted; it is more setup, not less.
 - **If they ask about putting it on the internet:** that is a deployment, not
   this setup — point them at [How to install](../../../../docs/hosting/install.md),
-  which covers their own server, Render, Railway and Vercel.
+  which covers their own server, Render, Railway and Vercel. A host deploys the
+  repository Step 7 makes.
 
 ## Notes
 

@@ -65,7 +65,7 @@ Call one of these actions:
 
 | Action | When | What it does | Example |
 | --- | --- | --- | --- |
-| **`init`** | MixOS isn't set up on this computer yet. | Guided first-time setup: installs the tools, boots the system locally in Docker, opens it in your browser. | `/mixos init` `[notes]` |
+| **`init`** | MixOS isn't set up on this computer yet, or your copy isn't in a GitHub repository of your own. | Guided first-time setup: installs the tools, boots the system locally in Docker, opens it in your browser, then offers to put your copy in a private GitHub repository of your own. | `/mixos init` `[notes]` |
 | **`help`** | You're not sure what to build. | Plain-language guide for non-technical builders. Recommends what to build and which action to run next; builds nothing itself. | `/mixos help` `[what you want to build]` |
 | **`app`** | You want to create, change, or design-review an app under `apps/`. | Writes a build plan into `apps/<slug>/plans/`, builds against the platform's invariants, verifies in a real browser. `review` audits design and UX before writing anything. | `/mixos app <create\|update\|review> <app-slug>` `[notes]` |
 | **`convert`** | You already have an application and want it as a MixOS app. | Inventories the source, writes a conversion plan, and stops for approval; then builds the first slice. Pass a plan path to resume at the build. | `/mixos convert <source-path\|git-url\|plan-path>` `[app-slug] [notes]` |
