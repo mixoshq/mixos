@@ -208,8 +208,8 @@ describe("the preview", () => {
         requiresMixOS: null,
       }),
     );
-    write("apps/mailer/app.json", '{"name":"Mailer","connectors":["probe"]}');
-    write("apps/digest/app.json", '{"name":"Digest","optionalConnectors":["probe"]}');
+    write("apps/mailer/app.json", '{"name":"Mailer","connectors":[{"name":"probe","version":"1.0.0"}]}');
+    write("apps/digest/app.json", '{"name":"Digest","optionalConnectors":[{"name":"probe","version":"1.0.0"}]}');
     const outcome = await previewForButton({ kind: "connector", slug: "probe" }, context());
     assert.equal(outcome.ok, true);
     if (!outcome.ok) return;
@@ -431,7 +431,7 @@ describe("Remove code and delete this checkout's data", () => {
   test("the preview asks what the database keeps only for an app or a connector that can be removed", async () => {
     write("apps/acme/app.json", '{"name":"Acme"}');
     write("connectors/probe/connector.json", '{"name":"probe","displayName":"Probe"}');
-    write("apps/mailer/app.json", '{"name":"Mailer","connectors":["probe"]}');
+    write("apps/mailer/app.json", '{"name":"Mailer","connectors":[{"name":"probe","version":"1.0.0"}]}');
     write("themes/aurora/theme.json", '{"name":"Aurora"}');
     write("themes/dusk/theme.json", '{"name":"Dusk"}');
     const asked: string[] = [];

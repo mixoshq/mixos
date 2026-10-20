@@ -35,31 +35,38 @@ function connectorDir(source: string): string {
 }
 
 const declared = (...methods: string[]): ConnectorTelemetryDefinition[] =>
-  methods.map((method) => ({ method }));
+  methods.map((method) => ({ method, operation: `op ${method}` }));
 
 // ── telemetry → registry ────────────────────────────────────────────────────
 
-test("mutates is carried into the registry with the rest of the entry", () => {
+test("mutates and the operation are carried into the registry with the rest of the entry", () => {
   assert.deepEqual(
     validateConnectorTelemetry(
       [
-        { method: "listItems", description: "Listed items" },
-        { method: "createItem", description: "Created an item", mutates: true },
-        { method: "getItem", mutates: false },
+        { method: "listItems", operation: "GET /items", description: "Listed items" },
+        { method: "createItem", operation: "POST /items", description: "Created an item", mutates: true },
+        { method: "getItem", operation: "GET /items/{id}", mutates: false },
       ],
       "acme",
     ),
     [
-      { method: "listItems", description: "Listed items" },
-      { method: "createItem", description: "Created an item", mutates: true },
-      { method: "getItem" },
+      { method: "listItems", operation: "GET /items", description: "Listed items" },
+      { method: "createItem", operation: "POST /items", description: "Created an item", mutates: true },
+      { method: "getItem", operation: "GET /items/{id}" },
     ],
   );
 });
 
 test("a method declared twice fails the build", () => {
   assert.throws(
-    () => validateConnectorTelemetry([{ method: "a" }, { method: "a" }], "acme"),
+    () =>
+      validateConnectorTelemetry(
+        [
+          { method: "a", operation: "GET /a" },
+          { method: "a", operation: "GET /b" },
+        ],
+        "acme",
+      ),
     /duplicate telemetry method "a"/,
   );
 });

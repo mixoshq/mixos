@@ -71,7 +71,12 @@ import type { Sql, TransactionSql } from "postgres";
 import { takeMigrationLock } from "../../../scripts/migration-lock";
 import type { AdminActor } from "../apps/admin-audit";
 import { appRoleName, appSchemaName, appSlugProblem } from "../apps/app-identifiers";
-import { connectorMissingKey, connectorReplacedKey, connectorSwitchKey } from "../connectors/switch-keys";
+import {
+  connectorMissingKey,
+  connectorReplacedKey,
+  connectorSwitchKey,
+  connectorWritableKey,
+} from "../connectors/switch-keys";
 import { sql as platformSql } from "../db/client";
 import { describeBuildKey, recentBuildsCarrying, RECENT_BUILD_HOURS } from "../platform/builds-seen";
 import { EXTENSION_NAME_PATTERN } from "./backup";
@@ -270,6 +275,7 @@ function connectorKeys(name: string): string[] {
     connectorMissingKey(name),
     identitySettingKey("connector", name),
     connectorSwitchKey(name),
+    connectorWritableKey(name),
     connectorReplacedKey(name),
   ];
 }

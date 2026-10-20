@@ -228,7 +228,7 @@ describe("npm run remove, against a real Postgres", { skip }, () => {
     assert.equal(await quietly(() => remove(["theme/aurora"])), 1);
     // A connector an app requires, asked for by the button's path.
     write("connectors/probe/connector.json", '{"name":"probe","displayName":"Probe"}');
-    write("apps/mailer/app.json", '{"name":"Mailer","connectors":["probe"]}');
+    write("apps/mailer/app.json", '{"name":"Mailer","connectors":[{"name":"probe","version":"1.0.0"}]}');
     const removal = await import("./remove");
     await assert.rejects(
       removal.removeExtension("connector", "probe", { actor: register.cliActor(), via: "cli", root, generator: STAND_IN }),

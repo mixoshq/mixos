@@ -24,6 +24,7 @@ const app: AppManifest = {
   icon: "book",
   connectors: [],
   optionalConnectors: [],
+  connectorRequirements: [],
   database: false,
   updatedAt: [],
   notifications: false,

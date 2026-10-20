@@ -24,6 +24,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { connectorRequirements, describeRequirement } from "../connectors/requirements";
 import { floorVerdict } from "../platform/version";
 import type { FloorVerdict } from "../platform/version-floor";
 import { contentHashesMatch } from "./content-hash";
@@ -310,6 +311,13 @@ export function declaredValues(kind: PendingKind, manifest: Record<string, unkno
       ),
       declaration("Each person's own account", [manifest.userScoped === true ? "Yes: each person signs in with their own" : null]),
       declaration("Webhooks", [manifest.webhook ? "Receives signed webhooks" : null]),
+      declaration("Version", [typeof manifest.version === "string" ? manifest.version : null]),
+      declaration(
+        "Methods that change data",
+        records(manifest.telemetry)
+          .filter((m) => m.mutates === true)
+          .map((m) => field(m, "method")),
+      ),
     ];
   }
 
@@ -324,10 +332,10 @@ export function declaredValues(kind: PendingKind, manifest: Record<string, unkno
       }),
     ),
     declaration("Database", [manifest.database === true ? "Its own schema and database role" : null]),
-    declaration("Connectors", [
-      ...strings(manifest.connectors),
-      ...strings(manifest.optionalConnectors).map((c) => `${c} (optional)`),
-    ]),
+    declaration(
+      "Connectors",
+      connectorRequirements(manifest.connectors, manifest.optionalConnectors).map(describeRequirement),
+    ),
     declaration("Services", [
       ...records(manifest.provides).map((s) => (field(s, "name") ? `provides ${field(s, "name")}` : null)),
       ...records(manifest.consumes).map((s) =>

@@ -58,6 +58,7 @@ import {
   connectorMissingKey,
   connectorReplacedKey,
   connectorSwitchKey,
+  connectorWritableKey,
 } from "../src/lib/connectors/switch-keys";
 import {
   describeIdentity,
@@ -173,6 +174,11 @@ export async function syncIdentities(
           insert into public.platform_settings (key, value)
           values (${connectorReplacedKey(w.slug)}, ${previous})
           on conflict (key) do nothing
+        `;
+        // Allow changes was given to the connector before it. The one now
+        // under this name starts read-only, as every connector does.
+        await tx`
+          delete from public.platform_settings where key = ${connectorWritableKey(w.slug)}
         `;
         const disabled = switched.length > 0;
         await audit(tx, "connector.identity.changed", "connector", w.slug, { ...details, disabled });

@@ -147,12 +147,12 @@ const FIXTURES: Record<string, Fixture> = {
   },
   "e2e-conn": {
     kind: "connector",
-    entries: files({ "connector.json": '{"name":"e2e-conn","displayName":"Conn"}\n', "index.ts": "export default {};\n" }),
+    entries: files({ "connector.json": '{"name":"e2e-conn","displayName":"Conn","version":"1.2.0"}\n', "index.ts": "export default {};\n" }),
     more: [
       {
         version: "1.2.1",
         releasedAt: WHEN["1.2.1"],
-        entries: files({ "connector.json": '{"name":"e2e-conn","displayName":"Conn 1.2.1"}\n', "index.ts": "export default { v: 2 };\n" }),
+        entries: files({ "connector.json": '{"name":"e2e-conn","displayName":"Conn 1.2.1","version":"1.2.1"}\n', "index.ts": "export default { v: 2 };\n" }),
         manifest: { yanked: true, yankedReason: "Leaks keys" },
       },
     ],

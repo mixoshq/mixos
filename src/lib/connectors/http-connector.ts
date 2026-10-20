@@ -105,9 +105,22 @@ export interface RequestOptions<T = unknown> {
   deadlineMs?: number;
   /** Override the total attempt budget. */
   maxAttempts?: number;
-  /** Query parameters appended to the path. Undefined values are dropped. */
-  query?: Record<string, string | number | boolean | undefined | null>;
+  /**
+   * Query parameters appended to the path. Undefined values are dropped, and
+   * an array repeats its parameter once per element (`ranges=A1&ranges=B2`),
+   * as many APIs take a list.
+   */
+  query?: Record<string, QueryValue>;
 }
+
+/** One query parameter's value: a list repeats the parameter. */
+export type QueryValue =
+  | string
+  | number
+  | boolean
+  | undefined
+  | null
+  | readonly (string | number | boolean)[];
 
 export abstract class HttpConnector implements BaseConnector {
   abstract readonly name: string;
@@ -173,6 +186,20 @@ export abstract class HttpConnector implements BaseConnector {
   }
 
   /**
+   * Whether this instance's caller may change data with it: its app asked for
+   * "write" and the connector's admin allowed changes (src/lib/apps/context.ts).
+   * Read when a client-credentials token is minted, so a token carries the
+   * scopes the connector requests with `"write"` only for a caller that may
+   * use them. Off unless the platform turns it on.
+   */
+  #writesAllowed = false;
+
+  /** Platform-only, like `bindUserGrant`: see `#writesAllowed`. */
+  static allowWrites(connector: BaseConnector): void {
+    if (connector instanceof HttpConnector) connector.#writesAllowed = true;
+  }
+
+  /**
    * Subclasses that need extra setup override this and call
    * `super.initialize(credentials)` first.
    */
@@ -227,6 +254,28 @@ export abstract class HttpConnector implements BaseConnector {
     opts: RequestOptions<T> = {},
   ): Promise<T | null> {
     return (await this.send<T>(path, init, opts)).body;
+  }
+
+  /**
+   * `request()`, for an operation whose response always carries a body: an
+   * empty one fails as `unexpected_response` rather than answering null. A
+   * method that mirrors such an operation can then return the provider's
+   * resource itself, typed, with no `| null` for its callers to handle.
+   */
+  protected async requestBody<T = unknown>(
+    path: string,
+    init: RequestInit = {},
+    opts: RequestOptions<T> = {},
+  ): Promise<T> {
+    const { body } = await this.send<T>(path, init, opts);
+    if (body !== null) return body;
+    throw new ConnectorError({
+      category: "unexpected_response",
+      connectorName: this.name,
+      subject: this.subject,
+      adminHint:
+        "The provider answered with no body where this operation always returns one, which usually means its API changed. The connector needs updating.",
+    });
   }
 
   /**
@@ -508,10 +557,9 @@ export abstract class HttpConnector implements BaseConnector {
 
     const maxPages = policy.maxPages ?? DEFAULTS.maxPages;
     const pageSize = policy.pageSize ?? DEFAULTS.pageSize;
-    const query: Record<string, string | number | boolean | undefined | null> =
-      {
-        ...(opts.query ?? {}),
-      };
+    const query: Record<string, QueryValue> = {
+      ...(opts.query ?? {}),
+    };
     if (policy.limitParam) query[policy.limitParam] = pageSize;
 
     let cursor: string | null = null;
@@ -620,7 +668,12 @@ export abstract class HttpConnector implements BaseConnector {
 
     for (const [key, value] of Object.entries(query ?? {})) {
       if (value == null) continue;
-      url.searchParams.set(key, String(value));
+      if (Array.isArray(value)) {
+        url.searchParams.delete(key);
+        for (const item of value) url.searchParams.append(key, String(item));
+      } else {
+        url.searchParams.set(key, String(value));
+      }
     }
 
     // apiKey-in-query is applied last so it cannot be clobbered by a caller.
@@ -755,7 +808,7 @@ export abstract class HttpConnector implements BaseConnector {
       "clientSecret",
     ];
     const params: Record<string, string> = { grant_type: "client_credentials" };
-    const scopes = requestedScopes(this.auth);
+    const scopes = requestedScopes(this.auth, { writes: this.#writesAllowed });
     if (scopes.length) params.scope = scopes.join(" ");
 
     const token = await requestToken({

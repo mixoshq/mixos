@@ -181,7 +181,7 @@ describe("removing", () => {
 
   test("names what refuses it, asks nothing, and exits 1", async () => {
     write("connectors/probe/connector.json", '{"name":"probe","displayName":"Probe"}');
-    write("apps/mailer/app.json", '{"name":"Mailer","connectors":["probe"]}');
+    write("apps/mailer/app.json", '{"name":"Mailer","connectors":[{"name":"probe","version":"1.0.0"}]}');
     const t = terminal([true]);
     assert.equal(await cli(["connector/probe"], t), 1);
     const out = t.out.join("\n");

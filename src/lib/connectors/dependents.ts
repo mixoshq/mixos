@@ -17,25 +17,31 @@ export interface ConnectorDependents {
   required: string[];
   /** Apps that declare it in `optionalConnectors` — a part of them degrades. */
   optional: string[];
+  /**
+   * Apps of either kind whose entry asks for `"access": "write"`: what Allow
+   * changes is for. Each is also in `required` or `optional`.
+   */
+  writes: string[];
 }
 
 export function getConnectorDependents(connectorName: string): ConnectorDependents {
   const required: string[] = [];
   const optional: string[] = [];
+  const writes: string[] = [];
 
   for (const app of appRegistry) {
-    if (app.connectors.includes(connectorName)) {
-      required.push(app.name);
-    } else if ((app.optionalConnectors ?? []).includes(connectorName)) {
-      // `else if`, so an app declaring the same connector both ways is counted
-      // once, as required — the stricter of the two claims is the true one.
-      optional.push(app.name);
-    }
+    // The schema allows one entry per connector across both lists.
+    const need = app.connectorRequirements.find((r) => r.name === connectorName);
+    if (!need) continue;
+    (need.optional ? optional : required).push(app.name);
+    if (need.access === "write") writes.push(app.name);
   }
 
+  const byName = (a: string, b: string) => a.localeCompare(b);
   return {
-    required: required.sort((a, b) => a.localeCompare(b)),
-    optional: optional.sort((a, b) => a.localeCompare(b)),
+    required: required.sort(byName),
+    optional: optional.sort(byName),
+    writes: writes.sort(byName),
   };
 }
 

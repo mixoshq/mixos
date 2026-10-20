@@ -12,10 +12,18 @@ import type { ConnectorTestResult } from "@/lib/connectors/types";
  *      (lowercase, hyphens — no leading underscore).
  *   2. In `connector.json`: set `name` to match the folder exactly, then fill in
  *      `displayName`, `description`, `authors`, `credentialFields`, and the
- *      `auth` / `http` policy for your API.
+ *      `auth` / `http` policy for your API. Leave `version` at 1.0.0 until the
+ *      first release.
  *   3. Rename the class and its `name` field below to match.
- *   4. Replace the example methods with the calls your apps need.
+ *   4. Replace the example methods with the provider's operations on each
+ *      resource you cover — all of them, not just the ones one app needs — one
+ *      method per operation, named as the provider names it, returning what it
+ *      returns. List each in `telemetry` with the `operation` it calls.
  *   5. `npm run registry && npm run typecheck && npm run verify:connectors`
+ *
+ * A connector mirrors its provider's API, and apps decide what to do with it.
+ * That is what lets the next app use it unchanged: it changes when the
+ * provider's API does, and only then. Within a major version it only adds.
  *
  * What you do NOT write, because `HttpConnector` already does it:
  * authentication, timeouts, retries with backoff, `Retry-After` handling,
@@ -37,8 +45,9 @@ import type { ConnectorTestResult } from "@/lib/connectors/types";
 // Declaring the shape you expect turns "the upstream quietly changed" from an
 // undefined-property crash inside a widget into a clear connector error naming
 // the field that moved. Optional, but cheap and worth it on anything an app
-// renders directly.
-const Item = z.object({
+// renders directly. `looseObject`, so a field the schema doesn't name still
+// reaches the app: the connector returns what the provider returns.
+const Item = z.looseObject({
   id: z.string(),
   name: z.string(),
   created_at: z.string().optional(),
@@ -62,7 +71,8 @@ export default class TemplateConnector extends HttpConnector {
   }
 
   // ── Public methods for apps to call ──
-  // One method per API operation. Let the app layer compose them.
+  // One method per provider operation, each listed in `telemetry` with the
+  // operation it calls. Let the app layer compose them.
 
   /** A single item, validated against the declared shape. */
   async getItem(id: string): Promise<Item | null> {
@@ -82,7 +92,12 @@ export default class TemplateConnector extends HttpConnector {
   }
 
   /**
-   * A write. Note what is NOT here: no retry configuration. A POST is never
+   * A write, declared `"mutates": true` in `telemetry`. It runs only on an
+   * install whose admin has allowed this connector to change data, and only
+   * for an app whose entry asks for `"access": "write"`; the platform refuses
+   * it otherwise, before it reaches here.
+   *
+   * Note what is NOT here: no retry configuration. A POST is never
    * auto-retried, because a silently duplicated write is worse than a visible
    * failure. If your API is genuinely idempotent (it takes an idempotency key,
    * or the operation is a no-op when repeated), opt in with

@@ -2,15 +2,34 @@
 
 ## Declaring a Connector Dependency
 
-To use a connector in your app, add its name to the `connectors` array in your `app.json`. The platform will automatically load, initialize, and inject the connector into your app context.
+To use a connector in your app, add an entry for it to the `connectors` array in your `app.json`: its name, and the version of it you built against, from its `connector.json`. The platform will automatically load, initialize, and inject the connector into your app context.
 
 ```json
 // app.json
 {
   "name": "My App",
-  "connectors": ["my-service", "monday"]
+  "connectors": [
+    { "name": "my-service", "version": "1.2.0" },
+    { "name": "monday", "version": "3.0.1", "access": "write" }
+  ]
 }
 ```
+
+Any later release of the connector with the same major version satisfies
+`version`, and the build fails on one that doesn't. `"access": "write"` is what
+lets the app call a method the connector declares `mutates`; leave it out for an
+app that only reads. A write also needs the connector's admin to have allowed
+changes. See [Changing data](architecture.md#changing-data).
+
+The app is handed the connector narrowed to its declared methods. Calling a
+write without `"access": "write"`, or anything the manifest doesn't declare,
+throws.
+
+**If the connector lacks something you need, don't change it to fit the app.**
+Compose its methods in the app's `lib/server/`. If the provider has an operation
+the connector doesn't cover, the connector gains it as a plain mirror of that
+operation, in a new minor version, and the app names that version. See
+[What a connector is for](architecture.md#what-a-connector-is-for).
 
 ## Accessing Connectors in API Routes
 

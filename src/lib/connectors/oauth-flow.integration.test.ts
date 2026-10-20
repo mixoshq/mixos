@@ -223,7 +223,7 @@ describe("the connector OAuth callback's audit row", { skip }, () => {
         actor_email: ADMIN_EMAIL,
         target_type: "connector",
         target_id: TENANT,
-        details: { scopes: ["things:read"] },
+        details: { scopes: ["things:read"], writes: false },
       },
     ]);
 
@@ -253,7 +253,7 @@ describe("the connector OAuth callback's audit row", { skip }, () => {
 
     const rows = await connectRows(TENANT);
     assert.equal(rows.length, before + 1);
-    assert.deepEqual(rows.at(-1)?.details, { scopes: ["things:read", "things:write"] });
+    assert.deepEqual(rows.at(-1)?.details, { scopes: ["things:read", "things:write"], writes: false });
     assert.equal((await wholeLog()).includes(tokens.access), false);
   });
 
