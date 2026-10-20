@@ -15,18 +15,33 @@ changes first. Upgrade by merging the newest release's tag. Don't merge
 ## When a new release is out
 
 Each instance asks mixos.org once a day which releases of MixOS exist. When a
-newer one is out, the top of every admin page says so, such
-as: "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor release: it may
-need changes." The notice links to the release's page on mixos.org and to this
-guide, and its notes are folded under it. Nothing is applied for you. The check
+newer one is out, admins see a slim banner over every page: "MixOS v0.5.0 is
+out (you run v0.4.2). Run `/mixos upgrade` in Claude Code to upgrade." Its
+**Details** link goes to the full notice at the top of the admin pages, which
+says what kind of release it is, such as "MixOS 0.5.0 is available (this
+instance runs 0.4.2). A minor release: it may need changes.", folds the notes
+under it, links to the release's page on mixos.org and to this guide, and gives
+`/mixos upgrade` to copy and the merge by hand. Dismissing the banner hides it
+until the next release; the notice stays. Nothing is applied for you. The check
 sends nothing about the instance; see
-[New releases of MixOS](README.md#new-releases-of-mixos) for what it does, and how
-to turn it off.
+[New releases of MixOS](README.md#new-releases-of-mixos) for what it does, and
+how to turn it off.
 
-With the [GitHub App](github-app.md) linked, the notice also shows the commands
-for step 2; see [Through the GitHub App](#through-the-github-app).
+## The quick way: /mixos upgrade
 
-## Upgrade in five steps
+Back up the database first, as step 1 below says. Then, in Claude Code, in your
+copy of MixOS, run:
+
+```
+/mixos upgrade
+```
+
+It finds MixOS's newest release, and shows its notes, anything breaking and any
+new migrations before it changes anything. Once you say yes, it merges the
+release on a branch, runs the checks, and opens the pull request with
+`/mixos deploy`. Merging the pull request ships the upgrade, as step 5 says.
+
+## The manual way, in five steps
 
 1. **Back up the database**, before anything else. Migrations only go forward,
    so a backup is the way back if something goes wrong.
@@ -104,11 +119,10 @@ Wherever the release step fails, the old version keeps serving while you fix it.
 
 ## Through the GitHub App
 
-With the [GitHub App](github-app.md) linked, the release notice shows the
-commands for step 2 and a link to what changed. The steps are yours, as above.
-Only on a fork of `mixoshq/mixos`, which shares upstream's commits, can the
-notice do steps 2 and 5 for you, by opening the pull request at the release's
-commit. See
+With the [GitHub App](github-app.md) linked, the release notice adds a link to
+what changed, on GitHub. Only on a fork of `mixoshq/mixos`, which shares
+upstream's commits, can it also do steps 2 and 5 for you, by opening the pull
+request at the release's commit. See
 [Updating MixOS through the App](github-app.md#updating-mixos-through-the-app).
 
 ## What breaks

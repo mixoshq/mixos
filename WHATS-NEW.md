@@ -10,6 +10,39 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-10-20
+
+- **Install without forking.** How to install
+  (`docs/hosting/install.md`) starts with the quick way: a prompt for Claude
+  Code that clones the newest release into `~/MixOS`, then `/mixos init` in VS
+  Code. Your copy becomes a private repository of your own, not a fork, since a
+  fork of a public repository can't be private: hosts deploy from it, and
+  releases merge into it from `upstream`. The manual way has the same steps by
+  hand.
+- **`/mixos init` ends by offering that repository.** Once MixOS runs, it asks
+  whether to create a private GitHub repository and push your copy, with `gh`.
+  A clone's `origin` becomes `upstream`; a `.zip` download is first connected
+  to the release it came from. Say no, and MixOS stays on your computer. Set up
+  already? `/mixos init` again offers it.
+- **`/mixos upgrade`.** Takes your copy to MixOS's newest release: it shows the
+  notes, anything breaking and any new migrations, merges the release on a
+  branch once you say yes, runs the checks, and hands the pull request to
+  `/mixos deploy`. Merging it ships the upgrade.
+- **A banner for admins when a release is out.** Over every page: "MixOS
+  v0.3.0 is out (you run v0.2.0). Run `/mixos upgrade` in Claude Code to
+  upgrade.", with **Details** to the notice on the admin pages, which now gives
+  `/mixos upgrade` first, whether or not the GitHub App is linked, and the
+  merge by hand second. Dismissing the banner hides it until the next release.
+- **`/mixos deploy` needs your own repository.** It stops when `origin` is
+  missing, or is `mixoshq/mixos` and you can't push there, and points to
+  `/mixos init`.
+- **A clone of the core ignores other extensions on its own.** In a checkout
+  whose `origin` is `mixoshq/mixos`, `npm ci` writes a marked block into
+  `.git/info/exclude` that keeps every extension the core doesn't carry out of
+  `git status` (`scripts/core-excludes.ts`), and removes it anywhere else, so
+  your own copy's extensions can be committed. Lines you wrote there by hand
+  still work beside it.
+
 ## 2026-10-18
 
 - **Names an extension may need to change.** The ESLint rules are

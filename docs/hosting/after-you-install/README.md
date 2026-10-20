@@ -80,11 +80,12 @@ the way back. [Rolling back](upgrading.md#rolling-back) says how to restore one.
 ## Keep MixOS up to date
 
 Each version of MixOS is a release: a tag on `mixoshq/mixos`, such as `v0.2.0`.
-When a newer one is out, the top of every admin page says so: see
-[New releases of MixOS](#new-releases-of-mixos). Upgrade by merging the
-release's tag into your repository, from `upstream`, and deploying it: see
-[Upgrading MixOS](upgrading.md). With the [GitHub App](github-app.md) linked,
-the notice also shows the commands.
+When a newer one is out, admins see a banner over every page, and the full
+notice at the top of the admin pages: see
+[New releases of MixOS](#new-releases-of-mixos). To take it, run
+`/mixos upgrade` in Claude Code, in your copy, or merge the release's tag into
+your repository from `upstream` by hand, and deploy it: see
+[Upgrading MixOS](upgrading.md).
 
 ## Release and update notices
 
@@ -157,13 +158,19 @@ User-Agent: MixOS
   page, such as "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor
   release: it may need changes." Its notes are folded under it, and their links
   are shown as text, never as links. The notice links to the release's page on
-  mixos.org and to [Upgrading MixOS](upgrading.md). Under the version at the foot
-  of the admin pages, a line says when mixos.org last answered.
+  mixos.org and to [Upgrading MixOS](upgrading.md), and gives `/mixos upgrade`
+  to copy and the merge by hand. Over every other page, admins see a slim
+  banner, "MixOS v0.5.0 is out (you run v0.4.2). Run `/mixos upgrade` in Claude
+  Code to upgrade.", with **Details**, which goes to the notice. Dismissing the
+  banner hides it until the next release, for that admin in that browser; the
+  notice stays. Under the version at the foot of the admin pages, a line says
+  when mixos.org last answered.
 - **Never applied.** Nothing is merged, downloaded or deployed. Taking a release
-  is up to you: merge its tag into your repository, as
-  [Upgrading MixOS](upgrading.md) says. With the [GitHub App](github-app.md)
-  linked, the notice also shows the commands for it
-  ([Updating MixOS through the App](github-app.md#updating-mixos-through-the-app)).
+  is up to you: `/mixos upgrade` merges it in your copy, or you merge its tag by
+  hand, as [Upgrading MixOS](upgrading.md) says, and merging the pull request
+  deploys it. On a fork of `mixoshq/mixos`, the
+  [GitHub App](github-app.md#updating-mixos-through-the-app) can open that pull
+  request for you.
 
 The check keeps the update check's schedule: about once a day, and an hour after
 a failure, or later if mixos.org asks, but never more than a day later. Its last

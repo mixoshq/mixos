@@ -206,6 +206,9 @@ questions before it starts.
   open the pull request (branching first if you are on `main`). `--reset`
   brings you back to a fresh `main` after the PR merges. `release` cuts a
   version of MixOS, for maintainers (see [Releases](#releases)).
+- **`/mixos upgrade`** — take your copy to MixOS's newest release: it shows
+  what changed, merges the release on a branch, runs the checks, and hands the
+  pull request to `/mixos deploy`.
 
 ## Authentication
 
@@ -317,9 +320,10 @@ platform is a minor version (`v0.2.0` → `v0.3.0`), and any other release is a
 patch (`v0.3.0` → `v0.3.1`). Prereleases have a suffix, such as
 `v0.3.0-rc.1`, and GitHub marks them as prereleases.
 
-**To upgrade a deployment,** merge the newest release tag into your own
-repository, not `upstream/main`, which holds work that hasn't been released yet.
-The steps are in [Upgrading MixOS](docs/hosting/after-you-install/upgrading.md).
+**To upgrade a deployment,** run `/mixos upgrade` in Claude Code, or merge the
+newest release tag into your own repository by hand, not `upstream/main`, which
+holds work that hasn't been released yet. The steps are in
+[Upgrading MixOS](docs/hosting/after-you-install/upgrading.md).
 
 **To cut a release** (maintainers), run `/mixos deploy release` on an
 up-to-date `main`. It opens a release PR that sets the version in

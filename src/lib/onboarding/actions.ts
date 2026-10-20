@@ -10,6 +10,7 @@ import {
   requireServerSession,
 } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
+import { onboardingCompletedAtFor } from "./completed";
 
 /**
  * When this user finished (or skipped) the welcome tour, or null if they have
@@ -17,13 +18,7 @@ import { revalidatePath } from "next/cache";
  */
 export async function getOnboardingCompletedAt(): Promise<string | null> {
   const session = await requireReadOnlySession();
-  const supabase = createServiceClient();
-  const { data } = await supabase
-    .from("users")
-    .select("onboarding_completed_at")
-    .eq("id", session.user.id)
-    .maybeSingle();
-  return (data?.onboarding_completed_at as string | null) ?? null;
+  return onboardingCompletedAtFor(session.user.id);
 }
 
 export async function markOnboardingComplete(): Promise<void> {

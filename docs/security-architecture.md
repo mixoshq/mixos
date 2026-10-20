@@ -2869,9 +2869,15 @@ marked as a prerelease or whose tag has a suffix; `prerelease` keeps them. Any
 other value is read as `stable`, with a warning, and the release step reports
 it, so a typo shows fewer releases, never more.
 
-**What the answer can do: show one notice.** When the release kept is newer than
-this build, the top of every admin page says so: "MixOS 0.5.0 is available (this
-instance runs 0.4.2). A minor release: it may need changes." The notes come
+**What the answer can do: show a notice, and a banner.** When the release kept
+is newer than this build, the top of every admin page says so: "MixOS 0.5.0 is
+available (this instance runs 0.4.2). A minor release: it may need changes." A
+slim banner over every other page of the main interface says it to admins too,
+and to no one else, which the server checks as it does for the notice: "MixOS
+v0.5.0 is out (you run v0.4.2). Run `/mixos upgrade` in Claude Code to
+upgrade." Both name `/mixos upgrade`, which an admin runs in their own copy.
+The banner's dismissal is an HttpOnly cookie holding the admin's id and the
+tag, read by the server and by nothing else. The notes come
 from commit subjects, so a merged pull request's title is enough to put text
 there, and they are rendered by mixos.org's rule for them
 (`src/components/admin/release-notes.tsx`): collapsed, raw HTML dropped, images
@@ -2885,11 +2891,15 @@ answer is ever fetched or made a link.
 **Never applied.** No button applies a release. The check writes one row, its
 own, and takes its lock while it runs; it starts no process and writes no
 file. Taking a release is merging its tag into the operator's repository and
-deploying it. With the GitHub App linked on a fork of upstream, the notice
-offers one thing: to open a pull request for that merge, at a commit GitHub
-has confirmed is upstream's tag ([MixOS update pull requests](#mixos-update-pull-requests)).
-Merging it stays with the operator, on GitHub; `src/components/admin/release-notice.test.ts`
-holds the notice to that one button, and that button to that one action.
+deploying it. The notice and the banner each have a button that copies
+`/mixos upgrade` to the clipboard and does nothing else, and the banner's other
+button sets its dismissal cookie. With the GitHub App linked on a fork of
+upstream, the notice offers one thing more: to open a pull request for that
+merge, at a commit GitHub has confirmed is upstream's tag
+([MixOS update pull requests](#mixos-update-pull-requests)). Merging it stays
+with the operator, on GitHub; `src/components/admin/release-notice.test.ts`
+holds the notice to those buttons and each to its one action, and
+`src/components/admin/release-banner.test.ts` the banner.
 
 **Turning it off.** `MIXOS_UPDATE_CHECK=false`, the update check's switch,
 sends nothing for this check either, and the admin pages say the checks are off.
