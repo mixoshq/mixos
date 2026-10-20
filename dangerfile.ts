@@ -312,8 +312,8 @@ if (addedMigrations.length > 0) {
 /**
  * `fail`. The core repository carries each kind's template, Wall-E and the
  * built-in themes (scripts/core-extensions.ts); an app, connector or theme of
- * someone's own belongs in their fork. Only in the core repository: a fork
- * commits its extensions, which is how it ships them.
+ * someone's own belongs in their own repository. Only in the core repository:
+ * anyone's own repository commits its extensions, which is how it ships them.
  */
 const strayFolders = isCoreRepository(danger.github.thisPR.owner, danger.github.thisPR.repo)
   ? strayExtensions([...danger.git.created_files, ...danger.git.modified_files])
@@ -326,7 +326,7 @@ if (strayFolders.length > 0) {
       `${strayFolders.map((f) => `- \`${f}/\``).join("\n")}\n\n` +
       `The core repository carries only each kind's template, Wall-E and the built-in themes ` +
       `(\`scripts/core-extensions.ts\`). An app, connector or theme of your own belongs in your ` +
-      `fork, where you commit and deploy it. Take ${one ? "it" : "them"} out of this PR: ` +
+      `own repository, where you commit and deploy it. Take ${one ? "it" : "them"} out of this PR: ` +
       `\`git rm -r --cached <folder>\` keeps the files on disk.`
   );
 }
@@ -343,9 +343,9 @@ if (strayFolders.length > 0) {
  * committed another way. A release PR is told apart by its branch, which
  * `/mixos deploy release` names after the version it sets: release/vX.Y.Z.
  *
- * Only in the core repository, where releases are cut. A fork changes its
- * version by merging a release tag, which is how it upgrades
- * (docs/hosting/after-you-install/upgrading.md).
+ * Only in the core repository, where releases are cut. Anyone's own
+ * repository changes its version by merging a release tag, which is how it
+ * upgrades (docs/hosting/after-you-install/upgrading.md).
  *
  * The change is measured from where the branch left its base, as GitHub's
  * Files changed tab measures it. Danger's own diff starts from the base's
