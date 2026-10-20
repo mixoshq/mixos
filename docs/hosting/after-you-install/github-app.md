@@ -136,9 +136,8 @@ build runs the registry generator, and `extensions.yml` smoke-tests a changed ap
 ([The pull-request check](README.md#the-pull-request-check)). Admin > Apps,
 Connectors and Themes list the App's open pull requests with their checks:
 
-- **No CI ran:** nothing checked the head commit within ten minutes. On a new
-  fork, GitHub keeps workflows off until you turn them on under **Actions**.
-  Don't merge it unchecked.
+- **No CI ran:** nothing checked the head commit within ten minutes. Check that
+  GitHub Actions is on for your repository. Don't merge it unchecked.
 - **Changed since proposed:** someone pushed to the branch after the App opened
   it. Read those commits before you merge.
 
