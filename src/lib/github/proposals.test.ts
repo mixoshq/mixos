@@ -23,7 +23,7 @@ describe("what a pull request's checks say", () => {
     assert.equal(ciState(runs(), status(), since, at(NO_CI_AFTER_MS - 1)).state, "waiting");
     const none = ciState(runs(), status(), since, at(NO_CI_AFTER_MS));
     assert.deepEqual([none.state, none.label, none.tone], ["none", "No CI ran", "danger"]);
-    assert.match(none.detail, /turns them on, under Actions/);
+    assert.match(none.detail, /Check that GitHub Actions is on for the repository\. Don't merge it unchecked\./);
   });
 
   test("a skipped run is nothing having run", () => {
