@@ -3788,12 +3788,12 @@ proposal is read at the next one, not before.
 Admin > Apps, Connectors and Themes list the App's open pull requests of that
 kind, read with a read token (`src/lib/github/proposals.ts`), with their
 checks. A head commit nothing has checked ten minutes after the proposal shows
-"No CI ran", in the danger tone: GitHub keeps workflows off on a new fork until
-its owner turns them on, so on many forks nothing runs at all. A head that
-isn't the commit in the `<kind>.propose` row shows "Changed since proposed":
-anyone with push access can add a commit to the branch after the App opens the
-pull request. Each is listed as what its branch proposes: an install, an
-update to a release or a removal. A pull request on a `mixos/install/`,
+"No CI ran", in the danger tone: with GitHub Actions off for the repository, as
+GitHub keeps it off on a new fork until its owner turns it on, nothing runs at
+all. A head that isn't the commit in the `<kind>.propose` row shows "Changed
+since proposed": anyone with push access can add a commit to the branch after
+the App opens the pull request. Each is listed as what its branch proposes: an
+install, an update to a release or a removal. A pull request on a `mixos/install/`,
 `mixos/update/` or `mixos/remove/` branch with no such row is marked as not
 proposed from this instance. Links are built from the stored repository and
 the pull request's number. Admin > GitHub lists the open

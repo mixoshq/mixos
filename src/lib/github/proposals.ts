@@ -15,9 +15,10 @@
  * said plainly:
  *
  *   - "No CI ran", in the danger tone, when nothing has checked the head
- *     commit ten minutes after it arrived. GitHub turns workflows off on a new
- *     fork until its owner turns them on, so on many forks nothing runs at
- *     all, and a pull request with no checks looks like one still waiting.
+ *     commit ten minutes after it arrived. With GitHub Actions off for the
+ *     repository (GitHub keeps it off on a new fork until its owner turns it
+ *     on), nothing runs at all, and a pull request with no checks looks like
+ *     one still waiting.
  *   - "Changed since proposed", when the head isn't the commit the App made:
  *     anyone who can push to the repository can add a commit to the branch
  *     after the App opens the pull request, and what was verified is the App's
@@ -87,8 +88,8 @@ export function ciState(runs: CheckRuns, status: CombinedStatus, since: Date, no
       label: "No CI ran",
       tone: "danger",
       detail:
-        "Nothing has checked its head commit in ten minutes. On a new fork, GitHub keeps workflows off until " +
-        "its owner turns them on, under Actions. Don't merge it unchecked.",
+        "Nothing has checked its head commit in ten minutes. Check that GitHub Actions is on for the repository. " +
+        "Don't merge it unchecked.",
     };
   }
   return { state: "waiting", label: "Waiting for CI", tone: "neutral", detail: "Its checks haven't started yet." };
