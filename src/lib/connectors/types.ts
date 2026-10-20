@@ -8,6 +8,12 @@ export interface ConnectorManifest {
   name: string;
   displayName: string;
   /**
+   * This release, `X.Y.Z`. An app names the version it was built against, and
+   * any later release with the same major version satisfies it: within a major
+   * version a connector only adds. See src/lib/connectors/requirements.ts.
+   */
+  version: string;
+  /**
    * Public URL of the connector's icon, e.g. `/connector-assets/gmail/icon.png`.
    * Authored as a filename inside `connectors/<name>/assets/`; the generator
    * copies the directory to `public/connector-assets/<name>/` and rewrites this to
@@ -91,6 +97,12 @@ export type ConnectorAuthStrategy =
 /** How a scope's own description classifies it. Derived, never hand-written. */
 export type ConnectorScopeAccess = "read" | "write" | "read-write";
 
+/**
+ * When a connector asks for a scope: `true` always, `"write"` only on an
+ * install whose admin has allowed the connector to change data, `false` never.
+ */
+export type ConnectorScopeRequest = boolean | "write";
+
 /** One row of a provider's documented scope table. */
 export interface ConnectorScope {
   scope: string;
@@ -98,7 +110,7 @@ export interface ConnectorScope {
   description?: string;
   access?: ConnectorScopeAccess;
   /** Does this connector ask for it at authorization time? */
-  requested: boolean;
+  requested: ConnectorScopeRequest;
 }
 
 export interface ConnectorAuthPolicy {
@@ -203,11 +215,16 @@ export interface ConnectorWebhookPolicy {
  */
 export interface ConnectorTelemetryDefinition {
   method: string;
+  /**
+   * The provider operation the method calls, as the provider's reference names
+   * it. One method per operation, which the build holds to.
+   */
+  operation: string;
   description?: string;
   /**
-   * True when the method changes state upstream. Read by the MCP context, which
-   * refuses a mutating call from a read-only tool — closing the one hole
-   * `docs/apps/mcp.md` documented as reviewer-enforced.
+   * True when the method changes state upstream. An app calls it only when its
+   * entry says `"access": "write"` and the connector's admin has allowed
+   * changes, and an MCP tool never does (src/lib/apps/read-only.ts).
    */
   mutates?: boolean;
 }

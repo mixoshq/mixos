@@ -4,7 +4,11 @@ You are creating or modifying a connector under `connectors/`.
 
 ## Write a plan first (before any code)
 
-For anything beyond a trivial one-line tweak, **write a build plan to `connectors/<slug>/plans/YYYYMMDD_HHMM-<plan-name>.md`** before editing code — the plan lives **inside the connector it describes**, so it travels with the code. Cover: **Context** (why this change), **Decisions** (anything locked with the user), **Structure** (the file-level changes — `connector.json`, `index.ts`), and **Verification** (how you'll prove it works). Get it reviewed when the change is non-trivial.
+For anything beyond a trivial one-line tweak, **write a build plan to `connectors/<slug>/plans/YYYYMMDD_HHMM-<plan-name>.md`** before editing code — the plan lives **inside the connector it describes**, so it travels with the code. Cover: **Context** (why this change), **Decisions** (anything locked with the user), **Structure** (the file-level changes — `connector.json`, `index.ts`), **Operations** (see below), and **Verification** (how you'll prove it works). Get it reviewed when the change is non-trivial.
+
+**Operations: build to the provider's API, not to one app.** A connector mirrors its provider, and apps decide what to do with it; that is what lets the next app use it unchanged ([the contract](connectors/AGENTS.md#the-contract-a-connector-mirrors-its-provider)). So the plan lists, from the provider's API reference, every operation on each resource the connector will touch, reads and writes alike, and maps each to one method with the `operation` it calls. A request phrased as one app's need ("our dashboard needs the totals") names the resources to cover, not the methods to write. Writes are declared `"mutates": true` and ship off: an admin allows them per install.
+
+**Changing an existing connector:** say which kind of change it is. A new operation, an optional parameter or a new field in a result is a new **minor** version. Removing or renaming a method, changing what one takes or returns, or making a read into a write is a new **major** version, and every app that names the old one must be checked against it. A bug fix that changes neither is a **patch**. Set `version` in `connector.json` accordingly. An app's request alone is never a reason to reshape a method.
 
 - **Creating a new connector?** Make `connectors/<slug>/plans/` as the first thing you write, before `connector.json`.
 - **Read the existing plans in that folder first** when modifying a connector — especially the auth strategy and failure-mapping decisions, which are the expensive ones to get wrong twice.
@@ -133,22 +137,26 @@ Read [registry-ux.md](docs/connectors/registry-ux.md) first. In short:
 
 ## Non-negotiable invariants (from connectors/AGENTS.md)
 
+- A connector mirrors its provider: every operation on the resources it touches, one method each with its `operation`, returning what the provider returns (`z.looseObject`, nothing converted lossily, field lists as optional parameters). Never a method shaped for one app.
+- `version` (`X.Y.Z`) is required. Within a major version only add.
 - Folder name === `name` in `connector.json` (lowercase, hyphens). No leading underscore on shipped connectors.
 - Connectors are server-side only. Never import one from client code.
 - Credentials flow through `initialize(credentials)` only — no env vars, no hardcoded secrets, no fallbacks. `credentialFields[].key` must match what `initialize()` reads.
 - Stateless: no caching across requests.
 - `configured` must be `true` only when every required credential is present.
 - Never set `lastUpdated` in `connector.json`; never hand-edit `src/generated/connector-registry.ts`.
-- **Every public method on the class must be declared in `telemetry`**, with `mutates: true` on anything that changes state upstream. The build rejects an undeclared one: the registry reports what a connector can do from that list, so a method missing from it is one an admin is never told about.
+- **Every public method on the class must be declared in `telemetry`**, with its `operation` and `mutates: true` on anything that changes state upstream. The build rejects an undeclared one: the registry reports what a connector can do from that list, so a method missing from it is one an admin is never told about. It is also all an app can call.
+- A scope only the write methods need is `"requested": "write"`, asked for only once an admin allows changes.
 
 ## Verify before reporting done
 
 1. `npx tsx scripts/generate-project-registry.ts` — confirm the connector appears in the regenerated registry.
 2. `npm run typecheck`.
 3. `npm run verify:connectors`.
-4. `npx tsx scripts/check-scopes.ts <name>` — proves `auth.scopesUrl` parses. **Read the output.** "14 scopes parsed" is not the test; whether the descriptions are English sentences and the read/write split is right is the test. A requested scope the page never documents is flagged — that is usually a typo in `auth.scopes`.
-5. Dev server → Administration → Connector Registry. Confirm it renders, save real credentials, and exercise it from a test app API route. Do not claim "done" without actually calling it.
-6. **Walk the wizard as an admin would**, from an unconfigured state. Each step's instructions should be followable without leaving the dialog, and each tick should appear only after the platform actually verified something.
+4. `npx tsx scripts/check-connector-contract.ts` after staging, for a change to an existing connector: it refuses a version that goes backwards, and a removed method or a read made into a write without a new major version.
+5. `npx tsx scripts/check-scopes.ts <name>` — proves `auth.scopesUrl` parses. **Read the output.** "14 scopes parsed" is not the test; whether the descriptions are English sentences and the read/write split is right is the test. A requested scope the page never documents is flagged — that is usually a typo in `auth.scopes`.
+6. Dev server → Administration → Connector Registry. Confirm it renders, save real credentials, and exercise it from a test app API route. For write methods, call one while the connector is read-only (it is refused), then allow changes, connect again if it uses OAuth, and call it again. Do not claim "done" without actually calling it.
+7. **Walk the wizard as an admin would**, from an unconfigured state. Each step's instructions should be followable without leaving the dialog, and each tick should appear only after the platform actually verified something.
 
 ## User request
 

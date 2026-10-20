@@ -99,9 +99,19 @@ So the parse lands in `connector.json` as `auth.scopes`:
   { "scope": "…/records.readonly", "description": "View your records and settings",
     "access": "read",  "requested": true },
   { "scope": "…/records.modify",   "description": "Create, edit and delete your records",
-    "access": "write", "requested": false }
+    "access": "write", "requested": "write" },
+  { "scope": "…/admin",            "description": "Manage your account",
+    "access": "read-write", "requested": false }
 ]
 ```
+
+`requested` says when the connector asks for a scope: `true` always, `"write"`
+only on an install whose admin has allowed the connector to change data, and
+`false` never. A scope only the connector's write methods need is `"write"`, so
+a read-only install never holds it: the decision to grant it moves from each
+release to each install. The build refuses a `"write"` scope on a connector with
+no method declared `mutates`, which would have nothing to use it. See
+[Changing data](architecture.md#changing-data).
 
 One array, not two. The catalogue and the request are the same list seen from
 two angles, and keeping them in separate places is how they drift apart.

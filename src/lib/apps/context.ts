@@ -13,11 +13,14 @@ import type { BaseConnector } from "@/lib/connectors/types";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getDecryptedConfig } from "@/lib/connectors/config";
+import { HttpConnector } from "@/lib/connectors/http-connector";
 import {
   disabledConnector,
   getDisabledConnectors,
 } from "@/lib/connectors/switch";
 import { initializeWithUserGrant } from "@/lib/connectors/user-grant";
+import { getWritableConnectors } from "@/lib/connectors/writable";
+import { appReachRules, narrowConnector } from "./connector-reach";
 import { createScopedClient } from "./scoped-db";
 import { createNotificationsClient } from "./notifications";
 import { createServicesClient } from "./services";
@@ -87,8 +90,9 @@ export async function buildAppContext(
 
   // Initialize declared connectors: the admin-configured credentials in
   // `connector_configs`, shared by every user, or for a `userScoped` connector
-  // the signed-in user's own grant. Apps declare names only; the platform
-  // resolves credentials.
+  // the signed-in user's own grant. Apps declare which connectors they use and
+  // whether they change data in them; the platform resolves credentials, and
+  // hands each over narrowed to what the app may call.
   const connectors = await loadTenantConnectors(
     manifest,
     "buildAppContext",
@@ -211,6 +215,43 @@ async function loadTenantConnectors(
     return connectors;
   }
 
+  /*
+    Allow changes (src/lib/connectors/writable.ts), read once like the switch,
+    for the connectors this app asks to change data in: an app that only
+    reads costs no query. Unreadable fails closed: every connector is read-only
+    for this context, which costs an app its writes and nothing else.
+  */
+  const writers = manifest.connectorRequirements
+    .filter((r) => r.access === "write")
+    .map((r) => r.name);
+  let writable: Set<string> = new Set();
+  try {
+    if (writers.length > 0) writable = await getWritableConnectors(writers);
+  } catch (err) {
+    console.error(
+      `[${logTag}] could not read which connectors may change data, so all are read-only:`,
+      err,
+    );
+    writable = new Set();
+  }
+
+  /*
+    What the app is handed: the connector narrowed to its declared methods
+    (./connector-reach.ts), and its writes only when the app's entry asks for
+    "write" and an admin has allowed changes. Never the instance itself, whose
+    protected `request()` would reach any path with its credential.
+  */
+  const reachFor = (connName: string) =>
+    appReachRules({
+      appSlug: manifest.slug,
+      connectorName: connName,
+      subject: connectorManifest(connName)?.displayName ?? connName,
+      need: manifest.connectorRequirements.find((r) => r.name === connName),
+      writable: writable.has(connName),
+    });
+  const handOver = (connName: string, connector: BaseConnector) =>
+    narrowConnector(connector, connectorManifest(connName)?.telemetry ?? [], reachFor(connName));
+
   for (const connName of declaredNames) {
     /*
       Turned off by an admin. The connector is never imported, constructed or
@@ -232,6 +273,9 @@ async function loadTenantConnectors(
         mod.default ??
         mod[Object.keys(mod).find((k) => typeof mod[k] === "function")!];
       const instance: BaseConnector = new ConnectorClass();
+      // A client-credentials token is minted with the connector's write scopes
+      // only for a caller that may write with it.
+      if (reachFor(connName).writes) HttpConnector.allowWrites(instance);
 
       let tenantCreds: Record<string, string> | null = null;
       try {
@@ -286,12 +330,15 @@ async function loadTenantConnectors(
           continue;
         }
 
-        connectors[connName] = instrumentConnector(instance, {
-          connectorSlug: connName,
-          methods: connectorTelemetryMethods(connName),
-          callerAppSlug: manifest.slug,
-          userId,
-        });
+        connectors[connName] = handOver(
+          connName,
+          instrumentConnector(instance, {
+            connectorSlug: connName,
+            methods: connectorTelemetryMethods(connName),
+            callerAppSlug: manifest.slug,
+            userId,
+          }),
+        );
         continue;
       }
 
@@ -315,12 +362,15 @@ async function loadTenantConnectors(
         );
       }
 
-      connectors[connName] = instrumentConnector(instance, {
-        connectorSlug: connName,
-        methods: connectorTelemetryMethods(connName),
-        callerAppSlug: manifest.slug,
-        userId,
-      });
+      connectors[connName] = handOver(
+        connName,
+        instrumentConnector(instance, {
+          connectorSlug: connName,
+          methods: connectorTelemetryMethods(connName),
+          callerAppSlug: manifest.slug,
+          userId,
+        }),
+      );
     } catch (err) {
       console.error(`[${logTag}] connector "${connName}" failed to load:`, err);
     }

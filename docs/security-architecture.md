@@ -215,7 +215,8 @@ Output:     base64(IV) : base64(AuthTag) : base64(Ciphertext)
 |   4. new ConnectorClass()                        |
 |   5. instance.initialize(credentials)            |
 |      - Credentials stored as private fields      |
-|   6. Inject into context.connectors              |
+|   6. Narrow to the declared methods (§16.1)      |
+|   7. Inject into context.connectors              |
 |                                                  |
 |  Instance is STATELESS and REQUEST-SCOPED:       |
 |   - Created fresh per request                    |
@@ -231,6 +232,7 @@ Output:     base64(IV) : base64(AuthTag) : base64(Ciphertext)
 | Credentials in browser JS      | No app code imports a connector at runtime; the build refuses it (§24) |
 | Credentials in API responses   | Connectors are server-only; SDK returns app data only  |
 | Credentials leaked via caching | Connector instances are stateless, never cached        |
+| An app reaching around a connector | The app gets it narrowed to its declared methods; `request()` throws (§16.1) |
 | Credentials at rest in DB      | AES-256-GCM with per-record random IV                  |
 | Tampered ciphertext            | GCM authentication tag verified on every decrypt       |
 | Key in source code             | Key loaded from env var at runtime, not committed      |
@@ -1368,6 +1370,41 @@ carrying the credential it just rejected will put that value in the server log.
 Connector authors own this: invariant 18 in
 [`connectors/AGENTS.md`](../connectors/AGENTS.md) is "never log or echo
 credentials", and dropping the upstream error body is the base class's job.
+
+### 16.1 What an app can reach on a connector
+
+An app is never handed the connector instance. `loadTenantConnectors()` hands it
+the instance narrowed by
+[`src/lib/apps/connector-reach.ts`](../src/lib/apps/connector-reach.ts) to the
+methods the connector's `telemetry` declares, which the build holds to the
+class's public methods. Anything else callable throws, `request()` above all:
+protected to the compiler, reachable with `as any` at runtime, and able to send
+any verb to any path with the connector's credential. So the manifest is the
+whole of what an app can do with a connector.
+
+A method declared `mutates` runs only with two keys, each held by someone
+different:
+
+| Key | Who holds it | Where |
+| --- | --- | --- |
+| The app's entry says `"access": "write"` | the app's developer, in review | `app.json` |
+| The connector may change data on this install | an admin of this install | `platform_settings`, `connector.writable.<name>` |
+
+Without the first, the call throws a `ConnectorUseError` naming the app's
+manifest. Without the second, it throws a `forbidden` ConnectorError telling an
+admin where to allow changes. Neither runs the method. The setting fails closed:
+when it can't be read, every connector is read-only for that request.
+
+The second key reaches the provider too. A scope a connector requests with
+`"write"` is asked for at Connect, and minted into a client-credentials token,
+only where changes are allowed, so a read-only install's grant can't write even
+through a method that wrongly declared itself a read. The release step deletes
+the setting when a different connector takes the name, as it turns the switch
+off (§3.1).
+
+What this still trusts is the declaration: a method that writes but is declared
+as a read runs as a read. The scopes are what bound that, which is why a write
+scope belongs behind `"write"`.
 
 
 ---

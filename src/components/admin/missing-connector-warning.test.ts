@@ -32,6 +32,7 @@ const CRM: MissingConnector = { name: "crm", displayName: "Verify CRM", state: "
 const DRIVE: MissingConnector = { name: "drive", displayName: "Drive", state: "unconfigured" };
 const MAIL: MissingConnector = { name: "mail", displayName: "Mail", state: "unconfigured" };
 const FEED: MissingConnector = { name: "feed", displayName: "Feed", state: "disabled" };
+const SHEETS: MissingConnector = { name: "sheets", displayName: "Sheets", state: "read-only" };
 
 const warning = (missingConnectors: MissingConnector[], isActive: boolean) =>
   text(renderToStaticMarkup(createElement(MissingConnectorWarning, { app, missingConnectors, isActive })));
@@ -55,5 +56,16 @@ test("an active app is running without them: it can't be granted, and what needs
   assert.equal(
     warning([DRIVE, MAIL, FEED], true),
     "CRM Check is active, but Drive and Mail aren't configured and Feed isn't enabled, so it can't be granted to anyone, and anything that needs those connectors fails. Open Connector Registry →",
+  );
+});
+
+test("an app that changes data waits on its connector being allowed to", () => {
+  assert.equal(
+    warning([SHEETS], false),
+    "CRM Check can't be activated or granted until Sheets is allowed to change data. Open Connector Registry →",
+  );
+  assert.equal(
+    warning([SHEETS], true),
+    "CRM Check is active, but Sheets isn't allowed to change data, so it can't be granted to anyone, and anything that needs that connector fails. Open Connector Registry →",
   );
 });

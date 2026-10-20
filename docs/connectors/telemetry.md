@@ -4,19 +4,24 @@
 
 Telemetry lets you see **how a connector is actually used** — which operations get called, how often, and **which apps** are driving them. You list the connector's methods in `connector.json`, and the platform does the rest.
 
-The list is required, not opt-in: **every public method on the class must be in it**, or the build fails. The exceptions are `initialize`, `testConnection` and `handleWebhook`, which only the platform calls. Make a helper `private` if apps should not call it, and mark each method that changes anything upstream `"mutates": true`.
+The list is required, not opt-in: **every public method on the class must be in it**, or the build fails. The exceptions are `initialize`, `testConnection` and `handleWebhook`, which only the platform calls. Make a helper `private` if apps should not call it, give each method the provider `operation` it calls, and mark each method that changes anything upstream `"mutates": true`.
 
 ```json
 // connector.json
 {
   "name": "my-service",
   "telemetry": [
-    { "method": "enrichPerson",  "description": "Enriched a person record" },
-    { "method": "enrichCompany", "description": "Enriched a company record" },
-    { "method": "updatePerson",  "description": "Updated a person record", "mutates": true }
+    { "method": "enrichPerson",  "operation": "POST /people/enrich",    "description": "Enriched a person record" },
+    { "method": "enrichCompany", "operation": "POST /companies/enrich", "description": "Enriched a company record" },
+    { "method": "updatePerson",  "operation": "PATCH /people/{id}",     "description": "Updated a person record", "mutates": true }
   ]
 }
 ```
+
+`operation` is the provider operation as its reference names it: a path, an RPC
+method, a GraphQL operation. No two methods may name the same one, so the list
+reads as a map of what the connector covers of the provider's API, and the
+Connector Registry shows it on the connector's Details tab.
 
 ## Connectors write no telemetry code
 
@@ -62,7 +67,7 @@ declared `method` must be a public method on the class.
 ## Limits
 
 - **Every public method, and nothing else.** The build fails on a public method missing from `telemetry`, and on a listed method the class doesn't have as a public method.
-- **The list also decides what an MCP tool can call.** A tool reaches a connector only through the methods listed here, and one marked `"mutates": true` throws when a tool calls it — so mark every method that changes anything upstream. See [MCP tools](../apps/mcp.md#read-only-is-enforced-not-requested).
+- **The list also decides what an app and an MCP tool can call.** Each reaches a connector only through the methods listed here: an app's write needs `"access": "write"` on its entry and an admin's Allow changes, and a tool's always throws — so mark every method that changes anything upstream. See [Changing data](architecture.md#changing-data) and [MCP tools](../apps/mcp.md#read-only-is-enforced-not-requested).
 - **No custom/domain events.** Connector telemetry counts method *calls* — it is auto-instrumented, not a general `track(event, props)` API. If you need arbitrary custom events, emit them from the **app** that calls the connector, using [app telemetry](../apps/telemetry.md).
 - **Best-effort.** Recording never blocks or fails a connector call.
 - **No payloads.** Arguments, results, and credentials are never recorded. The calling user is: admins see their name beside each call on the Usage Logs tab.

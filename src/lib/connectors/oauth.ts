@@ -14,6 +14,7 @@ import {
   parseRetryAfter,
 } from "./status-map";
 import type { ConnectorAuthPolicy } from "./types";
+import { isScopeRequested } from "./write-policy";
 import { platformKey } from "@/lib/env/keys";
 
 /**
@@ -92,16 +93,26 @@ export interface OAuthFlowState {
   codeVerifier: string;
   returnTo: string;
   exp: number;
+  /**
+   * Whether this authorization asked for the scopes the connector requests
+   * once changes are allowed (src/lib/connectors/writable.ts), as the setting
+   * stood when it started. Carried so the callback reads the grant against
+   * what was actually asked for, even if an admin changes the setting while
+   * the provider's consent screen is open.
+   */
+  writes: boolean;
 }
 
 export function newFlowState(
   connector: string,
   returnTo: string,
   userId: string | null = null,
+  writes = false,
 ): OAuthFlowState {
   return {
     connector,
     userId,
+    writes,
     state: randomBytes(32).toString("base64url"),
     // RFC 7636 allows 43–128 chars; 43 bytes of entropy encodes to 43+.
     codeVerifier: randomBytes(48).toString("base64url"),
@@ -127,7 +138,11 @@ export function openFlowState(
     const flow = JSON.parse(
       decrypt(sealed, platformKey("connectorEncryption")),
     ) as OAuthFlowState;
-    if (typeof flow.state !== "string" || typeof flow.codeVerifier !== "string")
+    if (
+      typeof flow.state !== "string" ||
+      typeof flow.codeVerifier !== "string" ||
+      typeof flow.writes !== "boolean"
+    )
       return null;
     if (!Number.isFinite(flow.exp) || flow.exp < Date.now()) return null;
     return flow;
@@ -194,14 +209,19 @@ export function oauthReturnUrl(
 // ── Authorize URL ───────────────────────────────────────────────────────────
 
 /**
- * The scopes actually sent at authorization time.
+ * The scopes actually sent at authorization time, or when a client-credentials
+ * token is minted.
  *
  * `auth.scopes` carries every scope the provider documents so the registry can
  * show what an API offers; only entries flagged `requested` are ones this
- * connector asks for.
+ * connector asks for. One flagged `"write"` is asked for only with `writes`:
+ * on an install whose admin allowed the connector to change data.
  */
-export function requestedScopes(policy: ConnectorAuthPolicy): string[] {
-  return (policy.scopes ?? []).filter((s) => s.requested).map((s) => s.scope);
+export function requestedScopes(
+  policy: ConnectorAuthPolicy,
+  { writes = false }: { writes?: boolean } = {},
+): string[] {
+  return (policy.scopes ?? []).filter((s) => isScopeRequested(s, writes)).map((s) => s.scope);
 }
 
 export function buildAuthorizeUrl(
@@ -225,7 +245,7 @@ export function buildAuthorizeUrl(
   url.searchParams.set("code_challenge_method", "S256");
   // Only the requested subset. `scopes` is the provider's whole catalogue, so
   // sending it unfiltered would ask consent for every permission the API has.
-  const requested = requestedScopes(policy);
+  const requested = requestedScopes(policy, { writes: opts.flow.writes });
   if (requested.length) url.searchParams.set("scope", requested.join(" "));
   return url.toString();
 }
@@ -369,6 +389,8 @@ export async function exchangeAuthorizationCode(opts: {
   clientSecret: string;
   code: string;
   codeVerifier: string;
+  /** The flow's `writes`: what the authorization asked for. */
+  writes: boolean;
   timeoutMs?: number;
 }): Promise<TokenSet> {
   const tokens = await requestToken({
@@ -385,7 +407,7 @@ export async function exchangeAuthorizationCode(opts: {
       code_verifier: opts.codeVerifier,
     },
   });
-  return { ...tokens, scope: grantedScope(tokens.scope, opts.policy) };
+  return { ...tokens, scope: grantedScope(tokens.scope, opts.policy, { writes: opts.writes }) };
 }
 
 /**
@@ -402,9 +424,10 @@ export async function exchangeAuthorizationCode(opts: {
 export function grantedScope(
   responseScope: string | null | undefined,
   policy: ConnectorAuthPolicy,
+  { writes = false }: { writes?: boolean } = {},
 ): string | undefined {
   if (responseScope != null) return responseScope;
-  const requested = requestedScopes(policy);
+  const requested = requestedScopes(policy, { writes });
   return requested.length > 0 ? requested.join(" ") : undefined;
 }
 

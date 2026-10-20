@@ -71,6 +71,7 @@ function manifest(slug: string, global: boolean): AppManifest {
     icon: "box",
     connectors: [],
     optionalConnectors: [],
+    connectorRequirements: [],
     database: false,
     updatedAt: [],
     notifications: false,

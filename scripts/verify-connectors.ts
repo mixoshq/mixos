@@ -263,6 +263,13 @@ class Probe extends HttpConnector {
       }
     ).request(p, init, opts);
   }
+  callBody<T>(p: string, init?: RequestInit, opts?: object) {
+    return (
+      this as unknown as {
+        requestBody(a: string, b?: RequestInit, c?: object): Promise<T>;
+      }
+    ).requestBody(p, init, opts);
+  }
   pages<T>(p: string, opts?: object) {
     return (
       this as unknown as {
@@ -335,6 +342,18 @@ async function main() {
     "204 returns null instead of crashing on json()",
     (await c.call("/empty")) === null,
   );
+  {
+    const empty = await expectError(() => c.callBody("/empty"));
+    check(
+      "requestBody turns an empty body into unexpected_response",
+      empty.category === "unexpected_response",
+      empty.category,
+    );
+    check(
+      "requestBody returns the body when there is one",
+      (await c.callBody<{ hello: string }>("/ok"))?.hello === "world",
+    );
+  }
 
   const nf = await expectError(() => c.call("/missing"));
   check("404 -> not_found", nf.category === "not_found");
@@ -511,6 +530,15 @@ async function main() {
 
   check("testConnection returns ok", (await c.testConnection()).ok === true);
 
+  reset();
+  await c.call("/ok", undefined, { query: { ranges: ["Sheet1!A1:B2", "Totals"], render: "x", gone: undefined } });
+  check(
+    "an array query value repeats its parameter",
+    seen["GET /ok"]?.url?.includes("ranges=Sheet1%21A1%3AB2&ranges=Totals&render=x") === true &&
+      !seen["GET /ok"]?.url?.includes("gone"),
+    seen["GET /ok"]?.url ?? "",
+  );
+
   // ══ Auth ═════════════════════════════════════════════════════════════════
   suite = "auth";
   const cc = (
@@ -543,6 +571,35 @@ async function main() {
     "token reused for the request lifetime",
     hits["POST /token"] === 1,
     `1 mint / 3 calls`,
+  );
+
+  // A scope requested with "write" is minted into the token only for a caller
+  // the platform allowed to write (HttpConnector.allowWrites).
+  const ccWrites = cc({
+    scopes: [
+      { scope: "read:things", requested: true },
+      { scope: "write:things", requested: "write" },
+    ],
+  });
+  reset();
+  a = await mk(ccWrites);
+  await a.call("/data");
+  check(
+    "a write scope is left out of a token for a reader",
+    !(seen["POST /token"].body ?? "").includes("write%3Athings"),
+    seen["POST /token"].body ?? "",
+  );
+  reset();
+  a = new Probe();
+  a.authOverride = ccWrites;
+  a.httpOverride = { baseUrl: base };
+  HttpConnector.allowWrites(a);
+  await a.initialize({ baseUrl: base, clientId: "abc", clientSecret: "s3cr3t" });
+  await a.call("/data");
+  check(
+    "a write scope is minted into a token for a writer",
+    (seen["POST /token"].body ?? "").includes("scope=read%3Athings+write%3Athings"),
+    seen["POST /token"].body ?? "",
   );
 
   reset();
@@ -739,6 +796,25 @@ async function main() {
   );
   check("authorize URL: state echoed", q.get("state") === flow.state);
   check("authorize URL: scope forwarded", q.get("scope") === "read:things");
+  const withWrites = authCode({
+    scopes: [
+      { scope: "read:things", requested: true },
+      { scope: "write:things", requested: "write" },
+    ],
+  });
+  const scopeFor = (writes: boolean) =>
+    new URL(
+      buildAuthorizeUrl(withWrites, {
+        connector: "acme",
+        clientId: "cid",
+        flow: newFlowState("acme", "/admin/connectors", null, writes),
+      }),
+    ).searchParams.get("scope");
+  check("authorize URL: a write scope is left out while changes aren't allowed", scopeFor(false) === "read:things");
+  check(
+    "authorize URL: a write scope is asked for once changes are allowed",
+    scopeFor(true) === "read:things write:things",
+  );
   check(
     "redirect URI built from configured origin, not a header",
     q.get("redirect_uri") === redirectUriFor("acme") &&
@@ -757,6 +833,7 @@ async function main() {
     clientSecret: "sec",
     code: "the-code",
     codeVerifier: flow.codeVerifier,
+    writes: false,
   });
   check(
     "code exchange returns access + refresh tokens",
@@ -783,6 +860,7 @@ async function main() {
     clientSecret: "sec",
     code: "the-code",
     codeVerifier: flow.codeVerifier,
+    writes: false,
   });
   check(
     "a token response that omits scope granted what was requested",

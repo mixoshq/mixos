@@ -37,6 +37,12 @@ import {
   formatZodError,
 } from "./manifest-schemas";
 import { normalizeRemixKeywords, type RemixIndexEntry } from "../src/lib/apps/remix";
+import {
+  connectorEntryNames,
+  connectorRequirements,
+  describeConnectorVersion,
+  satisfiesConnectorVersion,
+} from "../src/lib/connectors/requirements";
 import type {
   ThemeAssets,
   ThemeFontFace,
@@ -1502,8 +1508,9 @@ async function readAppText(
     description: r.description ?? "",
     tagline: r.tagline ?? null,
     icon: r.icon ?? "box",
-    connectors: r.connectors ?? [],
-    optionalConnectors: r.optionalConnectors ?? [],
+    connectors: connectorEntryNames(r.connectors),
+    optionalConnectors: connectorEntryNames(r.optionalConnectors),
+    connectorRequirements: connectorRequirements(r.connectors, r.optionalConnectors),
     database: r.database ?? false,
     updatedAt,
     notifications: r.notifications ?? false,
@@ -1524,8 +1531,8 @@ async function readAppText(
     widgets: buildWidgets(r.widgets),
     schedules,
     sync: validateSyncs(r.sync, slug, appDir, [
-      ...(r.connectors ?? []),
-      ...(r.optionalConnectors ?? []),
+      ...connectorEntryNames(r.connectors),
+      ...connectorEntryNames(r.optionalConnectors),
     ]),
     emits: r.emits ?? [],
     listensTo: r.listensTo ?? [],
@@ -1539,8 +1546,8 @@ async function readAppText(
     provides: validateProvides(r.provides, slug, appDir),
     consumes: normalizeConsumes(r.consumes),
     mcp: validateMcpTools(r.mcp, slug, appDir, [
-      ...(r.connectors ?? []),
-      ...(r.optionalConnectors ?? []),
+      ...connectorEntryNames(r.connectors),
+      ...connectorEntryNames(r.optionalConnectors),
     ]),
     ...(pageVisibility ? { pageVisibility } : {}),
   };
@@ -1735,6 +1742,7 @@ async function scanApps(
 interface ConnectorManifestOut {
   name: string;
   displayName: string;
+  version: string;
   /** Public URL of the copied icon, or absent when the connector ships none. */
   icon?: string;
   userScoped?: boolean;
@@ -1862,6 +1870,7 @@ function readConnector(connectorDir: string, name: string): ConnectorManifestOut
   return {
     name: raw.name,
     displayName: raw.displayName,
+    version: raw.version,
     // Stored as the URL the browser will request, not the authoring path,
     // so no call site has to know where assets get copied to.
     ...(raw.icon
@@ -1963,6 +1972,60 @@ function validateUserScopedUsage(
         `connector-dependent part into a request the user makes.`,
     );
   }
+}
+
+/**
+ * Each app's connector entries, held to the connectors in this checkout.
+ *
+ * An entry names the connector version the app was built against, and the
+ * connector here must be the same major version and at least that release:
+ * within a major version a connector only adds, so a later 1.x still has
+ * everything a 1.2.0 app calls, and 2.0.0 may not. An entry asking for
+ * "write" must name a connector that declares a method changing data, or it
+ * would grant something nobody could see the use of.
+ *
+ * A connector that isn't in this checkout is not checked: the activation gate
+ * refuses an app whose required connector is missing, as it always has, and
+ * an optional one is simply absent.
+ */
+function connectorRequirementProblems(
+  apps: readonly Pick<AppManifest, "slug" | "connectorRequirements">[],
+  connectors: readonly Pick<ConnectorManifestOut, "name" | "version" | "telemetry">[],
+): string[] {
+  const byName = new Map(connectors.map((c) => [c.name, c]));
+  const problems: string[] = [];
+  for (const app of apps) {
+    for (const need of app.connectorRequirements) {
+      const connector = byName.get(need.name);
+      if (!connector) continue;
+      if (!satisfiesConnectorVersion(need.version, connector.version)) {
+        const newerMajor = Number(connector.version.split(".")[0]) > Number(need.version.split(".")[0]);
+        problems.push(
+          `apps/${app.slug}/app.json was built against ${need.name} ${describeConnectorVersion(need.version)}, ` +
+            `and connectors/${need.name} is ${connector.version}.\n  ` +
+            (newerMajor
+              ? `${connector.version} is a new major version, which may remove or change what the app calls. ` +
+                `Check the app against it, then name ${connector.version} in its entry.`
+              : `Update ${need.name} to ${need.version} or later first.`),
+        );
+      }
+      if (need.access === "write" && !connector.telemetry.some((t) => t.mutates)) {
+        problems.push(
+          `apps/${app.slug}/app.json asks to change data in ${need.name}, which declares no method ` +
+            `that changes anything.\n  Leave "access" out: the app only reads.`,
+        );
+      }
+    }
+  }
+  return problems;
+}
+
+function validateConnectorRequirements(
+  apps: readonly AppManifest[],
+  connectors: readonly ConnectorManifestOut[],
+): void {
+  const problems = connectorRequirementProblems(apps, connectors);
+  if (problems.length > 0) throw new Error(problems.join("\n"));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2484,6 +2547,7 @@ export type ConnectorName = (typeof connectorNames)[number];
 
   // Both registries are in hand here, which is what this check needs.
   validateUserScopedUsage(apps, connectors);
+  validateConnectorRequirements(apps, connectors);
 
   console.log("\nScanning themes...");
   const { themes, css: themeCss, tokens: themeTokens } = await scanThemes();
@@ -2689,6 +2753,14 @@ const RegisteredAppSchema = z.looseObject({
   database: z.boolean(),
   connectors: z.array(z.string()),
   optionalConnectors: z.array(z.string()),
+  connectorRequirements: z.array(
+    z.looseObject({
+      name: z.string(),
+      optional: z.boolean(),
+      access: z.enum(["read", "write"]),
+      version: z.string(),
+    }),
+  ),
   schedules: z.array(z.looseObject({ name: z.string() })),
   sync: z.array(z.looseObject({ name: z.string() })),
   provides: z.array(z.looseObject({ name: z.string(), consumers: consumersSchema })),
@@ -2698,7 +2770,9 @@ const RegisteredAppSchema = z.looseObject({
 });
 const RegisteredConnectorSchema = z.looseObject({
   name: z.string().min(1),
+  version: z.string(),
   userScoped: z.boolean().optional(),
+  telemetry: z.array(z.looseObject({ method: z.string(), mutates: z.boolean().optional() })),
 });
 
 /**
@@ -2818,6 +2892,9 @@ async function checkStagedApp(dir: string, slug: string, registered: Registered)
   } catch (err) {
     return { problems: [errorText(err)], deferred };
   }
+  // This app's entries only: another app's problem is not this install's.
+  const needs = connectorRequirementProblems([app.manifest], registered.connectors);
+  if (needs.length > 0) return { problems: needs, deferred };
   return { problems: [], deferred };
 }
 
@@ -2840,6 +2917,11 @@ function checkStagedConnector(dir: string, name: string, registered: Registered)
   } catch (err) {
     return { problems: [errorText(err)], deferred: [] };
   }
+  // The installed apps' entries for this connector, against this release: a
+  // new major version an app wasn't built against is refused, not installed
+  // under it.
+  const needs = connectorRequirementProblems(registered.apps, [connector]);
+  if (needs.length > 0) return { problems: needs, deferred: [] };
   return { problems: [], deferred: [] };
 }
 
@@ -3062,6 +3144,7 @@ if (require.main === module) {
 export {
   checkInstalledFloors,
   checkStaged,
+  connectorRequirementProblems,
   readRegistered,
   runFullGenerator,
   scanApps,
