@@ -1,9 +1,9 @@
 # Upgrading MixOS
 
-Upgrading means merging a new release of MixOS into your fork and deploying it.
-Your apps, connectors and themes come along, because they live in the same
-repository. How smooth it is depends mostly on whether you changed anything
-under `src/`.
+Upgrading means merging a new release of MixOS into your repository and
+deploying it. Your apps, connectors and themes come along, because they live in
+the same repository. How smooth it is depends mostly on whether you changed
+anything under `src/`.
 
 Each version of MixOS is a release: an annotated tag on `mixoshq/mixos`'s `main`,
 such as `v0.2.0`, listed on the
@@ -15,19 +15,33 @@ changes first. Upgrade by merging the newest release's tag. Don't merge
 ## When a new release is out
 
 Each instance asks mixos.org once a day which releases of MixOS exist. When a
-newer one is out, the top of every admin page says so, such
-as: "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor release: it may
-need changes." The notice links to the release's page on mixos.org and to this
-guide, and its notes are folded under it. Nothing is applied for you. The check
+newer one is out, admins see a slim banner over every page: "MixOS v0.5.0 is
+out (you run v0.4.2). Run `/mixos upgrade` in Claude Code to upgrade." Its
+**Details** link goes to the full notice at the top of the admin pages, which
+says what kind of release it is, such as "MixOS 0.5.0 is available (this
+instance runs 0.4.2). A minor release: it may need changes.", folds the notes
+under it, links to the release's page on mixos.org and to this guide, and gives
+`/mixos upgrade` to copy and the merge by hand. Dismissing the banner hides it
+until the next release; the notice stays. Nothing is applied for you. The check
 sends nothing about the instance; see
-[New releases of MixOS](README.md#new-releases-of-mixos) for what it does, and how
-to turn it off.
+[New releases of MixOS](README.md#new-releases-of-mixos) for what it does, and
+how to turn it off.
 
-With the [GitHub App](github-app.md) linked and your copy a fork of
-`mixoshq/mixos`, the notice can open the upgrade as a pull request for you; see
-[Through the GitHub App](#through-the-github-app).
+## The quick way: /mixos upgrade
 
-## Upgrade in five steps
+Back up the database first, as step 1 below says. Then, in Claude Code, in your
+copy of MixOS, run:
+
+```
+/mixos upgrade
+```
+
+It finds MixOS's newest release, and shows its notes, anything breaking and any
+new migrations before it changes anything. Once you say yes, it merges the
+release on a branch, runs the checks, and opens the pull request with
+`/mixos deploy`. Merging the pull request ships the upgrade, as step 5 says.
+
+## The manual way, in five steps
 
 1. **Back up the database**, before anything else. Migrations only go forward,
    so a backup is the way back if something goes wrong.
@@ -43,7 +57,9 @@ With the [GitHub App](github-app.md) linked and your copy a fork of
    Compose, dump from inside the container, as in
    [Backups and access](../providers/self-hosted.md#backups-and-access).
 
-2. **Merge the release, on a branch.** Add `mixoshq/mixos` as `upstream` once:
+2. **Merge the release, on a branch.** Your copy takes MixOS's releases from
+   `upstream`, which `/mixos init` sets up. If `git remote get-url upstream`
+   finds none, add it once:
    `git remote add upstream https://github.com/mixoshq/mixos.git`. Then:
 
    ```bash
@@ -71,8 +87,8 @@ With the [GitHub App](github-app.md) linked and your copy a fork of
    npm run build && npm run typecheck
    ```
 
-5. **Push the branch, and merge it** into your fork's `main` through a pull
-   request against your fork, not `mixoshq/mixos`. Merging deploys it, and every
+5. **Push the branch, and merge it** into `main` through a pull request on your
+   own repository, not `mixoshq/mixos`. Merging deploys it, and every
    host runs the release step, which applies the new migrations before the new
    version takes over. When it's done, the admin pages show the new version and
    its commit ([Which build is running](README.md#which-build-is-running)).
@@ -103,11 +119,10 @@ Wherever the release step fails, the old version keeps serving while you fix it.
 
 ## Through the GitHub App
 
-With the [GitHub App](github-app.md) linked and your copy a fork of
-`mixoshq/mixos`, the release notice does steps 2 and 5 for you: it opens the pull
-request at the release's commit, after checking the tag with GitHub. Backing up,
-reading the notes, trying it and merging stay yours. A private copy that isn't a
-fork follows the steps above. See
+With the [GitHub App](github-app.md) linked, the release notice adds a link to
+what changed, on GitHub. Only on a fork of `mixoshq/mixos`, which shares
+upstream's commits, can it also do steps 2 and 5 for you, by opening the pull
+request at the release's commit. See
 [Updating MixOS through the App](github-app.md#updating-mixos-through-the-app).
 
 ## What breaks

@@ -6,9 +6,9 @@
  * The extensions the core repository carries: each kind's template, Wall-E,
  * the example app, and the built-in themes, which the build needs one of.
  * Anything else under apps/, connectors/ or themes/ is someone's own and
- * belongs in their fork, where they commit and deploy it. Danger fails a pull
- * request to mixoshq/mixos that adds one (dangerfile.ts); a fork commits its
- * extensions as usual.
+ * belongs in their own repository, where they commit and deploy it. Danger
+ * fails a pull request to mixoshq/mixos that adds one (dangerfile.ts); anyone's
+ * own repository commits its extensions as usual.
  */
 
 export const CORE_EXTENSIONS = {

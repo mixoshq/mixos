@@ -9,7 +9,7 @@ services:
 | --- | --- |
 | `db` | Postgres 17, on a named volume. Not published; nothing outside the Compose network can reach it. |
 | `migrate` | The release step, `node ops/release.cjs`. Runs once per `up`, before the app, then exits. |
-| `app` | The production server, from your fork's Dockerfile. Published on `127.0.0.1` only, for a proxy in front of it. |
+| `app` | The production server, from your repository's Dockerfile. Published on `127.0.0.1` only, for a proxy in front of it. |
 | `cron` | The five-minute tick: `curl` against `/api/cron` with the bearer token. |
 
 [`deploy/docker-compose.https.yml`](../../../deploy/docker-compose.https.yml)
@@ -27,14 +27,20 @@ scripts would also load.
   server, and `next build` needs the room.
 - **Docker Engine with the Compose v2 plugin**, and git.
 - **A domain whose DNS points at the server**, with ports 80 and 443 open.
-- **Your fork** of `mixoshq/mixos` on GitHub.
+- **Your own repository** on GitHub, with your copy of MixOS: see
+  [Step 1 of How to install](../install.md#step-1-get-your-own-copy).
 
 For Coolify or Dokploy, you need a server that already runs it.
 
 ## Docker Compose on your server
 
+Your repository is private, so the server needs a key to read it. On the
+server, run `ssh-keygen -t ed25519` and accept the defaults. Add the public key
+it saves, `~/.ssh/id_ed25519.pub`, to your repository's **Settings > Deploy
+keys**, with write access off. Then:
+
 ```bash
-git clone https://github.com/<you>/mixos.git     # your fork, with your apps
+git clone git@github.com:<you>/mixos.git     # your repository, with your apps
 cd mixos
 sh deploy/new-env.sh https://mixos.example.com you@example.com
 MIXOS_COMMIT=$(git rev-parse HEAD) docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.https.yml up -d --build
@@ -133,7 +139,7 @@ confirm it.
 
 ## Upgrading
 
-Merge the new release into your fork and push it, as in
+Merge the new release into your repository and push it, as in
 [Upgrading MixOS](../after-you-install/upgrading.md). Then, on the server:
 
 ```bash

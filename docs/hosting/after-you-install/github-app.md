@@ -2,9 +2,9 @@
 
 Admin > GitHub links an instance to the repository it's built from, through a
 private GitHub App you own. With it linked, a deployment can propose extensions,
-updates, removals and MixOS upgrades as pull requests into your repository,
-which you review and merge on GitHub. Nothing merges by itself, and nothing
-runs on the instance until you deploy.
+their updates and their removals as pull requests into your repository, which
+you review and merge on GitHub. Nothing merges by itself, and nothing runs on
+the instance until you deploy.
 
 ## Linking your GitHub repository
 
@@ -136,9 +136,8 @@ build runs the registry generator, and `extensions.yml` smoke-tests a changed ap
 ([The pull-request check](README.md#the-pull-request-check)). Admin > Apps,
 Connectors and Themes list the App's open pull requests with their checks:
 
-- **No CI ran:** nothing checked the head commit within ten minutes. On a new
-  fork, GitHub keeps workflows off until you turn them on under **Actions**.
-  Don't merge it unchecked.
+- **No CI ran:** nothing checked the head commit within ten minutes. Check that
+  GitHub Actions is on for your repository. Don't merge it unchecked.
 - **Changed since proposed:** someone pushed to the branch after the App opened
   it. Read those commits before you merge.
 
@@ -146,9 +145,19 @@ When the merge deploys, an app arrives inactive: activate it on Admin > Apps.
 
 ## Updating MixOS through the App
 
-When a newer release of MixOS is out and the App is linked, the release notice at
-the top of the admin pages offers **Open an update pull request**, if your
-repository is a fork of `mixoshq/mixos`. It opens a pull request into your
+When a newer release of MixOS is out, the release notice at the top of the
+admin pages gives `/mixos upgrade` to run in Claude Code, and the merge by
+hand, as [Upgrading MixOS](upgrading.md) describes:
+
+```bash
+git fetch upstream --tags && git merge v0.5.0
+```
+
+With the App linked, it adds a link to what changed, on GitHub. The App can't
+open that merge as a pull request on your own repository, which doesn't have
+the release's commit until you merge it. A fork of
+`mixoshq/mixos` shares upstream's commits, so on a fork the notice offers
+**Open an update pull request** instead. It opens a pull request into your
 default branch from the branch `mixos/update-<tag>`, at the release's commit,
 with the release notes as text, GitHub's own numbers for the release against
 your branch, and the upgrade checklist. Nothing is merged: merge it on GitHub
@@ -165,14 +174,6 @@ merge the release by hand. The same happens when the release changes a file unde
 `.github/workflows/`, which the App can't push because it has no workflows
 permission, when the release changes more files than GitHub lists in a compare
 (300), or when your default branch already has the release's commit.
-
-**A private copy** that isn't a fork can't take a pull request from upstream's
-commit. The notice shows the commands instead, as
-[Upgrading MixOS](upgrading.md) describes:
-
-```bash
-git fetch upstream --tags && git merge v0.5.0
-```
 
 **Once opened,** the notice names the pull request and offers nothing else.
 Admin > GitHub lists open update pull requests with their checks, as Admin > Apps
