@@ -123,6 +123,23 @@ the action just did the write, so it returns the answer. A client that guesses
 gets it wrong in one of two directions: advance regardless and an empty submit
 skips a step; re-derive from stale props and it snaps back.
 
+### Whether it can change data
+
+A connector with a method declared `mutates` gets one more step, before Connect
+because it decides which scopes Connect asks for: **Choose whether it can change
+data**. It shows whether the connector is read-only or allowed to change data,
+lists the methods that change data, names the apps that ask to, and lists the
+scopes allowing changes adds at Connect. Its action is **Allow changes** or
+**Make read-only**, and you write nothing for it: it is built from `telemetry`,
+`auth.scopes` and the apps' entries.
+
+Read-only is a finished choice, so the step needs nothing done, except while an
+app asks to change data in the connector and changes aren't allowed: that app
+can't be activated, so the checklist stops there. It never locks a later step,
+because keeping a connector read-only is allowed. When changes are allowed on a
+connector whose grant was taken while it was read-only, the Connect step is
+unfinished again until it is connected once more.
+
 ### Gating
 
 A step that takes a value or proves something is `mustComplete`. Everything

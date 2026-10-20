@@ -54,12 +54,23 @@ Do not infer conventions from surrounding code alone, and do not guess based on 
 - Widget `id` is derived from the component filename — renaming breaks saved dashboards.
 - Scoped-DB tables: each app has its own schema (`app_<slug>`, needs `"database": true`); write bare names in migrations and queries. Migrations are checked before they run: no triggers, functions, `DO`, grants, `SET`, or anything outside the app's schema (list `updatedAt` columns in `app.json` instead of writing a trigger). See `docs/apps/database.md`.
 - MCP tools (`mcp` in `app.json` → `mcp/<name>.ts`) are READ-ONLY and capped at 5 per app. Export both `inputSchema` (Zod) and a default handler. Never write from one, and never call a connector method that mutates — `ctx.db` blocks writes, but the connector is on you. Share the builder the matching API route uses; don't duplicate query logic.
+- Each connector entry is `{ "name", "version", "access"? }`: the version from that connector's `connector.json`, and `"access": "write"` only if the app calls a method the connector declares `mutates`. The app can call only the connector's declared methods.
+
+## When the connector lacks something
+
+A connector mirrors its provider's API, and the app decides what to do with it. So **don't change a connector to fit this app.** First look for what you need among the connector's declared methods (`telemetry` in its `connector.json`, each with the provider `operation` it calls), and compose them in the app's `lib/server/`. Only if the provider has an operation the connector doesn't cover:
+
+1. Stop, and tell the user which provider operation is missing.
+2. Add it with `/mixos connector update <name>` as a plain mirror of the provider's operation, a new minor version, in a change of its own. Not shaped for this app, and not named after it.
+3. Name that version in this app's entry.
+
+A field the connector projects away, or a value it converts lossily, is the same case: the fix is an optional parameter on the connector's method, never a second, app-shaped method.
 
 ## Connector-call discipline (widgets & routes)
 
 Connector calls dominate latency and many APIs force per-record fan-out. Before shipping a connector-backed route or widget, confirm the [api-routes efficiency rules](docs/apps/api-routes.md#calling-connectors-efficiently):
 
-- **Fetch only what's rendered.** A widget must request just the data it shows; a route should make only the calls that data needs. When one route feeds several widgets, accept an `include`/`scope` param and guard each enrichment block — don't run a ticket scan for a widget that only shows names.
+- **Fetch only what's rendered.** A widget must request just the data it shows; a route should make only the calls that data needs, and passes the connector a field list where it takes one rather than receiving whole records. When one route feeds several widgets, accept an `include`/`scope` param and guard each enrichment block — don't run a ticket scan for a widget that only shows names.
 - **Scope before you enrich.** Filter the primary records (by user, date, status) *before* the expensive per-record enrichment, not after. "My book" should never pay to enrich the whole book.
 - **No unscoped N+1 loops.** Prefer batch reads; if you must loop per-record associations, scope first, chunk, and `sleep()` between chunks.
 - **`resolveConfig` blocks the config modal.** Point it at a lightweight endpoint (option lists only — never the heavy data route), `.catch()` to static options, and race a timeout so the modal can't hang on "Loading configuration...". See [widgets.md](docs/apps/widgets.md#resolveconfig-blocks-the-modal--keep-it-fast-and-bulletproof).

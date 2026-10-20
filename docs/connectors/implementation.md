@@ -2,10 +2,10 @@
 
 ## Extend `HttpConnector`
 
-Every connector extends `HttpConnector`. You write the methods your apps call;
-the base class handles authentication, timeouts, retries with backoff,
-`Retry-After`, status classification, and the plain-English message a user
-eventually reads.
+Every connector extends `HttpConnector`. You write one method per provider
+operation, for every operation on the resources the connector covers; the base
+class handles authentication, timeouts, retries with backoff, `Retry-After`,
+status classification, and the plain-English message a user eventually reads.
 
 ```ts
 interface BaseConnector {
@@ -29,7 +29,8 @@ import { z } from "zod";
 import { HttpConnector } from "@/lib/connectors/http-connector";
 import type { ConnectorTestResult } from "@/lib/connectors/types";
 
-const Item = z.object({ id: z.string(), name: z.string() });
+// looseObject: a field the schema doesn't name still reaches the app.
+const Item = z.looseObject({ id: z.string(), name: z.string() });
 type Item = z.infer<typeof Item>;
 
 export default class MyServiceConnector extends HttpConnector {
@@ -40,8 +41,12 @@ export default class MyServiceConnector extends HttpConnector {
     return { ok: true, detail: me?.name ? `Authenticated as ${me.name}` : undefined };
   }
 
-  async getItem(id: string): Promise<Item | null> {
-    return this.request(`/items/${encodeURIComponent(id)}`, undefined, { schema: Item });
+  /** `fields` narrows what the provider sends; the default is the whole record. */
+  async getItem(id: string, opts: { fields?: string[] } = {}): Promise<Item | null> {
+    return this.request(`/items/${encodeURIComponent(id)}`, undefined, {
+      schema: Item,
+      query: { fields: opts.fields?.join(",") },
+    });
   }
 
   async listItems(): Promise<Item[]> {
@@ -64,18 +69,22 @@ Note what is absent: no `fetch`, no `if (!res.ok) throw`, no `Authorization`
 header, no retry loop. Adding any of them by hand means opting out of the
 behaviour below.
 
-Every public method also goes in the manifest's `telemetry` list, or the build
-fails. For this class:
+Every public method also goes in the manifest's `telemetry` list, with the
+provider operation it calls, or the build fails. For this class:
 
 ```json
 "telemetry": [
-  { "method": "getItem",    "description": "Read one item" },
-  { "method": "listItems",  "description": "Listed items" },
-  { "method": "createItem", "description": "Created an item", "mutates": true }
+  { "method": "getItem",    "operation": "GET /items/{id}", "description": "Read one item" },
+  { "method": "listItems",  "operation": "GET /items",      "description": "Listed items" },
+  { "method": "createItem", "operation": "POST /items",     "description": "Created an item", "mutates": true }
 ]
 ```
 
-See [Telemetry](telemetry.md).
+That list is all an app can call: the platform hands an app this connector
+narrowed to it. `createItem` runs only for an app whose entry asks for
+`"access": "write"`, on an install whose admin allowed changes. See
+[Telemetry](telemetry.md) and
+[Changing data](architecture.md#changing-data).
 
 ## `this.request()`
 
@@ -88,12 +97,25 @@ protected request<T>(path, init?: RequestInit, opts?: RequestOptions<T>): Promis
 | `schema` | — | Validates the parsed body. Drift throws `unexpected_response`. |
 | `responseType` | `"json"` | `"text"` returns a string; `"raw"` returns the `Response`. |
 | `idempotent` | by HTTP verb | **Opt a write into retries.** See below. |
-| `query` | — | Query parameters; `undefined` and `null` entries are dropped. |
+| `query` | — | Query parameters; `undefined` and `null` entries are dropped, and an array repeats its parameter (`ranges=A1&ranges=B2`). |
 | `timeoutMs` / `deadlineMs` / `maxAttempts` | manifest, then defaults | Per-call overrides. |
 
 Returns `null` for `204`, `205`, `304`, and for an empty body — those carry no
 content, and calling `.json()` on them is the most common defect in hand-written
 API clients.
+
+### `this.requestBody()`
+
+The same call, for an operation that always answers with a body: an empty one
+fails as `unexpected_response` instead of returning `null`. A method mirroring
+such an operation returns the provider's resource itself, so its callers have
+no `null` to handle:
+
+```ts
+async getItem(id: string): Promise<Item> {
+  return this.requestBody(`/items/${encodeURIComponent(id)}`, undefined, { schema: Item });
+}
+```
 
 ## Retries, and why your writes are not retried
 
@@ -152,8 +174,15 @@ anywhere else fails as `unexpected_response`.
 ## Best practices
 
 - Keep `name` identical to the folder name and the manifest `name`.
-- One method per API operation. Let the app layer compose them.
+- Cover every operation on each resource the connector touches, not just the
+  ones the app in front of you calls. One method per operation, named as the
+  provider names it. Let the app layer compose them.
+- Return what the provider returns. Declare upstream shapes with
+  `z.looseObject`, convert nothing lossily, and make a field list or a format an
+  optional parameter that defaults to everything.
 - Declare a `schema` on anything an app renders directly — it converts "the
   upstream quietly changed" into a clear error naming the field that moved.
+- Within a major version, only add. See
+  [Versions](architecture.md#versions).
 - Never read `process.env`, never hardcode a secret, never cache between
   requests. The platform builds a fresh instance per request.
