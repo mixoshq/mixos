@@ -8,7 +8,9 @@
  *
  * ./release-check.ts does the work from the scheduler tick: the switch, the
  * lock, the request and the stored state. The admin pages show what
- * `describeReleaseCheck()` returns (src/components/settings/settings-shell.tsx).
+ * `describeReleaseCheck()` returns (src/components/settings/settings-shell.tsx),
+ * and its notice also puts a banner over every other page for admins
+ * (./release-banner.ts).
  * Everything here takes its clock and this build's version as arguments, so the
  * tests can drive every case.
  *
@@ -39,14 +41,15 @@
  *
  * ── NEVER APPLIED ───────────────────────────────────────────────────────────
  *
- * The answer drives one notice and one line, and nothing else. Applying a
- * release is merging its tag into the operator's repository and deploying it,
- * which no button here does.
+ * The answer drives one notice, its banner and one line, and nothing else.
+ * Applying a release is merging its tag into the operator's repository and
+ * deploying it, which no button here does: the notice and the banner name
+ * `/mixos upgrade`, which an admin runs in their own copy.
  */
 
 import { z } from "zod";
 import { docsUrl } from "@/lib/docs";
-import { CoreReleaseSchema, type CoreRelease } from "@/lib/repository/types";
+import { CORE_RELEASE_TAG, CoreReleaseSchema, type CoreRelease } from "@/lib/repository/types";
 import { RELEASE_CHANNELS, type ReleaseChannel } from "@/lib/repository/policy";
 import {
   ago,
@@ -191,6 +194,24 @@ export function releasePageUrl(tag: string): string | null {
 
 /** How to take a release into a copy of MixOS. */
 export const UPGRADE_GUIDE_URL = docsUrl("install/after-you-install/upgrading");
+
+/**
+ * What an admin runs in Claude Code, in their copy of MixOS, to take the
+ * newest release (.claude/skills/mixos/actions/upgrade.md). The notice and the
+ * banner give it first.
+ */
+export const UPGRADE_COMMAND = "/mixos upgrade";
+
+/**
+ * The merge by hand, as the upgrade guide gives it, for a release tag the
+ * list's schema validates: `git fetch upstream --tags && git merge v0.5.0`.
+ */
+export function mergeCommand(tag: string): string {
+  if (!CORE_RELEASE_TAG.test(tag) || !parseReleaseVersion(tag)) {
+    throw new Error("A release tag the list's schema validates.");
+  }
+  return `git fetch upstream --tags && git merge ${tag}`;
+}
 
 /** The docs section that says what the release check sends, and how to turn it off. */
 export const WHAT_THE_RELEASE_CHECK_SENDS = docsUrl("security/surface#the-release-check");

@@ -68,6 +68,8 @@ you want, and Claude builds it through a few guided commands:
   you'd like in yours? Claude can bring that piece over, and asks you what each
   of its buttons should do in your app.
 - **`/mixos deploy`** — publish it so the rest of the team can use it.
+- **`/mixos upgrade`** — when a new version of MixOS is out, Claude brings your
+  copy up to date and gets it ready to publish.
 
 You can reassure them: they only decide what the app should show and do — the code,
 and keeping data safe, is handled for them. Then say something like *"Now let's

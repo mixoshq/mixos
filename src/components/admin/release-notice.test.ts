@@ -6,9 +6,11 @@
  * The release notice as the admin pages render it, on the server: the notes
  * without HTML, images or working links, by the rule mixos.org's release pages
  * follow (its packages/cli/test/core-release-notes.test.ts has the same
- * cases), and only the two links built from the tag. Then what the GitHub
- * App's offer adds, and that nothing in the check or the notice could apply a
- * release: the one button there is opens a pull request, and nothing more.
+ * cases), and only the two links built from the tag. `/mixos upgrade` first,
+ * for every repository, with a copy button, and the merge by hand for the
+ * notice's own tag. Then what the GitHub App's offer adds, and that nothing in
+ * the check or the notice could apply a release: one button copies the
+ * command, and the only other one opens a pull request, and nothing more.
  */
 
 import { test } from "node:test";
@@ -36,6 +38,9 @@ const text = (html: string) =>
     .trim();
 
 const notes = (markdown: string) => renderToStaticMarkup(createElement(ReleaseNotes, null, markdown));
+
+/** Each button's text, in order. */
+const buttons = (html: string) => [...html.matchAll(/<button[^>]*>(.*?)<\/button>/g)].map((m) => text(m[1]));
 
 const HOSTILE = [
   "### Fixes",
@@ -118,7 +123,7 @@ test("the notice: the sentence, the notes collapsed, and the two links built fro
     text(html),
     /^MixOS 0\.5\.0 is available \(this instance runs 0\.4\.2\)\. A minor release: it may need changes\. Release notes /,
   );
-  assert.match(html, /<section aria-label="A new release of MixOS"/);
+  assert.match(html, /<section id="new-release" aria-label="A new release of MixOS"/);
   // Collapsed until asked for.
   assert.match(html, /<details[^>]*><summary[^>]*>Release notes<\/summary>/);
   assert.doesNotMatch(html, /<details[^>]*\sopen/);
@@ -132,17 +137,26 @@ test("the notice: the sentence, the notes collapsed, and the two links built fro
     assert.match(a, /target="_blank"/);
     assert.match(a, /rel="noreferrer noopener"/);
   }
-  // No apply button, nor anything else to press.
-  assert.doesNotMatch(html, /<button|<form|<input(?![^>]*type="checkbox")/);
+  // `/mixos upgrade` first, to copy; then the merge by hand, for this tag, collapsed.
+  assert.match(
+    text(html),
+    /How to upgrade \(opens in a new tab\) To upgrade, run \/mixos upgrade in Claude Code, in your copy of MixOS\. Copy Or merge it by hand On a branch, in a checkout of your repository, as How to upgrade says: git fetch upstream --tags && git merge v0\.5\.0$/,
+  );
+  assert.match(html, /<details[^>]*data-merge-by-hand[^>]*><summary[^>]*>Or merge it by hand<\/summary>/);
+  // No apply button, nor anything else to press: the one button copies the command.
+  assert.deepEqual(buttons(html), ["Copy"]);
+  assert.doesNotMatch(html, /<form|<input(?![^>]*type="checkbox")/);
   assert.doesNotMatch(html, /evil\.example\/patch"/);
 });
 
-test("a release with no notes has nothing to expand", () => {
-  const notice = describeRelease({ ...RELEASE, notes: "  \n" }, "stable", "0.4.2");
+test("a release with no notes has no notes to expand, and the merge by hand still names its tag", () => {
+  const notice = describeRelease({ ...RELEASE, tag: "v0.4.3", notes: "  \n" }, "stable", "0.4.2");
   assert.ok(notice);
   const html = renderToStaticMarkup(createElement(ReleaseNotice, { notice }));
-  assert.doesNotMatch(html, /<details/);
-  assert.match(text(html), /A minor release: it may need changes\. v0\.5\.0 on mixos\.org/);
+  assert.doesNotMatch(html, /<summary[^>]*>Release notes/);
+  assert.match(text(html), /A patch release: fixes\. v0\.4\.3 on mixos\.org/);
+  assert.match(text(html), /git fetch upstream --tags && git merge v0\.4\.3$/);
+  assert.doesNotMatch(html, /v0\.5\.0/);
 });
 
 // ── what the GitHub App's offer adds ────────────────────────────────────────
@@ -154,12 +168,16 @@ const render = (offer: UpdateOffer | null) => {
   return renderToStaticMarkup(createElement(ReleaseNotice, { notice, offer }));
 };
 
-test("without an offer, the notice is as it was: no button, nothing to press", () => {
-  assert.equal(render(null), renderToStaticMarkup(createElement(ReleaseNotice, { notice: describeRelease(RELEASE, "stable", "0.4.2")! })));
-  assert.doesNotMatch(render(null), /<button|<form|data-update-offer/);
+test("without the App: /mixos upgrade to copy, the merge by hand, and nothing else to press", () => {
+  const html = render(null);
+  assert.equal(html, renderToStaticMarkup(createElement(ReleaseNotice, { notice: describeRelease(RELEASE, "stable", "0.4.2")! })));
+  assert.match(text(html), /To upgrade, run \/mixos upgrade in Claude Code, in your copy of MixOS\. Copy/);
+  assert.match(text(html), /git fetch upstream --tags && git merge v0\.5\.0/);
+  assert.deepEqual(buttons(html), ["Copy"]);
+  assert.doesNotMatch(html, /<form|data-update-offer/);
 });
 
-test("on a fork of upstream: one button, which opens a pull request, and nothing else to press", () => {
+test("on a fork of upstream: /mixos upgrade to copy, beside the one button that opens a pull request, and nothing else to press", () => {
   const html = render({
     kind: "fork",
     tag: "v0.5.0",
@@ -171,10 +189,12 @@ test("on a fork of upstream: one button, which opens a pull request, and nothing
     off: null,
     compareUrl: "https://github.com/mixoshq/mixos/compare/v0.4.2...v0.5.0",
   });
-  const buttons = html.match(/<button[^>]*>/g) ?? [];
-  assert.equal(buttons.length, 1, html);
-  assert.doesNotMatch(buttons[0], /\sdisabled(?:=""|\s|>)/);
-  assert.match(html, /<button[^>]*>(?:(?!<\/button>).)*Open an update pull request/);
+  // Beside /mixos upgrade: the copy button, then the App's one, which opens a pull request.
+  assert.deepEqual(buttons(html), ["Copy", "Open an update pull request"]);
+  const open = (html.match(/<button[^>]*>/g) ?? [])[1];
+  assert.doesNotMatch(open, /\sdisabled(?:=""|\s|>)/);
+  assert.match(text(html), /To upgrade, run \/mixos upgrade in Claude Code, in your copy of MixOS\. Copy Open an update pull request/);
+  assert.match(text(html), /git fetch upstream --tags && git merge v0\.5\.0/);
   assert.doesNotMatch(html, /<form|<input/);
   assert.match(html, /data-update-offer="fork"/);
   // Only the two links built from the tag: the compare link is the fallback, not a third link here.
@@ -192,11 +212,11 @@ test("on a fork of upstream: one button, which opens a pull request, and nothing
     off: "Confirm on Admin > GitHub that no host builds previews of the App's branches.",
     compareUrl: null,
   });
-  assert.match(off.match(/<button[^>]*>/)![0], /\sdisabled(?:=""|\s|>)/);
+  assert.match((off.match(/<button[^>]*>/g) ?? [])[1], /\sdisabled(?:=""|\s|>)/);
   assert.match(text(off), /Opening one is off for now\. Confirm on Admin > GitHub that no host builds previews of the App's branches\./);
 });
 
-test("on a private copy: the merge by hand and the compare link, and no button", () => {
+test("on a private copy: /mixos upgrade to copy, the merge by hand with the compare link, and nothing else to press", () => {
   const html = render({
     kind: "copy",
     tag: "v0.5.0",
@@ -204,8 +224,10 @@ test("on a private copy: the merge by hand and the compare link, and no button",
     compareUrl: "https://github.com/mixoshq/mixos/compare/0123456789abcdef0123456789abcdef01234567...v0.5.0",
     command: "git fetch upstream --tags && git merge v0.5.0",
   });
-  assert.doesNotMatch(html, /<button|<form|<input/);
-  assert.match(text(html), /acme-org\/intranet isn't a fork of mixoshq\/mixos, so the GitHub App can't open an update pull request there\. Merge the release by hand, on a branch: git fetch upstream --tags && git merge v0\.5\.0/);
+  assert.deepEqual(buttons(html), ["Copy"]);
+  assert.doesNotMatch(html, /<form|<input/);
+  assert.match(text(html), /To upgrade, run \/mixos upgrade in Claude Code, in your copy of MixOS\. Copy Or merge it by hand/);
+  assert.match(text(html), /as How to upgrade says: git fetch upstream --tags && git merge v0\.5\.0 What changed, on GitHub \(opens in a new tab\)$/);
   assert.deepEqual(links(html), [
     "https://mixos.org/docs/releases/v0.5.0",
     "https://mixos.org/docs/install/after-you-install/upgrading",
@@ -224,7 +246,8 @@ test("once a pull request was opened from here: say so, link to it, and offer no
     at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
     by: "admin@example.com",
   });
-  assert.doesNotMatch(html, /<button|<form|<input/);
+  assert.deepEqual(buttons(html), ["Copy"]);
+  assert.doesNotMatch(html, /<form|<input/);
   assert.match(text(html), /Pull request #7 \(opens in a new tab\) for v0\.5\.0 was opened on acme\/mixos .* by admin@example\.com\. Admin > GitHub lists it with its checks\. Merging it is the deploy\./);
   assert.deepEqual(links(html), [
     "https://mixos.org/docs/releases/v0.5.0",
@@ -243,7 +266,7 @@ test("the status line links to what is sent", () => {
 
 // ── never applied ───────────────────────────────────────────────────────────
 
-test("nothing in the check or its notice can apply a release: no process, no file, and one button that opens a pull request", () => {
+test("nothing in the check or its notice can apply a release: no process, no file, a button that copies, and one that opens a pull request", () => {
   const root = path.resolve(__dirname, "../../..");
   const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
   // Imports only: comments may name what isn't done.
@@ -263,14 +286,19 @@ test("nothing in the check or its notice can apply a release: no process, no fil
     assert.doesNotMatch(source, /"use server"|<button|<Button[\s>]|<form|formAction|onClick/, file);
   }
 
-  // The one exception, on purpose: the notice renders the update pull request
-  // button, from its own file, and that file's only action opens a pull
-  // request through the GitHub App (src/lib/github/update-pull.ts), which can
-  // create a branch and a pull request and nothing else (./repository.ts's
-  // ref-only scope, src/lib/github/repository.test.ts). Nothing merges, and
-  // nothing runs or writes on this instance.
+  // Two buttons, on purpose, each from its own file. The copy button writes
+  // `/mixos upgrade` to the clipboard and does nothing else. The update pull
+  // request button's only action opens a pull request through the GitHub App
+  // (src/lib/github/update-pull.ts), which can create a branch and a pull
+  // request and nothing else (./repository.ts's ref-only scope,
+  // src/lib/github/repository.test.ts). Nothing merges, and nothing runs or
+  // writes on this instance.
   const notice = read("src/components/admin/release-notice.tsx");
-  assert.deepEqual(notice.match(/<[A-Za-z]*Button\b/g), ["<UpdatePullRequestButton"]);
+  assert.deepEqual(notice.match(/<[A-Za-z]*Button\b/g), ["<CopyButton", "<UpdatePullRequestButton"]);
+  const copy = read("src/components/admin/copy-button.tsx");
+  assert.doesNotMatch(importsOf(copy), NEVER);
+  assert.doesNotMatch(copy, /"use server"|actions["']|<form|formAction|fetch\(/);
+  assert.deepEqual(copy.match(/navigator\.[a-z]+\.[A-Za-z]+/g), ["navigator.clipboard.writeText"]);
   const button = read("src/components/admin/update-pull-request.tsx");
   assert.deepEqual(button.match(/from "@\/lib\/github\/[a-z-]*actions"/g), ['from "@/lib/github/update-pull-actions"']);
   assert.match(button, /proposeMixOSUpdateAction\(\{ tag: offer\.tag \}\)/);

@@ -4,10 +4,9 @@
 
 "use client";
 
-import { useState } from "react";
-import { Check, Copy, ExternalLink } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ExternalLink } from "lucide-react";
 import type { HandBack } from "@/lib/repository/hand-back";
+import { CopyButton } from "../copy-button";
 import { FileChanges } from "../update/update-parts";
 
 /**
@@ -105,31 +104,5 @@ export default function HandBackPanel({ handBack, isApp }: { handBack: HandBack;
       </p>
       {update && <p className="text-muted-foreground">{update.rollback}</p>}
     </div>
-  );
-}
-
-/**
- * Copies `text`, and says so for two seconds. Selecting the text by hand still
- * works when it can't. The removal result uses it too.
- */
-export function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      icon={copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 2000);
-        } catch {
-          // Clipboard access can be refused (permissions, an insecure origin).
-        }
-      }}
-    >
-      {copied ? "Copied" : label}
-    </Button>
   );
 }

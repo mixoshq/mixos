@@ -47,7 +47,8 @@ To put MixOS online for your team, deploy your repository. Each host's page
 under [Install at popular providers](providers/README.md) says how, and the
 manual way works for any host from [Step 2](#step-2-generate-the-keys).
 `/mixos deploy` doesn't install MixOS anywhere: it opens a pull request with
-your changes.
+your changes. When a newer release of MixOS is out, `/mixos upgrade` brings
+your copy up to date.
 
 ## The manual way
 
