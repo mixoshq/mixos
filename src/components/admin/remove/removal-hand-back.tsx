@@ -7,7 +7,7 @@
 import type { RemovalHandBack } from "@/lib/repository/hand-back";
 import { KEPT_DATA } from "@/lib/repository/remove-outcomes";
 import type { ExtensionKind } from "@/lib/repository/types";
-import { CopyButton } from "../pending/hand-back";
+import { CopyButton } from "../copy-button";
 
 /**
  * What to do once an extension's code is gone from this checkout: commit the

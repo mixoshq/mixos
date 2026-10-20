@@ -1,36 +1,80 @@
 # How to install MixOS
 
-Installing MixOS takes your fork from GitHub to a first sign-in on a host of
-your choice. This page has the short version first, then each step in detail.
-For what you need beforehand, read [Before you install](README.md).
+MixOS runs from a copy of its code that's yours: a private repository on
+GitHub, which your host deploys and new releases of MixOS merge into. The quick
+way has Claude Code set that up with you. The manual way does each step by
+hand. For what you need beforehand, read [Before you install](README.md).
 
-To try MixOS on your own computer instead, see
-[Running a development copy](development.md). And `/mixos deploy` doesn't
-install MixOS anywhere: it opens a pull request with your changes.
+## The quick way, with Claude Code
 
-## Things to know first
+1. **Download MixOS.** Paste this into Claude Code, in the desktop app or the
+   terminal:
+
+   ```text
+   Download the newest release of MixOS with git: clone
+   https://github.com/mixoshq/mixos.git into ~/MixOS, then put main at its
+   newest release tag (the highest vX.Y.Z, not a prerelease like v0.3.0-rc.1),
+   tracking no branch, so a pull can't bring in unreleased work. Change nothing
+   else. If ~/MixOS already exists or git isn't installed, stop and tell me
+   what to do. Then tell me which version I have.
+   ```
+
+   Or download **Source code (zip)** from
+   [the latest release](https://github.com/mixoshq/mixos/releases/latest), and
+   unzip it in your home folder. `/mixos init` connects it to MixOS's history,
+   so later releases merge in.
+
+2. **Open the folder in [Visual Studio Code](https://code.visualstudio.com/)**:
+   **File > Open Folder**, then `MixOS`, or the folder you unzipped.
+3. **Install the Claude Code extension**: in VS Code's Extensions view, search
+   for **Claude Code**, by Anthropic, and choose **Install**.
+4. **Sign in to Claude** in the Claude Code panel. Claude Code needs a Pro,
+   Max, Team or Enterprise plan, or a Claude Console account, billed by API
+   use; the free plan doesn't include it.
+5. **Run `/mixos init`** in the Claude Code panel. Claude installs what your
+   computer is missing, starts MixOS at
+   [http://localhost:3000](http://localhost:3000) and gives you its login. Then
+   it offers to put your copy in a private GitHub repository of your own.
+
+Cursor and JetBrains IDEs have Claude Code too, and it works in a terminal: run
+`claude` in the folder, then `/mixos init`.
+
+On Windows, MixOS runs in WSL. Set that up first, as
+[On Windows](development.md#on-windows) says, then do these steps in a VS Code
+window connected to WSL, with the prompt in its Claude Code panel.
+
+To put MixOS online for your team, deploy your repository. Each host's page
+under [Install at popular providers](providers/README.md) says how, and the
+manual way works for any host from [Step 2](#step-2-generate-the-keys).
+`/mixos deploy` doesn't install MixOS anywhere: it opens a pull request with
+your changes. When a newer release of MixOS is out, `/mixos upgrade` brings
+your copy up to date.
+
+## The manual way
+
+Each step by hand, for when you'd rather run them yourself. Three things to
+know first:
 
 - **Use your host's page if there is one.**
   [Install at popular providers](providers/README.md) has the exact steps for
   Vercel with Supabase, Render, Railway, and your own server with Docker
   Compose, Coolify or Dokploy. This page is the version for any host.
-- **Deploy your fork**, not `mixoshq/mixos`, so the extensions you add are in
-  the build.
+- **Deploy your own repository**, not `mixoshq/mixos`, so the extensions you
+  add are in the build.
 - **Keep a copy of the keys.** Three of them encrypt data at rest, and a backup
   of the database is no use without them.
 
-## Quick install
-
 The short version, if you've deployed a web app before:
 
-1. Fork [`mixoshq/mixos`](https://github.com/mixoshq/mixos) on GitHub, clone
-   your fork, and run `npm ci` in it.
+1. Clone [`mixoshq/mixos`](https://github.com/mixoshq/mixos) at its newest
+   release, push it to a private repository of your own, and run `npm ci` in
+   it.
 2. Create a Postgres database, version 13 or later, on a Postgres server of its
    own, and copy its connection string.
 3. Run `npm run keys:generate`, and keep its output somewhere safe.
 4. On your host, set `DATABASE_URL`, the keys, `NEXTAUTH_URL` (the address
    people will sign in at), `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD`.
-5. Deploy your fork, and run the release step before it takes traffic:
+5. Deploy your repository, and run the release step before it takes traffic:
    `node ops/release.cjs` in the Docker image, or `npm run release` from a
    checkout.
 6. Have something call `GET /api/cron` every five minutes, with
@@ -38,28 +82,66 @@ The short version, if you've deployed a web app before:
 7. Open `/api/health/ready`. Once it answers `{"status":"ok"}`, sign in with your
    admin email and password.
 
-## Detailed steps
+### Step 1: Get your own copy
 
-### Step 1: Fork MixOS
+Your copy of MixOS is a private repository of your own on GitHub. The apps,
+connectors and themes you add are committed there, your host builds from it,
+and new releases of MixOS merge into it from `upstream`, MixOS's own
+repository. It isn't a fork, because a fork of a public repository can't be
+private.
 
-Fork `mixoshq/mixos` on GitHub. The fork is your copy of MixOS: the apps,
-connectors and themes you add are committed there, and your host builds from it.
-
-Clone it and install its dependencies, so you can run MixOS's commands:
+#### Clone the newest release
 
 ```bash
-git clone https://github.com/<you>/mixos.git
-cd mixos
+git clone https://github.com/mixoshq/mixos.git MixOS
+cd MixOS
+git describe --abbrev=0 --exclude '*-*' origin/main   # the newest release, such as v0.2.0
+git switch -C main v0.2.0
+git branch --unset-upstream                          # so a pull can't bring in unreleased work
+```
+
+#### Create your own repository
+
+These are the commands `/mixos init` runs, with the
+[GitHub CLI](https://cli.github.com) signed in (`gh auth login`). MixOS's
+repository becomes `upstream`, and a new private repository of yours becomes
+`origin`:
+
+```bash
+git remote rename origin upstream
+gh repo create <you>/mixos --private --source . --remote origin --push
+gh repo set-default <you>/mixos    # so gh opens pull requests there, not on upstream
+```
+
+Without the GitHub CLI, create an empty private repository on GitHub, with no
+README, licence or `.gitignore`, then:
+
+```bash
+git remote rename origin upstream
+git remote add origin https://github.com/<you>/mixos.git
+git push -u origin main
+```
+
+That pushes MixOS's own history and nothing else. Git ignores the `.env` files
+and keys you'll make, so they stay on your computer. New releases reach your
+repository when you merge their tag: see
+[Upgrading MixOS](after-you-install/upgrading.md).
+
+#### Install the dependencies
+
+```bash
 npm ci
 ```
 
-`npm ci` installs exactly what `package-lock.json` pins. New releases of MixOS
-reach your fork when you merge their tag: see
-[Upgrading MixOS](after-you-install/upgrading.md).
+`npm ci` installs exactly what `package-lock.json` pins, so you can run MixOS's
+commands, and turns on MixOS's git hooks. Run it once the repository is yours:
+in a checkout whose `origin` is still `mixoshq/mixos`, it also has git ignore
+every extension the core doesn't carry, and your own are what you commit. If
+you ran it before, `npm run prepare` sets that right.
 
 ### Step 2: Generate the keys
 
-In your clone, run:
+In your copy, run:
 
 ```bash
 npm run keys:generate
@@ -166,7 +248,7 @@ Admin > Connectors, and they're stored encrypted.
 
 ### Step 5: Deploy
 
-Deploy your fork to your host. Each page under
+Deploy your repository to your host. Each page under
 [Install at popular providers](providers/README.md) says how, and sets up the
 release step and the tick as part of it.
 

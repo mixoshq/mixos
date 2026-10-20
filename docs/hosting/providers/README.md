@@ -5,9 +5,9 @@ the release step runs there, keeping previews of the GitHub App's branches off,
 upgrading, and the common problems. [Before you install](../README.md#where-to-host)
 compares them.
 
-- **[Vercel with Supabase](vercel-supabase.md)**: Vercel builds your fork, with a
-  preview of every pull request, and Supabase, Neon or any Postgres is the
-  database.
+- **[Vercel with Supabase](vercel-supabase.md)**: Vercel builds your
+  repository, with a preview of every pull request, and Supabase, Neon or any
+  Postgres is the database.
 - **[Render](render.md)**: a Blueprint creates the app, Render Postgres and the
   tick, and generates every key.
 - **[Railway](railway.md)**: the app, Railway Postgres and the tick, set up once,
@@ -16,8 +16,8 @@ compares them.
   and the tick on a server of your own, and Coolify or Dokploy can deploy the
   same file from git.
 
-Whichever you pick, deploy your fork, not `mixoshq/mixos`, so the extensions you
-add are in the build.
+Whichever you pick, deploy your own repository, not `mixoshq/mixos`, so the
+extensions you add are in the build.
 
 ## What each host provides
 

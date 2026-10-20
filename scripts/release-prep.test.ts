@@ -442,7 +442,7 @@ describe("the version in a pull request", () => {
     assert.equal(isReleasePR("release/v0.2.0", []), false);
   });
 
-  test("only the core repository is held to it: a fork takes its version from the tags it merges", () => {
+  test("only the core repository is held to it: anyone's own copy takes its version from the tags it merges", () => {
     assert.equal(isCoreRepository("mixoshq", "mixos"), true);
     assert.equal(isCoreRepository("MixOSHQ", "MixOS"), true);
     assert.equal(isCoreRepository("someone", "mixos"), false);
