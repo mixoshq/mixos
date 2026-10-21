@@ -8,6 +8,21 @@ tests and internal changes, and is the notes of its GitHub Release.
 Releases are made with `/mixos deploy release`; see the Release section of
 [.claude/skills/mixos/actions/deploy.md](.claude/skills/mixos/actions/deploy.md).
 
+## v0.4.0 (2026-10-20)
+
+Changes since v0.3.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.4.0/WHATS-NEW.md).
+
+### Breaking changes
+
+- **os:** hold connectors to a versioned contract, and allow their writes per install (d9870121)
+
+  connector.json needs "version", and an "operation" on
+  each telemetry entry. A connectors or optionalConnectors entry is
+  { "name", "version" }, and a bare name fails the build. An app can call
+  only a connector's declared methods, and one declared "mutates" only
+  with "access": "write" on its entry, once an admin allows the connector
+  to change data: every connector starts read-only.
+
 ## v0.3.0 (2026-10-20)
 
 Changes since v0.2.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.3.0/WHATS-NEW.md).
