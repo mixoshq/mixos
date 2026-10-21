@@ -65,7 +65,7 @@ You install VS Code and the Claude Code extension; Claude installs and starts
 everything else.
 
 1. **Get the code**, with the prompt in
-   [the quick way](install.md#the-quick-way-with-claude-code): Claude Code
+   [How to install](install.md#for-vibe-coders): Claude Code
    clones MixOS's newest release into `~/MixOS`. Or download the release's
    `.zip`. Open the folder in VS Code. On macOS, if you're offered the command
    line developer tools, choose **Install**: that's where `git` comes from. On

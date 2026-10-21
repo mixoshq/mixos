@@ -83,6 +83,29 @@ that extension is itself MPL-licensed, and never add it to the templates, to
 A file that starts with a shebang (`#!/usr/bin/env …`) keeps the shebang on
 line 1 and the notice directly below it.
 
+## Writing the docs
+
+The docs in `docs/` are also the docs on [mixos.org](https://mixos.org/docs),
+which copies them as they are. Two things in them are for the site, and read as
+plain Markdown on GitHub:
+
+- **A prompt for Claude** is a ` ```prompt ` fence. mixos.org draws it as
+  Claude's message box, with a button that copies it. Put one prompt in each
+  fence, exactly what the reader gives Claude, and say what it does in the text
+  around it: a `# comment` after it would be copied too, so the site's build
+  refuses one.
+- **Layout markers** are HTML comments, each on a line of its own, outside
+  lists. `<!-- tabs <group> -->` makes tabs of the sections up to
+  `<!-- /tabs -->`, one for each heading at the first one's level.
+  `<!-- details -->` closes the section up to `<!-- /details -->` behind its
+  first heading. `<!-- icons <list> -->` boxes the one list up to
+  `<!-- /icons -->`, with an icon beside each item, chosen by the item's bold
+  start, and any paragraphs after the list as its footnote.
+  `<!-- callout <name> -->` sets the section up to `<!-- /callout -->` apart in a
+  box with its icon. The site knows each group, list, callout and icon by name,
+  and its build refuses one it doesn't, so reuse those the docs already have, or
+  ask for a new one in an issue. Every other comment is dropped.
+
 ## Pull requests
 
 - **Commit messages** follow `type(scope): summary` — for example
