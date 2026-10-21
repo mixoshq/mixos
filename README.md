@@ -40,7 +40,7 @@ Three extension points, in increasing order of scope:
 
 ## Quick start
 
-Three steps, which [How to install](docs/hosting/install.md#the-quick-way-with-claude-code)
+Three steps, which [How to install](docs/hosting/install.md#for-vibe-coders)
 has in full:
 
 1. **Download MixOS**: paste that page's prompt into Claude Code, and it clones
@@ -49,7 +49,7 @@ has in full:
    Claude.
 3. **Run `/mixos init`** in Claude Code:
 
-   ```
+   ```prompt
    /mixos init
    ```
 
@@ -93,9 +93,10 @@ parts:
 1. **[Before you install](docs/hosting/README.md)**: what you need, and the
    choices to make first: where to host, which database, and how extensions get
    in.
-2. **[How to install](docs/hosting/install.md)**: the quick way, with Claude
-   Code, then the manual way: your own repository, keys, database, environment,
-   deploy, the release step, the first admin, and checking it works.
+2. **[How to install](docs/hosting/install.md)**: what you need, then a way for
+   vibe-coders and a way for developers, both with Claude Code, and the install
+   by hand: your own repository, keys, database, environment, deploy, the
+   release step, the first admin, and checking it works.
 3. **[Running a development copy](docs/hosting/development.md)**: MixOS on your
    own computer, with `/mixos init` or by hand: what you need, the dev
    container, `npm run dev`, installing from the Registry in a checkout, the

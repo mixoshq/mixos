@@ -32,7 +32,7 @@ how to turn it off.
 Back up the database first, as step 1 below says. Then, in Claude Code, in your
 copy of MixOS, run:
 
-```
+```prompt
 /mixos upgrade
 ```
 
