@@ -2,10 +2,16 @@
 
 A **remix** abstracts one UI component of an installed app — a widget, a page,
 or a part of a page — into another installed app, as a component of its own. You
-run it through the agent:
+run it through the agent, naming the app it comes from, a page's path or a
+widget's id in it, and the app to build it into:
 
-```
+```prompt
 /mixos remix careers:/ deals
+```
+
+A note can name just a part of it:
+
+```prompt
 /mixos remix careers:application-pipeline deals "the status chips above the table"
 ```
 
