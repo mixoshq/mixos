@@ -1,16 +1,43 @@
 # How to install MixOS
 
 MixOS runs from a copy of its code that's yours: a private repository on
-GitHub, which your host deploys and new releases of MixOS merge into. The quick
-way has Claude Code set that up with you. The manual way does each step by
-hand. For what you need beforehand, read [Before you install](README.md).
+GitHub, which your host deploys and new releases of MixOS merge into. Claude
+Code sets it up with you, whether or not you write code. For the choices to
+make first, read [Before you install](README.md).
 
-## The quick way, with Claude Code
+## What you need
+
+<!-- icons prerequisites -->
+
+- **VS Code**: install [Visual Studio Code](https://code.visualstudio.com/).
+  Developers can use another IDE, or a terminal, as
+  [For developers](#for-developers) shows.
+- **The Claude Code extension**: in VS Code's Extensions view, search for
+  **Claude Code**, by Anthropic, and choose **Install**.
+- **A GitHub account**, for the private repository that holds your copy of
+  MixOS. [Sign up](https://github.com/signup) if you don't have one.
+- **A paid Claude plan**: Pro, Max, Team or Enterprise, or a Claude Console
+  account billed by API use. The free plan doesn't include Claude Code.
+- **A host**, if you'll share your workspace with others. Without one, MixOS
+  runs on your own computer. [Install at popular providers](providers/README.md)
+  compares them.
+
+On Windows, MixOS runs in WSL. Set that up first, as
+[On Windows](development.md#on-windows) says, and work in a VS Code window
+connected to WSL.
+
+<!-- /icons -->
+
+<!-- tabs audience -->
+
+## For vibe-coders
+
+Claude downloads MixOS, installs what your computer is missing, and starts it.
 
 1. **Download MixOS.** Paste this into Claude Code, in the desktop app or the
    terminal:
 
-   ```text
+   ```prompt
    Download the newest release of MixOS with git: clone
    https://github.com/mixoshq/mixos.git into ~/MixOS, then put main at its
    newest release tag (the highest vX.Y.Z, not a prerelease like v0.3.0-rc.1),
@@ -24,33 +51,76 @@ hand. For what you need beforehand, read [Before you install](README.md).
    unzip it in your home folder. `/mixos init` connects it to MixOS's history,
    so later releases merge in.
 
-2. **Open the folder in [Visual Studio Code](https://code.visualstudio.com/)**:
-   **File > Open Folder**, then `MixOS`, or the folder you unzipped.
-3. **Install the Claude Code extension**: in VS Code's Extensions view, search
-   for **Claude Code**, by Anthropic, and choose **Install**.
-4. **Sign in to Claude** in the Claude Code panel. Claude Code needs a Pro,
-   Max, Team or Enterprise plan, or a Claude Console account, billed by API
-   use; the free plan doesn't include it.
-5. **Run `/mixos init`** in the Claude Code panel. Claude installs what your
+2. **Open the folder in VS Code**: **File > Open Folder**, then `MixOS`, or the
+   folder you unzipped.
+3. **Sign in to Claude** in the Claude Code panel, which the Claude mark (✻) at
+   the top of the editor opens.
+4. **Run `/mixos init`** in the Claude Code panel. Claude installs what your
    computer is missing, starts MixOS at
    [http://localhost:3000](http://localhost:3000) and gives you its login. Then
    it offers to put your copy in a private GitHub repository of your own.
 
-Cursor and JetBrains IDEs have Claude Code too, and it works in a terminal: run
-`claude` in the folder, then `/mixos init`.
+## For developers
 
-On Windows, MixOS runs in WSL. Set that up first, as
-[On Windows](development.md#on-windows) says, then do these steps in a VS Code
-window connected to WSL, with the prompt in its Claude Code panel.
+Clone MixOS yourself, open it in your IDE, and `/mixos init` does the rest.
 
-To put MixOS online for your team, deploy your repository. Each host's page
-under [Install at popular providers](providers/README.md) says how, and the
-manual way works for any host from [Step 2](#step-2-generate-the-keys).
-`/mixos deploy` doesn't install MixOS anywhere: it opens a pull request with
-your changes. When a newer release of MixOS is out, `/mixos upgrade` brings
-your copy up to date.
+1. **Clone the newest release**:
 
-## The manual way
+   ```bash
+   git clone https://github.com/mixoshq/mixos.git MixOS
+   cd MixOS
+   git switch -C main "$(git describe --abbrev=0 --exclude '*-*' origin/main)"
+   git branch --unset-upstream   # so a pull can't bring in unreleased work
+   ```
+
+2. **Open the folder with Claude Code**, in your IDE:
+
+<!-- tabs ide -->
+
+#### VS Code
+
+**File > Open Folder**, then `MixOS`. The Claude mark (✻) at the top of the
+editor opens the Claude Code panel.
+
+#### Cursor
+
+**File > Open Folder**, then `MixOS`. In the Extensions view, search for
+**Claude Code**, by Anthropic, and choose **Install**. The Claude mark (✻) at
+the top of the editor opens its panel.
+
+#### JetBrains
+
+Install the [Claude Code CLI](https://code.claude.com/docs/en/setup), then the
+**Claude Code [Beta]** plugin, from **Settings > Plugins > Marketplace**. Open
+the `MixOS` folder, and press **Cmd+Esc**, or **Ctrl+Esc** on Windows and
+Linux. Running `claude` in the IDE's terminal works too.
+
+#### Windsurf
+
+Install the [Claude Code CLI](https://code.claude.com/docs/en/setup). Then open
+the `MixOS` folder in Windsurf, and run `claude` in its terminal.
+
+#### Terminal
+
+Install the [Claude Code CLI](https://code.claude.com/docs/en/setup):
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+Then run `claude` in the `MixOS` folder.
+
+<!-- /tabs -->
+
+3. **Sign in to Claude**, if Claude Code asks.
+4. **Run `/mixos init`**. Claude installs what your computer is missing, starts
+   MixOS at [http://localhost:3000](http://localhost:3000) and gives you its
+   login. Then it offers to create your private repository, which
+   [Create your own repository](#create-your-own-repository) does by hand.
+
+<!-- details -->
+
+### Advanced: install by hand
 
 Each step by hand, for when you'd rather run them yourself. Three things to
 know first:
@@ -82,7 +152,7 @@ The short version, if you've deployed a web app before:
 7. Open `/api/health/ready`. Once it answers `{"status":"ok"}`, sign in with your
    admin email and password.
 
-### Step 1: Get your own copy
+#### Step 1: Get your own copy
 
 Your copy of MixOS is a private repository of your own on GitHub. The apps,
 connectors and themes you add are committed there, your host builds from it,
@@ -90,17 +160,16 @@ and new releases of MixOS merge into it from `upstream`, MixOS's own
 repository. It isn't a fork, because a fork of a public repository can't be
 private.
 
-#### Clone the newest release
+##### Clone the newest release
 
 ```bash
 git clone https://github.com/mixoshq/mixos.git MixOS
 cd MixOS
-git describe --abbrev=0 --exclude '*-*' origin/main   # the newest release, such as v0.2.0
-git switch -C main v0.2.0
-git branch --unset-upstream                          # so a pull can't bring in unreleased work
+git switch -C main "$(git describe --abbrev=0 --exclude '*-*' origin/main)"   # the newest release
+git branch --unset-upstream   # so a pull can't bring in unreleased work
 ```
 
-#### Create your own repository
+##### Create your own repository
 
 These are the commands `/mixos init` runs, with the
 [GitHub CLI](https://cli.github.com) signed in (`gh auth login`). MixOS's
@@ -127,7 +196,7 @@ and keys you'll make, so they stay on your computer. New releases reach your
 repository when you merge their tag: see
 [Upgrading MixOS](after-you-install/upgrading.md).
 
-#### Install the dependencies
+##### Install the dependencies
 
 ```bash
 npm ci
@@ -139,7 +208,7 @@ in a checkout whose `origin` is still `mixoshq/mixos`, it also has git ignore
 every extension the core doesn't carry, and your own are what you commit. If
 you ran it before, `npm run prepare` sets that right.
 
-### Step 2: Generate the keys
+#### Step 2: Generate the keys
 
 In your copy, run:
 
@@ -182,7 +251,7 @@ what each would expose if it leaked.
 Render's Blueprint, a Railway template and `deploy/new-env.sh` generate the keys
 for you.
 
-### Step 3: Create the database
+#### Step 3: Create the database
 
 Any Postgres 13 or later works. A few things decide whether it works well:
 
@@ -217,7 +286,7 @@ its own API over the `public` schema, whether or not MixOS uses it, and the
 locked tables are what keep it closed. See the
 [security architecture](../security-architecture.md).
 
-### Step 4: Set the environment
+#### Step 4: Set the environment
 
 Set these where MixOS runs; each host page says how. The release step reports
 any required key that's missing.
@@ -246,13 +315,13 @@ download.
 Connector credentials aren't environment variables. An admin enters them at
 Admin > Connectors, and they're stored encrypted.
 
-### Step 5: Deploy
+#### Step 5: Deploy
 
 Deploy your repository to your host. Each page under
 [Install at popular providers](providers/README.md) says how, and sets up the
 release step and the tick as part of it.
 
-#### On another host
+##### On another host
 
 Any host that runs a Docker image, or Node 22 or later, can run MixOS.
 
@@ -294,7 +363,7 @@ on the host works, such as:
 A tick that's cut short is harmless: each job is claimed atomically, and the
 next tick picks up where the last stopped.
 
-### Step 6: Run the release step
+#### Step 6: Run the release step
 
 The release step gets the database ready for the code that's about to serve. Every
 host runs it before new code takes traffic:
@@ -351,7 +420,7 @@ platform schema the build expects and every app migration the build carries. On
 a host that waits for it, a deploy whose release step was skipped or failed
 never takes traffic.
 
-#### The maintenance page
+##### The maintenance page
 
 On a host that doesn't wait, a database whose platform schema is behind the
 build puts the whole instance on hold. Every page shows a plain "Down for
@@ -373,14 +442,14 @@ shortly." Its scheduled jobs wait too, and stay due. Readiness reports
 files in a line starting `Serving "being updated" for`. The same release step
 brings it back. An app an admin has switched off answers as it always does.
 
-### Step 7: Sign in as the first admin
+#### Step 7: Sign in as the first admin
 
 The release step creates your admin account from `INITIAL_ADMIN_EMAIL` and
 `INITIAL_ADMIN_PASSWORD`, once. Sign in at your address, then change the
 password on your account page. Then add your team: see
 [After you install](after-you-install/README.md#sign-in-and-add-your-team).
 
-### Step 8: Check it works
+#### Step 8: Check it works
 
 MixOS answers two health checks:
 
@@ -399,6 +468,44 @@ curl -i https://mixos.example.com/api/cron           # 401: the tick needs its t
 Then check that the tick runs, in your scheduler's log: each call should get a
 200. The admin pages show the version and commit you deployed: see
 [Which build is running](after-you-install/README.md#which-build-is-running).
+
+<!-- /details -->
+
+<!-- /tabs -->
+
+<!-- callout online -->
+
+## Put it online
+
+Deploy your repository, and your team can sign in to your workspace from
+anywhere. Each host's page under
+[Install at popular providers](providers/README.md) says how, and
+[installing by hand](#advanced-install-by-hand) works for any host from
+[Step 2](#step-2-generate-the-keys).
+
+**At your own domain.** Render, Railway and Vercel give MixOS an address of
+theirs. To use your own, either a domain of its own, such as
+`mycompanymix.com`, or a subdomain of your company's, such as
+`mix.company.com`:
+
+1. **Add the domain to MixOS on your host.** Its dashboard says which DNS
+   record to create. On a server of your own, the domain points at the server,
+   as [Your own server](providers/self-hosted.md) says, and MixOS gets its
+   certificate once the DNS resolves.
+2. **Create that record where your domain's DNS is managed**: usually a CNAME
+   for a subdomain, and an A or ALIAS record for a domain of its own.
+3. **Set `NEXTAUTH_URL` to the new address**, exactly, such as
+   `https://mix.company.com`, and redeploy. Signing in sends people there, so a
+   mismatch shows up as an endless sign-in loop.
+4. **Give each OAuth app the new redirect address.** A connector's redirect
+   address is built from `NEXTAUTH_URL`, and Admin > Connectors shows the new
+   one.
+
+`/mixos deploy` doesn't put MixOS online: it opens a pull request with your
+changes. When a newer release of MixOS is out, `/mixos upgrade` brings your copy
+up to date.
+
+<!-- /callout -->
 
 ## Common installation problems
 
