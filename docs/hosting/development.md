@@ -350,7 +350,9 @@ Updating and removing an installed extension work in a checkout too: see
 
 To try a local copy of the catalogue, `MIXOS_REPOSITORY_URL` points a checkout
 at another one: see [`.env.local.example`](../../.env.local.example). A built
-deployment ignores it unless it names the deployment's own machine.
+deployment ignores it unless it names the deployment's own machine. Releases
+must be signed, so set `MIXOS_REPOSITORY_KEYS` to the key the local catalogue
+signs with, which mixos.org's `scripts/registry-signing-key.mjs --dev` prints.
 
 ## Running the tests
 

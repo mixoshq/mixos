@@ -22,6 +22,7 @@ import {
   fetchInstallManifest,
   searchRepository,
 } from "./client";
+import { TEST_REPOSITORY_KEYS, signedForTest } from "./test-signing";
 
 // ── the catalogue ───────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ const ANSWERS: Record<string, unknown> = {
     },
     releases: [],
   },
-  "/api/v1/apps/standup/install": {
+  "/api/v1/apps/standup/install": signedForTest({
     kind: "app",
     slug: "standup",
     name: "Standup",
@@ -55,7 +56,7 @@ const ANSWERS: Record<string, unknown> = {
     permissions: [],
     requiresMixOS: null,
     yanked: false,
-  },
+  }),
 };
 
 /** The three GETs `requestJson` serves, and the request each one sends. */
@@ -117,13 +118,18 @@ function redirect(res: http.ServerResponse, location: string, status = 302): voi
   res.end();
 }
 
-/** Point the client at `origin` until the test ends. */
-function useCatalogue(t: TestContext, origin: string): void {
+/** Point the client at `origin`, trusting its test key unless told not to, until the test ends. */
+function useCatalogue(t: TestContext, origin: string, keys: string | undefined = TEST_REPOSITORY_KEYS): void {
   const previous = process.env.MIXOS_REPOSITORY_URL;
+  const previousKeys = process.env.MIXOS_REPOSITORY_KEYS;
   process.env.MIXOS_REPOSITORY_URL = origin;
+  if (keys === undefined) delete process.env.MIXOS_REPOSITORY_KEYS;
+  else process.env.MIXOS_REPOSITORY_KEYS = keys;
   t.after(() => {
     if (previous === undefined) delete process.env.MIXOS_REPOSITORY_URL;
     else process.env.MIXOS_REPOSITORY_URL = previous;
+    if (previousKeys === undefined) delete process.env.MIXOS_REPOSITORY_KEYS;
+    else process.env.MIXOS_REPOSITORY_KEYS = previousKeys;
   });
 }
 
