@@ -10,6 +10,17 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-10-25
+
+- **Releases from mixos.org are signed, and MixOS checks.** Every install
+  manifest is verified against mixos.org's keys, pinned in
+  `src/lib/repository/release-signature.ts`, before anything is downloaded. A
+  release that isn't signed, or changed after it was, is refused as `unsigned`.
+  A development catalogue's own key goes in `MIXOS_REPOSITORY_KEYS`. See
+  [§31](docs/security-architecture.md#31-installing-from-the-repository).
+- **Browse counts active installs.** A card shows the instances using an
+  extension in the last 30 days, as mixos.org does, not the total ever.
+
 ## 2026-10-20
 
 - **Connectors mirror their provider, and building an app doesn't change one.**

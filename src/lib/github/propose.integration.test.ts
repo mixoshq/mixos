@@ -36,6 +36,7 @@ import zlib from "node:zlib";
 import postgres, { type Sql } from "postgres";
 import { migratePlatform } from "../../../scripts/platform-migrations";
 import type { TarEntry } from "../repository/tar";
+import { TEST_REPOSITORY_KEYS, signedForTest } from "../repository/test-signing";
 import { FakeGitHub } from "./fake-github";
 
 const REPO = path.resolve(__dirname, "../../..");
@@ -251,6 +252,7 @@ describe("proposing an install as a pull request", { skip }, () => {
     process.env.GITHUB_APP_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
     process.env.NEXTAUTH_URL = "https://mixos.test";
     process.env.MIXOS_REPOSITORY_URL = CATALOGUE;
+    process.env.MIXOS_REPOSITORY_KEYS = TEST_REPOSITORY_KEYS;
     // A built deployment, on Vercel: the only place Browse proposes.
     process.env.VERCEL = "1";
     for (const flag of ["INSTALL_APPS", "INSTALL_CONNECTORS", "INSTALL_THEMES"]) delete process.env[flag];
@@ -272,7 +274,7 @@ describe("proposing an install as a pull request", { skip }, () => {
         const archivePath = `/acme/extensions/tar.gz/${sha}`;
         const served = f.tampered ? [...r.entries, ...files({ "extra.ts": "export const x = 1;\n" })] : r.entries;
         archives.set(archivePath, tarball(`acme-extensions-${sha.slice(0, 7)}`, served.map((e) => ({ ...e, path: `${subpath}/${e.path}` }))));
-        const install = {
+        const install = signedForTest({
           kind: f.kind,
           slug,
           name: slug,
@@ -287,7 +289,7 @@ describe("proposing an install as a pull request", { skip }, () => {
           yanked: false,
           yankedReason: null as string | null,
           ...r.manifest,
-        };
+        });
         const path = `/api/v1/${SEGMENT[f.kind]}/${slug}/install`;
         if (r.version === "1.2.0") catalogue.set(path, install);
         catalogue.set(`${path}?version=${r.version}`, install);
@@ -368,7 +370,7 @@ describe("proposing an install as a pull request", { skip }, () => {
   after(async () => {
     globalThis.fetch = realFetch;
     Object.assign(console, saved);
-    for (const key of ["VERCEL", "MIXOS_REPOSITORY_URL", "GITHUB_APP_ENCRYPTION_KEY", "NEXTAUTH_URL"]) {
+    for (const key of ["VERCEL", "MIXOS_REPOSITORY_URL", "MIXOS_REPOSITORY_KEYS", "GITHUB_APP_ENCRYPTION_KEY", "NEXTAUTH_URL"]) {
       if (env[key] === undefined) delete process.env[key];
       else process.env[key] = env[key];
     }
