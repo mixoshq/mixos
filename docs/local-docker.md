@@ -230,7 +230,7 @@ paths — `createServiceClient()` (the query builder in
 pool) — and both are the same TCP connection to Postgres, configured from
 `DATABASE_URL`. The CLI is how this repository gets a local Postgres that
 matches hosted Supabase's version and extensions; a deployment needs none of the
-rest (see [docs/hosting](hosting/README.md)). Everything that would boot for
+rest (see [Requirements](hosting/requirements.md#a-postgres-database)). Everything that would boot for
 nothing, `supabase/config.toml` turns off.
 
 | Service | State | Why |
