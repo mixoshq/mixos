@@ -11,18 +11,9 @@ team can reach it, see [How to install](install.md).
 
 ## What you need
 
-| What | Version | Notes |
-| --- | --- | --- |
-| Operating system | macOS, Linux, or Windows with WSL 2 | On Windows, MixOS runs inside WSL. Git Bash and PowerShell can't run it |
-| [Node.js](https://nodejs.org) | **24**, pinned in `.nvmrc`, so `nvm use` selects it. 22 is the minimum | Node 22 reaches end of life on 30 April 2027. Every shell that runs MixOS's commands needs it, not only your terminal |
-| npm | Comes with Node | The lockfile is npm's: install with `npm ci`, not pnpm or yarn |
-| Git | Any recent version | |
-| Docker | Docker Desktop on macOS and Windows, or Docker Engine with the Compose v2 plugin on Linux | Give Docker about 4 GiB of memory, and keep several GB of disk free |
-| Free ports | 3000, 54321, 54322, 54323 | MixOS, the Supabase API, Postgres, and Supabase Studio |
-| [VS Code](https://code.visualstudio.com/) | Current | With the Claude Code and Prettier extensions. Claude Code needs a Pro, Max, Team or Enterprise plan, or a Claude Console account; only the guided `/mixos` commands use it |
-| [GitHub CLI](https://cli.github.com) | Optional | Lets `/mixos init` create your own repository on GitHub, and `/mixos deploy` open pull requests there. Without it, `/mixos deploy` gives you a link to paste |
-
-`/mixos init` checks all of this and installs what's missing. To do it yourself:
+[Requirements](requirements.md#on-your-computer) lists what your computer
+needs. `/mixos init` checks all of it and installs what's missing. To do it
+yourself:
 
 - **Node in every shell.** Git hooks, editors and Claude Code often start shells
   that never read `~/.zprofile`. On a Mac where Homebrew is set up there
