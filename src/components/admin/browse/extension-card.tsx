@@ -146,9 +146,11 @@ export default function ExtensionCard({
           <Badge tone="neutral">v{extension.latestVersion}</Badge>
         )}
         {extension.license && <Badge tone="neutral">{extension.license}</Badge>}
-        {extension.installCount > 0 && (
+        {/* Active installs, as mixos.org shows: the cumulative count never
+            falls, so made-up instance ids could hold it up. */}
+        {(extension.activeInstalls ?? 0) > 0 && (
           <Badge tone="neutral">
-            {formatCount(extension.installCount, "install")}
+            {formatCount(extension.activeInstalls ?? 0, "active install")}
           </Badge>
         )}
       </div>
