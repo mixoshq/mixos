@@ -102,7 +102,9 @@ plain Markdown on GitHub:
   `<!-- /icons -->`, with an icon beside each item, chosen by the item's bold
   start, and any paragraphs after the list as its footnote.
   `<!-- callout <name> -->` sets the section up to `<!-- /callout -->` apart in a
-  box with its icon. The site knows each group, list, callout and icon by name,
+  box with its icon. `<!-- terms -->` makes the paragraphs up to
+  `<!-- /terms -->`, each starting with a bold term, a list of terms, each on a
+  line of its own. The site knows each group, list, callout and icon by name,
   and its build refuses one it doesn't, so reuse those the docs already have, or
   ask for a new one in an issue. Every other comment is dropped.
 

@@ -509,6 +509,8 @@ up to date.
 
 ## Common installation problems
 
+<!-- terms -->
+
 **Readiness answers 503, or the deploy never goes live.** With no `reason`,
 MixOS can't reach the database: check `DATABASE_URL`, and `PGSSLMODE`. With
 `"reason": "schema-behind"` or `"app-migrations-behind"`, the release step
@@ -550,5 +552,7 @@ different role than the app. See [Step 3](#step-3-create-the-database).
 
 **The build stops: an extension needs a newer MixOS.** See
 [When an extension needs a newer MixOS](after-you-install/README.md#when-an-extension-needs-a-newer-mixos).
+
+<!-- /terms -->
 
 Each host's page has the problems particular to it.
