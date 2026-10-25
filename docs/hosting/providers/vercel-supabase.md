@@ -13,7 +13,7 @@ Postgres. Neon, or any Postgres Vercel can reach, works the same way: see
   tick every five minutes, and on the Hobby plan Vercel allows only daily cron
   jobs: it fails a deployment whose cron runs more often.
 - **A Supabase project for this install alone.** Each install needs a Postgres
-  server of its own: see [Step 3 of How to install](../install.md#step-3-create-the-database).
+  server of its own: see [A Postgres database](../requirements.md#a-postgres-database).
 - **The keys**, from `npm run keys:generate` in your copy.
 
 ## Steps
