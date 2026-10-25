@@ -60,11 +60,10 @@ every request.
 
 When a publisher withdraws a release of an extension you installed from
 mixos.org, for a security problem say, a notice at the top of Admin > Apps,
-Connectors and Themes says so within about a day, with their reason. Nothing is
-switched off or updated for you. Only extensions installed from mixos.org, which
-keep a `.registry.json`, are checked, and nothing is checked while
-`MIXOS_UPDATE_CHECK=false`. Each withdrawn release is
-also logged on the server as a warning starting `[update-check]`, for an alert to
+Connectors and Themes says so within about a day, with their reason: the
+[daily check for updates](README.md#release-and-update-notices) finds it.
+Nothing is switched off or updated for you. Each withdrawn release is also
+logged on the server as a warning starting `[update-check]`, for an alert to
 catch.
 
 **Deactivate is the incident response.** On a withdrawn app's notice, it turns
