@@ -80,109 +80,30 @@ the way back. [Rolling back](upgrading.md#rolling-back) says how to restore one.
 ## Keep MixOS up to date
 
 Each version of MixOS is a release: a tag on `mixoshq/mixos`, such as `v0.2.0`.
-When a newer one is out, admins see a banner over every page, and the full
-notice at the top of the admin pages: see
-[New releases of MixOS](#new-releases-of-mixos). To take it, run
+Admins hear when a newer one is out: see
+[Release and update notices](#release-and-update-notices). To take it, run
 `/mixos upgrade` in Claude Code, in your copy, or merge the release's tag into
 your repository from `upstream` by hand, and deploy it: see
 [Upgrading MixOS](upgrading.md).
 
 ## Release and update notices
 
-MixOS checks with mixos.org once a day, on the tick, so admins hear about two
-things: a release of an installed extension that its publisher withdrew, and a
-new release of MixOS. Neither check changes anything for you.
-`MIXOS_UPDATE_CHECK=false` turns both off.
+Once a day, MixOS checks mixos.org for updates: new releases of MixOS, and of
+the extensions it installed from mixos.org. It identifies itself only by a
+random ID, and mixos.org doesn't keep IP addresses.
 
-### What MixOS sends to mixos.org
-
-Once a day, each instance asks mixos.org about the extensions it installed from
-there, so that when a publisher withdraws a release, for a security problem say,
-the admins of every instance running it see why. The tick sends one request,
-from the server:
-
-```
-POST https://mixos.org/api/v1/updates
-{ "instanceId": "<random UUID>",
-  "items": [{ "kind": "app", "slug": "files", "version": "1.2.0" }] }
-```
-
-- **Sent:** a random ID for the instance, and the kind, slug and version of each
-  extension installed from mixos.org, from its `.registry.json`.
+- **Sent:** the random ID, and the kind, slug and version of each extension the
+  instance installed from mixos.org.
 - **Not sent:** extensions you wrote or installed from anywhere else, users,
   data, settings, the instance's address, and the MixOS version.
-- **The ID** is made at the first check and kept in the instance's database, as
-  `platform_settings.registry_instance_id`. It comes from nothing about the
-  instance. Each database is one instance, so a checkout and production are two.
-- **What mixos.org keeps:** for each instance and extension, the version it last
-  listed, a two-letter country, and when it was first and last seen, until 30
-  days after the last check that listed it; and, for each release an instance
-  lists for the first time, a row that counts the install, for 30 days and then
-  only as daily totals. Its database doesn't store IP addresses. The
-  [API docs](https://mixos.org/docs/api#what-we-record-and-what-we-do-not) have
-  the detail.
+- **What admins see:** a banner when a new release of MixOS is out, and a
+  notice on Admin > Apps, Connectors or Themes when an installed extension has
+  a newer release, or its publisher withdrew the one you run. Nothing is
+  updated or switched off for you.
 
-The answer only shows notices, under the header of Admin > Apps, Connectors and
-Themes: a release its publisher withdrew, with their reason and, for an app, a
-**Deactivate** button; a newer release; a listing that's no longer published;
-and when mixos.org last answered. Nothing is updated or switched off for you.
-
-A check runs about once a day, and at the next tick after a deploy changes what
-is installed. If mixos.org can't be reached, the last answer stays, and the check
-tries again an hour later, or after the wait mixos.org asks for, but never more
-than a day later.
-
-To turn it off, set `MIXOS_UPDATE_CHECK=false`: nothing is sent, no ID is
-created, and admins aren't told about withdrawn releases. The same switch stops
-the check for new releases of MixOS, so with it off the instance sends nothing
-to mixos.org on its own. It reads `true`, `1`, `yes` and `on` as on, and
-`false`, `0`, `no` and `off` as off; any other value is read as off, and the
-release step reports it. To stop checking one extension, delete its
-`.registry.json`.
-
-### New releases of MixOS
-
-Once a day, each instance also asks mixos.org which releases of MixOS exist, so
-admins hear when a newer one is out. The tick sends one request, from the
-server:
-
-```
-GET https://mixos.org/api/v1/mixos/releases
-User-Agent: MixOS
-```
-
-- **Sent:** nothing about the instance. No ID, no version, no query and no body.
-  mixos.org records nothing for a `GET`, so all it learns is that a MixOS
-  somewhere asked, from the request's IP address.
-- **Shown:** when a newer release is out, a notice at the top of every admin
-  page, such as "MixOS 0.5.0 is available (this instance runs 0.4.2). A minor
-  release: it may need changes." Its notes are folded under it, and their links
-  are shown as text, never as links. The notice links to the release's page on
-  mixos.org and to [Upgrading MixOS](upgrading.md), and gives `/mixos upgrade`
-  to copy and the merge by hand. Over every other page, admins see a slim
-  banner, "MixOS v0.5.0 is out (you run v0.4.2). Run `/mixos upgrade` in Claude
-  Code to upgrade.", with **Details**, which goes to the notice. Dismissing the
-  banner hides it until the next release, for that admin in that browser; the
-  notice stays. Under the version at the foot of the admin pages, a line says
-  when mixos.org last answered.
-- **Never applied.** Nothing is merged, downloaded or deployed. Taking a release
-  is up to you: `/mixos upgrade` merges it in your copy, or you merge its tag by
-  hand, as [Upgrading MixOS](upgrading.md) says, and merging the pull request
-  deploys it. On a fork of `mixoshq/mixos`, the
-  [GitHub App](github-app.md#updating-mixos-through-the-app) can open that pull
-  request for you.
-
-The check keeps the update check's schedule: about once a day, and an hour after
-a failure, or later if mixos.org asks, but never more than a day later. Its last
-answer is kept in the database as `platform_settings.mixos_release_check`.
-
-**The channel.** `MIXOS_RELEASE_CHANNEL=stable`, the default, tells you about
-releases only. `prerelease` adds prereleases, tags with a suffix such as
-`v0.3.0-rc.1`, which are for trying a version before it's final. Any other value
-is read as `stable`, and the release step reports it.
-
-**Turning it off.** `MIXOS_UPDATE_CHECK=false` turns this check off along with
-the update check. Nothing is sent, and the admin pages say the checks are off.
+To turn the checks off, set `MIXOS_UPDATE_CHECK=false`. Nothing is sent, and
+admins aren't told about new or withdrawn releases. The Registry API docs say
+[what mixos.org records](https://mixos.org/docs/api#what-we-record-and-what-we-do-not).
 
 ## Extensions
 
@@ -326,11 +247,10 @@ never checked, and a floor that isn't a version is a warning, not a stop.
 
 ### Updating an extension
 
-Updating an extension is a change to your repository, as installing one is.
-Once a day the instance asks mixos.org about the extensions it installed from
-there (see [What MixOS sends to mixos.org](#what-mixos-sends-to-mixosorg)), and a
+Updating an extension is a change to your repository, as installing one is. A
 notice under the Apps, Connectors or Themes header says when a newer release is
-out, or when the installed one was withdrawn. To update:
+out, or when the installed one was withdrawn: see
+[Release and update notices](#release-and-update-notices). To update:
 
 1. In a checkout of your repository, running `npm run dev`, press **Update** on
    the notice, or on the extension's listing in Browse. The dialog lists the

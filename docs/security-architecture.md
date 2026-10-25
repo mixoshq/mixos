@@ -813,7 +813,7 @@ x-forwarded-for: <attacker-spoofed>, <real-client-ip>
 
 Every per-IP limit keys on this rule (`getClientIp`,
 `src/lib/apps/public-access.ts`), which is why MixOS is served behind a proxy
-or platform that sets these headers ([hosting](hosting/README.md)).
+or platform that sets these headers ([Requirements](hosting/requirements.md#a-host)).
 
 The pre-filter's in-memory store (`src/lib/rate-limit.ts`) evicts stale entries
 automatically; the Postgres authority is pruned from the cron tick.

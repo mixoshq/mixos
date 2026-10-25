@@ -87,21 +87,21 @@ MixOS on your computer, are in
 
 ## Installing and hosting MixOS
 
-The install guide is in [`docs/hosting/`](docs/hosting/README.md), in five
-parts:
+The install guide is in [`docs/hosting/`](docs/hosting/), in five parts:
 
-1. **[Before you install](docs/hosting/README.md)**: what you need, and the
-   choices to make first: where to host, which database, and how extensions get
-   in.
-2. **[How to install](docs/hosting/install.md)**: what you need, then a way for
+1. **[How to install](docs/hosting/install.md)**: what you need, then a way for
    vibe-coders and a way for developers, both with Claude Code, and the install
    by hand: your own repository, keys, database, environment, deploy, the
    release step, the first admin, and checking it works.
+2. **[Requirements](docs/hosting/requirements.md)**: what MixOS needs online,
+   from the host, the database and the scheduler, what it doesn't provide yet,
+   and what your computer needs.
 3. **[Running a development copy](docs/hosting/development.md)**: MixOS on your
    own computer, with `/mixos init` or by hand: what you need, the dev
    container, `npm run dev`, installing from the Registry in a checkout, the
    tests, and common problems.
-4. **[Install at popular providers](docs/hosting/providers/README.md)**:
+4. **[Install at popular providers](docs/hosting/providers/README.md)**: where
+   to host, which database, and how extensions get in; then
    [Vercel with Supabase](docs/hosting/providers/vercel-supabase.md),
    [Render](docs/hosting/providers/render.md) ([`render.yaml`](render.yaml)),
    [Railway](docs/hosting/providers/railway.md) ([`railway.json`](railway.json)),

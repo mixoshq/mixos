@@ -2,8 +2,9 @@
 
 MixOS runs from a copy of its code that's yours: a private repository on
 GitHub, which your host deploys and new releases of MixOS merge into. Claude
-Code sets it up with you, whether or not you write code. For the choices to
-make first, read [Before you install](README.md).
+Code sets it up with you, whether or not you write code.
+[Requirements](requirements.md) has the technical details, online and on your
+computer.
 
 ## What you need
 
@@ -253,38 +254,10 @@ for you.
 
 #### Step 3: Create the database
 
-Any Postgres 13 or later works. A few things decide whether it works well:
-
-- **Its own Postgres server.** Each app with tables gets a database role of its
-  own, `mixos_app_<slug>`, and roles belong to the whole server. So two MixOS
-  databases on one server would share each app's role, and the release step
-  refuses an app role that another database on the server already uses. Give
-  each install a server of its own, not just a database of its own.
-- **A role that can create roles** (`CREATEROLE`). The release step creates each
-  app's role and makes itself a member, which is how the app reaches its
-  tables. The default role on Supabase, Neon, RDS, Render and Railway can, and so
-  can the superuser in a container.
-- **One role for everything.** Every table has row-level security on, with no
-  policies, so only the role that owns a table can use it. Run the release step
-  as the role the app connects as, which it does whenever both use the same
-  `DATABASE_URL`. A setup where an admin role migrates and a restricted role
-  serves finds every table empty.
-- **A pooler on serverless hosts.** A long-running server holds a small pool of
-  connections and can connect directly. Serverless functions, such as Vercel's,
-  open many short-lived ones, so use the provider's pooled connection string:
-  Supabase's transaction pooler, on port 6543, or the pooled `DATABASE_URL` that
-  Neon's Vercel integration sets. Transaction-mode poolers are fine: MixOS uses
-  no prepared statements or session state, and the release step's lock is
-  transaction-scoped.
-- **TLS.** MixOS requires TLS to the database unless `PGSSLMODE` says
-  otherwise. Set `PGSSLMODE=disable` for a database on the same private
-  network, as on Docker Compose and Render, or `verify-full` to check the
-  database's certificate.
-
-On Supabase, row-level security does real work: every Supabase project serves
-its own API over the `public` schema, whether or not MixOS uses it, and the
-locked tables are what keep it closed. See the
-[security architecture](../security-architecture.md).
+Create a Postgres database that meets
+[the requirements](requirements.md#a-postgres-database), and copy its
+connection string. [Which database](providers/README.md#which-database)
+compares the options.
 
 #### Step 4: Set the environment
 
@@ -301,8 +274,8 @@ any required key that's missing.
 | `CRON_SECRET` | Yes | The token the tick sends. Without it, `/api/cron` refuses every call and scheduled jobs never run |
 | `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD` | For the first deploy | The release step creates this account if no account has the email. It never changes an existing one, so they're safe to leave set |
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind. See [Fixing what an instance runs](after-you-install/README.md#fixing-what-an-instance-runs) |
-| `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance checks with mixos.org once a day, about the extensions it installed from there and about new releases of MixOS. `false` sends nothing. See [What MixOS sends to mixos.org](after-you-install/README.md#what-mixos-sends-to-mixosorg) |
-| `MIXOS_RELEASE_CHANNEL` | No, default `stable` | Which releases of MixOS the admin pages tell you about: `stable`, or `prerelease` to include prereleases. See [New releases of MixOS](after-you-install/README.md#new-releases-of-mixos) |
+| `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance checks mixos.org once a day for updates to MixOS and its extensions. `false` sends nothing. See [Release and update notices](after-you-install/README.md#release-and-update-notices) |
+| `MIXOS_RELEASE_CHANNEL` | No, default `stable` | Which releases of MixOS the admin pages tell you about: `stable`, or `prerelease` to include prereleases, such as `v0.3.0-rc.1` |
 | `GITHUB_APP_ENCRYPTION_KEY` | No | Turns on Admin > GitHub. See [The GitHub App](after-you-install/github-app.md) |
 | `MIXOS_COMMIT` | No | The commit the admin pages show beside the version. See [Which build is running](after-you-install/README.md#which-build-is-running) |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated email domains that accounts may use. Blank means any |
@@ -323,7 +296,8 @@ release step and the tick as part of it.
 
 ##### On another host
 
-Any host that runs a Docker image, or Node 22 or later, can run MixOS.
+On a host that meets [the requirements](requirements.md#a-host), deploy the
+Docker image or a Node build:
 
 - **The Docker image.** The repository's [`Dockerfile`](../../Dockerfile) builds
   it. It takes no secrets at build time, and runs `node server.js` on port 3000
@@ -342,26 +316,18 @@ Two things to know before you change the build:
 - **Standalone output depends on `VERCEL`.** `next.config.ts` turns
   `output: "standalone"` off when a `VERCEL` environment variable is set, so
   don't set one outside Vercel.
-- **The build checks its own file trees.** MixOS reads `apps/` and `docs/` from
-  disk while it serves, where Next's tracing can't see them, so the Dockerfile
-  fails the build if either is missing from the image. See
+- **The build checks its own file tree.** MixOS reads `apps/` from disk while it
+  serves, where Next's tracing can't see it, so the Dockerfile fails the build
+  if it's missing from the image. See
   [Dev and prod profiles](../local-docker.md#dev-and-prod-profiles).
 
-Put HTTPS in front of it, and make it reachable only through your proxy. The
-proxy must pass the client's address in `X-Forwarded-For` or `X-Real-IP`:
-[Securing your install](after-you-install/securing.md#if-you-run-your-own-proxy)
-lists what else it must do.
-
-Then schedule the tick: `GET /api/cron` every five minutes, with the
-`CRON_SECRET` as a bearer token. A tick may run for up to 300 seconds. A cron job
-on the host works, such as:
+Put HTTPS in front of it, as [A host](requirements.md#a-host) describes, then
+schedule [the tick](requirements.md#a-scheduler). A cron job on the host works,
+such as:
 
 ```
 */5 * * * * curl -fsS -o /dev/null --max-time 290 -H "Authorization: Bearer <CRON_SECRET>" https://mixos.example.com/api/cron
 ```
-
-A tick that's cut short is harmless: each job is claimed atomically, and the
-next tick picks up where the last stopped.
 
 #### Step 6: Run the release step
 
@@ -548,7 +514,8 @@ must be 32 bytes, in hex or base64. Restore the value from your copy;
 
 **The release step refuses an app's role or schema.** Another MixOS database on
 the same Postgres server uses that app's role, or the release step runs as a
-different role than the app. See [Step 3](#step-3-create-the-database).
+different role than the app. See
+[A Postgres database](requirements.md#a-postgres-database).
 
 **The build stops: an extension needs a newer MixOS.** See
 [When an extension needs a newer MixOS](after-you-install/README.md#when-an-extension-needs-a-newer-mixos).
