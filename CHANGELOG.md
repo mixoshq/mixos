@@ -8,6 +8,14 @@ tests and internal changes, and is the notes of its GitHub Release.
 Releases are made with `/mixos deploy release`; see the Release section of
 [.claude/skills/mixos/actions/deploy.md](.claude/skills/mixos/actions/deploy.md).
 
+## v0.5.0 (2026-10-25)
+
+Changes since v0.4.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.5.0/WHATS-NEW.md).
+
+### Fixes
+
+- **deps:** Next.js 16.4.3 and zod 4.6.7, for four security advisories (8c3b508)
+
 ## v0.4.0 (2026-10-20)
 
 Changes since v0.3.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.4.0/WHATS-NEW.md).
