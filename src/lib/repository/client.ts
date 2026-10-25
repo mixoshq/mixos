@@ -43,6 +43,7 @@
 
 import { isBuiltDeployment } from "../platform/build";
 import { MAX_REDIRECTS, fetchCheckingRedirects } from "./redirects";
+import { signatureProblem, trustedKeys } from "./release-signature";
 import {
   CoreReleaseListSchema,
   CoreReleaseSchema,
@@ -208,6 +209,12 @@ export type RepositoryFailure =
   | "status"
   /** Answered successfully with something that is not the documented shape. */
   | "malformed"
+  /**
+   * Answered about a release this instance can't verify the repository signed:
+   * no signature, a key it doesn't trust, or one that doesn't match. Nothing
+   * was downloaded. See ./release-signature.ts.
+   */
+  | "unsigned"
   /** The listing or release genuinely is not there. */
   | "not-found";
 
@@ -565,6 +572,18 @@ export async function fetchInstallManifest(
       "malformed",
     );
   }
+  // Signed by the repository with a key this instance already trusts. Checked
+  // here, where every manifest arrives, so nothing that reads one acts on a
+  // release that wasn't signed, or changed after it was. See
+  // ./release-signature.ts.
+  let keys;
+  try {
+    keys = trustedKeys(repositoryBaseUrl() !== DEFAULT_REPOSITORY_URL);
+  } catch (err) {
+    throw new RepositoryError(`MIXOS_REPOSITORY_KEYS: ${(err as Error).message}`, "config");
+  }
+  const problem = signatureProblem(parsed.data, keys);
+  if (problem) throw new RepositoryError(problem, "unsigned");
   return parsed.data;
 }
 

@@ -331,11 +331,24 @@ export const InstallManifestSchema = z.object({
    * yet". `isVerifiableHash` below is where that decision is made and named.
    */
   contentHash: z.string(),
+  /** How `contentHash` was computed: `mixos-tree-v1`. Signed with the rest. */
+  contentHashAlgorithm: z.string(),
   subpath: z.string().nullish(),
   permissions: z.array(PermissionSchema).default([]),
   requiresMixOS: z.string().nullish(),
   yanked: z.boolean().nullish(),
   yankedReason: z.string().nullish(),
+  /**
+   * The repository's signature over the release, checked as the manifest
+   * arrives (./release-signature.ts). Parsed as optional so that a missing one
+   * is refused as unsigned, which it is, rather than as a malformed answer.
+   */
+  signature: z
+    .object({
+      keyId: z.string().regex(/^[0-9a-f]{16}$/),
+      value: z.string().regex(/^[A-Za-z0-9+/]{86}==$/),
+    })
+    .nullish(),
 });
 export type InstallManifest = z.infer<typeof InstallManifestSchema>;
 

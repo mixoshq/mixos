@@ -35,6 +35,7 @@ import type { AdminActor } from "../apps/admin-audit";
 import { filesHash } from "./content-hash";
 import { serializeInstallRecord } from "./install-record";
 import type { TarEntry } from "./tar";
+import { TEST_REPOSITORY_KEYS, signedForTest } from "./test-signing";
 
 // ── the checkout ────────────────────────────────────────────────────────────
 
@@ -94,6 +95,7 @@ delete process.env.VERCEL;
 for (const flag of ["INSTALL_APPS", "INSTALL_CONNECTORS", "INSTALL_THEMES"]) delete process.env[flag];
 const CATALOGUE = "http://127.0.0.1:9";
 process.env.MIXOS_REPOSITORY_URL = CATALOGUE;
+process.env.MIXOS_REPOSITORY_KEYS = TEST_REPOSITORY_KEYS;
 
 after(() => {
   process.chdir(REPO);
@@ -318,21 +320,23 @@ before(async () => {
       if (install === "install") {
         const r = url.searchParams.get("version") ? releases.find((x) => x.version === url.searchParams.get("version")) : latest;
         if (!r) return Response.json({ error: "unknown version" }, { status: 404 });
-        return Response.json({
-          kind,
-          slug,
-          name,
-          version: r.version,
-          commitSha: r.commitSha,
-          gitTag: r.gitTag,
-          tarballUrl: `https://codeload.github.com${r.archivePath}`,
-          contentHash: r.contentHash,
-          subpath: null,
-          permissions: r.permissions,
-          requiresMixOS: "0.0.1",
-          yanked: r.yankedReason !== undefined,
-          yankedReason: r.yankedReason ?? null,
-        });
+        return Response.json(
+          signedForTest({
+            kind,
+            slug,
+            name,
+            version: r.version,
+            commitSha: r.commitSha,
+            gitTag: r.gitTag,
+            tarballUrl: `https://codeload.github.com${r.archivePath}`,
+            contentHash: r.contentHash,
+            subpath: null,
+            permissions: r.permissions,
+            requiresMixOS: "0.0.1",
+            yanked: r.yankedReason !== undefined,
+            yankedReason: r.yankedReason ?? null,
+          }),
+        );
       }
       return Response.json({
         slug,

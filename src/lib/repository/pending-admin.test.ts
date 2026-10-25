@@ -41,6 +41,7 @@ import {
 import type { ListingFacts } from "./pending-outcomes";
 import { reviewPendingInstall } from "./review";
 import type { TarEntry } from "./tar";
+import { TEST_REPOSITORY_KEYS, signedForTest } from "./test-signing";
 
 // ── the database ────────────────────────────────────────────────────────────
 
@@ -528,17 +529,19 @@ describe("the publisher's claims", () => {
     }
     if (url.pathname === "/api/v1/apps/acme/install") {
       res.writeHead(200, { "content-type": "application/json" }).end(
-        JSON.stringify({
-          kind: "app",
-          slug: "acme",
-          name: "Acme",
-          version: url.searchParams.get("version"),
-          commitSha: installCommit,
-          tarballUrl: `https://codeload.github.com/acme/mixos-apps/tar.gz/${installCommit}`,
-          contentHash: "sha256-x",
-          subpath: "apps/acme",
-          permissions: [{ scope: "network:api.acme.example", reason: "Reads boards‮ from Acme." }],
-        }),
+        JSON.stringify(
+          signedForTest({
+            kind: "app",
+            slug: "acme",
+            name: "Acme",
+            version: url.searchParams.get("version") ?? "1.2.0",
+            commitSha: installCommit,
+            tarballUrl: `https://codeload.github.com/acme/mixos-apps/tar.gz/${installCommit}`,
+            contentHash: "sha256-x",
+            subpath: "apps/acme",
+            permissions: [{ scope: "network:api.acme.example", reason: "Reads boards‮ from Acme." }],
+          }),
+        ),
       );
       return;
     }
@@ -549,11 +552,13 @@ describe("the publisher's claims", () => {
   /** The paths the catalogue was asked, other than the install manifest. */
   let asked: string[] = [];
   const before = process.env.MIXOS_REPOSITORY_URL;
+  const beforeKeys = process.env.MIXOS_REPOSITORY_KEYS;
 
   beforeEach(async () => {
     if (!server.listening) await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     process.env.MIXOS_REPOSITORY_URL = origin;
+    process.env.MIXOS_REPOSITORY_KEYS = TEST_REPOSITORY_KEYS;
     installCommit = sha;
     answering = true;
     asked = [];
@@ -561,6 +566,8 @@ describe("the publisher's claims", () => {
   afterEach(() => {
     if (before === undefined) delete process.env.MIXOS_REPOSITORY_URL;
     else process.env.MIXOS_REPOSITORY_URL = before;
+    if (beforeKeys === undefined) delete process.env.MIXOS_REPOSITORY_KEYS;
+    else process.env.MIXOS_REPOSITORY_KEYS = beforeKeys;
   });
   after(() => server.close());
 
