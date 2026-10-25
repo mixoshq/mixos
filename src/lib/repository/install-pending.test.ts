@@ -25,6 +25,7 @@ import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
 import type { TarEntry } from "./tar";
+import { TEST_REPOSITORY_KEYS, signedForTest } from "./test-signing";
 
 // ── the checkout ────────────────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ process.chdir(root);
 delete process.env.VERCEL;
 for (const flag of ["INSTALL_APPS", "INSTALL_CONNECTORS", "INSTALL_THEMES"]) delete process.env[flag];
 process.env.MIXOS_REPOSITORY_URL = "http://127.0.0.1:9";
+process.env.MIXOS_REPOSITORY_KEYS = TEST_REPOSITORY_KEYS;
 
 after(() => {
   process.chdir(REPO);
@@ -226,7 +228,7 @@ before(async () => {
     releases.set(`/api/v1/${SEGMENT[f.kind]}/${slug}/install`, {
       archivePath,
       archive: tarball(`mixoshq-${slug}-${sha.slice(0, 7)}`, f.entries),
-      manifest: {
+      manifest: signedForTest({
         kind: f.kind,
         slug,
         name: slug,
@@ -240,7 +242,7 @@ before(async () => {
         requiresMixOS: "0.0.1",
         yanked: false,
         ...f.manifest,
-      },
+      }),
     });
   }
 

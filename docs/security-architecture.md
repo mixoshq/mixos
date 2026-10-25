@@ -2401,6 +2401,20 @@ follow, and the second is the one that matters: mixos.org never handles the
 bytes, and mixos.org is therefore not a party this pipeline has to trust with
 them.
 
+**And every answer about a release is signed.** mixos.org signs each release
+when it is published, over its kind, slug, version, tag, commit, content hash
+and MixOS floor, with an Ed25519 key its database never holds, and a published
+release never changes afterwards except to be yanked. `fetchInstallManifest`
+checks that signature as the manifest arrives, against the keys pinned in
+`src/lib/repository/release-signature.ts`, before anything reads it: install,
+update, proposal and preview alike. A release that isn't signed, is signed by
+a key this instance doesn't pin, or changed after signing is refused with
+`unsigned`, and nothing is downloaded. So the hash says the bytes are the
+commit's, and the signature says the commit and hash are the ones mixos.org
+published: an altered row in its database, an altered answer at its edge, or a
+publisher writing their own release through its REST API can't send an
+instance anywhere else.
+
 ### The order of operations is the control
 
 Two refusals come first and need no lock: the kind's install flag (see
@@ -2821,9 +2835,11 @@ catalogue, users, data, settings, the instance's URL, and the MixOS version.
 **What mixos.org keeps:** for each instance and extension, the version it last
 listed, a two-letter country, and when it was first and last seen, deleted 30
 days after the last check that listed it; and for each release an instance
-lists for the first time, a row that counts the install, kept for 30 days and
-then only as daily totals. The IP address isn't stored in the Registry's
-database. mixos.org's
+lists, a row that counts the install once the same instance lists it again at
+least 20 hours later, kept for 30 days and then only as daily totals. An
+instance ID that checks in once never counts, and the number mixos.org shows is
+active installs, which fall when instances stop checking in. The IP address
+isn't stored in the Registry's database. mixos.org's
 [API docs](https://mixos.org/docs/api#what-we-record-and-what-we-do-not) say the
 same from its side.
 
@@ -3480,6 +3496,12 @@ safer: the correct value is known.
 A source checkout honours the override, because developing the platform against
 another catalogue is what it is for. That is the intended end state: **every
 deployment searches mixos.org, and the override is a development affordance.**
+
+A catalogue other than mixos.org signs with its own key, which the checkout
+trusts from `MIXOS_REPOSITORY_KEYS` (`<key id>:<public key>`, comma-separated).
+That variable is ignored whenever the catalogue is mixos.org, so it can add
+trust for a development catalogue but never for mixos.org's answers, and a
+malformed one is a configuration error rather than an empty list.
 
 ### The transport carrying the checksum
 

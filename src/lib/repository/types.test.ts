@@ -4,6 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { signedForTest } from "./test-signing";
 import { ExtensionSchema, InstallManifestSchema } from "./types";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -11,7 +12,7 @@ import { ExtensionSchema, InstallManifestSchema } from "./types";
 const commitSha = "3f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39";
 
 /** What mixos.org's install endpoint returns for a release published from the website. */
-const websiteInstall = {
+const websiteInstall = signedForTest({
   kind: "app",
   slug: "standup",
   name: "Standup",
@@ -20,12 +21,13 @@ const websiteInstall = {
   gitTag: null,
   tarballUrl: `https://codeload.github.com/acme/standup/tar.gz/${commitSha}`,
   contentHash: "sha256-PLACEHOLDER-standup",
+  contentHashAlgorithm: "mixos-tree-v1",
   subpath: null,
   permissions: [],
   requiresMixOS: null,
   yanked: false,
   yankedReason: null,
-};
+});
 
 const release = (gitTag: string | null) => ({
   version: gitTag ?? commitSha.slice(0, 7),
