@@ -11,6 +11,7 @@ import {
   appSlugProblem,
   decodeAppSlug,
   encodeAppSlug,
+  reservedAppSlugProblem,
 } from "./app-identifiers";
 
 test("a slug's schema and role", () => {
@@ -90,4 +91,13 @@ test("the overlap check reports invalid slugs, and does not count an app twice",
   assert.deepEqual(appIdentifierProblems(["notes", "notes"]), []);
   const [problem] = appIdentifierProblems(["Notes"]);
   assert.match(problem, /^apps\/Notes: "Notes" is not a valid app slug/);
+});
+
+test("a slug whose URL a platform page has is reserved, and only that slug", () => {
+  assert.match(reservedAppSlugProblem("release-notes") ?? "", /"release-notes" is reserved: \/apps\/release-notes/);
+  for (const free of ["release-notes-2", "release_notes", "notes", "wall-e"]) {
+    assert.equal(reservedAppSlugProblem(free), null, free);
+  }
+  // Reserved is not invalid: the schema encoding still holds for it.
+  assert.equal(appSlugProblem("release-notes"), null);
 });

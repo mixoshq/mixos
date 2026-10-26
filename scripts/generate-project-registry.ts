@@ -61,7 +61,15 @@ import {
   appIdentifierProblems,
   appSchemaName,
   appSlugProblem,
+  reservedAppSlugProblem,
 } from "../src/lib/apps/app-identifiers";
+import { readReleaseNotes, releaseNotesOf } from "./release-notes";
+import {
+  CORE_SLUG,
+  RELEASE_NOTES_FILE,
+  RELEASE_NOTE_KINDS,
+  type ReleaseNote,
+} from "../src/lib/release-notes/types";
 import {
   checkHookNamespaces,
   formatHookFindings,
@@ -188,6 +196,9 @@ const THEMES_CSS_FILE = path.resolve(OUTPUT_DIR, "themes.css");
 const THEME_TOKENS_FILE = path.resolve(OUTPUT_DIR, "theme-tokens.json");
 const REGISTRY_INSTALLS_FILE = path.resolve(OUTPUT_DIR, "registry-installs.ts");
 const REMIX_INDEX_FILE = path.resolve(OUTPUT_DIR, "remix-index.ts");
+const RELEASE_NOTES_OUTPUT_FILE = path.resolve(OUTPUT_DIR, "release-notes.ts");
+// MixOS's own release notes, release-notes.json at the root of the repository.
+const CORE_DIR = path.resolve(__dirname, "..");
 // What each extension publishes for pages read without a session is copied
 // into public/, each into a folder of its own, at one of five places:
 // themes/<slug>/ (a theme's assets/), connector-assets/<name>/ (a prefix of
@@ -1185,6 +1196,9 @@ function readTheme(dir: string, slug: string): ThemeText | null {
     declaredFonts: (r.fonts ?? []).map((f) => f.file),
   });
 
+  // Read again by main() for what it accepts; checked here for --check too.
+  readReleaseNotes(dir, `themes/${slug}/${RELEASE_NOTES_FILE}`);
+
   const fonts = validateThemeFonts(r.fonts ?? [], slug, dir);
   const assets = validateThemeAssets(r.assets ?? {}, slug, dir);
   const screenshots = validateScreenshots(r.screenshots, "themes", slug, dir);
@@ -1439,6 +1453,12 @@ async function readAppText(
   if (slugProblem) {
     throw new FatalManifestError(`apps/${slug}: ${slugProblem}`);
   }
+  // A platform page's path wins over an app's, so an app under a reserved slug
+  // could never be opened.
+  const reserved = reservedAppSlugProblem(slug);
+  if (reserved) {
+    throw new FatalManifestError(`apps/${slug}: ${reserved}`);
+  }
 
   const pagesDir = path.join(appDir, "pages");
   const hasPages =
@@ -1469,6 +1489,10 @@ async function readAppText(
       );
     }
   }
+
+  // Its release notes. main() reads them again for every app it accepts;
+  // checked here as well, so an install's --check refuses a bad file.
+  readReleaseNotes(appDir, `apps/${slug}/${RELEASE_NOTES_FILE}`);
 
   // Schema validates the visibility *values*; this additionally verifies
   // each key resolves to a real file on disk.
@@ -1866,6 +1890,8 @@ function readConnector(connectorDir: string, name: string): ConnectorManifestOut
     connectorDir,
     validateConnectorTelemetry(raw.telemetry, name),
   );
+  // Read again by main() for what it accepts; checked here for --check too.
+  readReleaseNotes(connectorDir, RELEASE_NOTES_FILE);
 
   return {
     name: raw.name,
@@ -2157,6 +2183,67 @@ function writeRegistryInstalls(installs: readonly RegistryInstall[]): void {
 import type { RegistryInstall } from "@/lib/repository/install-record";
 
 export const registryInstalls: RegistryInstall[] = ${JSON.stringify(installs, null, 2)};
+`,
+    "utf-8",
+  );
+}
+
+/**
+ * Every release note this build carries: MixOS's own, from release-notes.json
+ * at the root, and each accepted extension's, from beside its manifest
+ * (scripts/release-notes.ts). readAppText(), readConnector() and readTheme()
+ * have checked each extension's already, so an install's `--check` refuses a
+ * bad file too; this reads them again for what the scan accepted.
+ *
+ * Newest first. On one day: MixOS, then apps, connectors and themes, each by
+ * slug, and each file's own order.
+ */
+function collectReleaseNotes(
+  apps: readonly AppManifest[],
+  connectors: readonly ConnectorManifestOut[],
+  themes: readonly ThemeManifest[],
+): ReleaseNote[] {
+  const notes = [
+    ...releaseNotesOf("core", CORE_SLUG, CORE_DIR, RELEASE_NOTES_FILE),
+    ...apps.flatMap((a) =>
+      releaseNotesOf("app", a.slug, path.join(APPS_DIR, a.slug), `apps/${a.slug}/${RELEASE_NOTES_FILE}`),
+    ),
+    ...connectors.flatMap((c) =>
+      releaseNotesOf(
+        "connector",
+        c.name,
+        path.join(CONNECTORS_DIR, c.name),
+        `connectors/${c.name}/${RELEASE_NOTES_FILE}`,
+      ),
+    ),
+    ...themes.flatMap((t) =>
+      releaseNotesOf("theme", t.slug, path.join(THEMES_DIR, t.slug), `themes/${t.slug}/${RELEASE_NOTES_FILE}`),
+    ),
+  ];
+  const kind = (note: ReleaseNote) => RELEASE_NOTE_KINDS.indexOf(note.kind);
+  // A stable sort, so notes of one extension on one day keep their order.
+  return notes.sort(
+    (a, b) => b.date.localeCompare(a.date) || kind(a) - kind(b) || a.slug.localeCompare(b.slug),
+  );
+}
+
+/**
+ * Write `src/generated/release-notes.ts`. Server only: a person's notes reach
+ * the browser through a server action, not this whole list. Written even when
+ * empty.
+ */
+function writeReleaseNotes(notes: readonly ReleaseNote[]): void {
+  fs.writeFileSync(
+    RELEASE_NOTES_OUTPUT_FILE,
+    `// AUTO-GENERATED by scripts/generate-project-registry.ts — do not edit
+//
+// SERVER ONLY. Every release note in this build, newest first: MixOS's own,
+// from release-notes.json at the root, and each accepted extension's, from
+// beside its manifest. A person's share reaches the browser through
+// src/lib/release-notes/actions.ts, never this whole list.
+import type { ReleaseNote } from "@/lib/release-notes/types";
+
+export const releaseNotes: ReleaseNote[] = ${JSON.stringify(notes, null, 2)};
 `,
     "utf-8",
   );
@@ -2629,6 +2716,10 @@ export function getTheme(slug: string): ThemeManifest {
   const remixes = writeRemixIndex(apps);
   console.log(`Generated remix index with ${remixes} remix(es)`);
 
+  const notes = collectReleaseNotes(apps, connectors, themes);
+  writeReleaseNotes(notes);
+  console.log(`Generated release notes with ${notes.length} note(s)`);
+
   // An install that needs a newer MixOS than this build fails it.
   const floors = checkInstalledFloors(installs, version);
   for (const warning of floors.warnings) console.warn(`  ${warning}`);
@@ -2931,7 +3022,11 @@ function checkStagedTheme(dir: string, slug: string): Judgement {
     if (!readTheme(dir, slug)) return { problems: [`themes/${slug} has no theme.json.`], deferred: [] };
   } catch (err) {
     return {
-      problems: [err instanceof ThemeError ? err.message : `themes/${slug}: ${errorText(err)}`],
+      problems: [
+        err instanceof ThemeError || err instanceof FatalManifestError
+          ? err.message
+          : `themes/${slug}: ${errorText(err)}`,
+      ],
       deferred: [],
     };
   }

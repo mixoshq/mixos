@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import Link from "next/link";
+import { Gift } from "lucide-react";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import {
   ensureUser,
@@ -32,10 +34,23 @@ export default async function AppsPage() {
     // Applied here rather than as apps/layout.tsx, which would also wrap
     // /apps/[appSlug] and put a settings sidebar around every installed app.
     <SettingsShell>
-      <h1 className="text-2xl font-bold text-foreground">App Manager</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Toggle each one on to use it and put its widgets on your dashboard.
-      </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">App Manager</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Toggle each one on to use it and put its widgets on your dashboard.
+          </p>
+        </div>
+        {/* What changed in MixOS and in what's on here: /apps/release-notes,
+            which the menu bar's gift opens too. */}
+        <Link
+          href="/apps/release-notes"
+          className="inline-flex shrink-0 items-center gap-2 self-start rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted"
+        >
+          <Gift className="h-4 w-4" aria-hidden />
+          Release Notes
+        </Link>
+      </div>
 
       <div className="mt-6">
         {/*
