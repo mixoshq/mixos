@@ -35,8 +35,12 @@ const SEND_AFTER_MS = 500;
 /** The most ids one call carries: the server refuses more (./actions.ts). */
 const SEND_AT_MOST = 200;
 
-const SECTION_LABEL: Record<ReleaseNoteKind, string> = {
-  core: "MixOS",
+/**
+ * Each section's heading. MixOS's notes have none: they come first, under
+ * MixOS's own name, so a heading would say MixOS twice.
+ */
+const SECTION_HEADING: Record<ReleaseNoteKind, string | null> = {
+  core: null,
   app: "Apps",
   connector: "Connectors",
   theme: "Themes",
@@ -247,13 +251,19 @@ export default function ReleaseNotesMenu() {
 
           <div ref={setList} className="max-h-[min(28rem,65vh)] overflow-y-auto py-1">
             {sections.map((section) => (
-              <section key={section.kind} aria-labelledby={`release-notes-${section.kind}`} className="py-1">
-                <h3
-                  id={`release-notes-${section.kind}`}
-                  className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                >
-                  {SECTION_LABEL[section.kind]}
-                </h3>
+              <section
+                key={section.kind}
+                aria-labelledby={SECTION_HEADING[section.kind] ? `release-notes-${section.kind}` : undefined}
+                className="py-1"
+              >
+                {SECTION_HEADING[section.kind] && (
+                  <h3
+                    id={`release-notes-${section.kind}`}
+                    className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                  >
+                    {SECTION_HEADING[section.kind]}
+                  </h3>
+                )}
                 {section.groups.map((group) => (
                   <div key={`${group.kind}:${group.slug}`} className="px-4 py-1.5">
                     <div className="flex min-h-7 items-center gap-2">
