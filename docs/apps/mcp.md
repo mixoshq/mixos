@@ -312,8 +312,9 @@ one that should have been narrower).
 
 ## What the user sees
 
-- **`/account/mcp`** — the URL to paste into Claude, connected clients, what each
-  can read, and a Disconnect button.
+- **`/account/mcp`** — the URL to paste into a client, with setup steps for
+  Claude, ChatGPT and Copilot; connected clients, what each can read, and a
+  Disconnect button.
 - **The consent screen** — one checkbox per app they can reach that has at
   least one enabled tool, showing your app's name, description, and every
   enabled tool's description.
