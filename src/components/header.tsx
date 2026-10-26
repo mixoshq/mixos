@@ -19,6 +19,7 @@ import {
   Pencil,
 } from "lucide-react";
 import AppsDropdown from "@/components/apps/apps-dropdown";
+import ReleaseNotesMenu from "@/components/release-notes/release-notes-menu";
 import { useDashboardEdit } from "@/components/dashboard/edit-mode-context";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -161,6 +162,8 @@ export default function Header({
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
+        {/* Before the name: what changed lately, and nothing at all when nothing has. */}
+        <ReleaseNotesMenu />
         <div className="relative" ref={menuRef}>
           <button
             onClick={() => setMenuOpen(!menuOpen)}
