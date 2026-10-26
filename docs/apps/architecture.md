@@ -11,6 +11,7 @@ apps/my-app/
   hooks.ts          # Hook entrypoint, loaded by the platform (optional, see Hooks)
   branding/         # Marks for the brand hooks, declared in app.json (optional)
   README.md         # Long-form description, published on the public listing (optional)
+  release-notes.json # One line per change, for the people who use the app (optional)
   pages/
     Main.tsx        # Root page at /apps/my-app
     settings/
@@ -46,6 +47,32 @@ The listing renders GitHub-Flavoured Markdown and then sanitizes the result. The
 | Headings are re-levelled automatically. | Whatever the shallowest heading in the file is becomes `<h2>`, with relative depth preserved — so a README that opens with `#` and one that opens with `##` both render correctly. Nothing to plan around. |
 
 One thing to leave out: the listing page already displays the app's name, `tagline`, `license`, `authors`, `keywords`, and its `appUrl` / `appSupportUrl` links. A README that repeats them renders as duplication.
+
+### Release notes (release-notes.json)
+
+`release-notes.json` beside `app.json` tells the people who use the app what changed, one line at a time. MixOS shows the notes from the last 14 days behind the gift icon in the menu bar, with a dot on each one a person hasn't seen, to everyone who has the app installed. App Manager's Release Notes page keeps all of them. The file is optional: an app without one has no notes.
+
+```json
+[
+  { "date": "2026-10-20", "version": "1.2.0", "note": "Filter the pipeline by owner, and the filter is still there when you come back." },
+  { "date": "2026-08-28", "note": "First release: your pipeline by stage, as a dashboard widget and a page." }
+]
+```
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `date` | ✅ | The day the change shipped, `YYYY-MM-DD`. No later than tomorrow: a typo'd year would keep a note new for a year. |
+| `version` |  | The release it shipped in, three numbers with no `v`: `1.2.0`. |
+| `note` | ✅ | One line of plain text, 300 characters or fewer. No Markdown: it is printed as it is. |
+
+The build checks the file, and so does a Registry install before the app lands: the newest note first, no note twice on one day, no field but these three, and at most 256 KB. A file that breaks a rule stops the build, as a bad manifest does. It is a file of its own, not a field in `app.json`, because it keeps the app's whole history.
+
+Writing one:
+
+- **A note for each change a person using the app would notice:** a new page or widget, a number that now means something else, a setting an admin has to fill in, a connector the app now needs. Not refactors, tests, docs or listing metadata.
+- **For that person, not a developer:** what changed for them, in plain words, with no file, route or function names.
+- **The oldest note is the first release,** and says what the app does: `First release: …`.
+- **Fix a typo the same day.** A note is remembered as seen by its text, so an edited note is new again to everyone who had seen it.
 
 ## App Manifest (app.json)
 

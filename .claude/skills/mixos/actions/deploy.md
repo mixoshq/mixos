@@ -31,9 +31,9 @@ Anything else is ignored.
 - Never use `--force`, `--no-verify`, `git add -A` of files you have not
   looked at, or `git stash`. If you would need any of those, stop and say why.
 - Do not modify, format, or "tidy" the changes you are committing. This
-  action ships what is there. The two exceptions are the manifest review and
-  the `WHATS-NEW.md` entry in step 3, and both are confirmed with the user
-  before they are written.
+  action ships what is there. The three exceptions are the manifest review,
+  the `WHATS-NEW.md` entry and the release notes in step 3, and each is
+  confirmed with the user before it is written.
 - Never run `npm run db:push`, `npm run db:migrate` or `npm run release`
   here. Each can target a production database — the linked hosted project, or
   whatever `DATABASE_URL` names — so on a feature branch it would push
@@ -295,6 +295,19 @@ put it in the plan; it joins the commit it describes. Skip for internal-only
 changes (refactors, an app or connector build with no platform-facing
 impact).
 
+**Release notes.** A change that the people using an app, connector or
+theme would notice gets a line in that extension's `release-notes.json`, and
+one they would notice in MixOS itself a line in the `release-notes.json` at the
+root. MixOS shows them in the menu bar for 14 days, to everyone the change
+reaches. If a group makes such a change and its diff adds no line for it, draft
+one for the plan: first in the file, `{ "date": "<today>", "note": "…" }`
+(`"version"` too for a connector, from its `connector.json`), one line of plain
+text of 300 characters or fewer, saying what changed for those people rather
+than which files. It joins the commit it describes. Skip refactors, tests, docs
+and changes nobody using it would see. Never edit a note already in a file: its
+text is what marks it seen, so an edited note shows as new to everyone again.
+See [Release notes](docs/apps/architecture.md#release-notes-release-notesjson).
+
 If a branch is to be created (cases A and B-merged), also choose its name:
 `<type>/<slug>` where the type is `feat`, `fix`, or `ops` by the nature of
 the change, and the slug is short kebab-case derived from the changes —
@@ -322,6 +335,7 @@ Commits:
 
 Manifest: <path> — <field>: "<old>" → "<new>"     (omit if none)
 What's new: <one-line summary of the entry>        (omit if none)
+Release note: <file> — "<the note>"                (one line each; omit if none)
 Left out: <path> — <one-line reason>               (omit if none)
 
 Then: push to origin and open a PR against main.
@@ -349,9 +363,9 @@ uncommitted changes across:
 git switch -c <name> origin/main
 ```
 
-**Whenever there is uncommitted work** — first write any manifest correction
-and the `WHATS-NEW.md` entry from the plan. Then make each commit in plan
-order. Stage precisely what the commit covers:
+**Whenever there is uncommitted work** — first write any manifest correction,
+the `WHATS-NEW.md` entry and the release notes from the plan. Then make each
+commit in plan order. Stage precisely what the commit covers:
 
 - Whole files: `git add <paths>`.
 - A file split across commits: `git add -p <path>` is interactive and will

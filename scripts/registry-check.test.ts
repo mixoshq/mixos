@@ -542,6 +542,39 @@ describe("checkStaged", () => {
     assert.match(problems[0], /^apps\/Not_A-Slug: /);
   });
 
+  test("a slug a platform page has is refused", async () => {
+    const { problems } = await checkStaged("app", stage("release-notes", { "app.json": '{"name":"X"}' }), none());
+    assert.match(problems[0], /^apps\/release-notes: "release-notes" is reserved: \/apps\/release-notes is a page/);
+  });
+
+  test("release notes are checked as each kind is staged, and a good file is accepted", async () => {
+    const good = JSON.stringify([{ date: "2026-08-28", note: "First release." }]);
+    const long = JSON.stringify([{ date: "2026-08-28", note: "x".repeat(301) }]);
+
+    const app = (notes: string) => stage("x", { "app.json": '{"name":"X"}', "release-notes.json": notes });
+    assert.deepEqual((await checkStaged("app", app(good), none())).problems, []);
+    const [appProblem] = (await checkStaged("app", app(long), none())).problems;
+    assert.match(appProblem, /^apps\/x\/release-notes\.json failed validation[\s\S]*0\.note: is 301 characters/);
+
+    const connector = (notes: string) => {
+      const dir = stageConnector("crm");
+      fs.writeFileSync(path.join(dir, "release-notes.json"), notes);
+      return dir;
+    };
+    assert.deepEqual((await checkStaged("connector", connector(good), registered())).problems, []);
+    const [connectorProblem] = (await checkStaged("connector", connector(long), registered())).problems;
+    assert.match(connectorProblem, /^connectors\/crm: release-notes\.json failed validation/);
+
+    const theme = (notes: string) => {
+      const dir = template("themes", "_template", path.join(tmp, `stage-${n++}`), "plain");
+      fs.writeFileSync(path.join(dir, "release-notes.json"), notes);
+      return dir;
+    };
+    assert.deepEqual((await checkStaged("theme", theme(good), none())).problems, []);
+    const [themeProblem] = (await checkStaged("theme", theme("[{"), none())).problems;
+    assert.match(themeProblem, /^themes\/plain\/release-notes\.json is not valid JSON/);
+  });
+
   test("a route is read from its source: a bare handler is refused, and options it cannot read wait for registration", async () => {
     const bare = await checkStaged(
       "app",
