@@ -54,6 +54,7 @@ Report the measured table to the user before writing the theme. A brand owner wi
 - Never declare a token listed in `FORBIDDEN_TOKENS` (empty today).
 - Never set `lastUpdated`; never hand-edit anything in `src/generated/`.
 - Never add a `dark:` variant to a component to work around a theme problem.
+- Release notes go in `release-notes.json` beside `theme.json`, never in the manifest: newest first, one line of plain text each, 300 characters or fewer.
 
 ## Verify before reporting done
 
@@ -63,6 +64,7 @@ Report the measured table to the user before writing the theme. A brand owner wi
 4. Activate at `/admin/themes`, then load: dashboard, an app page, a form, a table, a modal, **the sign-in page while signed out**, and an app's public `/p/<app-slug>` page. There is no light/dark toggle to try: the theme is the whole palette. If you changed a sibling (`<slug>-dark`) too, activate and check each one.
 5. Hard-reload. The active theme is resolved on the server, so the first paint should already be in its colours.
 6. Network tab: no requests to any font or asset host.
+7. **Write the release note.** If the change is one a person would see, add it first in `themes/<slug>/release-notes.json` (a new theme starts the file with `First release: …`, describing its look): `{ "date": "<today, YYYY-MM-DD>", "note": "…" }`, one line of plain text, 300 characters or fewer, saying what looks different rather than which token moved. While the theme is active, everyone sees it in the menu bar for 14 days, so put the line in your report. Step 1's generator run checks the file. See [Release notes](docs/themes/architecture.md#release-notes).
 
 Do not claim done on a theme you have not looked at signed out.
 

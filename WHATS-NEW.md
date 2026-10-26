@@ -12,6 +12,23 @@ just pulled.
 
 ## 2026-10-25
 
+- **Release notes, in the menu bar.** An app, a connector or a theme keeps
+  `release-notes.json` beside its manifest, and MixOS one at the root:
+  `[{ "date", "version"?, "note" }]`, newest first, each note one line of 300
+  characters or fewer, written for the people the change reaches. A gift before
+  the name in the menu bar shows each person the last 14 days' notes for MixOS
+  and for what is on in their workspace (the apps they installed, the
+  connectors not switched off, the active theme), with a red count, and a dot on
+  each note until it has been under the pointer, or on screen, for a second.
+  App Manager's **Release Notes** button opens all of them at
+  `/apps/release-notes`, with a filter. The build and a Registry install check
+  the file, and `/mixos app`, `connector`, `theme` and `deploy` write the line
+  with the change. See
+  [Release notes](docs/apps/architecture.md#release-notes-release-notesjson).
+- **No app may be called `release-notes`.** The build refuses the slug, since
+  `/apps/release-notes` is that page.
+- **Migration 0002** adds `release_notes_seen`, which notes each person has
+  seen.
 - **Releases from mixos.org are signed, and MixOS checks.** Every install
   manifest is verified against mixos.org's keys, pinned in
   `src/lib/repository/release-signature.ts`, before anything is downloaded. A

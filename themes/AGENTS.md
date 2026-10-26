@@ -37,6 +37,8 @@ A theme repaints every app in the install at once. That is why it is the most co
 
 22. **`assets.logo` is a default; `branding` is a claim.** Apps may replace `assets.logo` through the brand hooks. A slot declared under `branding: { name?, menuBarLogo?, loginLogo? }` is final, and no app filter runs for it. Every logo is measured so it can be drawn at its own aspect ratio: an SVG needs a `viewBox` (or an absolute `width` and `height`) on its root, and anything else must be a `.png`, `.jpg` or `.webp`. Claim only what the theme owns: a claimed name follows every install that selects the theme. See [`docs/themes/assets.md`](../docs/themes/assets.md#claiming-the-brand).
 
+23. **Release notes are one line each, in `release-notes.json` beside `theme.json`, never in the manifest.** Newest first, each `{ "date", "version"?, "note" }`: the day the change shipped (`YYYY-MM-DD`, no later than tomorrow) and one line of plain text of 300 characters or fewer. Add one with every change a person would see: a ground, an accent, a typeface, a logo. Say what looks different, not which token moved. While the theme is active, the menu bar shows its last 14 days' notes to everyone, and App Manager's Release Notes page all of them. The build and a Registry install check the file. See [Release notes](../docs/themes/architecture.md#release-notes).
+
 Authoritative types: [`src/lib/themes/types.ts`](../src/lib/themes/types.ts). Token contract: [`src/lib/themes/tokens.ts`](../src/lib/themes/tokens.ts). Canonical template: [`themes/_template/`](_template/).
 
 ---

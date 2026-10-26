@@ -66,6 +66,10 @@ Hard rules:
 19. **Minimum scopes only.** Request the smallest scope set the connector's methods need when provisioning the upstream credential. In practice this is the `requested` flags in `auth.scopes`: `true` for what the read methods need, `"write"` for what only the write methods need, which is asked for only on an install whose admin allowed changes. The refresh preserves the flags precisely so that flipping one stays a deliberate, reviewable act. Adding a scope requires a security note in the PR. Never ask for `*.ReadWrite` with `true` when `*.Read` would do and the write scope can be `"write"`.
 20. **Stay stateless.** Do not stash credentials or responses in module-level variables, closures outside the instance, or caches that outlive the request. The platform creates a fresh instance and calls `initialize()` per request — that is the only legal lifecycle.
 
+## Release notes
+
+21. **Release notes are one line each, in `release-notes.json` beside `connector.json`, never in the manifest.** Newest first, each `{ "date", "version"?, "note" }`: the day the release shipped (`YYYY-MM-DD`, no later than tomorrow), the `version` it shipped as, and one line of plain text of 300 characters or fewer. Add one with every release an admin or a person whose apps use the connector would notice: a new method, a write that needs **Allow changes**, a new scope that means connecting again. Write it for them, not for a developer. The menu bar shows the last 14 days' notes on every install where the connector is on, and App Manager's Release Notes page all of them. The build and a Registry install check the file. See [Release notes](../docs/connectors/architecture.md#release-notes).
+
 Authoritative types: [`src/lib/connectors/types.ts`](../src/lib/connectors/types.ts). Starting point: [`connectors/_template/`](_template/).
 
 ---

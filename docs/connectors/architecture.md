@@ -8,6 +8,7 @@ Each connector lives in its own directory under `/connectors` with two files: a 
 connectors/my-service/
   connector.json    # Metadata, credential fields, setup guide
   README.md         # Optional — long-form description for the catalogue listing
+  release-notes.json # Optional — one line per change, for the people it reaches
   index.ts          # Implementation class
   assets/           # icon.png and anything else the manifest names.
     icon.png        # Required. Square, >= 512x512. Copied to public/connector-assets/my-service/
@@ -272,6 +273,30 @@ Where it is held to that:
 What a method takes and returns can't be read from the manifest, so changing it
 is a new major version on the author's word. The Registry's checks catch the
 rest.
+
+## Release notes
+
+`release-notes.json` beside `connector.json` says what each release changed,
+one line at a time, for the admins who configure the connector and the people
+whose apps use it. MixOS shows the notes from the last 14 days behind the gift
+icon in the menu bar of every install where the connector is on, and App
+Manager's Release Notes page keeps all of them. The file is optional.
+
+```json
+[
+  { "date": "2026-10-20", "version": "1.1.0", "note": "Apps can read attachments too. Nothing to set up: the scope it needs is one the connector already has." },
+  { "date": "2026-08-28", "version": "1.0.0", "note": "First release: read-only access to one shared mailbox." }
+]
+```
+
+Each note is `{ "date", "version"?, "note" }`: the day the release shipped as
+`YYYY-MM-DD`, no later than tomorrow; the `version` from `connector.json` it
+shipped as; and one line of plain text, 300 characters or fewer. Newest first,
+and no note twice on one day. The build checks the file, and so does a Registry
+install before the connector lands. Write for an admin, not a developer: what
+the connector can now do, and anything they must do, such as allowing changes
+or connecting again for a new scope. The rules are an app's, in full:
+[Release notes](../apps/architecture.md#release-notes-release-notesjson).
 
 ## Changing data
 
