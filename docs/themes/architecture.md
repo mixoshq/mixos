@@ -11,6 +11,7 @@ themes/
   mixos/
     theme.json               manifest — schema-validated at build time
     README.md                optional — long-form description for the catalogue listing
+    release-notes.json       optional — one line per change, for everyone it paints
     theme.css                tokens + allowlisted .mix-* surfaces
     assets/
       fonts/*.woff2
@@ -38,6 +39,28 @@ themes/
 | `surfaces` |  | Allowlisted `.mix-*` surfaces this theme styles. Cross-checked against `theme.css` in both directions, so it can neither under-report a theme's reach nor carry a stale entry. | |
 | `escapes` |  | Declared exceptions to platform guarantees. | |
 | `lastUpdated` |  | Tool-written by the pre-commit stamp. Never hand-edited. | |
+
+## Release notes
+
+`release-notes.json` beside `theme.json` says what changed in the theme's
+look, one line at a time. While the theme is the install's active one, MixOS
+shows its notes from the last 14 days behind the gift icon in the menu bar,
+and App Manager's Release Notes page keeps all of them. The file is optional.
+
+```json
+[
+  { "date": "2026-10-20", "note": "Muted text is a shade darker, so captions and dates are easier to read." },
+  { "date": "2026-08-28", "note": "First release: white panels under a dark slate menu bar, with cyan accents." }
+]
+```
+
+Each note is `{ "date", "version"?, "note" }`: the day the change shipped as
+`YYYY-MM-DD`, no later than tomorrow, an optional release version, and one line
+of plain text, 300 characters or fewer. Newest first, and no note twice on one
+day. The build checks the file, and so does a Registry install before the theme
+lands. Write for the people looking at it: what looks different, not which
+token moved. The rules are an app's, in full:
+[Release notes](../apps/architecture.md#release-notes-release-notesjson).
 
 ## What a theme controls, and what it cannot
 

@@ -416,13 +416,14 @@ apps whose schema or role names would be the same.
 +-----------------------------------+
 | Postgres (shared database)        |
 |                                   |
-|  public: platform tables (27, all |
+|  public: platform tables (30, all |
 |  RLS enabled, zero policies):     |
 |    users, apps                    |
 |    user_apps, user_app_grants     |
 |    app_passwords                  |
 |    app_api_keys                   |
 |    app_settings                   |
+|    app_mcp_tool_settings          |
 |    connector_configs              |
 |    user_connector_oauth           |
 |    connector_scope_status         |
@@ -433,6 +434,7 @@ apps whose schema or role names would be the same.
 |    app_scheduled_jobs             |
 |    app_job_runs                   |
 |    platform_settings              |
+|    platform_builds_seen           |
 |    app_open_events                |
 |    telemetry_events               |
 |    oauth_clients                  |
@@ -440,6 +442,7 @@ apps whose schema or role names would be the same.
 |    oauth_tokens                   |
 |    rate_buckets                   |
 |    admin_audit_log                |
+|    release_notes_seen             |
 |    _migrations, _platform_locks   |
 |                                   |
 |  app_my_app    (mixos_app_my_app) |
