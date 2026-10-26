@@ -55,6 +55,23 @@ export function appSlugProblem(slug: string): string | null {
   return null;
 }
 
+/**
+ * Slugs no app may take, because a page of the platform's is at the app's URL.
+ * An app's pages are under `/apps/<slug>`, and App Manager's Release Notes page
+ * is `/apps/release-notes`: Next routes that path to the platform's page, so an
+ * app with the slug could never be opened.
+ */
+export const RESERVED_APP_SLUGS: readonly string[] = ["release-notes"];
+
+/** Why the platform holds `slug`, or null when it doesn't. */
+export function reservedAppSlugProblem(slug: string): string | null {
+  if (!RESERVED_APP_SLUGS.includes(slug)) return null;
+  return (
+    `"${slug}" is reserved: /apps/${slug} is a page of MixOS's own, so the app's pages ` +
+    `could never be opened. Choose another folder name.`
+  );
+}
+
 function encode(slug: string): string {
   return slug.replace(/_/g, "__").replace(/-/g, "_");
 }
