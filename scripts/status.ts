@@ -13,6 +13,11 @@
 //
 // It changes nothing. It exits 0 when every check passed and 1 otherwise, so a
 // script or an agent can ask the same question a person does.
+//
+// `--json` prints the same answer as one JSON object instead (StatusReport,
+// below), for a program that shows it its own way: the MixOS Launcher app in
+// desktop/macos reads it. Fields are only ever added to it, so an older app
+// keeps reading a newer checkout.
 
 import path from "node:path";
 import { resolveInstance } from "./instance";
@@ -38,7 +43,27 @@ import {
 
 const START = "Start it with `npm run dev:docker` (all of it in Docker) or `npm run dev` (Next on this computer).";
 
+/** `npm run status -- --json`. `version` changes only if a field's meaning does. */
+type StatusReport = {
+  version: 1;
+  checkout: string;
+  instance: string;
+  /** The folder that owns this checkout's instance name, when it isn't this one. */
+  sharedWith: string | null;
+  up: boolean;
+  headline: string;
+  app: { url: string; how: string; docker: boolean } | null;
+  checks: Check[];
+  signIn: { email: string; password: string } | null;
+  studioUrl: string | null;
+  others: Array<{ instance: string; url: string; how: string; checkout: string | null }>;
+};
+
+/** Colour codes out, so a terminal-run `--json` is the same JSON a pipe gets. */
+const plain = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "");
+
 async function main() {
+  const json = process.argv.includes("--json");
   const instance = resolveInstance();
   const self = { instance: instance.name, root: ROOT };
   const apps = await runningMixosApps();
@@ -53,11 +78,13 @@ async function main() {
   const local = own || sharedWith ? null : localSupabase();
   const envDocker = parseEnvFile(path.join(ROOT, ".env.docker"));
 
-  console.log(
-    c.bold(
-      `\nMixOS status — ${sharedWith ? "no instance of its own yet" : `instance \`${instance.name}\``}, ${tilde(ROOT)}`,
-    ),
-  );
+  if (!json) {
+    console.log(
+      c.bold(
+        `\nMixOS status — ${sharedWith ? "no instance of its own yet" : `instance \`${instance.name}\``}, ${tilde(ROOT)}`,
+      ),
+    );
+  }
 
   const checks: Check[] = [];
   const app = mine[0];
@@ -78,7 +105,7 @@ async function main() {
         : "Apply the new platform migrations with `npm run db:local`, then reload.",
     };
     checks.push(...(await checkApp(app.url, { fixes, signIn: own ? undefined : localSignIn(envDocker) })));
-    if (checks[0].state === "ok") checks[0].lines[0] += `   ${c.dim(app.how)}`;
+    if (checks[0].state === "ok" && !json) checks[0].lines[0] += `   ${c.dim(app.how)}`;
   } else {
     checks.push({ state: "fail", name: "Web server", lines: ["not running"], fix: START });
     checks.push(
@@ -110,17 +137,34 @@ async function main() {
   }
 
   const ok = allOk(checks);
-  process.stdout.write(
-    formatSummary({
-      headline: !app
-        ? "MixOS isn't running for this checkout"
-        : ok
-          ? `MixOS is up at ${app.url}`
-          : `MixOS is running at ${app.url}, but something is wrong — see below`,
-      checks,
-      notes,
-    }),
-  );
+  const headline = !app
+    ? "MixOS isn't running for this checkout"
+    : ok
+      ? `MixOS is up at ${app.url}`
+      : `MixOS is running at ${app.url}, but something is wrong — see below`;
+
+  if (json) {
+    const report: StatusReport = {
+      version: 1,
+      checkout: ROOT,
+      instance: instance.name,
+      sharedWith,
+      up: ok,
+      headline,
+      app: app ? { url: app.url, how: app.how, docker: app.docker } : null,
+      checks: checks.map((check) => ({
+        ...check,
+        lines: check.lines.map(plain),
+        fix: check.fix && plain(check.fix),
+      })),
+      signIn: (own ? undefined : localSignIn(envDocker)) ?? null,
+      studioUrl: local?.studioUrl ?? null,
+      others: others.map(({ instance: name, url, how, checkout }) => ({ instance: name, url, how, checkout })),
+    };
+    process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+  } else {
+    process.stdout.write(formatSummary({ headline, checks, notes }));
+  }
   process.exit(ok ? 0 : 1);
 }
 
