@@ -139,9 +139,11 @@ done
 
 `ss -Hltnp "sport = :3000"` names the process holding it, when it is theirs.
 
-If 3000 is taken it is almost always a `next dev` the person forgot about
-(`ps -o command -p <pid>` confirms). Mention it now rather than letting the boot
-fail later with a bind error.
+If 3000 is taken, it's usually a `next dev` the person forgot about
+(`ps -o command -p <pid>` confirms) or another MixOS copy. Mention it now. The
+boot doesn't fail on it with a bind error: it names the holder and gives the
+command for the next free port (Step 5). The Supabase ports are different: a
+conflict there stops the boot.
 
 ## Step 2 — Present the list and ask once
 
@@ -512,8 +514,10 @@ from here and you never reach Step 6: the command blocks until your tool times
 out, and the kill that ends it lands on the compose foreground group and tears
 the app back down, so the person is left with a half-stopped stack and no
 credentials. `--detach` brings the same stack up with `docker compose up -d`,
-polls `http://localhost:3000/api/health/ready` until it answers 200 (with its
-own timeout and a specific failure message), prints the banner, and exits 0. It
+polls the app's `/api/health/ready` until it answers 200 (with its own timeout
+and a specific failure message), prints the summary — a ✓ or ✗ for the web
+server, the database, the sign-in page and Studio, with the URL and the login —
+and exits 0 only if every check passed. It
 composes with `--prod` — `npm run dev:docker -- --detach --prod` — though there
 is no reason to want the prod profile during setup.
 
@@ -573,9 +577,18 @@ query — point at
 guessing. **000** means nothing is listening on 3000 at all: curl also exits 7
 there, which is what the `|| true` absorbs so the case reports itself as a
 number instead of looking like a broken command — check
-`docker compose -p mixos ps` and `docker compose -p mixos logs app-dev`. If the
-boot failed on a port conflict, that's Step 1's port check coming true; stop
-whatever holds the port and re-run.
+`docker compose -p mixos ps` and `docker compose -p mixos logs app-dev`.
+
+**If the boot stopped on a port conflict,** its message names what holds the
+port, often another MixOS, and gives the command for the next free one, such as
+`MIXOS_PORT=3001 npm run dev:docker -- --detach`. Tell the person what holds
+3000, then run the command it gave you. Nothing asks you to choose: with no one
+at a keyboard the boot never waits on a question. From then on use that port
+wherever this file says 3000. If the holder is this checkout's own
+`npm run dev`, stop it rather than moving: the message says so.
+
+`npm run status` asks all of these questions in one command, any time: it
+prints the same summary and exits 0 only when everything answers.
 
 Nothing is streaming logs now, and that is the point: the stack keeps running
 after the command returns, so Step 6 can actually happen. To watch it anyway,
@@ -587,7 +600,8 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
    [`.env.docker`](../../../../.env.docker) and print them. Those are the credentials
    the seeded admin was created with — do not invent values, and do not ask the
    person to choose any.
-2. Tell them to open **http://localhost:3000** and log in.
+2. Tell them to open the URL the summary printed, **http://localhost:3000**
+   unless the boot moved to the next free port, and log in.
    Use `localhost`, **not** `127.0.0.1` — Next's dev server rejects its own
    `/_next/*` assets and hot-reload socket from the `127.0.0.1` origin, and the
    page renders unstyled and broken.
@@ -620,7 +634,8 @@ after the command returns, so Step 6 can actually happen. To watch it anyway,
      container while the database keeps running. `npm run docker:down` stops
      everything, including the database; that is also how the detached stack you
      started in Step 5 comes down. `npm run docker:reset` wipes the local
-     database and starts over.
+     database and starts over. `npm run status` says whether it's all up, at
+     which address, and what to run if it isn't.
    - **Connector API keys are not environment variables.** An admin enters them
      in the UI at http://localhost:3000/admin/connectors and MixOS encrypts them
      in the database. This isn't needed to boot MixOS; it can wait.

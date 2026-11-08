@@ -129,9 +129,12 @@ This is what `/mixos init` does for you.
    run downloads several GB and can take 5 to 15 minutes, with no visible
    progress for long stretches.
 
-4. **Sign in** at [http://localhost:3000](http://localhost:3000) with the
+4. **Wait for the summary.** Once MixOS answers, it prints a ✓ for the web
+   server, the database, the sign-in page and Studio, with the address and the
+   login, and opens your browser. A ✗ comes with its fix on the line below.
+5. **Sign in** at [http://localhost:3000](http://localhost:3000) with the
    `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` in
-   [`.env.docker`](../../.env.docker).
+   [`.env.docker`](../../.env.docker). The summary prints them too.
 
 There's no secret to generate and no `.env.local` to fill in. `.env.docker` is
 committed on purpose: every value in it is a throwaway that only ever protects a
@@ -149,6 +152,7 @@ running, so the next start skips the slow part.
 ```bash
 npm run dev:docker              # start the database and MixOS, with hot reload
 npm run dev:docker -- --detach  # the same, but return once MixOS answers
+npm run status                  # is it up, where, and what to do if not
 npm run docker:prod             # the production image instead, to reproduce a deploy
 npm run docker:down             # stop everything, keep the data
 npm run docker:reset            # stop everything and DELETE the local database
@@ -156,10 +160,18 @@ npm run db:local                # apply new platform migrations
 npm run migrate:apps            # apply new app migrations
 ```
 
-`--detach` starts everything in the background, waits until
-`http://localhost:3000/api/health/ready` answers 200, and exits, so a zero exit
+`--detach` starts everything in the background, waits until MixOS's
+`/api/health/ready` answers 200, prints the summary and exits, so a zero exit
 means MixOS really is serving. Stop it with `npm run docker:down`. The bare `--`
 is npm's: `npm run dev:docker --detach` silently starts attached.
+
+`npm run status` answers "is it running?" any time, from any terminal: the same
+✓ and ✗ lines, and every other MixOS on your computer with its port.
+
+**Port 3000 already taken?** If another MixOS has it, a second checkout or a
+`npm run dev` left running, MixOS names it and offers the next free port. Press
+Enter to take it. Run from a script or by Claude, it prints the command to use
+instead, such as `MIXOS_PORT=3001 npm run dev:docker -- --detach`.
 
 `npm run dev:docker` applies both kinds of migration every time it starts, so
 you only need `db:local` and `migrate:apps` when you add a migration while
@@ -173,7 +185,9 @@ Supabase Studio, for browsing your local data, is at
 A second checkout can run at the same time as the first by naming itself in
 `.env.instance`: copy [`.env.instance.example`](../../.env.instance.example).
 It gets its own Compose project, Supabase stack, database and ports. Without the
-file, a checkout is `mixos`, on port 3000. A shell value beats the file:
+file, a checkout is `mixos`, on port 3000. Whichever copy starts second is
+offered the next free port, so the file needs no `MIXOS_PORT` unless you want
+to pin one. A shell value beats the file:
 
 ```bash
 MIXOS_INSTANCE=mixos-test MIXOS_PORT=3002 npm run dev:docker
@@ -190,12 +204,19 @@ You can also run Next.js directly on your computer, with `npm run dev`.
 
 ### Against the dev container's database
 
-It's a fallback for slow hot reload, not the default. Start the stack with
-`npm run dev:docker -- --detach`, free port 3000 with
-`docker compose -p mixos stop app-dev`, and point a `.env.local` at
-`127.0.0.1:54322` with `PGSSLMODE=disable`. Copy the other values from
-`.env.docker` too, so sessions and saved connector credentials keep working.
-Then run `npm run dev`. The details are in
+It's a fallback for slow hot reload, not the default. There's nothing to
+configure:
+
+```bash
+npm run dev:docker -- --db-only   # just the database, with every migration
+npm run dev                       # Next on your computer, against it
+```
+
+`npm run dev` finds the local database by itself and uses `.env.docker`'s
+values with it, so sessions and saved connector credentials work the same
+either way. It offers to start the database if it isn't running. If the dev
+container already has port 3000, it offers to stop that container and take
+over. It ends on the same summary as `dev:docker`. The details are in
 [Running Next.js on the host](../local-docker.md#running-nextjs-on-the-host-against-the-container-backend).
 
 ### With a database of your own

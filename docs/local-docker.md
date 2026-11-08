@@ -7,11 +7,51 @@ This is the reference for how the pieces fit;
 ```bash
 npm run dev:docker              # boot everything, app with hot reload
 npm run dev:docker -- --detach  # the same boot, but the command exits when the app is up
+npm run dev:docker -- --db-only # the database only, for `npm run dev` on the host
 npm run docker:prod             # boot everything, app as the production image
+npm run status                  # is it up, where, and what to do if not
 npm run docker:down             # stop everything, keep the data
 npm run docker:reset            # stop everything and delete the database volume
 npm run db:local                # apply pending supabase/migrations/*.sql to the local DB
 ```
+
+---
+
+## How you know it's up
+
+Every way of starting MixOS ends on the same summary, and the running app
+writes it, not the script:
+
+```text
+────────────────────────────────────────────────────────────────────────
+  ✓ MixOS is up at http://localhost:3000
+
+  ✓ Web server   http://localhost:3000
+  ✓ Database     connected, schema up to date
+  ✓ Sign-in      http://localhost:3000/login
+                 admin@localhost / mixos-local-dev
+  ✓ Studio       http://127.0.0.1:54323   browse and edit the database
+────────────────────────────────────────────────────────────────────────
+```
+
+Each line is a question put to the app over HTTP: does `/api/health/live`
+answer, does `/api/health/ready` reach Postgres with the schema this code
+expects, does `/login` render. A failure is a ✗ with its fix underneath, such
+as `npm run db:local` for a schema that's behind. Each question waits on the
+one before it, so a missing database shows up as one ✗, not three. Next's own
+`✓ Ready` line isn't the signal. It means a process is listening, and a server
+with no database prints it too.
+
+Once everything passes, the browser opens at the app. That only happens for a
+person at a terminal, never for an agent, a script or CI. `--no-open` or
+`MIXOS_OPEN_BROWSER=false` turns it off.
+
+**`npm run status`** asks the same questions any time, from any terminal. It
+finds this checkout's app, in Docker or as a host `npm run dev`, and lists every
+other MixOS serving on the machine with its port. It changes nothing, and exits
+0 only when every check passed, so a script can use it too. The checks live in
+[`scripts/local-stack.ts`](../scripts/local-stack.ts), shared by all three
+commands.
 
 ---
 
@@ -20,7 +60,9 @@ npm run db:local                # apply pending supabase/migrations/*.sql to the
 `npm run dev:docker` ends in `docker compose up` **in the foreground**. It
 therefore does not return: the terminal becomes the log stream for `app-dev`
 and `cron`, which is what you want while you are working — a failed migration
-or a thrown request handler scrolls past in front of you. Ctrl-C is how the
+or a thrown request handler scrolls past in front of you. The summary prints
+into that stream as soon as the app first answers, however long a cold first
+compile takes. Ctrl-C is how the
 session ends. It reaches the compose process group and stops the app
 containers; the Supabase CLI stack is a *separate* orchestrator (see below) and
 keeps running, so the next boot skips the slow part. `npm run docker:down`
@@ -34,9 +76,9 @@ you. For those, `--detach`:
 npm run dev:docker -- --detach   # or: npm run docker:prod -- --detach
 ```
 
-brings the identical stack up in the background, then polls
-`http://localhost:3000/api/health/ready` until it returns 200 before printing
-the banner and exiting 0 (and fails with a pointed message if it never does).
+brings the identical stack up in the background, then polls the app's
+`/api/health/ready` until it returns 200 before printing the summary and
+exiting 0 (and fails with a pointed message if it never does).
 Waiting on readiness rather than on `compose up` returning is the whole value:
 `/api/health/ready` opens a real connection to Postgres, so a zero exit status
 means the app is actually serving requests, not just that containers were
@@ -159,11 +201,29 @@ duplicated by hand, so they cannot drift apart.
 | 54322 | Postgres | Supabase CLI |
 | 54323 | Supabase Studio | Supabase CLI |
 
-All four must be free before boot. The usual collision is a host `npm run dev`
-still holding 3000; find it with `lsof -nP -iTCP:3000 -sTCP:LISTEN`.
+The Supabase ports must be free before the stack starts. The app port is
+handled for you. When something already holds it, the preflight says what,
+whether that's another MixOS instance in Docker, a host `npm run dev` in some
+checkout, or an unrelated app, and recommends the next free port:
+
+```text
+    warn port 3000 is taken
+         MixOS instance `mixos-dev` (in Docker, from ~/mixos-dev) is already on http://localhost:3000.
+    Start this one on http://localhost:3001 instead? [Y/n]
+```
+
+At a terminal, Enter takes it for this run. With nobody to answer (an agent, CI,
+`--check`), the boot stops and prints the command instead:
+`MIXOS_PORT=3001 npm run dev:docker -- --detach`. Put `MIXOS_PORT` in
+`.env.instance` to keep a checkout on one port. There's one exception: when the
+holder is this checkout's own host `npm run dev`, the fix is to stop it. Two
+servers for one checkout, on two ports, are the confusing case this check
+exists to prevent. Whatever port a run settles on is used everywhere:
+compose publishes it, the app's `NEXTAUTH_URL` follows it, and the summary
+prints it.
 
 These are the ports of the **default instance**. A checkout can be a different
-one — see below — and then every number here moves with it.
+one — see below — and then the Supabase numbers move with it.
 
 ---
 
@@ -182,14 +242,16 @@ Copy `.env.instance.example` to `.env.instance` in the second checkout:
 
 ```bash
 MIXOS_INSTANCE=mixos-dev          # compose project, Supabase project id
-MIXOS_PORT=3001                   # where the app is published
 MIXOS_SUPABASE_PORT_BASE=54340    # Supabase's seven ports, derived from here
 MIXOS_INSPECTOR_PORT=8084         # not part of the 5432x block
+# MIXOS_PORT=3001                 # optional: pin the app to one port
 ```
 
 Then `npm run dev:docker` there boots `mixos-dev` alongside `mixos`, with its
-own containers, its own volumes and its own database. `npm run docker:down` in
-either checkout stops only that one.
+own containers, its own volumes and its own database. The app port needs no
+setting: whichever instance starts second is offered the next free port (see
+the port map above). `npm run docker:down` in either checkout stops only that
+one, and `npm run status` in either lists both.
 
 **The file is absent by default, and every value then falls back to its
 default**: `mixos`, 3000, 54321.
@@ -261,6 +323,11 @@ Compose loads two files into every service, in this order:
 | `.env.docker` | **yes** | `AUTH_SECRET`, `CONNECTOR_ENCRYPTION_KEY`, `APP_UNLOCK_SECRET`, `CRON_SECRET`, `INITIAL_ADMIN_EMAIL`, `INITIAL_ADMIN_PASSWORD`, `NEXTAUTH_URL=http://localhost:3000`, `PGSSLMODE=disable` |
 | `.env.docker.local` | no — generated, gitignored | `DATABASE_URL` |
 
+One value is overridden on top of both: `NEXTAUTH_URL`. Compose sets it from
+the port the app is published on, `http://localhost:${MIXOS_PORT}`, because it
+is the origin OAuth callbacks and absolute links are built from, and an
+instance on 3001 must not send them to whatever holds 3000.
+
 **`.env.docker` is committed on purpose.** Every value in it is fixed and
 public, which is the whole point: nobody generates a secret by hand, and a fixed
 `CONNECTOR_ENCRYPTION_KEY` means connector credentials you saved locally still
@@ -318,8 +385,8 @@ deploy.
 
 ## Dev and prod profiles
 
-Both profiles serve on 3000 and use the same Supabase stack; only the app
-container differs.
+Both profiles serve on the instance's app port (3000 by default) and use the
+same Supabase stack; only the app container differs.
 
 **`dev` (`npm run dev:docker`)** — `Dockerfile.dev`, your working tree
 bind-mounted, `next dev` bound to `0.0.0.0`. Named volumes shadow `node_modules`
@@ -367,44 +434,40 @@ edit-to-served at roughly **0.2s for an API route and 0.3s for a page
 component**. Reach for the host server when you have measured a problem, not on
 principle.
 
-Boot the backend, then hand port 3000 back to the host. These are two steps,
-and how you sequence them depends on whether the boot is attached:
+Start the database, then Next on the host. Two commands, and no `.env.local`
+to write:
 
 ```bash
-npm run dev:docker -- --detach        # returns once the app answers /api/health/ready
-docker compose -p mixos stop app-dev  # ...then let the host own port 3000
-                                      # (-p is the instance name; see above)
+npm run dev:docker -- --db-only   # Supabase and every migration, no app container
+npm run dev                       # Next on this computer, against that database
 ```
 
-With a plain attached `npm run dev:docker` the two cannot be pasted as one
-block — the first command never returns, so the `stop` below it would never
-run. Either issue the `stop` from a second terminal, or simply press Ctrl-C in
-the first: that already stops the app containers and leaves the Supabase stack
-up, which is the state you were trying to reach. The difference is only in what
-else goes down with it — Ctrl-C takes the `cron` sidecar too, `stop app-dev`
-leaves it running.
+`npm run dev` ([`scripts/dev.ts`](../scripts/dev.ts)) finds this instance's
+running Supabase stack and hands Next its host-facing address
+(`127.0.0.1`, per the two-address split above), `PGSSLMODE=disable`, and the
+rest of `.env.docker`. Those are the container's own values, so sessions and
+stored connector credentials stay valid across both ways of running. They go
+in through the server's environment, never a written file. If the stack isn't
+running, `npm run dev` offers to start it.
 
-Stopping `app-dev` rather than running the host server on another port matters:
-`NEXTAUTH_URL` is `http://localhost:3000`, and a session issued for one origin
-is not valid on another.
+It stays out of the way of a database you chose. With `DATABASE_URL` (or
+`PGHOST`) in the shell, `.env.local` or `.env`, or with any `.env.local` at all,
+it adds nothing. That's the rule [`scripts/load-env.ts`](../scripts/load-env.ts)
+applies to the same fallback, because `.env.docker`'s `PGSSLMODE=disable` and its
+public `AUTH_SECRET` belong to the local database only.
 
-Point a host `.env.local` at the containerized backend:
-
-```bash
-# .env.local — host-facing addresses, note 127.0.0.1 not host.docker.internal
-DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
-PGSSLMODE=disable
-```
-
-Copy the remaining secrets from `.env.docker` so sessions and stored connector
-credentials stay valid across both ways of running. Then `npm run dev`.
+Already booted the whole stack? Run `npm run dev` anyway. It sees this
+instance's `app-dev` on the port and offers to stop that container and take
+its place. With nobody at the keyboard, it prints the
+`docker compose -p <instance> stop app-dev` to run instead. A port held by
+anything else gets the next free one, as in the port map above.
 
 One caveat about the scheduler. The `cron` sidecar calls the app by its
 `mixos-app` network alias, and when that does not resolve — `app-dev` is
 stopped — it falls back to `host.docker.internal:3000`. So if you got here via
-`stop app-dev` it survives and its ticks land on your host server — but only if
-you copied `CRON_SECRET` across, or every tick 401s. If you got here via
-Ctrl-C, cron stopped along with the app container and nothing is ticking at all.
+`stop app-dev` it survives and its ticks land on your host server, which has
+`CRON_SECRET` from `.env.docker`. With `--db-only`, or after a Ctrl-C, there is
+no cron container and nothing is ticking at all.
 Either way, don't infer from a passing tick that the scheduler is exercised the
 way it is in production; force one by hand with
 `npx tsx scripts/run-scheduled-jobs.ts`.
@@ -412,6 +475,16 @@ way it is in production; force one by hand with
 ---
 
 ## Troubleshooting
+
+**Start with `npm run status`.** It says whether the app, the database and
+Studio answer, prints the fix for whichever doesn't, and lists every MixOS on
+the machine with its port. Most of what follows is the detail behind one of its
+✗ lines.
+
+**`npm run dev` says "Ready" but pages fail.** Next's `Ready` only means it's
+listening. The summary under it says whether it can reach a database. With
+none configured and no local stack running, run
+`npm run dev:docker -- --db-only` and restart `npm run dev`.
 
 **Connection refused, or the wrong database, after changing instances.**
 `.env.docker.local` is stale. Delete it and re-run `npm run dev:docker`, which
