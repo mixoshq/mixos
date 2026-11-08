@@ -16,8 +16,9 @@ just pulled.
   your Mac with a ✓ or ✗ for each check, and a menu bar icon, the MixOS mark,
   for opening, starting and stopping them. It also sets up a new copy: it
   checks for git, Node and Docker, downloads the newest release, and starts it
-  with a database of its own. `npm run desktop:mac` builds it into
-  `desktop/macos/dist/`. See [desktop/macos](desktop/macos/README.md).
+  with a database of its own. `npm run desktop:mac` builds it, with a
+  drag-to-Applications installer (.dmg), into `desktop/macos/dist/`. See
+  [desktop/macos](desktop/macos/README.md).
 - **`npm run status -- --json`** prints the status as JSON, for programs like
   the Launcher.
 - **You can see that MixOS is up.** `npm run dev:docker`, its `--detach` and a
