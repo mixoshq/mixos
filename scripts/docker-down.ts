@@ -26,6 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { dockerInstallHint, hostPlatform } from "./host-platform";
 import { resolveInstance } from "./instance";
+import { notYourInstance, ownedElsewhere } from "./instance-claims";
 import readline from "node:readline/promises";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -197,6 +198,18 @@ async function main() {
   if (args.help) {
     console.log(HELP.trim());
     return;
+  }
+
+  // Before the reset prompt, so nobody confirms deleting a database that is
+  // not even this checkout's. One name, one owner (scripts/instance-claims.ts):
+  // a checkout that only shares the name would stop that owner's MixOS, and
+  // with --reset delete its data.
+  const owner = ownedElsewhere(INSTANCE.name, ROOT);
+  if (owner) {
+    throw new TeardownError(
+      `Not stopping \`${INSTANCE.name}\`: it belongs to another checkout.`,
+      notYourInstance(INSTANCE.name, owner, args.reset ? "a reset" : "stopping it"),
+    );
   }
 
   if (args.reset) await confirmReset(args.yes);

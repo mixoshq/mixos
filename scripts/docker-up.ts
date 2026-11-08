@@ -82,7 +82,13 @@ import {
   hostPlatform,
   windowsDockerDesktop,
 } from "./host-platform";
-import { resolveInstance } from "./instance";
+import { type Instance, exportInstance, portsFor, resolveInstance } from "./instance";
+import {
+  chooseOwnInstance,
+  ownedElsewhere,
+  recordClaim,
+  writeInstanceFile,
+} from "./instance-claims";
 import {
   type Check,
   allOk,
@@ -114,8 +120,10 @@ const ROOT = path.resolve(__dirname, "..");
 
 // Resolved FIRST, because it writes MIXOS_* into process.env and every child
 // process below — `docker compose`, the Supabase CLI — reads its identity from
-// there. See scripts/instance.ts.
-const INSTANCE = resolveInstance();
+// there. See scripts/instance.ts. A `let`, because the boot's first step can
+// give this checkout an instance of its own (settleInstance()), and everything
+// derived from it below moves with it (adopt()).
+let INSTANCE: Instance = resolveInstance();
 
 /** macOS, Linux, or Windows via WSL 2 — see scripts/host-platform.ts. */
 const PLATFORM = hostPlatform();
@@ -137,16 +145,12 @@ if (OWNER) {
  * match docker-down.ts, which resolves the same way from the same file rather
  * than repeating a literal.
  */
-const COMPOSE_PROJECT = INSTANCE.name;
+let COMPOSE_PROJECT = INSTANCE.name;
 
 // Used for the *pre-start* port check, when there is no running stack to ask.
 // Once the stack is up the real Supabase ports come from `supabase status`,
 // which is authoritative even if someone edits supabase/config.toml.
-const PORTS = {
-  supabaseApi: INSTANCE.ports.supabaseApi,
-  supabaseDb: INSTANCE.ports.supabaseDb,
-  supabaseStudio: INSTANCE.ports.supabaseStudio,
-} as const;
+let PORTS = supabasePorts(INSTANCE);
 
 /**
  * Where the app is published on the host. The instance's port (3000 unless
@@ -156,12 +160,35 @@ const PORTS = {
  */
 let appPort = INSTANCE.ports.app;
 
+function supabasePorts(instance: Instance) {
+  return {
+    supabaseApi: instance.ports.supabaseApi,
+    supabaseDb: instance.ports.supabaseDb,
+    supabaseStudio: instance.ports.supabaseStudio,
+  } as const;
+}
+
+/** Make `instance` the one this run boots, and everything derived from it. */
+function adopt(instance: Instance): void {
+  INSTANCE = instance;
+  COMPOSE_PROJECT = instance.name;
+  PORTS = supabasePorts(instance);
+  appPort = instance.ports.app;
+}
+
 /** How long to wait for the Docker daemon after launching Docker Desktop. */
 const DOCKER_BOOT_TIMEOUT_MS = 180_000;
 const DOCKER_POLL_INTERVAL_MS = 2_000;
 
 /** Docker Desktop's default VM allocation is generous, but not always. */
 const MIN_DOCKER_MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
+
+// What one more instance costs, for the warning when several run at once.
+// Measured on this repo with `docker stats`: a Supabase stack idles at about
+// 0.6 GiB (Studio is a third of it), and a dev app container at about 1.5 GiB,
+// most of it Turbopack.
+const STACK_BYTES = 0.6 * 1024 ** 3;
+const APP_BYTES = 1.5 * 1024 ** 3;
 
 // How long `--detach` waits for the app to answer before giving up. Three
 // minutes is sized for the slowest honest case, not the common one: a cold dev
@@ -788,6 +815,28 @@ async function preflight(opts: {
       } else {
         pf.ok("Docker memory", `${gib} GiB`);
       }
+
+      // Each instance is its own database and its own stack, so every other
+      // one running holds a share of the same memory. Counted rather than
+      // measured — `docker stats` takes seconds — from shares that are stable
+      // enough to estimate. Advisory: they all start either way.
+      const others = otherInstancesRunning();
+      if (others.stacks.length > 0) {
+        const want =
+          (others.stacks.length + 1) * STACK_BYTES + (others.apps + (opts.dbOnly ? 0 : 1)) * APP_BYTES;
+        const wantGib = (want / 1024 ** 3).toFixed(1);
+        const list = others.stacks.map((name) => `\`${name}\``).join(", ");
+        if (want > bytes * 0.85) {
+          pf.warn(
+            `${others.stacks.length} other instance${others.stacks.length === 1 ? " is" : "s are"} running: ${list}`,
+            `With this one they want about ${wantGib} of Docker's ${gib} GiB. Everything still starts, ` +
+              "but it can be slow, and Docker stops containers when memory runs out. " +
+              "`npm run docker:down` in a checkout you aren't using frees its share.",
+          );
+        } else {
+          pf.ok("other instances running", `${list}; about ${wantGib} of ${gib} GiB with this one`);
+        }
+      }
     }
   }
 
@@ -854,6 +903,108 @@ async function preflight(opts: {
   return { supabaseRunning, envDocker };
 }
 
+/** Other instances' running database containers, and their running app containers. */
+function otherInstancesRunning(): { stacks: string[]; apps: number } {
+  const r = capture("docker", [
+    "ps",
+    "--format",
+    '{{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}',
+  ]);
+  const stacks: string[] = [];
+  let apps = 0;
+  if (r.status !== 0) return { stacks, apps };
+  for (const line of r.stdout.split("\n")) {
+    const [name = "", project = "", service = ""] = line.split("\t");
+    const db = /^supabase_db_(.+)$/.exec(name);
+    if (db && db[1] !== INSTANCE.name) stacks.push(db[1]);
+    if ((service === "app-dev" || service === "app") && project !== INSTANCE.name) apps++;
+  }
+  return { stacks, apps };
+}
+
+/**
+ * Make sure this checkout boots an instance, and so a database, of its own.
+ * The rule, and why, are in scripts/instance-claims.ts.
+ *
+ * Its own already, or nobody's yet: claimed, and the boot carries on. Another
+ * folder's, under the name every unnamed checkout gets: this checkout is given
+ * one of its own, saved to its .env.instance, and booted fresh. Another
+ * folder's, under a name somebody wrote: refused with the fix, since quietly
+ * renaming what a person typed is worse than stopping.
+ *
+ * `--check` reports what would happen and writes nothing.
+ */
+function settleInstance(checkOnly: boolean): void {
+  const owner = ownedElsewhere(INSTANCE.name, ROOT);
+  if (!owner) {
+    if (!checkOnly) recordClaim(INSTANCE, ROOT);
+    info(`\`${INSTANCE.name}\`, this checkout's own, with its own database`);
+    return;
+  }
+
+  const own = chooseOwnInstance(ROOT);
+  if (INSTANCE.nameSource !== "default") {
+    const where = INSTANCE.nameSource === "file" ? "in .env.instance" : "in place of the shell's MIXOS_INSTANCE";
+    throw new SetupError(
+      `${tilde(owner)} already uses the instance \`${INSTANCE.name}\`, and an instance is one database.`,
+      `Give this checkout a name of its own ${where}` +
+        (own
+          ? `, for example MIXOS_INSTANCE=${own.name} with MIXOS_SUPABASE_PORT_BASE=${own.portBase}. `
+          : ". ") +
+        "Or leave MIXOS_INSTANCE out entirely, and the boot picks a free one for you.",
+    );
+  }
+  if (!own) {
+    throw new SetupError(
+      `${tilde(owner)} already uses \`${INSTANCE.name}\`, and no block of Supabase ports is free for another instance.`,
+      "`npm run docker:down` in checkouts you aren't using, then re-run.",
+    );
+  }
+
+  info(`${tilde(owner)} already uses \`${INSTANCE.name}\`, and an instance is one database.`);
+  info(
+    `This checkout gets its own: \`${own.name}\`, with Supabase on ${own.portBase}-${own.portBase + 9} ` +
+      "and a fresh database.",
+  );
+  if (checkOnly) {
+    // Preflighted as the instance it would be, so the Supabase and port lines
+    // below describe this checkout's future stack rather than the other's.
+    adopt({
+      name: own.name,
+      ports: portsFor(own.portBase, INSTANCE.ports.app, own.inspectorPort),
+      isDefault: false,
+      nameSource: "file",
+    });
+    exportInstance(INSTANCE);
+    info(c.dim("(--check writes nothing; a real boot saves this to .env.instance)"));
+    return;
+  }
+
+  // Containers of the old name still running THIS checkout's code are what
+  // sharing looked like: this folder's app on that folder's database. They
+  // are this checkout's to stop, and nothing else of that instance is touched.
+  const leftover = capture("docker", [
+    "ps",
+    "--filter",
+    `label=com.docker.compose.project=${INSTANCE.name}`,
+    "--format",
+    '{{.Names}}\t{{.Label "com.docker.compose.project.working_dir"}}',
+  ]);
+  const ours = leftover.stdout
+    .split("\n")
+    .map((line) => line.split("\t"))
+    .filter(([name, dir]) => name && dir && samePath(dir, ROOT))
+    .map(([name]) => name);
+  if (ours.length > 0 && succeeds("docker", ["stop", ...ours])) {
+    info(`Stopped ${ours.join(", ")}: this checkout's code, running on ${tilde(owner)}'s database.`);
+  }
+
+  writeInstanceFile(ROOT, own, { owner, instance: INSTANCE.name });
+  adopt(resolveInstance());
+  recordClaim(INSTANCE, ROOT);
+  info("Saved to .env.instance.");
+}
+
 /**
  * The app port: free, this stack's own, or somebody else's.
  *
@@ -893,6 +1044,17 @@ async function checkAppPort(
     } else {
       pf.ok(`port ${appPort} is this stack's own app`, "compose will replace it");
     }
+    return;
+  }
+
+  // Only `--check` can still see this one: the old name's container running
+  // this checkout's code, which a real boot has already stopped by now
+  // (settleInstance()).
+  if (holder.kind === "mixos" && holder.checkout && samePath(holder.checkout, ROOT)) {
+    pf.warn(
+      `port ${appPort} is this checkout's old \`${holder.instance}\` app`,
+      "A real boot stops it before starting this one, which then gets the port.",
+    );
     return;
   }
 
@@ -1475,6 +1637,9 @@ async function main() {
       `\nMixOS local stack — ${args.dbOnly ? "database only" : `${args.prod ? "prod" : "dev"} profile`}`,
     ),
   );
+
+  step("Instance");
+  settleInstance(args.check);
 
   step(
     args.check

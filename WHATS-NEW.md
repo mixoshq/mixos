@@ -27,6 +27,15 @@ just pulled.
   the next free port. Run by Claude or a script, it prints the command to use
   instead. `.env.instance` no longer needs a `MIXOS_PORT`. A second instance
   now gets `NEXTAUTH_URL` for its own port, not 3000's.
+- **Every checkout has its own database.** A second clone or a git worktree
+  used to be the same `mixos` instance as the first, sharing one database.
+  Now, on its first boot, it gets an instance of its own, named after its
+  folder, with its own Supabase ports and a fresh database, saved to its
+  `.env.instance`. The first checkout keeps its data. `docker:down`, `db:reset`,
+  `npm run dev` and `npm run status` never act on another folder's instance.
+  Who owns what is kept in `~/.mixos/instances.json`. A memory warning says
+  when Docker gets tight with several running. See
+  [More than one instance](docs/local-docker.md#more-than-one-instance-on-one-machine).
 - **`npm run dev` needs no `.env.local` for the local database.** It finds the
   stack from `npm run dev:docker` by itself, offers to start it if it's down
   (`npm run dev:docker -- --db-only` starts only the database), and offers to
