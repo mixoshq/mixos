@@ -21,10 +21,16 @@ another copy sees running. **Add an Existing Copy…** adds any other.
 
 ## Install
 
-Open `MixOS-Launcher-<version>.dmg` and drag **MixOS Launcher** to
-Applications. The app is signed ad hoc, not with an Apple Developer ID, so the
-first time you open it, **Control-click it and choose Open**. After that it
-opens like any other app.
+Open `MixOS-Launcher-<version>.dmg`. It opens on one window: MixOS Launcher on
+the left, your Applications folder on the right, and an arrow between them.
+Drag the app onto Applications, then eject the disk.
+
+The app is signed ad hoc, not with an Apple Developer ID, and it isn't
+notarized. On the Mac that built it, it opens straight away. A copy downloaded
+or AirDropped onto another Mac is stopped the first time it opens. Allow it in
+**System Settings › Privacy & Security** with **Open Anyway**, once. Since
+macOS 15, Control-click › Open no longer does this. The installer window says
+so too.
 
 It needs macOS 13 or later. What it sets up needs Docker Desktop and Node 22 or
 newer, and it tells you if either is missing.
@@ -45,6 +51,23 @@ Swift package, and `build.sh` wraps the binary in an app bundle. The icon and
 the in-app logo are drawn from `public/logo.png` at build time
 (`make-icon.swift`), and the version and the Node requirement come from
 `package.json`.
+
+**The installer.** The .dmg's window is laid out by
+[dmgbuild](https://github.com/dmgbuild/dmgbuild), pinned to 1.6.7
+(`dmg-settings.py`). Its background, with the MixOS mark, the arrow and the
+instructions, is drawn by `make-dmg-background.swift` at 1× and 2×. `build.sh`
+holds the layout numbers, the window size and each icon's position, and hands
+the same ones to both. That keeps the icons at the ends of the arrow.
+
+dmgbuild writes the layout straight into the disk image's `.DS_Store`. It
+doesn't script Finder, so it needs no Automation permission and builds the
+same over SSH or in CI. It needs Python 3.10+, newer than macOS's own:
+
+- with `uv` installed, `build.sh` runs it through uv, which brings its own
+  Python;
+- otherwise any `python3` 3.10+ gets a virtualenv in `.build/`;
+- with neither, the .dmg still installs (the app and an Applications link),
+  just without the window. `brew install uv` gives you the full one.
 
 To work on it, open `desktop/macos/Package.swift` in Xcode, or use
 `swift build` and `swift test` in `desktop/macos`. A binary run with
