@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<!-- build.sh fills in the __PLACEHOLDERS__ from the repo's package.json. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>MixOS Launcher</string>
+  <key>CFBundleDisplayName</key>
+  <string>MixOS Launcher</string>
+  <key>CFBundleIdentifier</key>
+  <string>org.mixos.launcher</string>
+  <key>CFBundleExecutable</key>
+  <string>MixOSLauncher</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>__VERSION__</string>
+  <key>CFBundleVersion</key>
+  <string>__VERSION__</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.developer-tools</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <!-- The Node major MixOS needs, from engines.node: what setup checks for. -->
+  <key>MixOSNodeMajor</key>
+  <string>__NODE_MAJOR__</string>
+</dict>
+</plist>
