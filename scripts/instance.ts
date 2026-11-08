@@ -8,8 +8,10 @@
  * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
  *
  * An instance is a compose project, its named volumes and its Supabase
- * containers, all named after it, and the ports it publishes. Two checkouts with
- * one name are one instance: booting the second recreates the first.
+ * containers, all named after it, and the ports it publishes — and so exactly
+ * one database. Each belongs to one checkout: ./instance-claims.ts records
+ * which, and gives a second checkout that boots under a taken name one of its
+ * own.
  *
  * A second instance is what developing an extension and *installing* one need,
  * because they are different jobs that cannot share a tree — registration
@@ -21,7 +23,8 @@
  *
  * A checkout with no `.env.instance` is the `mixos` project on port 3000 with
  * Supabase on 54321, as the docs say. A second instance takes its own name and
- * ports; the first keeps the defaults.
+ * ports — written for it on its first boot when nobody did — and the first
+ * keeps the defaults.
  *
  * ── WHY THE PORTS ARE DERIVED FROM ONE BASE ─────────────────────────────────
  *
@@ -60,7 +63,7 @@ const INSTANCE_FILE = ".env.instance";
  * shadow 54320, api 54321, db 54322, studio 54323, smtp 54324, analytics
  * 54327, pooler 54329.
  */
-const OFFSETS = {
+export const OFFSETS = {
   shadow: 0,
   api: 1,
   db: 2,
@@ -95,11 +98,41 @@ export interface Instance {
   ports: InstancePorts;
   /** True when this checkout is the default — used only to keep output quiet. */
   isDefault: boolean;
+  /**
+   * Where the name came from. Only a `default` name is ever changed for the
+   * checkout (scripts/instance-claims.ts): one someone wrote, in the file or
+   * the shell, is theirs.
+   */
+  nameSource: "shell" | "file" | "default";
 }
 
 /**
- * Read `.env.instance` into `process.env` WITHOUT overriding anything already
- * set, so `MIXOS_INSTANCE=x npm run dev:docker` beats the file.
+ * MIXOS_* as the person's shell set them — captured before resolveInstance()
+ * writes its own answers back, because "a shell value beats the file" has to
+ * mean the shell's, not this process's earlier answer. Otherwise a file written
+ * mid-run (a checkout given an instance of its own) could never be read back.
+ *
+ * A child that resolves again — `npm run dev` starting `dev:docker` — inherits
+ * the written-back values too, so the keys that really came from the shell
+ * travel with them, in MIXOS_SHELL_KEYS, and only those count as the shell's.
+ */
+const FROM_SHELL: Readonly<Record<string, string>> = (() => {
+  const keys =
+    process.env.MIXOS_SHELL_KEYS !== undefined
+      ? process.env.MIXOS_SHELL_KEYS.split(",").filter(Boolean)
+      : Object.keys(process.env).filter((key) => key.startsWith("MIXOS_"));
+  const out: Record<string, string> = {};
+  for (const key of keys) {
+    const value = process.env[key];
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+})();
+
+/**
+ * Read `.env.instance`. Its MIXOS_* settings are resolved below, behind the
+ * shell's; anything else in it goes into `process.env` WITHOUT overriding what
+ * is already set, as it always has.
  *
  * Deliberately not `loadEnv()` from `./load-env`: that one decides between the
  * hosted and Docker env files and rewrites container addresses for host-side
@@ -107,9 +140,10 @@ export interface Instance {
  * `docker-down.ts` in particular has to work on a half-finished checkout where
  * none of those files exist yet.
  */
-function loadInstanceFile(): void {
-  const full = path.join(ROOT, INSTANCE_FILE);
-  if (!fs.existsSync(full)) return;
+function readInstanceFile(root: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const full = path.join(root, INSTANCE_FILE);
+  if (!fs.existsSync(full)) return out;
 
   for (const line of fs.readFileSync(full, "utf-8").split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -124,8 +158,10 @@ function loadInstanceFile(): void {
     ) {
       value = value.slice(1, -1);
     }
-    if (!(key in process.env)) process.env[key] = value;
+    out[key] = value;
+    if (!key.startsWith("MIXOS_") && !(key in process.env)) process.env[key] = value;
   }
+  return out;
 }
 
 /**
@@ -147,8 +183,7 @@ function validName(raw: string): string {
   return name;
 }
 
-function intFromEnv(key: string, fallback: number): number {
-  const raw = process.env[key];
+function portSetting(key: string, raw: string | undefined, fallback: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > 65_535) {
@@ -167,16 +202,41 @@ function intFromEnv(key: string, fallback: number): number {
  * remember to pass an env object, which is exactly the kind of thing one of
  * the four `spawnSync`s in docker-up.ts would eventually forget.
  *
- * Safe to call more than once.
+ * Safe to call more than once, and it reads `.env.instance` again each time:
+ * a checkout given an instance of its own mid-run is resolved afresh.
  */
-export function resolveInstance(): Instance {
-  loadInstanceFile();
+export function resolveInstance(root: string = ROOT): Instance {
+  const file = readInstanceFile(root);
+  const setting = (key: string): string | undefined => FROM_SHELL[key] ?? file[key];
 
-  const name = validName(process.env.MIXOS_INSTANCE ?? DEFAULT_INSTANCE);
-  const base = intFromEnv("MIXOS_SUPABASE_PORT_BASE", DEFAULT_SUPABASE_PORT_BASE);
+  const rawName = setting("MIXOS_INSTANCE");
+  const name = validName(rawName ?? DEFAULT_INSTANCE);
+  const nameSource =
+    FROM_SHELL.MIXOS_INSTANCE !== undefined ? "shell" : rawName !== undefined ? "file" : "default";
+  const base = portSetting(
+    "MIXOS_SUPABASE_PORT_BASE",
+    setting("MIXOS_SUPABASE_PORT_BASE"),
+    DEFAULT_SUPABASE_PORT_BASE,
+  );
 
-  const ports: InstancePorts = {
-    app: intFromEnv("MIXOS_PORT", DEFAULT_APP_PORT),
+  const instance: Instance = {
+    name,
+    ports: portsFor(
+      base,
+      portSetting("MIXOS_PORT", setting("MIXOS_PORT"), DEFAULT_APP_PORT),
+      portSetting("MIXOS_INSPECTOR_PORT", setting("MIXOS_INSPECTOR_PORT"), DEFAULT_INSPECTOR_PORT),
+    ),
+    isDefault: name === DEFAULT_INSTANCE,
+    nameSource,
+  };
+  exportInstance(instance);
+  return instance;
+}
+
+/** Every port of an instance, from its Supabase base and the two that stand alone. */
+export function portsFor(base: number, app: number, inspector: number): InstancePorts {
+  return {
+    app,
     supabaseApi: base + OFFSETS.api,
     supabaseDb: base + OFFSETS.db,
     supabaseShadow: base + OFFSETS.shadow,
@@ -184,11 +244,18 @@ export function resolveInstance(): Instance {
     supabaseSmtp: base + OFFSETS.smtp,
     supabaseAnalytics: base + OFFSETS.analytics,
     supabasePooler: base + OFFSETS.pooler,
-    supabaseInspector: intFromEnv("MIXOS_INSPECTOR_PORT", DEFAULT_INSPECTOR_PORT),
+    supabaseInspector: inspector,
   };
+}
 
-  // Written back for the children: compose reads MIXOS_INSTANCE and MIXOS_PORT,
-  // the Supabase CLI reads the rest through env() in config.toml.
+/**
+ * Write an instance into `process.env` for the children: compose reads
+ * MIXOS_INSTANCE and MIXOS_PORT, the Supabase CLI reads the rest through env()
+ * in config.toml. Exported for docker-up.ts's `--check`, which preflights an
+ * instance it has chosen but not yet written down.
+ */
+export function exportInstance(instance: Instance): void {
+  const { name, ports } = instance;
   process.env.MIXOS_INSTANCE = name;
   process.env.MIXOS_PORT = String(ports.app);
   process.env.MIXOS_SUPABASE_API_PORT = String(ports.supabaseApi);
@@ -199,6 +266,5 @@ export function resolveInstance(): Instance {
   process.env.MIXOS_SUPABASE_ANALYTICS_PORT = String(ports.supabaseAnalytics);
   process.env.MIXOS_SUPABASE_POOLER_PORT = String(ports.supabasePooler);
   process.env.MIXOS_SUPABASE_INSPECTOR_PORT = String(ports.supabaseInspector);
-
-  return { name, ports, isDefault: name === DEFAULT_INSTANCE };
+  process.env.MIXOS_SHELL_KEYS = Object.keys(FROM_SHELL).join(",");
 }

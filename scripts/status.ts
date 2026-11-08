@@ -16,6 +16,7 @@
 
 import path from "node:path";
 import { resolveInstance } from "./instance";
+import { ownedElsewhere } from "./instance-claims";
 import {
   type Check,
   type Fixes,
@@ -44,12 +45,19 @@ async function main() {
   const mine = apps.filter((app) => isOurs(app, self));
   const others = apps.filter((app) => !isOurs(app, self));
   const own = configuredDatabase();
+  // Another folder owns this checkout's instance name: its stack is that
+  // folder's database, not this checkout's (scripts/instance-claims.ts).
+  const sharedWith = own ? null : ownedElsewhere(instance.name, ROOT);
   // A database of the checkout's own is the app's business; the local stack is
   // only this checkout's database when nothing else is named.
-  const local = own ? null : localSupabase();
+  const local = own || sharedWith ? null : localSupabase();
   const envDocker = parseEnvFile(path.join(ROOT, ".env.docker"));
 
-  console.log(c.bold(`\nMixOS status — instance \`${instance.name}\`, ${tilde(ROOT)}`));
+  console.log(
+    c.bold(
+      `\nMixOS status — ${sharedWith ? "no instance of its own yet" : `instance \`${instance.name}\``}, ${tilde(ROOT)}`,
+    ),
+  );
 
   const checks: Check[] = [];
   const app = mine[0];
@@ -60,7 +68,9 @@ async function main() {
         : "Its terminal says why.",
       noDatabase: own
         ? `The app can't reach the database named in ${own}. Check DATABASE_URL.`
-        : local
+        : sharedWith
+          ? "This checkout has no database of its own yet. `npm run dev:docker -- --db-only` gives it one."
+          : local
           ? "The app can't reach the local database. Restart it with `npm run dev:docker`."
           : "The local database isn't running. `npm run dev:docker -- --db-only` starts it.",
       schemaBehind: own
@@ -71,7 +81,9 @@ async function main() {
     if (checks[0].state === "ok") checks[0].lines[0] += `   ${c.dim(app.how)}`;
   } else {
     checks.push({ state: "fail", name: "Web server", lines: ["not running"], fix: START });
-    checks.push(await databaseWithoutApp(own, local));
+    checks.push(
+      await databaseWithoutApp(own, local, sharedWith ? { owner: sharedWith, instance: instance.name } : null),
+    );
     checks.push({ state: "skip", name: "Sign-in", lines: ["not checked: the app isn't running"] });
   }
   if (local?.studioUrl) {
@@ -120,8 +132,17 @@ async function main() {
 async function databaseWithoutApp(
   own: string | null,
   local: ReturnType<typeof localSupabase>,
+  shared: { owner: string; instance: string } | null,
 ): Promise<Check> {
   if (own) return { state: "skip", name: "Database", lines: [`yours, from ${own}: not checked without the app`] };
+  if (shared) {
+    return {
+      state: "fail",
+      name: "Database",
+      lines: [`none of its own: \`${shared.instance}\` is ${tilde(shared.owner)}'s`],
+      fix: "`npm run dev:docker` gives this checkout an instance and a fresh database of its own.",
+    };
+  }
   if (!local) {
     return {
       state: "fail",

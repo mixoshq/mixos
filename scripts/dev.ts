@@ -40,7 +40,8 @@ import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resolveInstance } from "./instance";
+import { type Instance, resolveInstance } from "./instance";
+import { ownedElsewhere } from "./instance-claims";
 import {
   type Check,
   type Fixes,
@@ -147,14 +148,22 @@ type Database =
   | { kind: "local"; db: LocalDatabase; envDocker: Record<string, string> }
   /** A .env.local that names no database: the hosted path, half set up. */
   | { kind: "unnamed" }
+  /** This checkout's instance name is another folder's (scripts/instance-claims.ts). */
+  | { kind: "shared"; owner: string; instance: string; named: boolean }
   | { kind: "none" };
 
-function findDatabase(): Database {
+function findDatabase(instance: Instance): Database {
   const source = configuredDatabase();
   if (source) return { kind: "own", source };
   // load-env.ts's rule: a .env.local means someone is configuring their own
   // database, and the local stack's values must not be mixed into it.
   if (fs.existsSync(path.join(ROOT, ".env.local"))) return { kind: "unnamed" };
+  // A stack under this checkout's name that another folder owns is that
+  // folder's database, however reachable it is from here.
+  const owner = ownedElsewhere(instance.name, ROOT);
+  if (owner) {
+    return { kind: "shared", owner, instance: instance.name, named: instance.nameSource !== "default" };
+  }
   const db = localSupabase();
   if (!db) return { kind: "none" };
   return { kind: "local", db, envDocker: parseEnvFile(path.join(ROOT, ".env.docker")) };
@@ -187,6 +196,8 @@ function describeDatabase(database: Database): string {
     }
     case "unnamed":
       return c.yellow(".env.local names no database (DATABASE_URL)");
+    case "shared":
+      return c.yellow(`none of its own: \`${database.instance}\` is ${tilde(database.owner)}'s`);
     case "none":
       return c.yellow("none running — see the summary once the server is up");
   }
@@ -205,7 +216,13 @@ function fixesFor(database: Database): Fixes {
           : database.kind === "unnamed"
             ? "Add DATABASE_URL to .env.local (docs/hosting/development.md), or remove .env.local to " +
               `use the local database from \`npm run dev:docker -- --db-only\`; ${restart}.`
-            : `Start the local database with \`npm run dev:docker -- --db-only\`, ${restart}.`,
+            : database.kind === "shared"
+              ? (database.named
+                  ? `MIXOS_INSTANCE names ${tilde(database.owner)}'s instance. Take it out of .env.instance ` +
+                    "or the shell, and "
+                  : "This checkout has no database of its own yet. ") +
+                `\`npm run dev:docker -- --db-only\` gives it one, ${restart}.`
+              : `Start the local database with \`npm run dev:docker -- --db-only\`, ${restart}.`,
     schemaBehind:
       database.kind === "own"
         ? "Apply the platform migrations with `npm run db:migrate`, then reload."
@@ -306,25 +323,45 @@ async function main() {
     return;
   }
 
-  const instance = resolveInstance();
+  let instance = resolveInstance();
   const args = parseDevArgs(argv);
   const envPort = process.env.PORT ? toPort(process.env.PORT, "PORT") : null;
 
-  console.log(c.bold(`\nMixOS dev server — instance \`${instance.name}\`, ${tilde(ROOT)}`));
-  const port = await settlePort(args.port ?? envPort ?? instance.ports.app, instance.name);
+  console.log(c.bold(`\nMixOS dev server — ${tilde(ROOT)}`));
 
-  let database = findDatabase();
-  if (database.kind === "none" && interactive()) {
-    info(`${c.yellow("!")} No database is set up for this checkout, and its local one isn't running.`);
-    if (await confirm("Start the local database now? It runs in Docker, and the first start takes a while.")) {
+  // The database first: starting one can give this checkout an instance of
+  // its own, and the port question below is about that instance's containers.
+  let database = findDatabase(instance);
+  // A shared name somebody wrote is theirs to change (docker-up.ts refuses to),
+  // so only an unnamed checkout is offered one of its own here.
+  const offerable = database.kind === "none" || (database.kind === "shared" && !database.named);
+  if (offerable && interactive()) {
+    info(
+      `${c.yellow("!")} ` +
+        (database.kind === "shared"
+          ? `This checkout has no database of its own: \`${database.instance}\` is ${tilde(database.owner)}'s.`
+          : "No database is set up for this checkout, and its local one isn't running."),
+    );
+    const offer =
+      database.kind === "shared"
+        ? "Give this checkout its own, with a fresh database, now? It runs in Docker."
+        : "Start the local database now? It runs in Docker, and the first start takes a while.";
+    if (await confirm(offer)) {
+      // The child resolves the instance itself and may write .env.instance;
+      // MIXOS_SHELL_KEYS (scripts/instance.ts) keeps what this process wrote
+      // back from passing for the person's own setting.
       const started = spawnSync("npm", ["run", "dev:docker", "--", "--db-only"], {
         cwd: ROOT,
         stdio: "inherit",
       });
       if (started.status !== 0) fail("the database didn't start. Its output, above, says why.");
-      database = findDatabase();
+      instance = resolveInstance();
+      database = findDatabase(instance);
     }
   }
+
+  const port = await settlePort(args.port ?? envPort ?? instance.ports.app, instance.name);
+  info(`Instance   \`${instance.name}\``);
 
   info(`Database   ${describeDatabase(database)}`);
   info(`Port       ${port}`);

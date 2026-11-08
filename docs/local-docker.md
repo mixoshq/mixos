@@ -230,15 +230,54 @@ one — see below — and then the Supabase numbers move with it.
 ## More than one instance on one machine
 
 An instance is a compose project, its named volumes and its Supabase containers,
-all named after the instance. Two checkouts with the same instance name are the
-same instance: booting the second recreates the first.
+all named after the instance. It is also exactly one database, and **every
+checkout gets an instance of its own**. A second clone or a git worktree never
+shares the first one's database, and booting it never replaces the first one's
+app.
 
 A second tree is usually for something one instance can't do. Registering an
 extension refuses a slug whose directory already exists, so the instance you
 *author* an extension in cannot also be the one you *install* it into to check
 that a stranger gets what you meant. That needs two instances, running at once.
 
-Copy `.env.instance.example` to `.env.instance` in the second checkout:
+**It happens on the first boot.** A checkout with no `.env.instance` is `mixos`,
+on port 3000 with Supabase on 54321. If another folder already owns `mixos`,
+`npm run dev:docker` gives this checkout an instance of its own instead:
+
+```text
+[1] Instance
+    ~/git/mixos already uses `mixos`, and an instance is one database.
+    This checkout gets its own: `mixos-feature`, with Supabase on 54360-54369 and a fresh database.
+    Saved to .env.instance.
+```
+
+The name comes from the folder. The port block is the next one nothing holds,
+running or stopped. The database starts fresh, with every migration and the
+seeded admin, and nothing carries over from the other folder. That folder
+keeps its name and its data. `--check` shows what it would do, and writes
+nothing.
+
+**Who owns what** is recorded in `~/.mixos/instances.json` (`MIXOS_STATE_DIR`
+moves it): each instance, its folder and its port block. Booting an instance is
+claiming it. The record outlives the containers, which `docker:down` removes,
+and that's what keeps a stopped instance's ports from being handed out again.
+On a machine that booted MixOS before the record existed, the evidence is
+Docker's: the folder compose last ran the instance from keeps it. A claim whose
+folder is gone, moved or deleted, no longer counts.
+
+**Nothing acts on another folder's instance.** From a checkout that only shares
+the name, these all refuse with the fix:
+- `npm run docker:down` and `docker:reset`, which would stop that checkout's
+  MixOS or delete its data;
+- `npm run supabase`, along with `db:reset`, `db:push` and `db:local`, which go
+  through it;
+- `npm run dev`, which won't connect to that database;
+- `npm run status`, which says this checkout has no database of its own yet.
+
+[`scripts/instance-claims.ts`](../scripts/instance-claims.ts) holds the rule.
+
+**Naming one yourself** still works. Copy `.env.instance.example` to
+`.env.instance`:
 
 ```bash
 MIXOS_INSTANCE=mixos-dev          # compose project, Supabase project id
@@ -247,14 +286,18 @@ MIXOS_INSPECTOR_PORT=8084         # not part of the 5432x block
 # MIXOS_PORT=3001                 # optional: pin the app to one port
 ```
 
-Then `npm run dev:docker` there boots `mixos-dev` alongside `mixos`, with its
-own containers, its own volumes and its own database. The app port needs no
+A name you wrote is never renamed for you. If another folder already owns it,
+the boot stops and suggests a free name and port block. The app port needs no
 setting: whichever instance starts second is offered the next free port (see
-the port map above). `npm run docker:down` in either checkout stops only that
-one, and `npm run status` in either lists both.
+the port map above). `npm run docker:down` in a checkout stops only that
+checkout's instance, and `npm run status` in any of them lists them all.
 
-**The file is absent by default, and every value then falls back to its
-default**: `mixos`, 3000, 54321.
+Each instance runs its own Supabase stack, about 0.6 GiB of Docker's memory,
+plus about 1.5 GiB for a dev app container. The preflight counts the instances
+already running and warns when this one would make Docker's memory tight.
+Everything still starts. `npm run docker:down` in a checkout you aren't using
+frees its share.
+
 A shell value beats the file, which makes a one-off possible without a file at
 all:
 
@@ -464,7 +507,7 @@ anything else gets the next free one, as in the port map above.
 
 One caveat about the scheduler. The `cron` sidecar calls the app by its
 `mixos-app` network alias, and when that does not resolve — `app-dev` is
-stopped — it falls back to `host.docker.internal:3000`. So if you got here via
+stopped — it falls back to `host.docker.internal` on the instance's own app port. So if you got here via
 `stop app-dev` it survives and its ticks land on your host server, which has
 `CRON_SECRET` from `.env.docker`. With `--db-only`, or after a Ctrl-C, there is
 no cron container and nothing is ticking at all.

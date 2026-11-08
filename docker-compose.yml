@@ -272,14 +272,16 @@ services:
     # host.docker.internal survives as the FALLBACK, for host mode: with
     # app-dev stopped and `npm run dev` running on the host instead
     # (docs/local-docker.md), nothing on the network answers to mixos-app, so a
-    # tick that cannot even resolve the name (curl exit 6) goes to the host's
-    # port 3000 — which `next dev` binds on every interface, so this works on
-    # Linux as well as on Docker Desktop.
+    # tick that cannot even resolve the name (curl exit 6) goes to the host, on
+    # this instance's app port — which `next dev` binds on every interface, so
+    # this works on Linux as well as on Docker Desktop. The instance's port, not
+    # a fixed 3000, so a stopped instance's ticks do not land on whichever other
+    # instance holds 3000. Compose fills it in when it renders this file.
     command:
       - |
         set -u
         TARGET="http://mixos-app:3000/api/cron"
-        HOST_TARGET="http://host.docker.internal:3000/api/cron"
+        HOST_TARGET="http://host.docker.internal:${MIXOS_PORT:-3000}/api/cron"
         INTERVAL=300
         # Belt-and-braces on top of depends_on: healthy only proves the app
         # answered once. Give the first real request a little more room, and

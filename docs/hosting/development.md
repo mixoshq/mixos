@@ -182,12 +182,19 @@ Supabase Studio, for browsing your local data, is at
 
 ### More than one copy on one machine
 
-A second checkout can run at the same time as the first by naming itself in
-`.env.instance`: copy [`.env.instance.example`](../../.env.instance.example).
-It gets its own Compose project, Supabase stack, database and ports. Without the
-file, a checkout is `mixos`, on port 3000. Whichever copy starts second is
-offered the next free port, so the file needs no `MIXOS_PORT` unless you want
-to pin one. A shell value beats the file:
+Every checkout, whether a second clone or a git worktree, gets its own
+database. The first checkout to start is `mixos`. When a second one starts,
+`npm run dev:docker` sees that another folder owns `mixos` and gives this
+checkout an instance of its own, named after its folder. It gets its own
+Compose project, Supabase stack, ports and a fresh database, and the boot saves
+them to its `.env.instance`. The first checkout keeps its data. Nothing run in
+one checkout, not `docker:down`, `db:reset` or `npm run dev`, touches another
+checkout's database.
+
+You can name an instance yourself by copying
+[`.env.instance.example`](../../.env.instance.example). Whichever copy starts
+second is offered the next free app port, so the file needs no `MIXOS_PORT`
+unless you want to pin one. A shell value beats the file:
 
 ```bash
 MIXOS_INSTANCE=mixos-test MIXOS_PORT=3002 npm run dev:docker

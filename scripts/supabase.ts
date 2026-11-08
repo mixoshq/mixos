@@ -32,6 +32,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { resolveInstance } from "./instance";
+import { notYourInstance, ownedElsewhere } from "./instance-claims";
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -50,6 +51,15 @@ function main(): void {
   const args = process.argv.slice(2);
   if (args.length === 0) {
     console.error("Usage: npm run supabase -- <command>   (e.g. `npm run supabase -- status`)");
+    process.exit(1);
+  }
+
+  // `db reset` deletes, and `migration up` writes, whichever database the
+  // project id names. Another checkout's must not be reachable from here just
+  // because the two share a name (scripts/instance-claims.ts).
+  const owner = ownedElsewhere(instance.name, ROOT);
+  if (owner) {
+    console.error(notYourInstance(instance.name, owner, `\`supabase ${args.join(" ")}\``));
     process.exit(1);
   }
 

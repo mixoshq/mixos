@@ -28,7 +28,12 @@ import path from "node:path";
 import readline from "node:readline";
 import { databaseNamed } from "../src/lib/db/pg-options";
 import { hostPlatform } from "./host-platform";
+import { listeners } from "./host-ports";
 import { DEFAULT_INSTANCE } from "./instance";
+import { isMixosCheckout, ownedElsewhere, samePath } from "./instance-claims";
+
+export { type Listener, listeners, parseLsofListeners, parseSsListeners } from "./host-ports";
+export { isMixosCheckout, samePath } from "./instance-claims";
 
 export const ROOT = path.resolve(__dirname, "..");
 
@@ -239,68 +244,6 @@ export function looksLikeDocker(holder: string | null): boolean {
   return /^(container |com\.docke|docker|vpnkit|containerd)/i.test(holder);
 }
 
-export type Listener = { pid: number; command: string; port: number };
-
-/**
- * Parse `lsof -Fpcn` output: a `p` line starts each process, then its `c`
- * (command) and one `n` (address) per socket. IPv4 and IPv6 sockets for one
- * port are one listener here.
- */
-export function parseLsofListeners(out: string): Listener[] {
-  const found: Listener[] = [];
-  let pid = 0;
-  let command = "";
-  for (const line of out.split("\n")) {
-    const value = line.slice(1);
-    if (line.startsWith("p")) {
-      pid = Number(value);
-      command = "";
-    } else if (line.startsWith("c")) {
-      command = value;
-    } else if (line.startsWith("n")) {
-      const m = /:(\d+)$/.exec(value);
-      if (!m || !pid) continue;
-      const port = Number(m[1]);
-      if (!found.some((l) => l.pid === pid && l.port === port)) {
-        found.push({ pid, command, port });
-      }
-    }
-  }
-  return found;
-}
-
-/**
- * Parse `ss -Hltnp`: `LISTEN 0 511 *:3000 *:* users:(("next-server (v1",pid=9,fd=20))`.
- * ss truncates the command to 15 characters, which still starts with what we
- * match on.
- */
-export function parseSsListeners(out: string): Listener[] {
-  const found: Listener[] = [];
-  for (const line of out.split("\n")) {
-    const cols = line.trim().split(/\s+/);
-    const port = /:(\d+)$/.exec(cols[3] ?? "");
-    const user = /users:\(\("(.+?)",pid=(\d+)/.exec(line);
-    if (!port || !user) continue;
-    const entry = { pid: Number(user[2]), command: user[1], port: Number(port[1]) };
-    if (!found.some((l) => l.pid === entry.pid && l.port === entry.port)) found.push(entry);
-  }
-  return found;
-}
-
-/**
- * Host processes listening on TCP, on one port or all of them. `lsof` first;
- * Linux distributions do not all ship it, and every one ships ss (iproute2).
- * Only processes this user may inspect are named, which covers every
- * `npm run dev` they started.
- */
-export function listeners(port?: number): Listener[] {
-  const tcp = port === undefined ? "-iTCP" : `-iTCP:${port}`;
-  const lsof = capture("lsof", ["+c", "0", "-nP", tcp, "-sTCP:LISTEN", "-Fpcn"]);
-  if (lsof.status === 0) return parseLsofListeners(lsof.stdout);
-  const ss = capture("ss", port === undefined ? ["-Hltnp"] : ["-Hltnp", `sport = :${port}`]);
-  return ss.status === 0 ? parseSsListeners(ss.stdout) : [];
-}
-
 /** A process's working directory: /proc where there is one, lsof elsewhere. */
 function processCwd(pid: number): string | null {
   try {
@@ -314,31 +257,10 @@ function processCwd(pid: number): string | null {
   return line ? line.slice(1) : null;
 }
 
-/**
- * Whether a directory is a MixOS checkout. By what it contains rather than its
- * name: people clone into ~/MixOS, ~/git/mixos, a worktree, a fork.
- */
-export function isMixosCheckout(dir: string | null | undefined): boolean {
-  if (!dir) return false;
-  return (
-    fs.existsSync(path.join(dir, "scripts", "instance.ts")) &&
-    fs.existsSync(path.join(dir, "docker-compose.yml"))
-  );
-}
-
 /** The instance a checkout is, read from its `.env.instance` as instance.ts does. */
 export function instanceNameOf(checkout: string): string {
   const name = parseEnvFile(path.join(checkout, ".env.instance")).MIXOS_INSTANCE;
   return name?.trim() || DEFAULT_INSTANCE;
-}
-
-/** Whether two paths are one directory, through symlinks (macOS's /tmp is one). */
-export function samePath(a: string, b: string): boolean {
-  try {
-    return fs.realpathSync(a) === fs.realpathSync(b);
-  } catch {
-    return path.resolve(a) === path.resolve(b);
-  }
 }
 
 /** The compose services that are a MixOS app, under either profile. */
@@ -414,7 +336,13 @@ export function identifyPortHolder(
   ]);
   const row = docker.status === 0 ? parseDockerRows(docker.stdout)[0] : undefined;
   if (row) {
-    if (row.project === self.instance && APP_SERVICES.has(row.service)) {
+    // Ours only when the instance is: a container under this name that
+    // another folder owns is that folder's MixOS (scripts/instance-claims.ts).
+    if (
+      row.project === self.instance &&
+      APP_SERVICES.has(row.service) &&
+      !ownedElsewhere(self.instance, self.root)
+    ) {
       return {
         kind: "this-instance",
         container: row.name,
@@ -542,7 +470,7 @@ export async function runningMixosApps(): Promise<RunningApp[]> {
 
 /** Whether a running app is this checkout's: its instance in Docker, or its own host server. */
 export function isOurs(app: RunningApp, self: { instance: string; root: string }): boolean {
-  if (app.docker) return app.instance === self.instance;
+  if (app.docker) return app.instance === self.instance && !ownedElsewhere(self.instance, self.root);
   return app.checkout !== null && samePath(app.checkout, self.root);
 }
 

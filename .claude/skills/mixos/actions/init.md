@@ -526,6 +526,14 @@ connection settings to `.env.docker.local`, applies the platform migrations and
 every app's migrations, seeds the admin account, and starts the app container
 with hot reload.
 
+**The instance may not be called `mixos`.** Each checkout has its own database.
+If the person already has another MixOS checkout on this machine, the boot's
+first step, `[1] Instance`, gives this one its own name (from its folder, e.g.
+`mixos-feature`) and writes it to `.env.instance`. That's expected, not an
+error: tell them this copy has a database of its own, separate from the other
+one. Wherever this file says `-p mixos` below, use the name that step printed
+(`grep MIXOS_INSTANCE .env.instance` reads it back).
+
 Detached still means *slow*, not *instant*: the command holds your shell for the
 whole first-run image pull, which can outlast the default command timeout you
 run under. Give it the longest timeout your tooling allows (10 minutes for the
