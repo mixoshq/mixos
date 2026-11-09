@@ -19,7 +19,6 @@ import {
 import { usePreferences } from "@/components/preferences-context";
 import { useListReorder } from "@/lib/dnd/use-list-reorder";
 import AppsMoreMenu from "@/components/apps/apps-more-menu";
-import { APP_MANAGER_LINK, GUIDE_STEPS } from "@/components/onboarding/steps";
 import { useTour } from "@/components/onboarding/tour-context";
 import type { AppManifest } from "@/lib/apps/types";
 import { CARD_SURFACE } from "@/components/ui/card";
@@ -61,14 +60,11 @@ export default function AppsDropdown() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   // While the welcome tour's guide is up the page is dimmed (z-90, see
-  // src/components/onboarding/guide.tsx), and the guide asks for this menu:
-  // it opens above the dim and under the bubble (z-95), whole and readable.
-  // With all of it lit, the dim's cut-out no longer marks App Manager, so the
-  // step that points at it marks it the way the menu marks a hovered row.
-  const { phase, guideStep } = useTour();
+  // src/components/onboarding/guide.tsx), and the guide asks for this menu
+  // ("Apps → App Manager"): it opens above the dim and under the bubble
+  // (z-95), whole and readable.
+  const { phase } = useTour();
   const overGuide = phase === "guide";
-  const appManagerPointedAt =
-    overGuide && GUIDE_STEPS[guideStep]?.target === APP_MANAGER_LINK;
   const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -348,11 +344,7 @@ export default function AppsDropdown() {
             <Link
               href="/apps"
               onClick={() => setDropdownOpen(false)}
-              data-tour={APP_MANAGER_LINK}
-              className={cn(
-                "flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent",
-                appManagerPointedAt && "bg-accent",
-              )}
+              className="flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent"
             >
               <LayoutGrid className="h-4 w-4 text-muted-foreground" />
               App Manager

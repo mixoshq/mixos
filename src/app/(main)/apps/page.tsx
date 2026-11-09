@@ -36,7 +36,10 @@ export default async function AppsPage() {
     <SettingsShell>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">App Manager</h1>
+          {/* The welcome tour's menu bar step ends once this is on screen. */}
+          <h1 data-tour="app-manager-page" className="text-2xl font-bold text-foreground">
+            App Manager
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Toggle each one on to use it and put its widgets on your dashboard.
           </p>

@@ -44,10 +44,17 @@ interface TourContextValue {
   revealed: () => void;
   /** Any phase → `done`, and stamps completion. Used by Skip. */
   finish: () => void;
-  /** The last step's Done: `finish`, plus confetti bursting from `origin`. */
+  /**
+   * The end of the guide: `finish`, plus the celebration — confetti from
+   * `origin`, and the message that says the install is done.
+   */
   complete: (origin: BurstOrigin) => void;
   /** Where the confetti is bursting from, for a few seconds after `complete()`; null otherwise. */
   celebrating: BurstOrigin | null;
+  /** The "is installed" message is up, from `complete()` until it is dismissed. */
+  installed: boolean;
+  /** The message was clicked away. */
+  dismissInstalled: () => void;
   /** Index of the guide step showing, so the page can stage itself around it. */
   guideStep: number;
   setGuideStep: (i: number) => void;
@@ -62,6 +69,8 @@ const TourContext = createContext<TourContextValue>({
   finish: () => {},
   complete: () => {},
   celebrating: null,
+  installed: false,
+  dismissInstalled: () => {},
   celebrated: () => {},
   guideStep: 0,
   setGuideStep: () => {},
@@ -95,6 +104,7 @@ export function TourProvider({
   }
 
   const [celebrating, setCelebrating] = useState<BurstOrigin | null>(null);
+  const [installed, setInstalled] = useState(false);
   const [guideStep, setGuideStep] = useState(0);
 
   const begin = useCallback(() => setPhase("reveal"), []);
@@ -112,10 +122,12 @@ export function TourProvider({
     (origin: BurstOrigin) => {
       finish();
       setCelebrating(origin);
+      setInstalled(true);
     },
     [finish],
   );
   const celebrated = useCallback(() => setCelebrating(null), []);
+  const dismissInstalled = useCallback(() => setInstalled(false), []);
 
   return (
     <TourContext.Provider
@@ -126,6 +138,8 @@ export function TourProvider({
         finish,
         complete,
         celebrating,
+        installed,
+        dismissInstalled,
         celebrated,
         guideStep,
         setGuideStep,
