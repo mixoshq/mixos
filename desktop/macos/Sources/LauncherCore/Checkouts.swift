@@ -42,6 +42,19 @@ public enum CheckoutFolder {
       && fileManager.fileExists(atPath: url.appendingPathComponent("docker-compose.yml").path)
   }
 
+  /// A folder as a person tells copies apart: its name and the one above it —
+  /// `git/mixos` — or `~/mixos` when it sits right in the home folder.
+  public static func shortPath(
+    _ url: URL,
+    home: URL = FileManager.default.homeDirectoryForCurrentUser
+  ) -> String {
+    let folder = url.standardizedFileURL
+    let parent = folder.deletingLastPathComponent()
+    if parent.path == home.standardizedFileURL.path { return "~/\(folder.lastPathComponent)" }
+    if parent.path == "/" { return "/\(folder.lastPathComponent)" }
+    return "\(parent.lastPathComponent)/\(folder.lastPathComponent)"
+  }
+
   /// A folder for a new copy that doesn't exist yet: `MixOS`, as the install
   /// guide uses, then `MixOS-2`, `MixOS-3`, …
   public static func suggestedNew(in parent: URL, fileManager: FileManager = .default) -> URL {

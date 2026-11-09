@@ -17,7 +17,7 @@ struct MenuContent: View {
     ForEach(store.checkouts) { checkout in
       let summary = store.summary(of: checkout)
       let busy = store.jobs[checkout.id]?.running == true
-      Menu("\(summary.symbol)  \(store.title(of: checkout)) — \(summary.text)") {
+      Menu("\(summary.symbol)  \(store.title(of: checkout))  (\(checkout.shortPath)) — \(summary.text)") {
         if store.appURL(of: checkout) != nil {
           Button("Open in Browser") { store.open(checkout) }
         }

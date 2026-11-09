@@ -68,12 +68,18 @@ private struct CheckoutRow: View {
     let summary = store.summary(of: checkout)
     HStack(spacing: 8) {
       Circle().fill(summary.color).frame(width: 9, height: 9)
-      VStack(alignment: .leading, spacing: 2) {
+      VStack(alignment: .leading, spacing: 1) {
         Text(store.title(of: checkout)).font(.body)
+        Text(checkout.shortPath)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
         Text(summary.text).font(.caption).foregroundStyle(.secondary)
       }
     }
     .padding(.vertical, 2)
+    .help(checkout.url.path)
     .contextMenu {
       Button("Show in Finder") { store.reveal(checkout) }
       Button("Remove from List") { store.remove(checkout) }
