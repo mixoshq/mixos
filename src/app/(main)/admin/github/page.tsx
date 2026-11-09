@@ -4,6 +4,7 @@
 
 import { Suspense } from "react";
 import Notice from "@/components/ui/notice";
+import TechTalk from "@/components/ui/tech-talk";
 import GitHubPanel from "@/components/admin/github/github-panel";
 import UpdatePullRequests from "@/components/admin/github/update-pull-requests";
 import { requireAdmin } from "@/lib/apps/access";
@@ -82,7 +83,8 @@ export default async function GitHubAdminPage({
     <div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">Production Updates</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        {/* flow-root: the paragraph holds the floated pill at its end. */}
+        <p className="mt-1 flow-root text-sm text-muted-foreground">
           Install, update and remove Apps, Connectors and Themes on your production instance, right from
           here. Each change opens a request for your developers to review and merge in your GitHub
           repository, and merging it deploys the latest. Nothing changes on its own.{" "}
@@ -95,11 +97,8 @@ export default async function GitHubAdminPage({
             Read the Production Updates guide
             <span className="sr-only"> (opens in a new tab)</span>
           </a>
-        </p>
-        {/* The mechanics, for whoever asks how; closed until then. */}
-        <details className="mt-3 text-sm text-muted-foreground">
-          <summary className="cursor-pointer font-medium text-foreground">Tech Talk</summary>
-          <p className="mt-2">
+          {/* The mechanics, for whoever asks how; closed until then. */}
+          <TechTalk>
             Production Updates works through a private GitHub App you create and install on the one
             repository this instance is built from. Installing, updating or removing an App, Connector or
             Theme here opens a pull request in that repository, on a branch of its own (
@@ -108,8 +107,8 @@ export default async function GitHubAdminPage({
             <code className="font-mono text-xs">mixos/remove/…</code>). Your developers review it, and
             merging it into the default branch is the deploy. The instance never changes its own code, and
             never merges.
-          </p>
-        </details>
+          </TechTalk>
+        </p>
       </div>
       <div className="space-y-6">
         {created && <Notice tone={CREATED[created].tone}>{CREATED[created].text}</Notice>}
