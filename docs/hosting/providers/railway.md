@@ -109,7 +109,7 @@ actually use.
 ## PR environments
 
 Keep PR environments off for this project while the
-[GitHub App](../after-you-install/github-app.md) is linked: in the project's
+[GitHub App](../after-you-install/production-updates.md) is linked: in the project's
 settings, under **Environments**. A PR environment deploys a pull request's code
 with copies of your variables, and the App's pull requests carry a publisher's
 code. The App can't read this setting, so Deployment > Production Updates asks you to confirm it

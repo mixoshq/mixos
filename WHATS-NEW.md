@@ -475,7 +475,7 @@ just pulled.
   `npm run keys:rotate-github-app` re-encrypts the stored key when you rotate
   it. Unlink uninstalls the App from GitHub before forgetting it. Linking,
   unlinking, replacing the key and the link turning off are audited. See
-  `docs/hosting/after-you-install/github-app.md#linking-your-github-repository`.
+  `docs/hosting/after-you-install/production-updates.md#linking-your-github-repository`.
 - **Preparing an update of an extension.** Install has an update mode: it
   downloads any release of an app or a connector installed from mixos.org,
   verifies and checks it as an install does, and leaves it in
@@ -499,7 +499,7 @@ just pulled.
   proposed". `vercel.json` turns off deployments of `mixos/**`,
   `render.yaml` turns off the web service's previews, Danger skips App
   branches, and CI checks out without keeping its token. See
-  `docs/hosting/after-you-install/github-app.md#proposing-an-extension`.
+  `docs/hosting/after-you-install/production-updates.md#proposing-an-extension`.
 - **Updating an extension, in place.** Register puts a pending update in
   place: it moves the folder to `.mixos/backup/`, puts the new release there,
   runs the registry generator, and deletes the backup once the generator
@@ -529,7 +529,7 @@ just pulled.
   it, and never merges. A private copy gets the `git fetch upstream --tags &&
   git merge <tag>` steps instead. Admin > GitHub lists open update pull
   requests with their checks. Audited as `mixos.update.propose`. See
-  `docs/hosting/after-you-install/github-app.md#updating-mixos-through-the-app`.
+  `docs/hosting/after-you-install/production-updates.md#updating-mixos-through-the-app`.
 - **Propose an update or a removal as a pull request.** With the GitHub App
   linked, a deployment's withdrawn and newer notices and its Browse cards
   offer **Propose update**, and the Remove dialog offers **Propose removal**,
@@ -544,7 +544,7 @@ just pulled.
   there. Rolling back is reverting the merge. Admin > Apps, Connectors and
   Themes list these pull requests with their checks beside the installs.
   Audited as `<kind>.propose` with `action: "update"` or `"remove"`. See
-  `docs/hosting/after-you-install/github-app.md#proposing-an-extension`.
+  `docs/hosting/after-you-install/production-updates.md#proposing-an-extension`.
 
 ## 2026-10-07
 

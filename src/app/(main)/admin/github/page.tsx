@@ -15,8 +15,8 @@ import { readPageState } from "@/lib/github/page-state";
 // The link changes on GitHub's say as much as on this page's; never cached.
 export const dynamic = "force-dynamic";
 
-/** The public guide: docs/hosting/after-you-install/github-app.md, as mixos.org serves it. */
-const PRODUCTION_UPDATES_DOCS = "https://mixos.org/docs/install/after-you-install/github-app";
+/** The public guide: docs/hosting/after-you-install/production-updates.md, as mixos.org serves it. */
+const PRODUCTION_UPDATES_DOCS = "https://mixos.org/docs/install/after-you-install/production-updates";
 
 /** What the "create the App" round trip ended with, as `?created=` says. */
 const CREATED: Record<CreatedOutcome, { tone: OutcomeTone; text: string }> = {
