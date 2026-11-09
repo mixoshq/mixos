@@ -7,12 +7,11 @@
 import {
   useCallback,
   useEffect,
-  useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { usePathname, useRouter } from "next/navigation";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useTour, type BurstOrigin } from "./tour-context";
@@ -39,6 +38,13 @@ import { GUIDE_STEPS, type GuideStep } from "./steps";
  * PORTALLED. The bubble sits above everything, modals included, and is
  * positioned from viewport coordinates, so where it is in the React tree
  * does not matter and where it is on screen always does.
+ *
+ * SKIP IS NOT IN THE BUBBLE. It is a chip of its own in the bottom-right
+ * corner, above the dim, and it stays while a step waits out of sight — on
+ * App Manager, say — so there is always a way out of a tour that is waiting
+ * for something the user may never do. Where the step points into that
+ * corner (the dashboard's pencil), the chip steps left of it: the bubble
+ * goes above such a target, so up would put the two on top of each other.
  */
 
 type Rect = { top: number; left: number; width: number; height: number };
@@ -49,12 +55,15 @@ const getFalse = () => false;
 
 /** A beat after the overlay has gone, so the bar is seen before it is explained. */
 const START_DELAY_MS = 400;
-/** Long enough to see the page a step went to before its menu opens over it. */
-const OPEN_DELAY_MS = 600;
 /** Long enough for the catalog to close and the new widget to be drawn. */
 const SETTLE_MS = 400;
 
 const BUBBLE_W = 416; // w-[26rem]; a constant so placement needs no measuring
+/** About the tallest a bubble gets: less room than this on its side flips it. */
+const BUBBLE_MIN_H = 140;
+/** Skip's corner, with room to spare: a target reaching into it moves Skip left. */
+const SKIP_CLEAR_W = 160;
+const SKIP_CLEAR_H = 72;
 const BUBBLE_GAP = 12;
 const EDGE = 16;
 const ARROW = 12;
@@ -111,6 +120,19 @@ function useStepState(step: GuideStep): { rect: Rect | null; done: boolean } {
   }, [doneOn]);
 
   return { rect, done };
+}
+
+/** A step's body, with its `**…**` parts in bold, in the title's colour. */
+function withBold(text: string): ReactNode {
+  return text.split(/\*\*(.+?)\*\*/).map((part, i) =>
+    i % 2 ? (
+      <strong key={i} className="font-semibold text-foreground">
+        {part}
+      </strong>
+    ) : (
+      part
+    ),
+  );
 }
 
 /** The confetti's origin: the centre of `el`, or of the screen without one. */
@@ -175,26 +197,6 @@ function Step({
 }) {
   const { finish } = useTour();
   const { rect, done } = useStepState(step);
-  const router = useRouter();
-  const pathname = usePathname();
-  const { route, opens } = step;
-
-  // Go to the step's page when it starts — once, so a user who then leaves
-  // is not pulled back.
-  useEffect(() => {
-    if (route && window.location.pathname !== route) router.push(route);
-  }, [route, router]);
-
-  // Open what the target is inside, once the step's page is the one showing.
-  const opened = useRef(false);
-  useEffect(() => {
-    if (!opens || opened.current || (route && pathname !== route)) return;
-    const t = window.setTimeout(() => {
-      opened.current = true;
-      window.dispatchEvent(new Event(opens));
-    }, OPEN_DELAY_MS);
-    return () => clearTimeout(t);
-  }, [opens, route, pathname]);
 
   // A step advances itself once it is done. Deferred so the setState lands
   // outside the frame loop's render, and for a `doneOn` step until the page
@@ -205,12 +207,56 @@ function Step({
     return () => clearTimeout(t);
   }, [done, onAdvance, step.doneOn]);
 
-  if (!rect) return null;
-
-  const placement = step.placement ?? "below";
-  const dim = step.dim ?? true;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+
+  // Skip's corner, unless the target is in it: then just left of the target.
+  const skipAt =
+    rect && rect.left + rect.width > vw - SKIP_CLEAR_W && rect.top + rect.height > vh - SKIP_CLEAR_H
+      ? { right: vw - rect.left + BUBBLE_GAP, bottom: EDGE }
+      : { right: EDGE, bottom: EDGE };
+
+  return createPortal(
+    <>
+      {rect && <Bubble step={step} rect={rect} vw={vw} vh={vh} />}
+      <button
+        type="button"
+        onClick={finish}
+        className="tour-bubble-in fixed z-[95] rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+        style={skipAt}
+      >
+        Skip tour
+      </button>
+    </>,
+    document.body,
+  );
+}
+
+/** The dim and the card, for a step whose target is on the page. */
+function Bubble({
+  step,
+  rect,
+  vw,
+  vh,
+}: {
+  step: GuideStep;
+  rect: Rect;
+  vw: number;
+  vh: number;
+}) {
+  // The step's side, unless there is no room for the bubble on it: the
+  // dashboard's pencil sits at the foot of the screen, and a bubble below it
+  // would be drawn off the bottom.
+  const wantedSide = step.placement ?? "below";
+  const roomBelow = vh - (rect.top + rect.height) - BUBBLE_GAP;
+  const roomAbove = rect.top - BUBBLE_GAP;
+  const placement =
+    wantedSide === "below" && roomBelow < BUBBLE_MIN_H && roomAbove > roomBelow
+      ? "above"
+      : wantedSide === "above" && roomAbove < BUBBLE_MIN_H && roomBelow > roomAbove
+        ? "below"
+        : wantedSide;
+  const dim = step.dim ?? true;
 
   // Left edge: `along` the target, then kept on-screen. The arrow is placed
   // afterwards so it points at the target's centre wherever the bubble ended
@@ -228,7 +274,7 @@ function Step({
       ? { top: rect.top + rect.height + BUBBLE_GAP }
       : { bottom: vh - rect.top + BUBBLE_GAP };
 
-  return createPortal(
+  return (
     <>
       {/* The dim and the bubble fade in together, gently: they arrive over a
           page the user is already looking at. */}
@@ -263,28 +309,20 @@ function Step({
           )}
           style={{ left: arrowLeft }}
         />
+        {/* No count, no Next and no Skip: the step moves on when the user
+            does what it asks, and Skip has its own corner. */}
         <div
           id="tour-step-title"
-          className="text-sm font-semibold text-foreground"
+          className="text-base font-semibold text-foreground"
         >
           {step.title}
         </div>
         {step.body && (
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-            {step.body}
+            {withBold(step.body)}
           </p>
         )}
-        {/* No count and no Next: the step moves on when the user does what
-            it asks. Skip is the one way out, and kept quiet. */}
-        <button
-          type="button"
-          onClick={finish}
-          className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-        >
-          Skip tour
-        </button>
       </div>
-    </>,
-    document.body,
+    </>
   );
 }

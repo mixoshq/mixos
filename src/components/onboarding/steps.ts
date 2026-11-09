@@ -25,7 +25,10 @@ export interface GuideStep {
    */
   target: string | string[];
   title: string;
-  /** Optional: a step whose title says it all needs no second sentence. */
+  /**
+   * Optional: a step whose title says it all needs no second sentence.
+   * `**…**` sets a part in bold, for the names of the things to click.
+   */
   body?: string;
   /** Which side of the target the bubble sits on. Default `below`. */
   placement?: "below" | "above";
@@ -40,18 +43,7 @@ export interface GuideStep {
   /** A window event that says the thing this step asked for is done. */
   doneOn?: string;
   /**
-   * The page the step happens on. The guide goes there when the step starts,
-   * once: after that the user is free to wander off, and the step waits for
-   * its target to be back.
-   */
-  route?: string;
-  /**
-   * A window event the guide dispatches once the step's page is up, for a
-   * target that something has to open first: the Apps menu.
-   */
-  opens?: string;
-  /**
-   * Closing what the step points at dismisses the step, as its button does.
+   * Closing what the step points at ends the step, as following it does.
    * For a target inside a menu, which closes on any click outside it: the
    * bubble would otherwise be left pointing at nothing, and the tour held
    * where nobody can see it.
@@ -72,24 +64,21 @@ export const DASHBOARD_TARGET = "edit-dashboard";
 /** The `data-tour` name of App Manager in the Apps menu. */
 export const APP_MANAGER_LINK = "apps-menu-app-manager";
 
-/** Opens the Apps menu (AppsDropdown listens for it). */
-export const OPEN_APPS_MENU = "tour:open-apps-menu";
-
 export const GUIDE_STEPS: GuideStep[] = [
   {
     target: "menu-bar",
     title: "This is your menu bar.",
-    body: "Install an app by clicking Apps.",
+    body: "Install an app by clicking **Apps → App Manager**.",
     along: 0.3,
     // The Apps menu, open: App Manager is in it.
     doneWhen: `[data-tour="${APP_MANAGER_LINK}"]`,
   },
   {
     target: APP_MANAGER_LINK,
-    title: "Install apps in App Manager.",
-    body: "Switch one on to add it to your workspace. You can always find this page again in the Apps menu.",
-    route: "/apps",
-    opens: OPEN_APPS_MENU,
+    title: "Then click App Manager.",
+    body: "That's where you install apps, and it's always here in the Apps menu.",
+    // Clicking it closes the menu on the way to App Manager, and so does
+    // clicking anywhere else; either way the guide moves on, and waits.
     endsWithTarget: true,
   },
   {
