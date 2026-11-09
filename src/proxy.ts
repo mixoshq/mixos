@@ -17,7 +17,8 @@ import { appMaintenanceGate, maintenanceGate } from "@/lib/platform/maintenance-
  * the database, which a proxy can reach because in Next 16 it runs on the
  * Node.js runtime, always: `runtime` can't be set in this file. The routes
  * `config.matcher` leaves out below give the same response themselves: the app
- * API gateway on its two mounts, and the webhook route.
+ * API gateway on its two mounts, and the webhook route. Loading the sign-in
+ * page is let through, to say in its own card that sign-in is unavailable.
  *
  * While one app's own migrations are behind, that app's pages get the same
  * 503 from here, saying the app is being updated, and everything else serves.
@@ -140,8 +141,9 @@ export default async function proxy(request: NextRequest) {
   const state = () => (asked ??= maintenanceState());
 
   // First, ahead of the public list: a public route queries the database as
-  // readily as a signed-in one, and the whole instance is waiting.
-  const maintenance = await maintenanceGate(pathname, state);
+  // readily as a signed-in one, and the whole instance is waiting. The method
+  // is what lets the sign-in page load and say so itself.
+  const maintenance = await maintenanceGate(pathname, state, request.method);
   if (maintenance) return maintenance;
 
   if (isPublic(pathname)) {

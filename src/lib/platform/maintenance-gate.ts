@@ -19,7 +19,9 @@
  * who opens a page. So while the platform schema is behind, every request but
  * the two health probes gets a 503 with `Retry-After`: a static page for a
  * page, JSON for an API route. The scheduler tick waits, webhook senders retry,
- * and no route runs against a schema it wasn't written for.
+ * and no route runs against a schema it wasn't written for. The one page that
+ * loads anyway is the sign-in page, which says itself that sign-in is
+ * unavailable (`isSignInPageLoad`).
  *
  * ── ONE APP ─────────────────────────────────────────────────────────────────
  *
@@ -215,14 +217,31 @@ function maintenanceResponse(pathname: string): NextResponse {
 }
 
 /**
+ * Loading the sign-in page, as against posting to it. The page asks the same
+ * question itself (src/lib/platform/sign-in-database.ts) and, while the schema
+ * is behind, draws "contact your administrator" in its card where the form
+ * would be, as it does with no database at all. What it reads on the way,
+ * the theme and the brand, already falls back when a read fails.
+ *
+ * Only a load. The form's server action posts to the same path and checks the
+ * password against the database, so a POST still gets the maintenance response.
+ */
+function isSignInPageLoad(pathname: string, method: string | undefined): boolean {
+  return pathname === "/login" && (method === "GET" || method === "HEAD");
+}
+
+/**
  * The maintenance response for `pathname`, or null to serve it as usual. The
- * health probes never ask `state`, so they answer even while it is slow.
+ * health probes never ask `state`, so they answer even while it is slow, and
+ * nor does loading the sign-in page, which asks for itself. `method` is the
+ * request's: without it, the sign-in page gets the maintenance response too.
  */
 export async function maintenanceGate(
   pathname: string,
   state: () => Promise<MaintenanceState>,
+  method?: string,
 ): Promise<NextResponse | null> {
-  if (EXEMPT.has(pathname)) return null;
+  if (EXEMPT.has(pathname) || isSignInPageLoad(pathname, method)) return null;
   const { platformBehind } = await state();
   return platformBehind ? maintenanceResponse(pathname) : null;
 }
