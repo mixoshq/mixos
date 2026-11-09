@@ -7,7 +7,8 @@
  * `docker` and the Supabase CLI that record their arguments and touch nothing.
  * The script resolves every path from the directory above it, so it runs from
  * a scratch copy of scripts/ whose node_modules/.bin/supabase is the stand-in,
- * and whose PATH puts a stand-in `docker` first.
+ * and whose PATH puts a stand-in `docker` first. The instance claims are read
+ * from a scratch MIXOS_STATE_DIR, never from this machine's ~/.mixos.
  */
 
 import { after, test } from "node:test";
@@ -43,18 +44,30 @@ function checkout(files: Record<string, string> = {}) {
   return { root, log };
 }
 
+const STATE = path.join(scratch, "state");
+
 /** Run docker-down.ts from `root`, with no MIXOS_* from this shell. */
-function down(root: string, args: string[] = []): string[] {
+function run(root: string, args: string[] = []) {
   const env: NodeJS.ProcessEnv = { ...process.env };
   for (const k of Object.keys(env)) if (k.startsWith("MIXOS_")) delete env[k];
+  env.MIXOS_STATE_DIR = STATE;
   env.PATH = `${path.join(root, "bin")}${path.delimiter}${process.env.PATH ?? ""}`;
-  const run = spawnSync(
+  return spawnSync(
     process.execPath,
     ["--import", "tsx", path.join(root, "scripts", "docker-down.ts"), ...args],
     { cwd: REPO, encoding: "utf8", env },
   );
-  assert.equal(run.status, 0, run.stdout + run.stderr);
-  return fs.readFileSync(path.join(root, "calls.log"), "utf8").trim().split("\n");
+}
+
+function calls(root: string): string[] {
+  const log = path.join(root, "calls.log");
+  return fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : [];
+}
+
+function down(root: string, args: string[] = []): string[] {
+  const result = run(root, args);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  return calls(root);
 }
 
 const SECOND_INSTANCE = { ".env.instance": "MIXOS_INSTANCE=mixos-dev\nMIXOS_PORT=3001\n" };
@@ -78,4 +91,25 @@ test("a checkout with no .env.instance is still the mixos instance", () => {
   const calls = down(root);
   assert.ok(calls.includes("docker compose -p mixos --profile dev --profile prod down"), calls.join("\n"));
   assert.ok(calls.includes("supabase stop --project-id mixos"), calls.join("\n"));
+});
+
+test("another checkout's instance is neither stopped nor reset from here", () => {
+  const owner = checkout(SECOND_INSTANCE);
+  fs.mkdirSync(STATE, { recursive: true });
+  fs.writeFileSync(
+    path.join(STATE, "instances.json"),
+    JSON.stringify({
+      version: 1,
+      instances: { "mixos-dev": { checkout: owner.root, portBase: 54340, inspectorPort: 8084 } },
+    }),
+  );
+  try {
+    const { root } = checkout(SECOND_INSTANCE);
+    const result = run(root, ["--reset", "--yes"]);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /belongs to another checkout/);
+    assert.ok(!calls(root).some((c) => c.startsWith("supabase ") || c.includes(" down")), calls(root).join("\n"));
+  } finally {
+    fs.rmSync(STATE, { recursive: true, force: true });
+  }
 });

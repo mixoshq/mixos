@@ -70,6 +70,17 @@ services:
       # macOS, where the container stays root as it always has.
       - MIXOS_UID=${MIXOS_UID:-}
       - MIXOS_GID=${MIXOS_GID:-}
+      # The app's own origin follows the port it is published on. .env.docker
+      # says http://localhost:3000, which is right for the first instance and
+      # wrong for every other: an instance on 3001 would send OAuth callbacks
+      # and every absolute link to whichever MixOS holds 3000. `environment:`
+      # beats `env_file:`, so this wins. See getAppOrigin() in
+      # src/lib/env/origin.ts.
+      - NEXTAUTH_URL=http://localhost:${MIXOS_PORT:-3000}
+      # Tells scripts/dev.ts that it is inside this container, where `npm run
+      # dev` is a plain `next dev`: docker-up.ts has already settled the
+      # database, the port and the summary, from outside.
+      - MIXOS_CONTAINER=1
     # The command is Dockerfile.dev's CMD, restated: setting an entrypoint
     # clears the image's CMD, so the two have to be changed together.
     entrypoint: ["/bin/sh", "/app/scripts/container-dev.sh"]
@@ -181,6 +192,8 @@ services:
       - MIXOS_REPOSITORY_URL=${MIXOS_REPOSITORY_URL:-}
       - MIXOS_UPDATE_CHECK=${MIXOS_UPDATE_CHECK:-}
       - MIXOS_RELEASE_CHANNEL=${MIXOS_RELEASE_CHANNEL:-}
+      # As on app-dev: the app's origin follows the port it is published on.
+      - NEXTAUTH_URL=http://localhost:${MIXOS_PORT:-3000}
     networks:
       default:
         # The same alias app-dev carries — one cron URL for both profiles.
@@ -259,14 +272,16 @@ services:
     # host.docker.internal survives as the FALLBACK, for host mode: with
     # app-dev stopped and `npm run dev` running on the host instead
     # (docs/local-docker.md), nothing on the network answers to mixos-app, so a
-    # tick that cannot even resolve the name (curl exit 6) goes to the host's
-    # port 3000 — which `next dev` binds on every interface, so this works on
-    # Linux as well as on Docker Desktop.
+    # tick that cannot even resolve the name (curl exit 6) goes to the host, on
+    # this instance's app port — which `next dev` binds on every interface, so
+    # this works on Linux as well as on Docker Desktop. The instance's port, not
+    # a fixed 3000, so a stopped instance's ticks do not land on whichever other
+    # instance holds 3000. Compose fills it in when it renders this file.
     command:
       - |
         set -u
         TARGET="http://mixos-app:3000/api/cron"
-        HOST_TARGET="http://host.docker.internal:3000/api/cron"
+        HOST_TARGET="http://host.docker.internal:${MIXOS_PORT:-3000}/api/cron"
         INTERVAL=300
         # Belt-and-braces on top of depends_on: healthy only proves the app
         # answered once. Give the first real request a little more room, and

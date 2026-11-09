@@ -43,21 +43,36 @@
 // half-stopped machine, and never reaches whatever it meant to do next.
 //
 // `--detach` is the mode for those callers: compose up with -d, then poll
-// /api/health/ready until the app genuinely serves, then print the banner and
+// /api/health/ready until the app genuinely serves, then print the summary and
 // exit 0. The poll is the point — `compose up -d` returns as soon as the
 // containers are *created*, which is several seconds to several minutes before
 // Next has compiled a route and opened a connection to Postgres, so exiting on
 // compose's own success would hand the caller a URL that 502s.
 //
+// "UP" MEANS ASKED, NOT ASSUMED. Either way the run ends on a summary that the
+// running app produced: it answers, it reaches Postgres with the schema this
+// code expects, and the sign-in page renders — a ✓ or a ✗ with its fix per
+// line (checkApp() in ./local-stack). Attached, a watcher polls alongside the
+// log stream and prints it the moment the app first answers, then opens the
+// browser for a person at a terminal. Detached, it prints after the readiness
+// poll. `npm run status` prints the same summary later, from any terminal.
+//
+// THE APP PORT is 3000, unless another MixOS already has it. Then the
+// preflight says which one, and offers the next free port to a person at the
+// keyboard; anyone else gets the command that uses it. Whatever port the run
+// settles on is the one compose publishes (MIXOS_PORT), the app's own origin
+// (NEXTAUTH_URL, set from it in docker-compose.yml), and what the summary
+// prints.
+//
 // Usage:
 //   npm run dev:docker            dev profile (bind-mounted source, hot reload)
 //   npm run docker:prod           prod profile (standalone image, production parity)
 //   npm run dev:docker -- --detach           boot, wait for ready, return to the prompt
+//   npm run dev:docker -- --db-only          the database only, for a host `npm run dev`
 //   npx tsx scripts/docker-up.ts --check     preflight only, changes nothing
 
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import net from "node:net";
 import path from "node:path";
 import {
   PLATFORM_LABEL,
@@ -67,15 +82,48 @@ import {
   hostPlatform,
   windowsDockerDesktop,
 } from "./host-platform";
-import { resolveInstance } from "./instance";
+import { type Instance, exportInstance, portsFor, resolveInstance } from "./instance";
+import {
+  chooseOwnInstance,
+  ownedElsewhere,
+  recordClaim,
+  writeInstanceFile,
+} from "./instance-claims";
+import {
+  type Check,
+  allOk,
+  appAnswers,
+  appUrl,
+  browserWanted,
+  c,
+  capture,
+  checkApp,
+  checkReachable,
+  confirm,
+  describeHolder,
+  formatSummary,
+  identifyPortHolder,
+  interactive,
+  localSignIn,
+  looksLikeDocker,
+  nextFreePort,
+  openBrowser,
+  parseEnvFile,
+  portHolder,
+  portInUse,
+  samePath,
+  tilde,
+} from "./local-stack";
 import { listPlatformMigrations } from "./platform-migration-files";
 
 const ROOT = path.resolve(__dirname, "..");
 
 // Resolved FIRST, because it writes MIXOS_* into process.env and every child
 // process below — `docker compose`, the Supabase CLI — reads its identity from
-// there. See scripts/instance.ts.
-const INSTANCE = resolveInstance();
+// there. See scripts/instance.ts. A `let`, because the boot's first step can
+// give this checkout an instance of its own (settleInstance()), and everything
+// derived from it below moves with it (adopt()).
+let INSTANCE: Instance = resolveInstance();
 
 /** macOS, Linux, or Windows via WSL 2 — see scripts/host-platform.ts. */
 const PLATFORM = hostPlatform();
@@ -97,19 +145,36 @@ if (OWNER) {
  * match docker-down.ts, which resolves the same way from the same file rather
  * than repeating a literal.
  */
-const COMPOSE_PROJECT = INSTANCE.name;
+let COMPOSE_PROJECT = INSTANCE.name;
 
-// Used for the *pre-start* port check, when there is no running stack to ask,
-// and for the `--detach` readiness poll, which has to name a port before the
-// app exists. Once the stack is up the real Supabase ports come from `supabase
-// status`, which is authoritative even if someone edits supabase/config.toml;
-// the app port is ours and is fixed by docker-compose.yml's publish.
-const PORTS = {
-  app: INSTANCE.ports.app,
-  supabaseApi: INSTANCE.ports.supabaseApi,
-  supabaseDb: INSTANCE.ports.supabaseDb,
-  supabaseStudio: INSTANCE.ports.supabaseStudio,
-} as const;
+// Used for the *pre-start* port check, when there is no running stack to ask.
+// Once the stack is up the real Supabase ports come from `supabase status`,
+// which is authoritative even if someone edits supabase/config.toml.
+let PORTS = supabasePorts(INSTANCE);
+
+/**
+ * Where the app is published on the host. The instance's port (3000 unless
+ * MIXOS_PORT says otherwise) until the preflight finds another MixOS on it and
+ * the person takes the next free one instead — which is why it is not a
+ * constant, and why it is written back to MIXOS_PORT for compose.
+ */
+let appPort = INSTANCE.ports.app;
+
+function supabasePorts(instance: Instance) {
+  return {
+    supabaseApi: instance.ports.supabaseApi,
+    supabaseDb: instance.ports.supabaseDb,
+    supabaseStudio: instance.ports.supabaseStudio,
+  } as const;
+}
+
+/** Make `instance` the one this run boots, and everything derived from it. */
+function adopt(instance: Instance): void {
+  INSTANCE = instance;
+  COMPOSE_PROJECT = instance.name;
+  PORTS = supabasePorts(instance);
+  appPort = instance.ports.app;
+}
 
 /** How long to wait for the Docker daemon after launching Docker Desktop. */
 const DOCKER_BOOT_TIMEOUT_MS = 180_000;
@@ -117,6 +182,13 @@ const DOCKER_POLL_INTERVAL_MS = 2_000;
 
 /** Docker Desktop's default VM allocation is generous, but not always. */
 const MIN_DOCKER_MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
+
+// What one more instance costs, for the warning when several run at once.
+// Measured on this repo with `docker stats`: a Supabase stack idles at about
+// 0.6 GiB (Studio is a third of it), and a dev app container at about 1.5 GiB,
+// most of it Turbopack.
+const STACK_BYTES = 0.6 * 1024 ** 3;
+const APP_BYTES = 1.5 * 1024 ** 3;
 
 // How long `--detach` waits for the app to answer before giving up. Three
 // minutes is sized for the slowest honest case, not the common one: a cold dev
@@ -131,15 +203,9 @@ const READY_POLL_INTERVAL_MS = 1_000;
 const READY_REQUEST_TIMEOUT_MS = 5_000;
 
 // ── Output helpers ──────────────────────────────────────────────────────────
-
-const useColor = process.stdout.isTTY === true && !process.env.NO_COLOR;
-const c = {
-  dim: (s: string) => (useColor ? `\x1b[2m${s}\x1b[0m` : s),
-  bold: (s: string) => (useColor ? `\x1b[1m${s}\x1b[0m` : s),
-  green: (s: string) => (useColor ? `\x1b[32m${s}\x1b[0m` : s),
-  yellow: (s: string) => (useColor ? `\x1b[33m${s}\x1b[0m` : s),
-  red: (s: string) => (useColor ? `\x1b[31m${s}\x1b[0m` : s),
-};
+//
+// Colours, capture(), parseEnvFile() and the port probes live in
+// ./local-stack, shared with `npm run dev` and `npm run status`.
 
 let stepNumber = 0;
 function step(label: string) {
@@ -170,29 +236,6 @@ class SetupError extends Error {
 // Every command is an argument array. Nothing is interpolated into a shell:
 // paths here are machine-local and can contain spaces, and a shell would also
 // make the service-role key visible in `ps` output.
-
-type Captured = { status: number; stdout: string; stderr: string };
-
-/** Run a command, capture its output. `status: 127` means "not on PATH". */
-function capture(cmd: string, args: string[]): Captured {
-  const r = spawnSync(cmd, args, {
-    cwd: ROOT,
-    encoding: "utf8",
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  if (r.error) {
-    const code = (r.error as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") {
-      return { status: 127, stdout: "", stderr: `${cmd}: command not found` };
-    }
-    return { status: 1, stdout: "", stderr: String(r.error.message) };
-  }
-  return {
-    status: r.status ?? 1,
-    stdout: r.stdout ?? "",
-    stderr: r.stderr ?? "",
-  };
-}
 
 /** Run a command purely for its exit code. */
 function succeeds(cmd: string, args: string[]): boolean {
@@ -257,36 +300,6 @@ function stream(
       resolve(signal ? (signal === "SIGINT" ? 130 : 1) : (code ?? 1));
     });
   });
-}
-
-// ── Env file handling ───────────────────────────────────────────────────────
-
-/**
- * Minimal KEY=VALUE reader, matching scripts/migrate.ts and scripts/seed-admin.ts
- * rather than adding a dotenv dependency for three call sites. Unlike those two
- * it returns a record instead of mutating process.env — the values are destined
- * for a *child* process's environment, and leaking .env.docker's dev-only
- * secrets into this process would make them ambient for everything we spawn.
- */
-function parseEnvFile(file: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (!fs.existsSync(file)) return out;
-  for (const line of fs.readFileSync(file, "utf-8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let value = trimmed.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    out[key] = value;
-  }
-  return out;
 }
 
 // ── Supabase CLI ────────────────────────────────────────────────────────────
@@ -358,7 +371,7 @@ function probeSupabaseRunning(): boolean {
  *
  * Only the database URL reaches the app. MixOS doesn't talk to the Supabase
  * API, so no API key is read; the API and Studio addresses are read for the
- * banner.
+ * summary.
  */
 function readSupabaseStatus(): SupabaseStatus {
   const r = capture(supabaseBin(), ["status", "-o", "json"]);
@@ -480,85 +493,6 @@ class Preflight {
   get failed(): boolean {
     return this.results.some((r) => r.state === "fail");
   }
-}
-
-/**
- * True if something is already listening on the port.
- *
- * Probes by connecting, not by trying to bind. Binding is the obvious approach
- * and it does not work on macOS: Node sets SO_REUSEADDR on every server socket,
- * and BSD's SO_REUSEADDR semantics allow binding a *specific* address while
- * another process holds the wildcard — so a `next dev` on `*:3000` reports the
- * port as free and the conflict resurfaces later as an opaque compose bind
- * error. Verified on this machine before the rewrite.
- *
- * The trade-off is that a listener bound only to a LAN interface goes
- * undetected, which is fine: compose publishes on the loopback path too.
- */
-function portInUse(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.connect({ port, host: "127.0.0.1" });
-    const finish = (inUse: boolean) => {
-      socket.destroy();
-      resolve(inUse);
-    };
-    socket.setTimeout(1_000);
-    socket.once("connect", () => finish(true));
-    // A drop (rather than a refusal) on loopback effectively cannot happen, and
-    // guessing "busy" here would block a legitimate boot, so treat it as free
-    // and let compose report the real bind error if we were wrong.
-    socket.once("timeout", () => finish(false));
-    socket.once("error", () => finish(false));
-  });
-}
-
-/**
- * Best-effort "who has this port", for an error message worth reading.
- *
- * Docker is asked first, because it is the one answer that works the same on
- * every platform. On Linux a published port is held by `docker-proxy`, a root
- * process that `lsof` and `ss` will not name to an ordinary user — so without
- * this, re-running the boot over a stack that is already up would report its
- * own app container as "an unknown process" and refuse to continue.
- */
-function portHolder(port: number): string | null {
-  const container = capture("docker", [
-    "ps",
-    "--filter",
-    `publish=${port}`,
-    "--format",
-    "{{.Names}}",
-  ]);
-  const name = container.status === 0 ? container.stdout.trim().split("\n")[0] : "";
-  if (name) return `container ${name}`;
-
-  const r = capture("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"]);
-  if (r.status === 0) {
-    const line = r.stdout.split("\n")[1];
-    const [command, pid] = line ? line.trim().split(/\s+/) : [];
-    if (command) return pid ? `${command} (pid ${pid})` : command;
-  }
-
-  // Linux distributions do not all ship lsof; every one ships ss (iproute2).
-  const ss = capture("ss", ["-Hltnp", `sport = :${port}`]);
-  if (ss.status === 0) {
-    const m = /users:\(\("([^"]+)",pid=(\d+)/.exec(ss.stdout);
-    if (m) return `${m[1]} (pid ${m[2]})`;
-  }
-  return null;
-}
-
-/**
- * Whether a port belongs to a container rather than to a host process.
- *
- * That case is fine — compose recreates its own containers — while a host
- * `npm run dev` on 3000 is not. Docker's own answer says "container …"; the
- * process names are what each platform's publisher looks like to lsof:
- * Docker Desktop's backend on macOS, `docker-proxy` on Linux.
- */
-function looksLikeDocker(holder: string | null): boolean {
-  if (!holder) return false;
-  return /^(container |com\.docke|docker|vpnkit|containerd)/i.test(holder);
 }
 
 function isDockerDaemonUp(): boolean {
@@ -715,6 +649,9 @@ type PreflightOutcome = {
 async function preflight(opts: {
   prod: boolean;
   checkOnly: boolean;
+  dbOnly: boolean;
+  /** This same command, on another app port: what a port conflict recommends. */
+  rerun: (port: number) => string;
 }): Promise<PreflightOutcome> {
   const pf = new Preflight(opts.checkOnly);
 
@@ -878,6 +815,28 @@ async function preflight(opts: {
       } else {
         pf.ok("Docker memory", `${gib} GiB`);
       }
+
+      // Each instance is its own database and its own stack, so every other
+      // one running holds a share of the same memory. Counted rather than
+      // measured — `docker stats` takes seconds — from shares that are stable
+      // enough to estimate. Advisory: they all start either way.
+      const others = otherInstancesRunning();
+      if (others.stacks.length > 0) {
+        const want =
+          (others.stacks.length + 1) * STACK_BYTES + (others.apps + (opts.dbOnly ? 0 : 1)) * APP_BYTES;
+        const wantGib = (want / 1024 ** 3).toFixed(1);
+        const list = others.stacks.map((name) => `\`${name}\``).join(", ");
+        if (want > bytes * 0.85) {
+          pf.warn(
+            `${others.stacks.length} other instance${others.stacks.length === 1 ? " is" : "s are"} running: ${list}`,
+            `With this one they want about ${wantGib} of Docker's ${gib} GiB. Everything still starts, ` +
+              "but it can be slow, and Docker stops containers when memory runs out. " +
+              "`npm run docker:down` in a checkout you aren't using frees its share.",
+          );
+        } else {
+          pf.ok("other instances running", `${list}; about ${wantGib} of ${gib} GiB with this one`);
+        }
+      }
     }
   }
 
@@ -889,10 +848,13 @@ async function preflight(opts: {
     pf.ok("Supabase stack", "not running (will start)");
 
   // ── ports ──
-  // The app port is always contested: compose publishes it. The Supabase ports
-  // only matter when we are about to start the stack — if it is already up, it
-  // is *supposed* to be holding them.
-  const portsToCheck: Array<[number, string]> = [[PORTS.app, "the MixOS app"]];
+  // The app port is always contested: compose publishes it. `--db-only`
+  // publishes no app, so it has none to check. The Supabase ports only matter
+  // when we are about to start the stack — if it is already up, it is
+  // *supposed* to be holding them.
+  if (!opts.dbOnly) await checkAppPort(pf, opts);
+
+  const portsToCheck: Array<[number, string]> = [];
   if (!supabaseRunning) {
     portsToCheck.push(
       [PORTS.supabaseApi, "the Supabase API gateway (Kong)"],
@@ -919,10 +881,8 @@ async function preflight(opts: {
     pf.fail(
       `port ${port} is already in use`,
       `${holder ?? "an unknown process"} is listening — this port is needed for ${purpose}.`,
-      port === PORTS.app
-        ? "Stop whatever is on 3000 (most often a host `npm run dev` in another terminal) and re-run."
-        : "Another Supabase stack is probably running. Stop it with `npx supabase stop --project-id <its id>` " +
-            "(`npx supabase projects list` will not help — check `docker ps` for supabase_db_* containers).",
+      "Another Supabase stack is probably running. Stop it with `npx supabase stop --project-id <its id>` " +
+        "(`npx supabase projects list` will not help — check `docker ps` for supabase_db_* containers).",
     );
   }
 
@@ -941,6 +901,194 @@ async function preflight(opts: {
   }
 
   return { supabaseRunning, envDocker };
+}
+
+/** Other instances' running database containers, and their running app containers. */
+function otherInstancesRunning(): { stacks: string[]; apps: number } {
+  const r = capture("docker", [
+    "ps",
+    "--format",
+    '{{.Names}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.service"}}',
+  ]);
+  const stacks: string[] = [];
+  let apps = 0;
+  if (r.status !== 0) return { stacks, apps };
+  for (const line of r.stdout.split("\n")) {
+    const [name = "", project = "", service = ""] = line.split("\t");
+    const db = /^supabase_db_(.+)$/.exec(name);
+    if (db && db[1] !== INSTANCE.name) stacks.push(db[1]);
+    if ((service === "app-dev" || service === "app") && project !== INSTANCE.name) apps++;
+  }
+  return { stacks, apps };
+}
+
+/**
+ * Make sure this checkout boots an instance, and so a database, of its own.
+ * The rule, and why, are in scripts/instance-claims.ts.
+ *
+ * Its own already, or nobody's yet: claimed, and the boot carries on. Another
+ * folder's, under the name every unnamed checkout gets: this checkout is given
+ * one of its own, saved to its .env.instance, and booted fresh. Another
+ * folder's, under a name somebody wrote: refused with the fix, since quietly
+ * renaming what a person typed is worse than stopping.
+ *
+ * `--check` reports what would happen and writes nothing.
+ */
+function settleInstance(checkOnly: boolean): void {
+  const owner = ownedElsewhere(INSTANCE.name, ROOT);
+  if (!owner) {
+    if (!checkOnly) recordClaim(INSTANCE, ROOT);
+    info(`\`${INSTANCE.name}\`, this checkout's own, with its own database`);
+    return;
+  }
+
+  const own = chooseOwnInstance(ROOT);
+  if (INSTANCE.nameSource !== "default") {
+    const where = INSTANCE.nameSource === "file" ? "in .env.instance" : "in place of the shell's MIXOS_INSTANCE";
+    throw new SetupError(
+      `${tilde(owner)} already uses the instance \`${INSTANCE.name}\`, and an instance is one database.`,
+      `Give this checkout a name of its own ${where}` +
+        (own
+          ? `, for example MIXOS_INSTANCE=${own.name} with MIXOS_SUPABASE_PORT_BASE=${own.portBase}. `
+          : ". ") +
+        "Or leave MIXOS_INSTANCE out entirely, and the boot picks a free one for you.",
+    );
+  }
+  if (!own) {
+    throw new SetupError(
+      `${tilde(owner)} already uses \`${INSTANCE.name}\`, and no block of Supabase ports is free for another instance.`,
+      "`npm run docker:down` in checkouts you aren't using, then re-run.",
+    );
+  }
+
+  info(`${tilde(owner)} already uses \`${INSTANCE.name}\`, and an instance is one database.`);
+  info(
+    `This checkout gets its own: \`${own.name}\`, with Supabase on ${own.portBase}-${own.portBase + 9} ` +
+      "and a fresh database.",
+  );
+  if (checkOnly) {
+    // Preflighted as the instance it would be, so the Supabase and port lines
+    // below describe this checkout's future stack rather than the other's.
+    adopt({
+      name: own.name,
+      ports: portsFor(own.portBase, INSTANCE.ports.app, own.inspectorPort),
+      isDefault: false,
+      nameSource: "file",
+    });
+    exportInstance(INSTANCE);
+    info(c.dim("(--check writes nothing; a real boot saves this to .env.instance)"));
+    return;
+  }
+
+  // Containers of the old name still running THIS checkout's code are what
+  // sharing looked like: this folder's app on that folder's database. They
+  // are this checkout's to stop, and nothing else of that instance is touched.
+  const leftover = capture("docker", [
+    "ps",
+    "--filter",
+    `label=com.docker.compose.project=${INSTANCE.name}`,
+    "--format",
+    '{{.Names}}\t{{.Label "com.docker.compose.project.working_dir"}}',
+  ]);
+  const ours = leftover.stdout
+    .split("\n")
+    .map((line) => line.split("\t"))
+    .filter(([name, dir]) => name && dir && samePath(dir, ROOT))
+    .map(([name]) => name);
+  if (ours.length > 0 && succeeds("docker", ["stop", ...ours])) {
+    info(`Stopped ${ours.join(", ")}: this checkout's code, running on ${tilde(owner)}'s database.`);
+  }
+
+  writeInstanceFile(ROOT, own, { owner, instance: INSTANCE.name });
+  adopt(resolveInstance());
+  recordClaim(INSTANCE, ROOT);
+  info("Saved to .env.instance.");
+}
+
+/**
+ * The app port: free, this stack's own, or somebody else's.
+ *
+ * Somebody else's is the case worth the care. "Port 3000 is already in use" is
+ * where people get stuck, and the somebody is usually another MixOS: a second
+ * checkout, or a host `npm run dev` left running in a forgotten terminal. So
+ * the holder is named, and the next free port is offered — taken on the spot
+ * by a person at the keyboard, or handed to anyone else (an agent, CI,
+ * `--check`) as the exact command that uses it, since nobody is there to say
+ * yes.
+ *
+ * The one holder that gets no offer is this checkout's own host server. Two
+ * servers for one checkout, on two ports, with one database between them, is
+ * the confusing state this check exists to prevent; stopping it is the fix.
+ */
+async function checkAppPort(
+  pf: Preflight,
+  opts: { checkOnly: boolean; rerun: (port: number) => string },
+): Promise<void> {
+  if (!(await portInUse(appPort))) {
+    pf.ok(`port ${appPort} free`, "the MixOS app");
+    return;
+  }
+
+  const holder = identifyPortHolder(appPort, { instance: INSTANCE.name, root: ROOT });
+  if (holder.kind === "this-instance") {
+    // A previous run of this stack: compose replaces its own containers. Booted
+    // from another checkout with the same instance name, it is still ours —
+    // one name is one instance — but this boot moves it here, and that copy
+    // stops serving, which deserves a line rather than a surprise.
+    if (holder.checkout && !samePath(holder.checkout, ROOT)) {
+      pf.warn(
+        `port ${appPort} is instance \`${INSTANCE.name}\`, running from ${tilde(holder.checkout)}`,
+        "This checkout is the same instance, so booting here moves it: that copy stops serving. " +
+          "To run both at once, give this checkout its own MIXOS_INSTANCE in .env.instance.",
+      );
+    } else {
+      pf.ok(`port ${appPort} is this stack's own app`, "compose will replace it");
+    }
+    return;
+  }
+
+  // Only `--check` can still see this one: the old name's container running
+  // this checkout's code, which a real boot has already stopped by now
+  // (settleInstance()).
+  if (holder.kind === "mixos" && holder.checkout && samePath(holder.checkout, ROOT)) {
+    pf.warn(
+      `port ${appPort} is this checkout's old \`${holder.instance}\` app`,
+      "A real boot stops it before starting this one, which then gets the port.",
+    );
+    return;
+  }
+
+  const next = await nextFreePort(appPort);
+  const detail = `${describeHolder(holder)} is already on ${appUrl(appPort)}.`;
+
+  if (holder.kind === "this-checkout") {
+    pf.fail(
+      `port ${appPort} is already in use`,
+      detail,
+      "Stop that server (Ctrl-C in its terminal) and re-run" +
+        (next ? `, or run both with \`${opts.rerun(next)}\`.` : "."),
+    );
+    return;
+  }
+
+  if (next && !opts.checkOnly && interactive()) {
+    pf.warn(`port ${appPort} is taken`, detail);
+    if (await confirm(`Start this one on ${appUrl(next)} instead?`)) {
+      appPort = next;
+      process.env.MIXOS_PORT = String(next);
+      pf.ok(`port ${appPort} free`, "the MixOS app, for this run");
+      return;
+    }
+  }
+
+  pf.fail(
+    `port ${appPort} is already in use`,
+    detail,
+    next
+      ? `Run this one on the next free port: \`${opts.rerun(next)}\`. ` +
+          `To keep it there, add MIXOS_PORT=${next} to .env.instance.`
+      : `No port from ${appPort + 1} to ${appPort + 20} is free either. Stop something and re-run.`,
+  );
 }
 
 // ── Steps ───────────────────────────────────────────────────────────────────
@@ -1016,8 +1164,8 @@ function writeEnvDockerLocal(status: SupabaseStatus): {
     "# container reaches a port published on the macOS host, and it only resolves",
     "# because every service in docker-compose.yml declares",
     '#   extra_hosts: ["host.docker.internal:host-gateway"]',
-    "# Host tooling (npm run dev, psql, scripts/*.ts) wants 127.0.0.1 instead —",
-    "# see the banner printed at the end of `npm run dev:docker`.",
+    "# Host tooling (psql, scripts/*.ts) wants 127.0.0.1 instead, and a host",
+    "# `npm run dev` makes that rewrite itself (scripts/dev.ts).",
     "",
     `DATABASE_URL=${containerDbUrl}`,
     "",
@@ -1078,81 +1226,137 @@ async function runHostScript(
   }
 }
 
-function printBanner(opts: {
+/**
+ * The end of every run: the running app's own answer to "is it up?", and what
+ * to do next. It replaced a banner that printed the same fixed URL whether or
+ * not anything answered there — the wrong one, for any instance not on 3000.
+ *
+ * Returns whether every check passed, so `--detach` can exit on it.
+ */
+async function printSummary(opts: {
   prod: boolean;
   detach: boolean;
   status: SupabaseStatus;
   envDocker: Record<string, string>;
-}) {
+}): Promise<boolean> {
   const { prod, detach, status, envDocker } = opts;
-  const rule = "─".repeat(72);
-  const email =
-    envDocker.INITIAL_ADMIN_EMAIL ??
-    "(INITIAL_ADMIN_EMAIL not set in .env.docker)";
-  const password =
-    envDocker.INITIAL_ADMIN_PASSWORD ??
-    "(INITIAL_ADMIN_PASSWORD not set in .env.docker)";
+  const url = appUrl(appPort);
+  const service = appService(prod);
 
-  console.log(`\n${rule}`);
-  console.log(
-    `  ${c.bold(`MixOS is starting — ${prod ? "prod" : "dev"} profile`)}`,
+  const checks: Check[] = await checkApp(url, {
+    signIn: localSignIn(envDocker),
+    fixes: {
+      notRunning: `See why with \`docker compose -p ${COMPOSE_PROJECT} logs ${service}\`.`,
+      noDatabase:
+        "Check that DATABASE_URL in .env.docker.local names host.docker.internal, not " +
+        "127.0.0.1 (docs/local-docker.md, Troubleshooting).",
+      schemaBehind: "Apply the new platform migrations with `npm run db:local`, then reload.",
+    },
+  });
+  checks.push(
+    await checkReachable(
+      "Studio",
+      status.studioUrl,
+      "browse and edit the database",
+      "`npm run dev:docker` starts it again.",
+    ),
   );
-  console.log("");
-  console.log(`  App        ${c.bold("http://localhost:3000")}`);
-  console.log(
-    `  Studio     ${status.studioUrl}   ${c.dim("(browse and edit the database)")}`,
-  );
-  console.log(`  Postgres   ${status.dbUrl}`);
-  console.log("");
-  console.log(`  Sign in    ${c.bold(email)}`);
-  console.log(`             ${c.bold(password)}`);
-  console.log(
-    `             ${c.dim("dev-only credentials from .env.docker; they are not secret")}`,
-  );
+  const ok = allOk(checks);
+
+  const notes = [`Postgres, for psql and host tools: ${status.dbUrl}`];
   if (!prod) {
-    console.log("");
-    console.log(`  ${c.yellow("Use localhost:3000, not 127.0.0.1:3000.")}`);
-    console.log(
-      `  ${c.dim("Next's dev server rejects /_next requests (including the hot-reload")}`,
-    );
-    console.log(
-      `  ${c.dim("websocket) from any origin it does not recognise, and 127.0.0.1 is not")}`,
-    );
-    console.log(
-      `  ${c.dim("on that list — the page loads unstyled and never refreshes.")}`,
+    notes.push(
+      "Use localhost, not 127.0.0.1: Next's dev server refuses its own assets from 127.0.0.1,",
+      "and the page loads unstyled. Rather run Next on this computer? `npm run dev` offers to",
+      "take over from this container, on this same database.",
     );
   }
-  console.log("");
-  console.log(
-    `  ${c.dim("Running `npm run dev` on the host instead? .env.local wants:")}`,
-  );
-  console.log(`  ${c.dim(`  DATABASE_URL=${status.dbUrl}`)}`);
-  console.log(`  ${c.dim("  PGSSLMODE=disable")}`);
-  console.log("");
+  notes.push("`npm run status` asks all of this again, any time, from any terminal.");
   // The last line has to match the mode the reader is actually in. Telling
   // someone who has just been handed their prompt back that "Ctrl-C stops the
   // app containers" points them at a keystroke that now stops nothing.
   if (detach) {
-    const service = prod ? "app" : "app-dev";
-    console.log(
-      `  ${c.dim(`Running in the background. Logs: \`docker compose -p ${COMPOSE_PROJECT} logs -f ${service}\``)}`,
-    );
-    console.log(
-      `  ${c.dim("`npm run docker:down` stops the app and Supabase both.")}`,
+    notes.push(
+      `Running in the background. Logs: \`docker compose -p ${COMPOSE_PROJECT} logs -f ${service}\``,
+      "`npm run docker:down` stops the app and Supabase both.",
     );
   } else {
-    console.log(
-      `  ${c.dim("Ctrl-C stops the app containers. `npm run docker:down` also stops Supabase.")}`,
-    );
+    notes.push("Ctrl-C stops the app containers. `npm run docker:down` also stops Supabase.");
   }
-  console.log(`${rule}\n`);
+
+  process.stdout.write(
+    formatSummary({
+      headline: ok
+        ? `MixOS is up at ${url}`
+        : `MixOS started at ${url}, but it isn't ready — see below`,
+      checks,
+      notes,
+    }),
+  );
+  return ok;
+}
+
+/**
+ * The attached run's summary. Compose owns the terminal from `up` until
+ * Ctrl-C, so the summary cannot wait for it to return: this polls alongside
+ * the log stream and prints into it the moment the app first answers, however
+ * long a first image pull or a cold compile takes, then opens the browser for
+ * a person at a terminal. Compose exiting first ends it quietly.
+ */
+async function announceWhenUp(
+  opts: Parameters<typeof printSummary>[0] & { noOpen: boolean },
+  signal: AbortSignal,
+): Promise<void> {
+  while (!signal.aborted && !(await appAnswers(appUrl(appPort)))) {
+    await sleep(READY_POLL_INTERVAL_MS * 2);
+  }
+  if (signal.aborted) return;
+  const ok = await printSummary(opts);
+  if (ok && !signal.aborted && browserWanted(opts.noOpen)) openBrowser(appUrl(appPort));
+}
+
+/**
+ * `--db-only`'s ending: the database and Studio, checked, and the one command
+ * that comes next. That command is a host `npm run dev`, which finds this
+ * stack's database on its own (scripts/dev.ts) — no .env.local to write.
+ */
+async function printDatabaseSummary(status: SupabaseStatus): Promise<void> {
+  const dbPort = Number(new URL(status.dbUrl).port);
+  const checks: Check[] = [
+    (await portInUse(dbPort))
+      ? { state: "ok", name: "Database", lines: [status.dbUrl] }
+      : {
+          state: "fail",
+          name: "Database",
+          lines: [`nothing answers on port ${dbPort}`],
+          fix: "`npm run docker:down`, then re-run this command.",
+        },
+    await checkReachable(
+      "Studio",
+      status.studioUrl,
+      "browse and edit the database",
+      "`npm run dev:docker -- --db-only` starts it again.",
+    ),
+  ];
+  process.stdout.write(
+    formatSummary({
+      headline: allOk(checks)
+        ? "The database is up. Start MixOS with `npm run dev`"
+        : "The database didn't come up — see below",
+      checks,
+      notes: [
+        "`npm run dev` uses this database by itself: there's no .env.local to write.",
+        "`npm run status` checks everything again. `npm run docker:down` stops the database.",
+      ],
+    }),
+  );
 }
 
 /**
  * Bring the app up.
  *
  * The other profile's app service is removed first. `app` and `app-dev` both
- * publish port 3000, and compose leaves a service from an inactive profile
+ * publish the app port, and compose leaves a service from an inactive profile
  * running rather than treating it as an orphan — so switching between
  * `dev:docker` and `docker:prod` would otherwise fail with a bind error that
  * says nothing about profiles.
@@ -1260,7 +1464,7 @@ function appContainerExited(prod: boolean): boolean {
  * is a failure.
  */
 async function waitForReady(prod: boolean): Promise<void> {
-  const url = `http://localhost:${PORTS.app}/api/health/ready`;
+  const url = `${appUrl(appPort)}/api/health/ready`;
   const startedAt = Date.now();
   const deadline = startedAt + READY_TIMEOUT_MS;
   const service = appService(prod);
@@ -1295,7 +1499,7 @@ async function waitForReady(prod: boolean): Promise<void> {
     }
 
     // One line, once, so a long-but-healthy first compile does not read as a
-    // hang. Repeating it every second would just bury the eventual banner.
+    // hang. Repeating it every second would just bury the eventual summary.
     if (!announcedSlow && Date.now() - startedAt > 20_000) {
       announcedSlow = true;
       info(
@@ -1319,7 +1523,7 @@ async function waitForReady(prod: boolean): Promise<void> {
       `then \`docker compose -p ${COMPOSE_PROJECT} logs -f ${service}\` for the app's own ` +
       `output. A 503 means the app is serving but cannot reach Postgres — check DATABASE_URL ` +
       `in .env.docker.local, which must spell the host as host.docker.internal and not ` +
-      `127.0.0.1. No response at all means it never bound port ${PORTS.app}: either it is ` +
+      `127.0.0.1. No response at all means it never bound port ${appPort}: either it is ` +
       `still compiling, or it is crash-looping. \`npm run docker:down\` stops everything.`,
   );
 }
@@ -1331,6 +1535,8 @@ type Args = {
   check: boolean;
   build: boolean;
   detach: boolean;
+  dbOnly: boolean;
+  noOpen: boolean;
   help: boolean;
 };
 
@@ -1340,6 +1546,8 @@ function parseArgs(argv: string[]): Args {
     check: false,
     build: false,
     detach: false,
+    dbOnly: false,
+    noOpen: false,
     help: false,
   };
   for (const arg of argv) {
@@ -1349,10 +1557,16 @@ function parseArgs(argv: string[]): Args {
         break;
       // Spelled in full, with no `-d` alias. `docker compose -d` is the obvious
       // shorthand and that is the problem: the two are not the same thing here.
-      // Ours also waits for readiness and prints the banner, and a reader who
+      // Ours also waits for readiness and prints the summary, and a reader who
       // pattern-matches the short form onto compose's would expect neither.
       case "--detach":
         args.detach = true;
+        break;
+      case "--db-only":
+        args.dbOnly = true;
+        break;
+      case "--no-open":
+        args.noOpen = true;
         break;
       case "--check":
         args.check = true;
@@ -1371,6 +1585,15 @@ function parseArgs(argv: string[]): Args {
         );
     }
   }
+  // Refused rather than ignored: each of these is a question about the app
+  // container, which `--db-only` never starts, and silently dropping one
+  // leaves the caller believing it applied.
+  if (args.dbOnly && (args.prod || args.detach || args.build)) {
+    throw new SetupError(
+      "--db-only starts no app, so --prod, --detach and --build have nothing to apply to.",
+      "Use `npm run dev:docker -- --db-only` on its own; it already returns once the database is up.",
+    );
+  }
   return args;
 }
 
@@ -1381,15 +1604,23 @@ Boot the local MixOS stack: Supabase (Postgres + PostgREST + Studio) and the app
   npm run docker:prod             prod profile — production-parity standalone image
   npm run docker:down             stop everything
   npm run docker:reset            stop everything and delete the database
+  npm run status                  is it up, where, and what to do if not
+
+The app is published on port 3000. When another MixOS already has it, the
+preflight names it and offers the next free port; MIXOS_PORT=3001 picks one.
 
 Flags (pass through npm with --, e.g. \`npm run dev:docker -- --check\`):
   --prod      run the prod profile instead of dev
   --build     force a compose image rebuild (implied by --prod)
   --detach    boot in the background, wait until the app answers
-              /api/health/ready, print the banner and exit 0. Combines with
+              /api/health/ready, print the summary and exit 0. Combines with
               --prod. Without it the command stays in the foreground streaming
               container logs and only ends on Ctrl-C — use --detach from a
               script, an agent, or anything else that needs its prompt back.
+  --db-only   start the database (and run its migrations) but not the app, for
+              \`npm run dev\` on this computer; returns once it is up
+  --no-open   don't open the browser when MixOS is up (also
+              MIXOS_OPEN_BROWSER=false). It only opens for a terminal anyway.
   --check     run preflight only and exit; changes nothing on your machine
   --help      this text
 `;
@@ -1402,8 +1633,13 @@ async function main() {
   }
 
   console.log(
-    c.bold(`\nMixOS local stack — ${args.prod ? "prod" : "dev"} profile`),
+    c.bold(
+      `\nMixOS local stack — ${args.dbOnly ? "database only" : `${args.prod ? "prod" : "dev"} profile`}`,
+    ),
   );
+
+  step("Instance");
+  settleInstance(args.check);
 
   step(
     args.check
@@ -1413,6 +1649,10 @@ async function main() {
   const { supabaseRunning, envDocker } = await preflight({
     prod: args.prod,
     checkOnly: args.check,
+    dbOnly: args.dbOnly,
+    rerun: (port) =>
+      `MIXOS_PORT=${port} npm run ${args.prod ? "docker:prod" : "dev:docker"}` +
+      (args.detach ? " -- --detach" : ""),
   });
 
   step("Supabase stack");
@@ -1458,22 +1698,31 @@ async function main() {
       "migrations did not apply — try `npm run docker:reset`.",
   );
 
-  // The banner's position depends on the mode, and both positions are "last
-  // thing the caller sees". Attached, compose owns the terminal from here to
-  // Ctrl-C, so anything printed after it would scroll past under a wall of
-  // container logs — the banner has to go first. Detached, the run ends a few
-  // lines below, so the banner goes at the end where it belongs, and only after
-  // readiness, so it never advertises a URL that is not answering yet.
-  if (!args.detach) {
-    printBanner({ prod: args.prod, detach: false, status, envDocker });
+  if (args.dbOnly) {
+    await printDatabaseSummary(status);
+    process.exit(0);
   }
+
+  const summaryOpts = { prod: args.prod, status, envDocker, noOpen: args.noOpen };
 
   step(
     `Starting the app (docker compose --profile ${args.prod ? "prod" : "dev"}${
       args.detach ? ", detached" : ""
     })`,
   );
+  // Attached, compose owns the terminal from here to Ctrl-C, and the summary
+  // has to reach it from inside the log stream: announceWhenUp() prints it
+  // there once the app answers. Said first, so the wait between here and then
+  // reads as expected rather than as a hang.
+  const watcher = new AbortController();
+  if (!args.detach) {
+    info(
+      c.dim(`MixOS will be at ${appUrl(appPort)}. A summary prints here once it answers.`),
+    );
+    void announceWhenUp({ ...summaryOpts, detach: false }, watcher.signal);
+  }
   const code = await composeUp(args.prod, args.build, args.detach);
+  watcher.abort();
   // 130 is a Ctrl-C, which is how a developer is expected to end a dev session.
   if (code !== 0 && code !== 130) {
     throw new SetupError(
@@ -1495,7 +1744,11 @@ async function main() {
 
     step("Waiting for the app to answer /api/health/ready");
     await waitForReady(args.prod);
-    printBanner({ prod: args.prod, detach: true, status, envDocker });
+    const ok = await printSummary({ ...summaryOpts, detach: true });
+    if (ok && browserWanted(args.noOpen)) openBrowser(appUrl(appPort));
+    // The summary already said what failed and how to fix it; the exit status
+    // is for a caller that only reads that.
+    process.exit(ok ? 0 : 1);
   }
 
   process.exit(0);

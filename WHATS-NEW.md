@@ -10,6 +10,39 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-11-08
+
+- **You can see that MixOS is up.** `npm run dev:docker`, its `--detach` and a
+  host `npm run dev` all end on a summary that the running app answers: a ✓ or
+  ✗ for the web server, the database, the sign-in page and Studio, with the
+  address, the login, and the fix under anything that failed. Then the browser
+  opens, for a person at a terminal (`--no-open` turns that off). Next's own
+  `Ready` line isn't the signal any more. See
+  [How you know it's up](docs/local-docker.md#how-you-know-its-up).
+- **`npm run status`** asks the same questions any time, and lists every MixOS
+  running on your computer with its port. It exits 0 only when everything
+  answers.
+- **Port 3000 taken? MixOS says by what.** When another MixOS already has it, a
+  second checkout or a forgotten `npm run dev`, the boot names it and offers
+  the next free port. Run by Claude or a script, it prints the command to use
+  instead. `.env.instance` no longer needs a `MIXOS_PORT`. A second instance
+  now gets `NEXTAUTH_URL` for its own port, not 3000's.
+- **Every checkout has its own database.** A second clone or a git worktree
+  used to be the same `mixos` instance as the first, sharing one database.
+  Now, on its first boot, it gets an instance of its own, named after its
+  folder, with its own Supabase ports and a fresh database, saved to its
+  `.env.instance`. The first checkout keeps its data. `docker:down`, `db:reset`,
+  `npm run dev` and `npm run status` never act on another folder's instance.
+  Who owns what is kept in `~/.mixos/instances.json`. A memory warning says
+  when Docker gets tight with several running. See
+  [More than one instance](docs/local-docker.md#more-than-one-instance-on-one-machine).
+- **`npm run dev` needs no `.env.local` for the local database.** It finds the
+  stack from `npm run dev:docker` by itself, offers to start it if it's down
+  (`npm run dev:docker -- --db-only` starts only the database), and offers to
+  take over port 3000 from the dev container. A database you configured
+  yourself is left alone.
+
+
 ## 2026-10-25
 
 - **Release notes, in the menu bar.** An app, a connector or a theme keeps
