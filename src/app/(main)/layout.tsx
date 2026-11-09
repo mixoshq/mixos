@@ -16,6 +16,7 @@ import { requireReadOnlySession } from "@/lib/auth/session";
 import { onboardingCompletedAtFor } from "@/lib/onboarding/completed";
 import { TourProvider } from "@/components/onboarding/tour-context";
 import WelcomeTour from "@/components/onboarding/welcome-tour";
+import Installed from "@/components/onboarding/installed";
 import Guide from "@/components/onboarding/guide";
 import Confetti from "@/components/onboarding/confetti";
 import RegisterServiceWorker from "@/components/push/register-sw";
@@ -56,14 +57,15 @@ export default async function MainLayout({
         <TourProvider active={onboardingCompletedAt === null}>
           <DashboardEditProvider>
             <div className="flex h-screen flex-col">
-              <HeaderShell logo={menuBarLogo} name={name} />
-              {/* In the column, not over it: the page below starts after it, so nothing overlaps. */}
+              {/* In the column, not over it: the menu bar and the page start after it, so nothing overlaps. */}
               <ReleaseBanner isAdmin={session.user.isAdmin} userId={session.user.id} />
+              <HeaderShell logo={menuBarLogo} name={name} />
               <main className="flex-1 overflow-auto bg-muted">{children}</main>
             </div>
             <WelcomeTour branding={{ name, menuBarLogo, loginLogo }} />
             <Guide />
             <Confetti />
+            <Installed name={name} logo={menuBarLogo} />
             <RegisterServiceWorker />
             <OfflineOverlay />
           </DashboardEditProvider>

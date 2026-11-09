@@ -90,22 +90,34 @@ export async function ensureUser(args: {
       },
       { onConflict: "email" },
     )
-    .select("id, onboarding_completed_at")
+    .select("id")
     .single();
 
   if (error) throw new Error(`Failed to ensure user: ${error.message}`);
-
-  // A first sign-in starts with every `global` app installed, so the welcome
-  // tour has a widget to add and a new dashboard is not a blank page. "First
-  // sign-in" is read off the tour: until it is finished or skipped, the
-  // install is re-asserted on each visit (idempotent, one upsert), which is
-  // what makes it hold for users seeded outside this function — the first
-  // admin — and for a session that races itself. Afterwards it is theirs to
-  // uninstall like any other app.
-  if (data.onboarding_completed_at === null) {
-    await installGlobalApps(supabase, data.id);
-  }
   return data.id;
+}
+
+/**
+ * A newcomer starts with every `global` app installed, so the welcome tour has
+ * something to put on the dashboard and a new one is not a blank page.
+ *
+ * Called at sign-in (the auth config's `signIn` event), and only while the
+ * tour isn't finished or skipped. At sign-in rather than on page views: the
+ * tour sends the user to App Manager, and an app they uninstall there has to
+ * stay uninstalled, which it wouldn't if every page put it back. Sign-in still
+ * covers every way an account comes to exist — the first admin is seeded
+ * outside the app — and two at once are one idempotent upsert.
+ */
+export async function installGlobalAppsForNewcomer(userId: string): Promise<void> {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from("users")
+    .select("onboarding_completed_at")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to read onboarding: ${error.message}`);
+  if (!data || data.onboarding_completed_at !== null) return;
+  await installGlobalApps(supabase, userId);
 }
 
 async function installGlobalApps(

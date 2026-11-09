@@ -131,10 +131,10 @@ the same way.
 ## Previews
 
 Keep **Preview Deployments** off for the Coolify resource while the
-[GitHub App](../after-you-install/github-app.md) is linked, and anything else on
+[GitHub App](../after-you-install/production-updates.md) is linked, and anything else on
 your server that builds pull requests. A preview builds a pull request's code and
 runs it with the resource's environment, and the App's pull requests carry a
-publisher's code. The App can't read this setting, so Admin > GitHub asks you to
+publisher's code. The App can't read this setting, so Deployment > Production Updates asks you to
 confirm it.
 
 ## Upgrading

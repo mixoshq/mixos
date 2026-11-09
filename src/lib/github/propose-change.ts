@@ -379,7 +379,7 @@ export async function checkChangeProposal(input: unknown, ctx: ChangeContext): P
   if (blocked) return blocked;
   try {
     const state = await readGitHubState();
-    if (!state.app || !state.link) return refused("not-linked", "Link a repository on Admin > GitHub first.", "info");
+    if (!state.app || !state.link) return refused("not-linked", "Link a repository on Deployment > Production Updates first.", "info");
     const record = state.link.repository;
     const build = ctx.build ?? thisBuild();
     const target = targetOf(kind, slug, action);
@@ -461,7 +461,7 @@ export async function compareUpdateProposal(input: unknown, ctx: ChangeContext):
   if (blocked) return blocked;
   try {
     const state = await readGitHubState();
-    if (!state.app || !state.link) return refused("not-linked", "Link a repository on Admin > GitHub first.", "info");
+    if (!state.app || !state.link) return refused("not-linked", "Link a repository on Deployment > Production Updates first.", "info");
     const branch = state.link.repository.defaultBranch;
     const build = ctx.build ?? thisBuild();
     const target = targetOf(kind, slug, "update");

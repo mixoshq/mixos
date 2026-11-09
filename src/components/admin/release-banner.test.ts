@@ -124,9 +124,9 @@ describe("where it renders, and what it can do", () => {
   const root = path.resolve(__dirname, "../../..");
   const read = (file: string) => fs.readFileSync(path.join(root, file), "utf8");
 
-  test("in the main interface's layout, under the menu bar; not in the sign-in, public or app-password pages", () => {
+  test("in the main interface's layout, above the menu bar; not in the sign-in, public or app-password pages", () => {
     const main = read("src/app/(main)/layout.tsx");
-    assert.match(main, /<HeaderShell[^>]*\/>\s*\{\/\*[^]*?\*\/\}\s*<ReleaseBanner isAdmin=\{session\.user\.isAdmin\} userId=\{session\.user\.id\} \/>\s*<main/);
+    assert.match(main, /\{\/\*[^]*?\*\/\}\s*<ReleaseBanner isAdmin=\{session\.user\.isAdmin\} userId=\{session\.user\.id\} \/>\s*<HeaderShell[^>]*\/>/);
     const others = ["src/app/layout.tsx", "src/app/(public)/layout.tsx"];
     for (const dir of ["src/app/(auth)", "src/app/(public)"]) {
       for (const entry of fs.readdirSync(path.join(root, dir), { recursive: true }) as string[]) {

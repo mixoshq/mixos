@@ -41,7 +41,17 @@ export const ADMIN_SECTIONS: NavSection[] = [
   { label: "Themes", href: "/admin/themes", icon: Palette },
   { label: "Scheduled Jobs", href: "/admin/scheduled-jobs", icon: Clock },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
-  { label: "GitHub", href: "/admin/github", icon: GitPullRequest },
+];
+
+/**
+ * How changes reach this deployed instance: Production Updates, which turns
+ * an app, connector or theme installed, updated or removed here into a pull
+ * request on the repository it's built from, through a GitHub App. Not
+ * called that here: an "App" in the menu would read as one of the apps. An admin page still (`/admin/github`, behind
+ * `requireAdmin`), at the URL it always had. A group left empty isn't shown.
+ */
+export const DEPLOYMENT_SECTIONS: NavSection[] = [
+  { label: "Production Updates", href: "/admin/github", icon: GitPullRequest },
 ];
 
 /**

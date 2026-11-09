@@ -19,6 +19,7 @@ import {
 import { usePreferences } from "@/components/preferences-context";
 import { useListReorder } from "@/lib/dnd/use-list-reorder";
 import AppsMoreMenu from "@/components/apps/apps-more-menu";
+import { useTour } from "@/components/onboarding/tour-context";
 import type { AppManifest } from "@/lib/apps/types";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -58,6 +59,12 @@ export default function AppsDropdown() {
   const iconOnly = menuBarAppDisplay === "icon";
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // While the welcome tour's guide is up the page is dimmed (z-90, see
+  // src/components/onboarding/guide.tsx), and the guide asks for this menu
+  // ("Apps → App Manager"): it opens above the dim and under the bubble
+  // (z-95), whole and readable.
+  const { phase } = useTour();
+  const overGuide = phase === "guide";
   const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -282,7 +289,8 @@ export default function AppsDropdown() {
             className={cn(
               "mix-popover",
               CARD_SURFACE,
-              "absolute left-0 top-full z-50 mt-1 w-64 py-1 shadow-lg",
+              "absolute left-0 top-full mt-1 w-64 py-1 shadow-lg",
+              overGuide ? "z-[91]" : "z-50",
             )}
           >
             {dropdownApps.length > 0 ? (

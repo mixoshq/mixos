@@ -9,6 +9,7 @@ import { usePathname } from "next/navigation";
 import {
   ACCOUNT_SECTIONS,
   ADMIN_SECTIONS,
+  DEPLOYMENT_SECTIONS,
   activeHref,
   type NavSection,
 } from "@/lib/admin/sections";
@@ -43,7 +44,7 @@ export function NavGroup({
     <div>
       <h2
         id={id}
-        className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground"
+        className="mb-2 px-3 text-xs font-bold uppercase tracking-widest text-foreground"
       >
         {label}
       </h2>
@@ -78,19 +79,29 @@ export function NavGroup({
 }
 
 /**
- * The settings sidebar: what an admin configures, then what they configure for
- * themselves.
+ * The settings sidebar: what the user configures for themselves, then what an
+ * admin configures, then how changes reach the deployment.
  *
- * `isAdmin` gates the whole Administration group rather than disabling its
- * links. A non-admin has no business seeing six pages they cannot open — and
+ * `isAdmin` gates the whole Administration and Deployment groups rather than
+ * disabling their links, and a group with nothing in it isn't drawn. A non-admin has no business seeing six pages they cannot open — and
  * the header menu already hides the same block on the same condition, so
  * showing it here would be the one place that leaked it.
  */
 export default function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
-  const active = activeHref(pathname, [...ADMIN_SECTIONS, ...ACCOUNT_SECTIONS]);
+  const active = activeHref(pathname, [
+    ...ACCOUNT_SECTIONS,
+    ...ADMIN_SECTIONS,
+    ...DEPLOYMENT_SECTIONS,
+  ]);
   return (
     <div className="flex flex-col gap-6">
+      <NavGroup
+        id="account-nav-label"
+        label="My Account"
+        sections={ACCOUNT_SECTIONS}
+        active={active}
+      />
       {isAdmin && (
         <NavGroup
           id="admin-nav-label"
@@ -99,12 +110,14 @@ export default function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
           active={active}
         />
       )}
-      <NavGroup
-        id="account-nav-label"
-        label="My Account"
-        sections={ACCOUNT_SECTIONS}
-        active={active}
-      />
+      {isAdmin && DEPLOYMENT_SECTIONS.length > 0 && (
+        <NavGroup
+          id="deployment-nav-label"
+          label="Deployment"
+          sections={DEPLOYMENT_SECTIONS}
+          active={active}
+        />
+      )}
     </div>
   );
 }

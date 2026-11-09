@@ -16,12 +16,12 @@ const INITIAL: CredentialsSignInState = { error: null, attempt: 0, email: "" };
 /**
  * The sign-in card.
  *
- * ON SUBMIT, EVERYTHING BUT THE LOGO FADES. The frame and the fields go to
- * opacity 0 while the request is pending. On success the server redirects to
- * the dashboard, where the welcome tour (for a first sign-in) draws the same
- * logo at the same spot — so the fade here is the first beat of the tour, and
- * the logo is the one thing that never moves. On failure the fields fade back
- * in and the card shakes.
+ * ON SUBMIT, EVERYTHING BUT THE MARK FADES. The frame, the fields and the
+ * wordmark go to opacity 0 while the request is pending. On success the
+ * server redirects to the dashboard, where the welcome tour (for a first
+ * sign-in) draws the same mark at the same spot and no wordmark — so the fade
+ * here is the first beat of the tour, and the mark is the one thing that never
+ * moves. On failure everything fades back in and the card shakes.
  *
  * THE SHAKE IS KEYED ON THE ATTEMPT, NOT THE ERROR. Two wrong passwords in a
  * row produce the same message; `attempt` is what makes the second one
@@ -65,7 +65,7 @@ export default function LoginCard({
           )}
         />
         <div className="relative">
-          <LoginLockup logo={logo} name={name} />
+          <LoginLockup logo={logo} name={name} nameShown={!pending} />
           <form
             action={formAction}
             className={cn("mt-8 transition-opacity duration-300", faded)}

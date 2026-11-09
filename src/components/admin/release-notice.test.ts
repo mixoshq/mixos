@@ -209,11 +209,11 @@ test("on a fork of upstream: /mixos upgrade to copy, beside the one button that 
     defaultBranch: "main",
     branch: "mixos/update-v0.5.0",
     title: "Update MixOS to v0.5.0 [skip preview]",
-    off: "Confirm on Admin > GitHub that no host builds previews of the App's branches.",
+    off: "Confirm on Deployment > Production Updates that no host builds previews of the App's branches.",
     compareUrl: null,
   });
   assert.match((off.match(/<button[^>]*>/g) ?? [])[1], /\sdisabled(?:=""|\s|>)/);
-  assert.match(text(off), /Opening one is off for now\. Confirm on Admin > GitHub that no host builds previews of the App's branches\./);
+  assert.match(text(off), /Opening one is off for now\. Confirm on Deployment > Production Updates that no host builds previews of the App's branches\./);
 });
 
 test("on a private copy: /mixos upgrade to copy, the merge by hand with the compare link, and nothing else to press", () => {
@@ -248,7 +248,7 @@ test("once a pull request was opened from here: say so, link to it, and offer no
   });
   assert.deepEqual(buttons(html), ["Copy"]);
   assert.doesNotMatch(html, /<form|<input/);
-  assert.match(text(html), /Pull request #7 \(opens in a new tab\) for v0\.5\.0 was opened on acme\/mixos .* by admin@example\.com\. Admin > GitHub lists it with its checks\. Merging it is the deploy\./);
+  assert.match(text(html), /Pull request #7 \(opens in a new tab\) for v0\.5\.0 was opened on acme\/mixos .* by admin@example\.com\. Deployment > Production Updates lists it with its checks\. Merging it is the deploy\./);
   assert.deepEqual(links(html), [
     "https://mixos.org/docs/releases/v0.5.0",
     "https://mixos.org/docs/install/after-you-install/upgrading",

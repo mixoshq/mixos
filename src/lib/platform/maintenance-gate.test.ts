@@ -149,6 +149,26 @@ test("the health probes are exempt, and never wait on the check", async () => {
   }
 });
 
+test("loading the sign-in page is exempt, and never waits on the check; posting to it is not", async () => {
+  let asked = 0;
+  const state = async () => {
+    asked++;
+    return BEHIND;
+  };
+  assert.equal(await maintenanceGate("/login", state, "GET"), null);
+  assert.equal(await maintenanceGate("/login", state, "HEAD"), null);
+  assert.equal(asked, 0);
+
+  // The form's server action, and a caller that doesn't say how it asks.
+  assert.equal((await maintenanceGate("/login", state, "POST"))?.status, 503);
+  assert.equal((await maintenanceGate("/login", state))?.status, 503);
+
+  // Only that path: its neighbours get the maintenance response.
+  for (const path of ["/login/x", "/loginx", "/"]) {
+    assert.equal((await maintenanceGate(path, state, "GET"))?.status, 503, path);
+  }
+});
+
 test("can't tell serves normally", async () => {
   const cantTell = maintenanceStateOf(schemaCantTell, appsCantTell);
   assert.equal(cantTell.platformBehind, false);

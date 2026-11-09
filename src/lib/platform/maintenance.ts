@@ -11,7 +11,8 @@
  *
  *   - `platformBehind`: the platform schema is provably behind this build.
  *     While it is, everything but the health probes gets the maintenance
- *     response (`./maintenance-gate.ts`).
+ *     response (`./maintenance-gate.ts`), and the sign-in page says sign-in
+ *     is unavailable (`./sign-in-database.ts`).
  *   - `appsBehind`: the apps with a migration this build carries that the
  *     database hasn't applied. Each of them alone answers "This app is being
  *     updated": the app gate (`src/lib/apps/app-gate.ts`) holds back its code,

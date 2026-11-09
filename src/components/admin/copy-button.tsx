@@ -21,13 +21,21 @@ export function CopyButton({
   text,
   label,
   iconOnly = false,
+  compact = false,
 }: {
   text: string;
   label: string;
   iconOnly?: boolean;
+  /**
+   * 24px tall with 12px text, for a strip as slim as the release banner over
+   * the menu bar. Under the 36px touch floor `Button`'s sizes keep, which is
+   * the price of that strip; anywhere with room, leave it off.
+   */
+  compact?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
-  const icon = copied ? <Check className="h-4 w-4" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />;
+  const iconSize = compact ? "h-3.5 w-3.5" : "h-4 w-4";
+  const icon = copied ? <Check className={iconSize} aria-hidden /> : <Copy className={iconSize} aria-hidden />;
   const onClick = async () => {
     try {
       await navigator.clipboard.writeText(text);
@@ -46,12 +54,19 @@ export function CopyButton({
         label={copied ? "Copied" : label}
         icon={icon}
         onClick={onClick}
+        className={compact ? "h-6 w-6" : undefined}
       />
     );
   }
 
   return (
-    <Button variant="ghost" size="sm" icon={icon} onClick={onClick}>
+    <Button
+      variant="ghost"
+      size="sm"
+      icon={icon}
+      onClick={onClick}
+      className={compact ? "h-6 gap-1 px-1.5 text-xs" : undefined}
+    >
       {copied ? "Copied" : label}
     </Button>
   );

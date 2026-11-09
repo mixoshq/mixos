@@ -11,7 +11,7 @@ import { requireReadOnlySession } from "@/lib/auth/session";
  * or change its installation, with `installation_id` and `setup_action`.
  *
  * It changes nothing. A GET that anyone can link to shouldn't link a
- * repository, so this only takes the admin back to Admin > GitHub, carrying the
+ * repository, so this only takes the admin back to Deployment > Production Updates, carrying the
  * installation id as a hint, where Finish linking (a server action) does the
  * work and checks the id against what GitHub lists for the App. After a change
  * to the installation, the page asks the admin to check again.

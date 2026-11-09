@@ -49,7 +49,7 @@ Browse pages show the catalogue at mixos.org, but can't install from it.
 So you install an extension from Browse in a
 [development copy](../development.md), commit its folder, and merge it into the
 branch your host deploys. With the
-[GitHub App](../after-you-install/github-app.md) linked, a deployment can open
+[GitHub App](../after-you-install/production-updates.md) linked, a deployment can open
 that pull request for you instead. Either way, a new app arrives switched off on
 each instance until an admin activates it. See
 [Installing from the Registry on a deployment](../after-you-install/README.md#installing-from-the-registry-on-a-deployment).
