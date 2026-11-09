@@ -8,6 +8,68 @@ tests and internal changes, and is the notes of its GitHub Release.
 Releases are made with `/mixos deploy release`; see the Release section of
 [.claude/skills/mixos/actions/deploy.md](.claude/skills/mixos/actions/deploy.md).
 
+## v0.6.0 (2026-11-08)
+
+Changes since v0.5.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.6.0/WHATS-NEW.md).
+
+### Features
+
+- **os:** Production Updates' Tech Talk, as mixos.org's pill (197c62e)
+- **os:** Production Updates, in place of the GitHub App (7aac302)
+- **os:** the confetti covers the screen evenly, in the mark's colours (d6629ff)
+- **os:** the menu bar marks Dashboard while you're on it (2181c30)
+- **os:** the confetti bursts from behind the card, at the screen's centre (b6fe9f2)
+- **os:** Setup Complete's box ticks itself under the pointer (0a7f0a8)
+- **os:** 1983 pieces of confetti (cfd066f)
+- **os:** the confetti bursts as the mark finishes drawing (e21280f)
+- **os:** "MixOS is yours.", with the mark drawing itself on (30dab78)
+- **os:** Skip tour outlined only under the pointer (8cdaebb)
+- **os:** right-clicking a dashboard with widgets offers Edit Dashboard (97fd1cf)
+- **os:** no ring around the celebration's mark (013b5fe)
+- **os:** the guide shows the Apps icon, and Skip as an outline, bottom left (adf3de9)
+- **os:** the first Enter keycap a second after the welcome line (52279a0)
+- **os:** the settings sidebar's group headings in the text colour (90a280f)
+- **os:** the settings menus as My Account, Administration, Deployment (66fefd4)
+- **os:** the celebration's mark animates in, once (8d5adda)
+- **os:** the GitHub App under a Developers group, saying what it's for (7c50c64)
+- **os:** the settings sidebar's group headings in bold (028e7fe)
+- **os:** an empty dashboard with nothing to add points to App Manager (ad04897)
+- **os:** no Skip tour while the dashboard is being edited (6964c2f)
+- **os:** the tour ends on "MixOS is installed!" after the first edit (4e1a1c2)
+- **os:** the guide says Apps → App Manager, with Skip in its own corner (e231035)
+- **os:** the guide waits on what you do, with only Skip tour in its bubble (2711664)
+- **os:** the dashboard picture at a laptop's 16:10, the keycap still by it (59b83df)
+- **os:** the dashboard picture plays, and the tagline gets its own screen (0d9b981)
+- **os:** the Enter keycap blinks like a text cursor (ecafd54)
+- **os:** the welcome line alone under the mark, the keycap blinking (7be27ad)
+- **os:** show MixOS Launcher's icon in its window header (0097de0)
+- **os:** the welcome line waits on Enter, under the mark alone (3fcca3c)
+- **os:** release notices in the admin accent, the banner over the bar (f67974c)
+- **os:** guide visits App Manager and ends on the first widget (a7ce0c8)
+- **os:** welcome tour sends the logo home and shows a dashboard (0fe1266)
+- **os:** sign-in page says when there's no database, with Try again (49f3558)
+- **os:** show each copy's folder in MixOS Launcher (d0ef22b)
+- **os:** MixOS Launcher finds running copies itself, and keeps its window in view (97bb7c7)
+- **os:** give MixOS Launcher an installer window (f3cbb3a)
+- **os:** MixOS Launcher, a Mac app that runs, watches and sets up local copies (68f83de)
+- **os:** give every local checkout its own instance, and so its own database (2344544)
+- **os:** say when local MixOS is up, and offer the next port when 3000 is taken (ce1efab)
+- **os:** connect Claude, ChatGPT or Copilot from My MCP Connections (5234626)
+- **os:** MixOS's notes lead the popover without a heading of their own (1f22b79)
+- **themes:** release notes for mixos and mixos-dark (e831155)
+- **wall-e:** release notes, back to the first release (59d6f11)
+- **os:** App Manager's Release Notes page, with a filter by extension (582ef43)
+- **os:** a gift in the menu bar with what changed in the last 14 days (a5596ab)
+- **os:** release notes beside each extension's manifest, and MixOS's own (7ae11f9)
+- **os:** install only releases mixos.org signed (6198a5b)
+- **os:** Browse shows active installs, as mixos.org does (46fb2f1)
+
+### Fixes
+
+- **os:** Tech Talk lives with the admin components, not in app API (ec05beb)
+- **os:** an app uninstalled mid-tour stays uninstalled (afe18f2)
+- **os:** quiet Turbopack's warnings for extension parts nothing installed has (6a9aa97)
+
 ## v0.5.0 (2026-10-25)
 
 Changes since v0.4.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.5.0/WHATS-NEW.md).
