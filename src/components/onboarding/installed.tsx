@@ -6,7 +6,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import Image from "next/image";
-import { SquareCheck } from "lucide-react";
+import { Square, SquareCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { fitLogo, type LogoBox } from "@/lib/branding/fit";
@@ -166,10 +166,17 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
               through to the dim. Focused, so Enter is it too. */}
           <Button
             variant="primary"
-            icon={<SquareCheck className="h-4 w-4" aria-hidden />}
+            // An empty box that ticks itself under the pointer. Not on focus:
+            // the button has focus from the start, which would tick it then.
+            icon={
+              <span aria-hidden className="relative h-4 w-4">
+                <Square className="absolute inset-0 h-4 w-4 transition-opacity group-hover:opacity-0" />
+                <SquareCheck className="absolute inset-0 h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
+              </span>
+            }
             autoFocus
             onClick={() => setLeaving(true)}
-            className="pointer-events-auto mt-6"
+            className="group pointer-events-auto mt-6"
           >
             Setup Complete
           </Button>
