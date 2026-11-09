@@ -17,8 +17,7 @@ import { useTour } from "./tour-context";
  * screen, while the confetti shoots up from the bottom (./confetti.tsx).
  *
  * Above the headline, the install's mark animates in, once: drawn on by a
- * sweep as it turns into place, a ring pinging out as it lands, then one
- * glint across it. The mark itself, not a drawing of it — whatever the
+ * sweep as it turns into place, then one glint across it. The mark itself, not a drawing of it — whatever the
  * install's brand is, it is what plays. Motion is CSS (`celebrate-*` in
  * globals.css); reduced motion gets the mark, still.
  *
@@ -97,7 +96,6 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
             aria-hidden
             className="relative mx-auto flex h-36 w-36 items-center justify-center"
           >
-            <span className="celebrate-ping absolute inset-2 rounded-full border-2 border-primary/40" />
             <span className="celebrate-logo relative block">
               {mark ? (
                 <span className="celebrate-draw relative block">
