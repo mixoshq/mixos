@@ -16,7 +16,7 @@ import {
  * Where GitHub sends the admin after creating the App from its manifest, with
  * `code` and `state`. The state has to match the one in the admin's cookie and
  * the one kept for them, once; then the code is exchanged for the App
- * (src/lib/github/link.ts). The admin lands back on Admin > GitHub, with the
+ * (src/lib/github/link.ts). The admin lands back on Developers > GitHub App, with the
  * outcome as a fixed code in the query string, never the code from GitHub.
  *
  * A browser navigation carrying a session cookie, so not in the proxy's public

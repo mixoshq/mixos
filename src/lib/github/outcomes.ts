@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * What Admin > GitHub's actions answer, and what its page is given: the shapes
+ * What Developers > GitHub App's actions answer, and what its page is given: the shapes
  * shared by the server (./link.ts, ./propose.ts, ./proposals.ts) and the
  * pages' client components.
  *
@@ -244,7 +244,7 @@ export type UpdateProposalCompareOutcome = UpdateProposalComparison | Extract<Gi
 /** What a listed pull request proposes: an extension of a kind, or an update of MixOS itself. */
 export type ProposalKind = "app" | "connector" | "theme" | "mixos";
 
-/** An open pull request the App opened, as the Apps page and Admin > GitHub list it. */
+/** An open pull request the App opened, as the Apps page and Developers > GitHub App list it. */
 export interface ProposedPullRequest {
   number: number;
   url: string;

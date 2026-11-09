@@ -14,6 +14,9 @@ import { readPageState } from "@/lib/github/page-state";
 // The link changes on GitHub's say as much as on this page's; never cached.
 export const dynamic = "force-dynamic";
 
+/** The public guide to the App: docs/hosting/after-you-install/github-app.md, as mixos.org serves it. */
+const GITHUB_APP_DOCS = "https://mixos.org/docs/install/after-you-install/github-app";
+
 /** What the "create the App" round trip ended with, as `?created=` says. */
 const CREATED: Record<CreatedOutcome, { tone: OutcomeTone; text: string }> = {
   created: { tone: "success", text: "GitHub created the App, and its key is stored here, encrypted. Now install it." },
@@ -78,10 +81,20 @@ export default async function GitHubAdminPage({
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">GitHub</h1>
+        <h1 className="text-2xl font-bold text-foreground">GitHub App</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Link this instance to the repository it is built from, through a private GitHub App you own. One App,
-          installed on one repository, and never on upstream MixOS.
+          For developers. Link this instance to the GitHub repository it&apos;s built from, and installing, updating
+          or removing an extension here opens a pull request there, with no local checkout needed. You review and
+          merge it on GitHub, and merging is the deploy.{" "}
+          <a
+            href={GITHUB_APP_DOCS}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="font-medium text-primary underline underline-offset-2"
+          >
+            Read the GitHub App guide
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
         </p>
       </div>
       <div className="space-y-6">

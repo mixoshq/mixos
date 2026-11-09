@@ -41,7 +41,15 @@ export const ADMIN_SECTIONS: NavSection[] = [
   { label: "Themes", href: "/admin/themes", icon: Palette },
   { label: "Scheduled Jobs", href: "/admin/scheduled-jobs", icon: Clock },
   { label: "Analytics", href: "/admin/analytics", icon: BarChart3 },
-  { label: "GitHub", href: "/admin/github", icon: GitPullRequest },
+];
+
+/**
+ * For whoever maintains the repository the instance is built from: an admin
+ * page still (`/admin/github`, behind `requireAdmin`), shown to admins only,
+ * but grouped by who uses it. The URL stayed put, so links to it still work.
+ */
+export const DEVELOPER_SECTIONS: NavSection[] = [
+  { label: "GitHub App", href: "/admin/github", icon: GitPullRequest },
 ];
 
 /**

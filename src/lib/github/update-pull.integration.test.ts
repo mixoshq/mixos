@@ -20,7 +20,7 @@
  *     compare link given;
  *   - the branch rule and the preview checklist, as for an install;
  *   - an existing update branch: the open pull request's link, or the branch's;
- *   - Admin > GitHub's list: waiting, "No CI ran", checks, changed since;
+ *   - Developers > GitHub App's list: waiting, "No CI ran", checks, changed since;
  *   - over every request: no write but the one ref and the one pull request,
  *     no merge, and no secret anywhere.
  *
@@ -281,7 +281,7 @@ describe("a MixOS update as a pull request", { skip }, () => {
       defaultBranch: "main",
       branch: `mixos/update-${TAG}`,
       title: `Update MixOS to ${TAG} [skip preview]`,
-      off: "Confirm on Admin > GitHub that no host builds previews of the App's branches.",
+      off: "Confirm on Developers > GitHub App that no host builds previews of the App's branches.",
       compareUrl: `https://github.com/mixoshq/mixos/compare/${commits.A}...${TAG}`,
     });
     delete process.env.VERCEL;
@@ -488,7 +488,7 @@ describe("a MixOS update as a pull request", { skip }, () => {
     fork().rules = { main: ["deletion", "pull_request"] };
   });
 
-  test("Admin > GitHub's list: waiting, then No CI ran, checks, and changed since opened", async () => {
+  test("Developers > GitHub App's list: waiting, then No CI ran, checks, and changed since opened", async () => {
     const now = new Date();
     let view = await p.readProposals(ADMIN, "mixos", now);
     assert.equal(view.state, "ok", JSON.stringify(view));

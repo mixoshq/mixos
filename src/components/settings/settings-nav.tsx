@@ -9,6 +9,7 @@ import { usePathname } from "next/navigation";
 import {
   ACCOUNT_SECTIONS,
   ADMIN_SECTIONS,
+  DEVELOPER_SECTIONS,
   activeHref,
   type NavSection,
 } from "@/lib/admin/sections";
@@ -78,17 +79,21 @@ export function NavGroup({
 }
 
 /**
- * The settings sidebar: what an admin configures, then what they configure for
- * themselves.
+ * The settings sidebar: what an admin configures, what a developer links, then
+ * what they configure for themselves.
  *
- * `isAdmin` gates the whole Administration group rather than disabling its
- * links. A non-admin has no business seeing six pages they cannot open — and
+ * `isAdmin` gates the whole Administration and Developers groups rather than
+ * disabling their links. A non-admin has no business seeing six pages they cannot open — and
  * the header menu already hides the same block on the same condition, so
  * showing it here would be the one place that leaked it.
  */
 export default function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
-  const active = activeHref(pathname, [...ADMIN_SECTIONS, ...ACCOUNT_SECTIONS]);
+  const active = activeHref(pathname, [
+    ...ADMIN_SECTIONS,
+    ...DEVELOPER_SECTIONS,
+    ...ACCOUNT_SECTIONS,
+  ]);
   return (
     <div className="flex flex-col gap-6">
       {isAdmin && (
@@ -96,6 +101,14 @@ export default function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
           id="admin-nav-label"
           label="Administration"
           sections={ADMIN_SECTIONS}
+          active={active}
+        />
+      )}
+      {isAdmin && (
+        <NavGroup
+          id="developer-nav-label"
+          label="Developers"
+          sections={DEVELOPER_SECTIONS}
           active={active}
         />
       )}

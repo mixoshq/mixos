@@ -27,7 +27,7 @@
  *      whether the extension's folder is already on it, and whether the branch
  *      `mixos/install/<kind>-<slug>` exists. Any of them refuses, naming the
  *      file. So does a missing preview checklist, which an admin confirms for
- *      what the App can't read (Admin > GitHub). For an update or a removal,
+ *      what the App can't read (Developers > GitHub App). For an update or a removal,
  *      the folder has to be there instead, with a `.registry.json` that
  *      records the release this build runs (judge()).
  *   3. With a write token whose scope is the extension's folder: a blob for
@@ -186,15 +186,15 @@ export function precondition(kind: ExtensionKind): Extract<GitHubOutcome, { ok: 
  */
 export function offReason(state: GitHubState): string | null {
   if (!state.link) return "Nothing is linked.";
-  if (state.link.disabled) return "The GitHub link is off. Check again on Admin > GitHub.";
+  if (state.link.disabled) return "The GitHub link is off. Check again on Developers > GitHub App.";
   if (!branchRuleSatisfied(state).ok) {
     return (
       `No pull_request rule applies to ${state.link.repository.defaultBranch}. Add a ruleset, or confirm ` +
-      "another protection, on Admin > GitHub."
+      "another protection, on Developers > GitHub App."
     );
   }
   if (!state.previewChecklist) {
-    return "Confirm on Admin > GitHub that no host builds previews of the App's branches.";
+    return "Confirm on Developers > GitHub App that no host builds previews of the App's branches.";
   }
   return null;
 }
@@ -212,7 +212,7 @@ export async function proposalTarget(kind: ExtensionKind): Promise<ProposalTarge
   try {
     state = await readGitHubState();
   } catch {
-    // A record that can't be read: Admin > GitHub says so.
+    // A record that can't be read: Developers > GitHub App says so.
     return null;
   }
   if (!state.app || !state.link) return null;
@@ -412,7 +412,7 @@ export async function inspectDefaultBranch(
   const head = await branchHead(repo, defaultBranch);
   if (!head) {
     throw new GitHubError(
-      `GitHub has no branch ${defaultBranch}, the default branch on record. Check again on Admin > GitHub.`,
+      `GitHub has no branch ${defaultBranch}, the default branch on record. Check again on Developers > GitHub App.`,
       "not-found",
     );
   }
@@ -490,7 +490,7 @@ export async function readFolderAtHead(
   const head = await branchHead(repo, defaultBranch);
   if (!head) {
     throw new GitHubError(
-      `GitHub has no branch ${defaultBranch}, the default branch on record. Check again on Admin > GitHub.`,
+      `GitHub has no branch ${defaultBranch}, the default branch on record. Check again on Developers > GitHub App.`,
       "not-found",
     );
   }
@@ -613,8 +613,8 @@ export function judgeDefaultBranch(
       : state.override
         ? `An admin confirmed another protection on ${branch}.`
         : inspection.rules.unreadStatus !== undefined
-          ? `GitHub didn't let the App read the rules on ${branch} (${inspection.rules.unreadStatus}), and no other protection is confirmed. Confirm one on Admin > GitHub.`
-          : `No pull_request rule applies to ${branch}. Add a ruleset, or confirm another protection, on Admin > GitHub.`,
+          ? `GitHub didn't let the App read the rules on ${branch} (${inspection.rules.unreadStatus}), and no other protection is confirmed. Confirm one on Developers > GitHub App.`
+          : `No pull_request rule applies to ${branch}. Add a ruleset, or confirm another protection, on Developers > GitHub App.`,
   });
 
   lines.push({
@@ -623,7 +623,7 @@ export function judgeDefaultBranch(
     label: "Previews elsewhere",
     detail: state.previewChecklist
       ? `${state.previewChecklist.by} confirmed nothing else builds the App's branches.`
-      : "Confirm on Admin > GitHub that no host builds previews of the App's branches. The App can't read those settings.",
+      : "Confirm on Developers > GitHub App that no host builds previews of the App's branches. The App can't read those settings.",
   });
 
   const workflowFindings = inspection.findings.filter(isWorkflowFile);
@@ -752,7 +752,7 @@ export async function checkProposal(input: unknown, ctx: ProposeContext): Promis
   if (blocked) return blocked;
   try {
     const state = await readGitHubState();
-    if (!state.app || !state.link) return refused("not-linked", "Link a repository on Admin > GitHub first.", "info");
+    if (!state.app || !state.link) return refused("not-linked", "Link a repository on Developers > GitHub App first.", "info");
     const record = state.link.repository;
     const target = targetOf(kind, slug);
     const manifest = await resolveInstall(kind, slug);
@@ -1114,18 +1114,18 @@ export async function linkedState(): Promise<{
 }> {
   const state = await readGitHubState();
   if (!state.app || !state.link) {
-    throw new ProposalRefusal(refused("not-linked", "Link a repository on Admin > GitHub first.", "info"));
+    throw new ProposalRefusal(refused("not-linked", "Link a repository on Developers > GitHub App first.", "info"));
   }
   if (state.link.disabled) {
     throw new ProposalRefusal(
-      refused("disabled", `The GitHub link is off: ${state.link.disabled.detail} Check again on Admin > GitHub.`, "danger"),
+      refused("disabled", `The GitHub link is off: ${state.link.disabled.detail} Check again on Developers > GitHub App.`, "danger"),
     );
   }
   if (!state.previewChecklist) {
     throw new ProposalRefusal(
       refused(
         "checklist",
-        "Not proposed. Confirm on Admin > GitHub that no host builds previews of the App's branches. The App " +
+        "Not proposed. Confirm on Developers > GitHub App that no host builds previews of the App's branches. The App " +
           "can't read those settings.",
         "danger",
       ),

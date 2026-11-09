@@ -175,5 +175,5 @@ deployment doesn't rebuild: its release step ran when it was built.
   that preview's own database.
 - **Signing in sends you back to the sign-in page on a custom domain.** Set
   `NEXTAUTH_URL` to that domain, exactly.
-- **Admin > GitHub refuses to propose.** Your `vercel.json` doesn't turn off
+- **Developers > GitHub App refuses to propose.** Your `vercel.json` doesn't turn off
   deployments of `mixos/**`. Add the setting above.
