@@ -130,6 +130,14 @@ final class CheckoutTests: XCTestCase {
     XCTAssertEqual(CheckoutFolder.suggestedNew(in: scratch).lastPathComponent, "MixOS-3")
   }
 
+  func testAFolderShowsWithTheOneAboveIt() {
+    let home = URL(fileURLWithPath: "/Users/me")
+    XCTAssertEqual(CheckoutFolder.shortPath(URL(fileURLWithPath: "/Users/me/git/mixos"), home: home), "git/mixos")
+    XCTAssertEqual(CheckoutFolder.shortPath(URL(fileURLWithPath: "/Users/me/mixos-dev"), home: home), "~/mixos-dev")
+    XCTAssertEqual(CheckoutFolder.shortPath(URL(fileURLWithPath: "/Users/me/git/mixos/"), home: home), "git/mixos")
+    XCTAssertEqual(CheckoutFolder.shortPath(URL(fileURLWithPath: "/mixos"), home: home), "/mixos")
+  }
+
   func testClaimsAreReadFromTheStateDirectory() throws {
     let file = scratch.appendingPathComponent("instances.json")
     try Data("""

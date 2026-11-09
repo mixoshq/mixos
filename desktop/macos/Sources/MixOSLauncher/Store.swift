@@ -16,6 +16,8 @@ struct Checkout: Identifiable, Hashable {
   let url: URL
   var id: String { url.path }
   var folderName: String { url.lastPathComponent }
+  /// `git/mixos`: the folder and the one above it, for the list and the menu.
+  var shortPath: String { CheckoutFolder.shortPath(url) }
 }
 
 /// What the launcher knows about a checkout's status right now.
