@@ -12,9 +12,17 @@ import {
 } from "@/lib/apps/access";
 import { appRegistry } from "@/generated/app-registry";
 import AppManagerList from "@/components/apps/app-manager-list";
+import { WIDGETS_PARAM } from "@/lib/apps/app-manager-url";
 import SettingsShell from "@/components/settings/settings-shell";
 
-export default async function AppsPage() {
+export default async function AppsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // `?widgets=1` opens the list with its Widgets filter on: the empty
+  // dashboard's "Install Apps with widgets" links here that way.
+  const widgetsOnly = (await searchParams)[WIDGETS_PARAM] === "1";
   const session = await requireReadOnlySession();
   const userId = await ensureUser(session.user);
   const [installedSlugs, grantedSlugs] = await Promise.all([
@@ -63,7 +71,14 @@ export default async function AppsPage() {
           hasn't connected is simply absent from the app's context, which the
           app handles (docs/apps/connectors.md).
         */}
-        <AppManagerList apps={availableApps} installedSlugs={installedSlugs} />
+        {/* Keyed on the filter, so following the link while already here
+            sets it rather than keeping whatever the list had. */}
+        <AppManagerList
+          key={widgetsOnly ? "widgets" : "all"}
+          apps={availableApps}
+          installedSlugs={installedSlugs}
+          initialWidgetsOnly={widgetsOnly}
+        />
       </div>
     </SettingsShell>
   );

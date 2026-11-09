@@ -73,6 +73,10 @@ export const GUIDE_STEPS: GuideStep[] = [
     target: [DASHBOARD_TARGET, "dashboard-pencil"],
     title: "Now, add a widget to your dashboard.",
     body: "A widget is a small piece of an app.",
+    // Only while something installed has a widget: otherwise the empty
+    // dashboard offers "Install Apps with widgets" instead, with no target
+    // here, and the step waits for them to install one.
+    //
     // Done when they finish editing with a widget added: the pencil is back
     // once editing is over and there is a widget. Adding one only arms it,
     // so they can add as many as they like first. The pencil is there before
