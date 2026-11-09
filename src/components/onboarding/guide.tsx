@@ -13,6 +13,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { CARD_SURFACE } from "@/components/ui/card";
+import { useDashboardEdit } from "@/components/dashboard/edit-mode-context";
 import { cn } from "@/lib/utils";
 import { useTour, type BurstOrigin } from "./tour-context";
 import { GUIDE_STEPS, type GuideStep } from "./steps";
@@ -42,7 +43,9 @@ import { GUIDE_STEPS, type GuideStep } from "./steps";
  * SKIP IS NOT IN THE BUBBLE. It is a chip of its own in the bottom-right
  * corner, above the dim, and it stays while a step waits out of sight — on
  * App Manager, say — so there is always a way out of a tour that is waiting
- * for something the user may never do. Where the step points into that
+ * for something the user may never do — except while the dashboard is being
+ * edited, where Done Editing is the tour's last step and Skip would be a
+ * second way to end it. Where the step points into that
  * corner (the dashboard's pencil), the chip steps left of it: the bubble
  * goes above such a target, so up would put the two on top of each other.
  */
@@ -179,14 +182,9 @@ function Steps() {
   return <Step key={index} step={step} onAdvance={onAdvance} />;
 }
 
-function Step({
-  step,
-  onAdvance,
-}: {
-  step: GuideStep;
-  onAdvance: () => void;
-}) {
+function Step({ step, onAdvance }: { step: GuideStep; onAdvance: () => void }) {
   const { finish } = useTour();
+  const { isEditing } = useDashboardEdit();
   const { rect, done } = useStepState(step);
 
   // A step advances itself once it is done. Deferred so the setState lands
@@ -202,7 +200,9 @@ function Step({
 
   // Skip's corner, unless the target is in it: then just left of the target.
   const skipAt =
-    rect && rect.left + rect.width > vw - SKIP_CLEAR_W && rect.top + rect.height > vh - SKIP_CLEAR_H
+    rect &&
+    rect.left + rect.width > vw - SKIP_CLEAR_W &&
+    rect.top + rect.height > vh - SKIP_CLEAR_H
       ? { right: vw - rect.left + BUBBLE_GAP, bottom: EDGE }
       : { right: EDGE, bottom: EDGE };
 
@@ -211,14 +211,16 @@ function Step({
       {/* Not once it's done: its target can be the very thing whose
           appearance said so — the pencil, back after editing. */}
       {rect && !done && <Bubble step={step} rect={rect} vw={vw} vh={vh} />}
-      <button
-        type="button"
-        onClick={finish}
-        className="tour-bubble-in fixed z-[95] rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:text-foreground"
-        style={skipAt}
-      >
-        Skip tour
-      </button>
+      {!isEditing && (
+        <button
+          type="button"
+          onClick={finish}
+          className="tour-bubble-in fixed z-[95] rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+          style={skipAt}
+        >
+          Skip tour
+        </button>
+      )}
     </>,
     document.body,
   );
@@ -245,7 +247,9 @@ function Bubble({
   const placement =
     wantedSide === "below" && roomBelow < BUBBLE_MIN_H && roomAbove > roomBelow
       ? "above"
-      : wantedSide === "above" && roomAbove < BUBBLE_MIN_H && roomBelow > roomAbove
+      : wantedSide === "above" &&
+          roomAbove < BUBBLE_MIN_H &&
+          roomBelow > roomAbove
         ? "below"
         : wantedSide;
   const dim = step.dim ?? true;
