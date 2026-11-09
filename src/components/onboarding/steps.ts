@@ -8,11 +8,11 @@
  * and draws the bubble next to it — and draws nothing while the target is not
  * on the page, which is how a step waits for the user to come back to it.
  *
- * Two kinds of step. A `next` step is read and dismissed with its button. An
- * `auto` step asks the user to do something real — add a widget — and moves
- * on the moment the page announces it happened (`doneOn`). No button on
- * those: the action is the button. A step waits as long as it takes; Skip
- * tour is on every one but a closing Done.
+ * Every step ends on something the user does — opens the Apps menu, closes
+ * it, adds a widget — and moves on the moment the page shows it happened:
+ * an element appearing (`doneWhen`), the target going (`endsWithTarget`), or
+ * an event the page announces (`doneOn`). No Next button: the action is the
+ * button. A step waits as long as it takes, with Skip tour on it throughout.
  *
  * Add a step by adding an entry here and a `data-tour="<name>"` on the
  * element it should point at.
@@ -35,12 +35,9 @@ export interface GuideStep {
    * on-screen regardless, and its arrow always points at the target.
    */
   along?: number;
-  /** `next` (default): a Next/Done button. `auto`: advances on `doneOn`. */
-  advance?: "next" | "auto";
-  /**
-   * For `auto` steps: the window event that says the thing this step asked
-   * for is done.
-   */
+  /** A selector whose element appearing says the thing this step asked for is done. */
+  doneWhen?: string;
+  /** A window event that says the thing this step asked for is done. */
   doneOn?: string;
   /**
    * The page the step happens on. The guide goes there when the step starts,
@@ -60,10 +57,7 @@ export interface GuideStep {
    * where nobody can see it.
    */
   endsWithTarget?: boolean;
-  /**
-   * The last step, when it is `auto`: where the confetti bursts from, since
-   * there is no Done button for it to burst from.
-   */
+  /** The last step: where the confetti bursts from when it is done. */
   celebrateAt?: () => Element | null;
   /**
    * Draw the dim around the spotlight. Default true. Off where the user is
@@ -85,8 +79,10 @@ export const GUIDE_STEPS: GuideStep[] = [
   {
     target: "menu-bar",
     title: "This is your menu bar.",
-    body: "Open Apps, pin your favorites, manage your account.",
+    body: "Install an app by clicking Apps.",
     along: 0.3,
+    // The Apps menu, open: App Manager is in it.
+    doneWhen: `[data-tour="${APP_MANAGER_LINK}"]`,
   },
   {
     target: APP_MANAGER_LINK,
@@ -100,7 +96,6 @@ export const GUIDE_STEPS: GuideStep[] = [
     target: [DASHBOARD_TARGET, "dashboard-pencil"],
     title: "Now, add a widget to your dashboard.",
     body: "A widget is a small piece of an app. Start here.",
-    advance: "auto",
     // DashboardGrid's, once a widget from the catalog is on the dashboard.
     doneOn: "dashboard:widget-added",
     // The dashboard appends, so the widget just added is the last one.
