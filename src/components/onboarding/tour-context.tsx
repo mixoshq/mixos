@@ -8,6 +8,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -45,10 +46,16 @@ interface TourContextValue {
   /** Any phase → `done`, and stamps completion. Used by Skip. */
   finish: () => void;
   /**
-   * The end of the guide: `finish`, plus the celebration — confetti from
-   * `origin`, and the message that says the install is done.
+   * The end of the guide: `finish`, plus the celebration — the message that
+   * says the install is done, now, and confetti from `origin` when the
+   * message calls `burst()`.
    */
   complete: (origin: BurstOrigin) => void;
+  /**
+   * Set the confetti off, once: the message calls it the moment its mark has
+   * drawn itself on, so the burst lands on the mark finishing.
+   */
+  burst: () => void;
   /** Where the confetti is bursting from, for a few seconds after `complete()`; null otherwise. */
   celebrating: BurstOrigin | null;
   /** The "is installed" message is up, from `complete()` until it is dismissed. */
@@ -68,6 +75,7 @@ const TourContext = createContext<TourContextValue>({
   revealed: () => {},
   finish: () => {},
   complete: () => {},
+  burst: () => {},
   celebrating: null,
   installed: false,
   dismissInstalled: () => {},
@@ -118,14 +126,22 @@ export function TourProvider({
     // the tour plays again next time, which is the safe direction to fail.
     void markOnboardingComplete();
   }, []);
+  // Where the confetti will burst from, held between `complete()` and the
+  // message's `burst()`; cleared by the burst, so a second call does nothing.
+  const pendingBurst = useRef<BurstOrigin | null>(null);
   const complete = useCallback(
     (origin: BurstOrigin) => {
       finish();
-      setCelebrating(origin);
+      pendingBurst.current = origin;
       setInstalled(true);
     },
     [finish],
   );
+  const burst = useCallback(() => {
+    if (!pendingBurst.current) return;
+    setCelebrating(pendingBurst.current);
+    pendingBurst.current = null;
+  }, []);
   const celebrated = useCallback(() => setCelebrating(null), []);
   const dismissInstalled = useCallback(() => setInstalled(false), []);
 
@@ -137,6 +153,7 @@ export function TourProvider({
         revealed,
         finish,
         complete,
+        burst,
         celebrating,
         installed,
         dismissInstalled,
