@@ -422,7 +422,7 @@ be deleted, the code still goes and the data stays.
 
 ## Link the GitHub App
 
-Developers > GitHub App links a deployment to the repository it's built from, through a
+Deployment > GitHub App links a deployment to the repository it's built from, through a
 private GitHub App you own, installed on that one repository. Then the
 deployment can propose extensions, their updates and their removals as pull
 requests, which you review and merge on GitHub. It's off until

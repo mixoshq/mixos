@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * What Developers > GitHub App shows, read from this instance alone: the stored link,
+ * What Deployment > GitHub App shows, read from this instance alone: the stored link,
  * and whether the stored key decrypts. Nothing here asks GitHub; the page's
  * Check again does. The caller has already required an admin.
  */

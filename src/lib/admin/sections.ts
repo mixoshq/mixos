@@ -44,11 +44,12 @@ export const ADMIN_SECTIONS: NavSection[] = [
 ];
 
 /**
- * For whoever maintains the repository the instance is built from: an admin
- * page still (`/admin/github`, behind `requireAdmin`), shown to admins only,
- * but grouped by who uses it. The URL stayed put, so links to it still work.
+ * How changes reach this deployed instance: the GitHub App, which turns an
+ * extension installed, updated or removed here into a pull request on the
+ * repository it's built from. An admin page still (`/admin/github`, behind
+ * `requireAdmin`), at the URL it always had. A group left empty isn't shown.
  */
-export const DEVELOPER_SECTIONS: NavSection[] = [
+export const DEPLOYMENT_SECTIONS: NavSection[] = [
   { label: "GitHub App", href: "/admin/github", icon: GitPullRequest },
 ];
 

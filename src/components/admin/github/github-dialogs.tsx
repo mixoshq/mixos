@@ -22,7 +22,7 @@ import type { GitHubOutcome } from "@/lib/github/outcomes";
 import { OutcomeNotice, PREVIEW_ITEMS } from "./github-parts";
 
 /**
- * Developers > GitHub App's dialogs. Each closes with what its action answered, which
+ * Deployment > GitHub App's dialogs. Each closes with what its action answered, which
  * the page shows; a refusal it can say more about stays open to say it.
  */
 

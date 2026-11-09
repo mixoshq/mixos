@@ -83,9 +83,10 @@ export default async function GitHubAdminPage({
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">GitHub App</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          For developers. Link this instance to the GitHub repository it&apos;s built from, and installing, updating
-          or removing an extension here opens a pull request there, with no local checkout needed. You review and
-          merge it on GitHub, and merging is the deploy.{" "}
+          Manage extensions on this live instance without a developer making the change in a checkout. With
+          the App linked, installing, updating or removing an app, connector or theme here opens a pull request
+          in the GitHub repository this instance is built from. Nothing changes on its own: you review and merge
+          it on GitHub, and merging is the deploy.{" "}
           <a
             href={GITHUB_APP_DOCS}
             target="_blank"

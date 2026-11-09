@@ -92,7 +92,7 @@ carry a publisher's code, so the instance refuses to propose while `render.yaml`
 turns previews on, and the App's pull request titles carry `[skip preview]` as
 well. If you created the service in the dashboard rather than from the
 Blueprint, turn its previews off in its settings. The App can't see that
-setting, so Developers > GitHub App asks you to confirm it.
+setting, so Deployment > GitHub App asks you to confirm it.
 
 ## Upgrading on Render
 

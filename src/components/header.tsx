@@ -7,7 +7,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ADMIN_SECTIONS, DEVELOPER_SECTIONS } from "@/lib/admin/sections";
+import { ADMIN_SECTIONS, DEPLOYMENT_SECTIONS } from "@/lib/admin/sections";
 import { useSession, signOut } from "next-auth/react";
 import { useState, useRef, useEffect } from "react";
 import {
@@ -186,43 +186,6 @@ export default function Header({
                 "absolute right-0 top-full z-50 mt-1 w-56 py-1 shadow-lg",
               )}
             >
-              {isAdmin && (
-                <>
-                  {/* Mapped from the shared lists rather than written out, so
-                    this menu and the settings sidebar cannot disagree about
-                    what each group contains. See src/lib/admin/sections.ts. */}
-                  {(
-                    [
-                      ["Administration", ADMIN_SECTIONS],
-                      ["Developers", DEVELOPER_SECTIONS],
-                    ] as const
-                  ).map(([heading, sections]) => (
-                    <div key={heading}>
-                      <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        {heading}
-                      </p>
-                      {sections.map((section) => {
-                        const Icon = section.icon;
-                        return (
-                          <Link
-                            key={section.href}
-                            href={section.href}
-                            onClick={() => setMenuOpen(false)}
-                            className="flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent"
-                          >
-                            <Icon
-                              className="h-4 w-4 text-muted-foreground"
-                              aria-hidden
-                            />
-                            {section.label}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  ))}
-                  <div className="my-1 border-t border-border" />
-                </>
-              )}
               <Link
                 href="/account"
                 onClick={() => setMenuOpen(false)}
@@ -231,6 +194,47 @@ export default function Header({
                 <UserCog className="h-4 w-4 text-muted-foreground" />
                 My Account
               </Link>
+              {isAdmin && (
+                <>
+                  <div className="my-1 border-t border-border" />
+                  {/* Mapped from the shared lists rather than written out, so
+                    this menu and the settings sidebar cannot disagree about
+                    what each group contains, or about leaving out an empty
+                    one. See src/lib/admin/sections.ts. */}
+                  {(
+                    [
+                      ["Administration", ADMIN_SECTIONS],
+                      ["Deployment", DEPLOYMENT_SECTIONS],
+                    ] as const
+                  )
+                    .filter(([, sections]) => sections.length > 0)
+                    .map(([heading, sections]) => (
+                      <div key={heading}>
+                        <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          {heading}
+                        </p>
+                        {sections.map((section) => {
+                          const Icon = section.icon;
+                          return (
+                            <Link
+                              key={section.href}
+                              href={section.href}
+                              onClick={() => setMenuOpen(false)}
+                              className="flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent"
+                            >
+                              <Icon
+                                className="h-4 w-4 text-muted-foreground"
+                                aria-hidden
+                              />
+                              {section.label}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    ))}
+                </>
+              )}
+              <div className="my-1 border-t border-border" />
               <button
                 onClick={() => {
                   setMenuOpen(false);

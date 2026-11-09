@@ -3578,7 +3578,7 @@ a release published that way can be verified and installed.
 
 ## 32. The GitHub App
 
-Developers > GitHub App links the instance to the one repository it is built from,
+Deployment > GitHub App links the instance to the one repository it is built from,
 through a private GitHub App the operator owns
 ([`src/lib/github/`](../src/lib/github/)). It is off while
 `GITHUB_APP_ENCRYPTION_KEY` is unset (§5). On a built deployment, Browse uses it
@@ -3597,7 +3597,7 @@ be installed only on the account that owns it.
 
 ### Creating it
 
-Developers > GitHub App posts the App's manifest to GitHub. That page is the only one
+Deployment > GitHub App posts the App's manifest to GitHub. That page is the only one
 whose `form-action` allows another origin, `https://github.com`
 (`formActionsFor()`, `src/lib/csp.ts`).
 
@@ -3848,7 +3848,7 @@ when `vercel.json` doesn't turn off deployments of `mixos/**`.
 
 The App can't read Render's service previews set in its dashboard, Railway's PR
 environments or Coolify's preview deployments, so an admin confirms a
-checklist on Developers > GitHub App (`github_preview_checklist`), audited. This
+checklist on Deployment > GitHub App (`github_preview_checklist`), audited. This
 repository's own files pass: `danger.yml`'s job skips App branches, `ci.yml`
 checks out with `persist-credentials: false`, `extensions.yml`, which is the
 check, has `contents: read` only, and `vercel.json` and `render.yaml` turn off
@@ -3868,7 +3868,7 @@ the App opens the pull request. Each is listed as what its branch proposes: an
 install, an update to a release or a removal. A pull request on a `mixos/install/`,
 `mixos/update/` or `mixos/remove/` branch with no such row is marked as not
 proposed from this instance. Links are built from the stored repository and
-the pull request's number. Developers > GitHub App lists the open
+the pull request's number. Deployment > GitHub App lists the open
 `mixos/update-` pull requests the same way, joined to `mixos.update.propose`.
 
 ### MixOS update pull requests
