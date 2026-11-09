@@ -30,7 +30,7 @@ import { useTour } from "./tour-context";
  * THE COPY IS CHOREOGRAPHED, NOT PAGED. Each screen is a list of beats with
  * a delay before each; the beats fade in one at a time and Next — the Enter
  * key, or the faint keycap that says so — fades the whole screen out before
- * the next one begins. The pauses are the design — two seconds on the
+ * the next one begins. The pauses are the design — a second on the
  * welcome line before the keycap, a second on the picture before the words
  * for it and two on those before the keycap again, then the tagline alone,
  * two seconds before "Let's begin". Enter is Let's begin too, there.
@@ -97,7 +97,7 @@ const screens = (name: string): Screen[] => [
         text: `Welcome to ${name}, your new home base.`,
         delay: 400,
       },
-      { kind: "next", delay: 2000 },
+      { kind: "next", delay: 1000 },
     ],
   },
   {
