@@ -18,6 +18,7 @@ struct MixOSLauncherApp: App {
       MainWindow()
         .environmentObject(store)
         .frame(minWidth: 760, minHeight: 480)
+        .background(FollowsYouAcrossSpaces())
     }
     .defaultSize(width: 920, height: 600)
     .commands {
@@ -87,5 +88,27 @@ private struct MenuBarLabel: View {
     } else {
       Image(systemName: state == .up ? "square.grid.3x3.fill" : "square.grid.3x3")
     }
+  }
+}
+
+/// The window opens where the person is. By default a macOS window belongs to
+/// the Space it was first shown on, so opening the launcher from the menu bar
+/// while in another Space — or over an app in full screen, VS Code say — sent
+/// them to that Space, and the window seemed to vanish the moment they went
+/// back. A launcher is a glance, so its window moves to the active Space
+/// instead, and may sit over a full-screen app.
+private struct FollowsYouAcrossSpaces: NSViewRepresentable {
+  func makeNSView(context: Context) -> NSView {
+    let view = NSView()
+    DispatchQueue.main.async { configure(view.window) }
+    return view
+  }
+
+  func updateNSView(_ view: NSView, context: Context) {
+    DispatchQueue.main.async { configure(view.window) }
+  }
+
+  private func configure(_ window: NSWindow?) {
+    window?.collectionBehavior.formUnion([.moveToActiveSpace, .fullScreenAuxiliary])
   }
 }

@@ -16,16 +16,15 @@ struct MenuContent: View {
     }
     ForEach(store.checkouts) { checkout in
       let summary = store.summary(of: checkout)
-      let report = store.status(of: checkout).report
       let busy = store.jobs[checkout.id]?.running == true
       Menu("\(summary.symbol)  \(store.title(of: checkout)) — \(summary.text)") {
-        if report?.app != nil {
+        if store.appURL(of: checkout) != nil {
           Button("Open in Browser") { store.open(checkout) }
         }
-        Button(report?.app == nil ? "Start" : "Restart") { store.start(checkout) }
+        Button(store.isRunning(checkout) ? "Restart" : "Start") { store.start(checkout) }
           .disabled(busy)
         Button("Stop") { store.stop(checkout) }
-          .disabled(busy || report?.app == nil)
+          .disabled(busy || !store.hasAnythingRunning(checkout))
         Divider()
         Button("Show Details…") { show(checkout.id) }
         Button("Show in Finder") { store.reveal(checkout) }

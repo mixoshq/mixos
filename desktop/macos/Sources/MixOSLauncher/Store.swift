@@ -4,7 +4,12 @@
 
 import AppKit
 import LauncherCore
+import OSLog
 import SwiftUI
+
+/// What the launcher sees and does, in the unified log:
+/// `log stream --predicate 'subsystem == "org.mixos.launcher"'`.
+let log = Logger(subsystem: "org.mixos.launcher", category: "store")
 
 /// A MixOS checkout on this Mac: a folder, known by its path.
 struct Checkout: Identifiable, Hashable {
@@ -49,10 +54,13 @@ final class Job: ObservableObject {
 
 /// Everything the window and the menu bar show, and every action they take.
 ///
-/// The launcher decides nothing about MixOS itself. It asks each checkout with
-/// `npm run status -- --json`, starts one with `npm run dev:docker -- --detach`
-/// and stops one with `npm run docker:down`, so what it shows is always what
-/// that checkout's own code says.
+/// Two sources, for two questions. What is running, and from which folder, the
+/// launcher sees for itself (Detector): Docker's containers, followed live, and
+/// the host's servers, every few seconds. Whether a copy is *healthy* only the
+/// copy can say, so it asks with `npm run status -- --json` — when the copy
+/// starts or stops, and now and then besides. It starts a copy with
+/// `npm run dev:docker -- --detach` and stops one with `npm run docker:down`,
+/// so what it does is always what that checkout's own code does.
 @MainActor
 final class Store: ObservableObject {
   @Published private(set) var checkouts: [Checkout] = []
@@ -61,54 +69,141 @@ final class Store: ObservableObject {
   @Published var selection: String?
   @Published var showingSetup = false
   @Published private(set) var refreshing: Set<String> = []
+  /// What is running, and what has run, by checkout: the launcher's own look.
+  @Published private(set) var detected: [String: DetectedCopy] = [:]
 
   @AppStorage("openBrowserOnStart") var openBrowserOnStart = true
 
   private(set) var runner: CommandRunner?
+  private var detector: Detector?
   private var timer: Timer?
+  private var scanTimer: Timer?
+  private var dockerWatch: Task<Void, Never>?
+  private var scanning = false
+  private var scanAgain = false
 
   private static let addedKey = "addedCheckouts"
   private static let discoveredKey = "discoveredCheckouts"
   private static let hiddenKey = "hiddenCheckouts"
 
-  /// How often status is asked again. Each ask starts Node in each checkout,
-  /// so not often; an action refreshes its checkout straight away anyway.
-  private static let refreshInterval: TimeInterval = 20
+  /// How often every copy's status is asked again. Each ask starts Node in the
+  /// checkout, and detection already catches a copy starting or stopping, so
+  /// this only refreshes the health of copies that kept running.
+  private static let refreshInterval: TimeInterval = 60
+
+  /// How often the host is looked at for `npm run dev` servers. Docker needs no
+  /// poll: its event stream says when a container starts or stops.
+  private static let scanInterval: TimeInterval = 5
 
   init() {
     loadCheckouts()
     Task {
-      runner = CommandRunner(path: await LoginShell.resolvePath())
+      let runner = CommandRunner(path: await LoginShell.resolvePath())
+      self.runner = runner
+      let detector = Detector(runner: runner)
+      self.detector = detector
+      scan()
       refreshAll()
+      watchDocker(with: detector)
     }
     timer = Timer.scheduledTimer(withTimeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.refreshAll() }
     }
+    scanTimer = Timer.scheduledTimer(withTimeInterval: Self.scanInterval, repeats: true) { [weak self] _ in
+      Task { @MainActor in self?.scan() }
+    }
+  }
+
+  // ── Detection ─────────────────────────────────────────────────────────────
+
+  /// Docker's event stream, for the whole life of the app, off the main actor:
+  /// each container start, stop or removal is a scan, at once.
+  private func watchDocker(with detector: Detector) {
+    dockerWatch = Task.detached { [weak self] in
+      await detector.watchDocker {
+        DispatchQueue.main.async { self?.scan() }
+      }
+    }
+  }
+
+  /// Look again at what is running. A scan asked for while one is under way
+  /// runs once more after it, so a burst of Docker events is one extra scan.
+  func scan() {
+    guard let detector else { return }
+    if scanning {
+      scanAgain = true
+      return
+    }
+    scanning = true
+    Task {
+      let found = await detector.scan()
+      let before = detected
+      if found != before {
+        let summary = found.values.map { "\(URL(fileURLWithPath: $0.checkout).lastPathComponent)=\($0.app?.url ?? ($0.databaseRunning ? "db" : "stopped"))" }
+        log.notice("scan: \(summary.sorted().joined(separator: " "), privacy: .public)")
+      }
+      detected = found
+      remember(found.keys)
+      loadCheckouts()
+      // A copy that started or stopped since the last look is asked for its
+      // checks straight away, rather than at the next minute.
+      for (path, copy) in found where before[path]?.app != copy.app || before[path]?.databaseRunning != copy.databaseRunning {
+        if before[path] != nil || copy.running { refresh(Checkout(url: URL(fileURLWithPath: path))) }
+      }
+      for (path, copy) in before where found[path] == nil && copy.running {
+        refresh(Checkout(url: URL(fileURLWithPath: path)))
+      }
+      scanning = false
+      if scanAgain {
+        scanAgain = false
+        scan()
+      }
+    }
+  }
+
+  /// Detected copies stay on the list once seen, so a copy that stops — or was
+  /// only ever a host `npm run dev`, with no claim — can be started from here.
+  private func remember<S: Sequence>(_ paths: S) where S.Element == String {
+    let defaults = UserDefaults.standard
+    var discovered = defaults.stringArray(forKey: Self.discoveredKey) ?? []
+    let new = paths.filter { !discovered.contains($0) }
+    guard !new.isEmpty else { return }
+    discovered += new
+    defaults.set(discovered, forKey: Self.discoveredKey)
   }
 
   // ── The list ──────────────────────────────────────────────────────────────
 
-  /// Checkouts this launcher was given, plus every one that has booted MixOS
-  /// (their claims) or been seen running by another's status report, minus
-  /// those the person removed from the list.
+  /// Checkouts this launcher was given, plus every one it has detected — its
+  /// claim, its containers, its host server — minus those the person removed
+  /// from the list. Running copies first, then by name.
   func loadCheckouts() {
     let defaults = UserDefaults.standard
     let added = defaults.stringArray(forKey: Self.addedKey) ?? []
     let discovered = defaults.stringArray(forKey: Self.discoveredKey) ?? []
-    let hidden = Set(defaults.stringArray(forKey: Self.hiddenKey) ?? [])
+    let hidden = Set((defaults.stringArray(forKey: Self.hiddenKey) ?? []).map(Detection.canonical))
     let claimed = Claims.read().values.map(\.checkout)
     var seen = Set<String>()
     var found: [Checkout] = []
-    for path in added + claimed.sorted() + discovered where !hidden.contains(path) && seen.insert(path).inserted {
+    for raw in added + claimed + discovered + Array(detected.keys) {
+      let path = Detection.canonical(raw)
+      guard !hidden.contains(path), seen.insert(path).inserted else { continue }
       let url = URL(fileURLWithPath: path)
       if CheckoutFolder.isMixOS(url) { found.append(Checkout(url: url)) }
     }
-    checkouts = found
+    found.sort { a, b in
+      let (ra, rb) = (detected[a.id]?.running == true, detected[b.id]?.running == true)
+      return ra != rb ? ra : title(of: a).localizedCaseInsensitiveCompare(title(of: b)) == .orderedAscending
+    }
+    if found != checkouts {
+      log.notice("list: \(found.map(\.folderName).joined(separator: ", "), privacy: .public) (was \(self.checkouts.count))")
+      checkouts = found
+    }
     if selection == nil { selection = found.first?.id }
   }
 
   func add(_ url: URL) {
-    let path = url.standardizedFileURL.path
+    let path = Detection.canonical(url.path)
     let defaults = UserDefaults.standard
     var added = defaults.stringArray(forKey: Self.addedKey) ?? []
     if !added.contains(path) { added.append(path) }
@@ -147,7 +242,6 @@ final class Store: ObservableObject {
       refreshing.remove(checkout.id)
       if let report = StatusReport.parse(result.output) {
         statuses[checkout.id] = .report(report)
-        discover(report)
       } else {
         statuses[checkout.id] = .unavailable(
           "This copy of MixOS can't report its status: it predates `npm run status`, or its " +
@@ -157,52 +251,64 @@ final class Store: ObservableObject {
     }
   }
 
-  /// Copies a checkout saw running on this Mac: a copy from before claims
-  /// existed is in no claim until it boots again, but it is in this list as
-  /// soon as anything is running it.
-  private func discover(_ report: StatusReport) {
-    let defaults = UserDefaults.standard
-    var discovered = defaults.stringArray(forKey: Self.discoveredKey) ?? []
-    let known = Set(checkouts.map(\.id))
-    let new = report.others.compactMap(\.checkout).filter {
-      !known.contains($0) && !discovered.contains($0) && CheckoutFolder.isMixOS(URL(fileURLWithPath: $0))
-    }
-    guard !new.isEmpty else { return }
-    discovered += new
-    defaults.set(discovered, forKey: Self.discoveredKey)
-    loadCheckouts()
-    for path in new { refresh(Checkout(url: URL(fileURLWithPath: path))) }
-  }
-
   func status(of checkout: Checkout) -> Status {
     statuses[checkout.id] ?? .unknown
   }
 
-  /// The name to show: the instance's, once its checkout has said it.
+  /// The name to show: the instance's, as the checkout or detection says it.
   func title(of checkout: Checkout) -> String {
-    status(of: checkout).report?.instance ?? checkout.folderName
+    status(of: checkout).report?.instance ?? detected[checkout.id]?.instance ?? checkout.folderName
   }
 
-  /// One word and a colour for a checkout, for the sidebar and the menu.
+  /// The running app's address: the checkout's word for it, else detection's.
+  func appURL(of checkout: Checkout) -> URL? {
+    (status(of: checkout).report?.app?.url ?? detected[checkout.id]?.app?.url).flatMap(URL.init(string:))
+  }
+
+  /// Whether the app is serving right now. Detection is the fresher of the two
+  /// answers; a status report can be up to a minute old.
+  func isRunning(_ checkout: Checkout) -> Bool {
+    if let copy = detected[checkout.id] { return copy.app != nil }
+    return status(of: checkout).report?.app != nil
+  }
+
+  /// Whether anything of it runs — its app, or only its database — and so
+  /// whether Stop has anything to stop.
+  func hasAnythingRunning(_ checkout: Checkout) -> Bool {
+    detected[checkout.id]?.running ?? (status(of: checkout).report?.app != nil)
+  }
+
+  /// One phrase and a colour for a checkout, for the sidebar and the menu.
+  /// Detection says whether it runs; the checkout's own checks say whether
+  /// it runs *well*, once they have been asked since it started.
   func summary(of checkout: Checkout) -> (text: String, color: Color, symbol: String) {
     if jobs[checkout.id]?.running == true { return ("Working…", .orange, "◐") }
-    switch status(of: checkout) {
-    case .unknown: return ("Checking…", .secondary, "○")
-    case .unavailable: return ("Status unavailable", .secondary, "○")
-    case .report(let report):
-      if report.up { return (report.app?.url ?? "Up", .green, "●") }
-      if report.app != nil { return ("Needs attention", .red, "▲") }
-      return ("Not running", .secondary, "○")
+    let copy = detected[checkout.id]
+    let report = status(of: checkout).report
+    if let app = copy?.app {
+      if let report, report.app != nil, !report.up { return ("Needs attention", .red, "▲") }
+      return (app.url, .green, "●")
     }
+    if copy?.databaseRunning == true { return ("Database only", .blue, "◑") }
+    if copy == nil {
+      switch status(of: checkout) {
+      case .unknown: return ("Checking…", .secondary, "○")
+      case .unavailable: return ("Status unavailable", .secondary, "○")
+      case .report(let report):
+        if report.up { return (report.app?.url ?? "Up", .green, "●") }
+        if report.app != nil { return ("Needs attention", .red, "▲") }
+      }
+    }
+    return ("Not running", .secondary, "○")
   }
 
   enum MenuBarState { case up, idle, attention }
 
   /// The menu bar icon's state: some MixOS is up, none is, or one isn't right.
   var menuBarState: MenuBarState {
-    let reports = checkouts.compactMap { status(of: $0).report }
-    if reports.contains(where: { $0.app != nil && !$0.up }) { return .attention }
-    return reports.contains(where: \.up) ? .up : .idle
+    let summaries = checkouts.map { summary(of: $0).symbol }
+    if summaries.contains("▲") { return .attention }
+    return summaries.contains("●") ? .up : .idle
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -233,7 +339,7 @@ final class Store: ObservableObject {
   }
 
   func open(_ checkout: Checkout) {
-    guard let url = status(of: checkout).report?.app.flatMap({ URL(string: $0.url) }) else { return }
+    guard let url = appURL(of: checkout) else { return }
     NSWorkspace.shared.open(url)
   }
 
@@ -248,6 +354,7 @@ final class Store: ObservableObject {
 
   private func afterJob(_ checkout: Checkout, openWhenUp: Bool) {
     guard let runner else { return }
+    scan()
     Task {
       let result = await runner.run(["npm", "run", "--silent", "status", "--", "--json"], in: checkout.url, timeout: 90)
       if let report = StatusReport.parse(result.output) {

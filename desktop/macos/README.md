@@ -16,8 +16,16 @@ bar icon, the MixOS mark, for opening, starting and stopping a copy.
   release into a folder you choose, installs its dependencies and starts it.
   The new copy gets a database of its own, separate from every other copy.
 
-It finds copies by itself: every checkout that has started MixOS, and every one
-another copy sees running. **Add an Existing Copy…** adds any other.
+**It finds copies by itself**, the moment it opens, with nothing to set up:
+
+- every copy running in Docker;
+- every host `npm run dev`;
+- every copy whose database is running without its app;
+- every copy that has ever started MixOS, even when it's stopped now.
+
+Copies starting and stopping show up straight away. A copy stays on the list
+once seen, until you remove it. **Add an Existing Copy…** adds one that has
+never run.
 
 ## Install
 
@@ -91,9 +99,20 @@ explains itself to an older app. `npm run status -- --json` only ever gains
 fields. A copy from before that command shows **Status unavailable**, and it
 can still be started and stopped.
 
-Copies are found in `~/.mixos/instances.json`, the record of which folder owns
-which instance (see [More than one instance](../../docs/local-docker.md#more-than-one-instance-on-one-machine)),
-and in the other copies each status report lists as running.
+**Finding copies** is the app's own work, in Swift (`Detection.swift`), so it
+needs no copy to ask first and no Node. Each copy is traced to its folder:
+
+| What | How it's seen | Its folder |
+|---|---|---|
+| A copy in Docker | `docker ps -a`, and `docker events` to follow it live | the container's compose working-directory label |
+| A host `npm run dev` | `lsof`, every 5 seconds | the Node process's working directory, if that answers MixOS's `/api/health/live` |
+| A database on its own | `supabase_db_<instance>` among the containers | the instance's claim, or its compose containers |
+| A copy that has run | `~/.mixos/instances.json` (see [More than one instance](../../docs/local-docker.md#more-than-one-instance-on-one-machine)) | the claim |
+
+A scan takes about a tenth of a second. Detection answers *what runs, from
+where*. Whether a running copy is healthy is the copy's own answer, so
+`npm run status -- --json` runs whenever a copy starts or stops, and once a
+minute besides.
 
 **The PATH.** An app opened from Finder gets launchd's bare `PATH`, with no
 Homebrew, no nvm and no Docker CLI. The app asks your login shell for its
@@ -116,3 +135,14 @@ when asked:
 env -i HOME="$HOME" USER="$USER" SHELL="$SHELL" PATH=/usr/bin:/bin \
   MIXOS_LAUNCHER_LIVE=/path/to/your/mixos swift test --filter Live
 ```
+
+## When something looks wrong
+
+The app logs what it detects, and every change to its list, to the macOS
+unified log:
+
+```bash
+/usr/bin/log stream --predicate 'subsystem == "org.mixos.launcher"'
+```
+
+The full path matters in zsh, which has a `log` command of its own.
