@@ -18,7 +18,7 @@ import { useTour } from "./tour-context";
 /**
  * The end of the welcome tour: "MixOS is yours.", in the middle of the
  * screen, its mark drawing itself on above the headline — and the moment
- * the mark is done, confetti shoots up from the bottom (./confetti.tsx,
+ * the mark is done, confetti bursts out from behind the card (./confetti.tsx,
  * through `burst()`): at once under reduced motion, where nothing draws, and
  * after BURST_FALLBACK_MS if the animation's end never arrives.
  *
