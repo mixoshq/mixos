@@ -16,9 +16,9 @@ import { markOnboardingComplete } from "@/lib/onboarding/actions";
 /**
  * Where the welcome tour is.
  *
- * - `welcome` — the brand takeover with the three screens.
- * - `reveal`  — "Let's begin" was pressed: the lockup is flying to the menu
- *               bar and the overlay is collapsing into it.
+ * - `welcome` — the brand takeover with its two screens.
+ * - `reveal`  — "Let's begin" was pressed: the overlay is collapsing into the
+ *               menu bar, where the lockup already flew on Next.
  * - `guide`   — the overlay is gone; the step bubble is pointing at things.
  * - `done`    — nothing rendered. The only phase a returning user sees.
  */
