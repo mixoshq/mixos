@@ -148,11 +148,17 @@ export default function Header({
         <Link
           href="/"
           title="Dashboard"
+          // Marked while it's the page, as the bar marks the open app
+          // (src/components/apps/apps-dropdown.tsx's itemColors).
+          aria-current={pathname === "/" ? "page" : undefined}
           onContextMenu={(e) => {
             e.preventDefault();
             setDashMenu({ x: e.clientX, y: e.clientY });
           }}
-          className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-brand-foreground transition-colors hover:bg-brand-foreground/10"
+          className={cn(
+            "flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-brand-foreground transition-colors",
+            pathname === "/" ? "bg-brand-foreground/20" : "hover:bg-brand-foreground/10",
+          )}
         >
           <Gauge className="h-4 w-4" />
           <span className="text-sm font-medium">Dashboard</span>
