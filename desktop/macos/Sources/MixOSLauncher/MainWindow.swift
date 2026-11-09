@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+import AppKit
 import LauncherCore
 import SwiftUI
 
@@ -45,6 +46,7 @@ struct MainWindow: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     .toolbar {
+      AppIconItem()
       ToolbarItem {
         Menu {
           Button("Set Up a New Copy…") { store.showingSetup = true }
@@ -56,6 +58,30 @@ struct MainWindow: View {
     }
     .sheet(isPresented: $store.showingSetup) {
       SetupView(store: store)
+    }
+  }
+}
+
+/// The app's icon, the MixOS mark on its tile, at the head of the window,
+/// left of its title. A navigation item is what macOS draws before the title.
+private struct AppIconItem: ToolbarContent {
+  var body: some ToolbarContent {
+    if #available(macOS 26, *) {
+      // macOS 26 puts every toolbar item on a glass button; an icon is not a
+      // button, so it goes without.
+      item.sharedBackgroundVisibility(.hidden)
+    } else {
+      item
+    }
+  }
+
+  private var item: some ToolbarContent {
+    ToolbarItem(placement: .navigation) {
+      Image(nsImage: NSApp.applicationIconImage)
+        .resizable()
+        .interpolation(.high)
+        .frame(width: 26, height: 26)
+        .accessibilityLabel("MixOS Launcher")
     }
   }
 }
