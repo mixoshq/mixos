@@ -4,7 +4,7 @@
 
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import Image from "next/image";
 import { Square, SquareCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { CARD_SURFACE } from "@/components/ui/card";
 import { fitLogo, type LogoBox } from "@/lib/branding/fit";
 import type { BrandLogo } from "@/lib/branding/types";
 import { cn } from "@/lib/utils";
-import MixosMarkDrawn, { isMixosMark } from "./mixos-mark";
+import MixosMarkDrawn, { MIXOS_MARK_COLOURS, isMixosMark } from "./mixos-mark";
 import { useTour } from "./tour-context";
 
 /**
@@ -54,9 +54,15 @@ export default function Installed({
 }
 
 function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
-  const { dismissInstalled, burst } = useTour();
+  const { dismissInstalled, burst: burstIn } = useTour();
   const [leaving, setLeaving] = useState(false);
   const mark = logo ? fitLogo(logo, MARK_BOX) : null;
+  // In the mark's own colours when the mark is MixOS's; the theme's otherwise.
+  const ownMark = isMixosMark(mark?.src);
+  const burst = useCallback(
+    () => burstIn(ownMark ? MIXOS_MARK_COLOURS : undefined),
+    [burstIn, ownMark],
+  );
 
   // The confetti, on the mark's last stroke; see the doc above.
   useEffect(() => {
@@ -116,7 +122,7 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
             aria-hidden
             className="relative mx-auto flex h-36 w-36 items-center justify-center"
           >
-            {isMixosMark(mark?.src) ? (
+            {ownMark ? (
               <MixosMarkDrawn height={MARK_BOX.height} onDrawn={burst} />
             ) : (
               <span

@@ -5,7 +5,7 @@
 "use client";
 
 import { useEffect, type CSSProperties } from "react";
-import { useTour, type BurstOrigin } from "./tour-context";
+import { useTour, type Celebration } from "./tour-context";
 
 /**
  * Confetti for finishing the tour. It bursts from the centre of the screen,
@@ -23,13 +23,14 @@ import { useTour, type BurstOrigin } from "./tour-context";
  *
  * THE GEOMETRY IS COMPUTED, NOT RANDOMISED. Render must be pure, so there
  * is no `Math.random` here: a small hash of the piece index gives each one
- * its angle and reach, the same on every render. The burst target is the
- * point where that angle's ray from the origin meets the viewport edge,
- * scaled back by a per-piece fraction, so the burst fills the screen without
- * its front tracing the viewport's rectangle. The viewport and origin
- * come in as props, measured in the click handler.
+ * its spot, spin and timing, the same on every render. At the top of the
+ * burst the pieces cover the screen evenly (`landingSpot`), each having
+ * flown its own distance to get there, before they all fall. The viewport
+ * and origin come in as props, measured where the tour ends.
  *
- * Colours are the theme's tokens, so the burst matches the running theme.
+ * Colours are the burst's own when it brings some — MixOS's mark's, when the
+ * mark on the card is MixOS's (./installed.tsx) — and otherwise the theme's
+ * tokens, so a rebranded install celebrates in its own colours.
  */
 
 const PIECES = 1983;
@@ -53,41 +54,43 @@ function scatter(i: number, salt: number): number {
   return (h >>> 0) / 4294967296;
 }
 
-/** Distance from (x, y) to the viewport edge along the unit vector (dx, dy). */
-function reachToEdge(
-  x: number,
-  y: number,
-  dx: number,
-  dy: number,
+/**
+ * Each piece's landing spot at the top of its burst, spread evenly over the
+ * screen: a grid of about one cell per piece, laid over the whole viewport,
+ * with each piece somewhere random inside its own cell. Even, with no clumps
+ * and no bare patches, as a random spread alone wouldn't be; and jittered, so
+ * it isn't a grid either. Cells go to pieces in a scattered order (stepping
+ * by a prime, coprime to any grid this size), so neighbours on screen don't
+ * share a colour or a start.
+ */
+function landingSpot(
+  i: number,
+  r: (salt: number) => number,
   vw: number,
   vh: number,
-): number {
-  const tx = dx > 0 ? (vw - x) / dx : dx < 0 ? -x / dx : Infinity;
-  const ty = dy > 0 ? (vh - y) / dy : dy < 0 ? -y / dy : Infinity;
-  return Math.min(tx, ty);
+): [number, number] {
+  const cols = Math.max(1, Math.round(Math.sqrt((PIECES * vw) / vh)));
+  const rows = Math.ceil(PIECES / cols);
+  const cell = (i * 7919) % (cols * rows);
+  return [
+    ((cell % cols) + r(1)) * (vw / cols),
+    (Math.floor(cell / cols) + r(2)) * (vh / rows),
+  ];
 }
 
-function pieceStyles(origin: BurstOrigin): CSSProperties[] {
+function pieceStyles(origin: Celebration): CSSProperties[] {
   const { x, y, vw, vh } = origin;
+  const colors = origin.colors?.length ? origin.colors : COLORS;
   const fallY = vh + 80 - y; // below the viewport, relative to the origin
   return Array.from({ length: PIECES }, (_, i) => {
     const r = (salt: number) => scatter(i, salt);
     const straggler = i === 0;
-    // The origin is the centre, so the burst goes every way round. The
-    // straggler goes straight up.
-    const angle = straggler ? Math.PI * 1.5 : Math.PI * 2 * r(1);
-    const dx = Math.cos(angle);
-    const dy = Math.sin(angle);
-    // How far along its ray a piece gets, as a fraction of the distance to
-    // the edge. Square-rooting the hash skews the spread toward the far end
-    // — enough pieces reach the edges to cover the screen — while the rest
-    // stop anywhere from just under halfway out, so the burst's front is a
-    // cloud, not the outline of the viewport, and few stop behind the card.
-    const fraction = 0.45 + 0.55 * Math.sqrt(r(2));
-    const reach = reachToEdge(x, y, dx, dy, vw, vh) * fraction;
+    // Out to its spot, wherever on the screen that is, from the origin. The
+    // straggler goes straight up, to just under the top.
+    const [tx, ty] = straggler ? [x, vh * 0.04] : landingSpot(i, r, vw, vh);
     return {
-      "--burst-x": `${dx * reach}px`,
-      "--burst-y": `${dy * reach}px`,
+      "--burst-x": `${tx - x}px`,
+      "--burst-y": `${ty - y}px`,
       "--fall-y": `${fallY}px`,
       "--drift": `${(r(3) - 0.5) * 160}px`,
       "--spin-1": `${(r(4) - 0.5) * 720}deg`,
@@ -96,7 +99,7 @@ function pieceStyles(origin: BurstOrigin): CSSProperties[] {
         ? `${STRAGGLER_MS}ms`
         : `${2200 + r(6) * 900}ms`,
       "--confetti-delay": `${r(7) * 120}ms`,
-      "--confetti-color": COLORS[i % COLORS.length],
+      "--confetti-color": colors[i % colors.length],
       width: `${6 + r(8) * 6}px`,
       height: `${10 + r(9) * 8}px`,
     } as CSSProperties;
@@ -113,7 +116,7 @@ function Burst({
   origin,
   onDone,
 }: {
-  origin: BurstOrigin;
+  origin: Celebration;
   onDone: () => void;
 }) {
   useEffect(() => {
