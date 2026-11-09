@@ -117,11 +117,11 @@ Wherever the release step fails, the old version keeps serving while you fix it.
 
 ## Through the GitHub App
 
-With the [GitHub App](github-app.md) linked, the release notice adds a link to
+With the [GitHub App](production-updates.md) linked, the release notice adds a link to
 what changed, on GitHub. Only on a fork of `mixoshq/mixos`, which shares
 upstream's commits, can it also do steps 2 and 5 for you, by opening the pull
 request at the release's commit. See
-[Updating MixOS through the App](github-app.md#updating-mixos-through-the-app).
+[Updating MixOS through the App](production-updates.md#updating-mixos-through-the-app).
 
 ## What breaks
 

@@ -5,13 +5,19 @@
 /**
  * The guide that follows the welcome screens, one step per thing worth
  * pointing at. A step names a `data-tour` target; the Guide measures it live
- * and draws the bubble next to it.
+ * and draws the bubble next to it — and draws nothing while the target is not
+ * on the page, which is how a step waits for the user to come back to it.
  *
- * Two kinds of step. A `next` step is read and dismissed with its button. An
- * `auto` step asks the user to do something real — click Edit Dashboard, add
- * the widget — and moves on the moment the page shows it happened, which
- * `done()` decides from the DOM. No Next button on those: the action is the
- * button.
+ * Every step ends on something the user does, and moves on the moment the
+ * page shows it happened: an element appearing (`doneWhen`), counted only
+ * after an event the page announces (`armedBy`) where that element can be
+ * there before the user acts. No Next button: the action is the button. A
+ * step waits as long as it takes, with Skip tour throughout.
+ *
+ * What happens between steps is left alone on purpose. Once App Manager is
+ * open the guide says nothing until the dashboard is back — someone
+ * installing apps may want more than one — and once the user is editing it
+ * says nothing until they are done, however many widgets they add.
  *
  * Add a step by adding an entry here and a `data-tour="<name>"` on the
  * element it should point at.
@@ -24,7 +30,11 @@ export interface GuideStep {
    */
   target: string | string[];
   title: string;
-  /** Optional: a step whose title says it all needs no second sentence. */
+  /**
+   * Optional: a step whose title says it all needs no second sentence.
+   * `**…**` sets a part in bold, for the names of the things to click, and
+   * `{apps}` draws the icon on the Apps button (guide.tsx's BODY_ICONS).
+   */
   body?: string;
   /** Which side of the target the bubble sits on. Default `below`. */
   placement?: "below" | "above";
@@ -34,72 +44,54 @@ export interface GuideStep {
    * on-screen regardless, and its arrow always points at the target.
    */
   along?: number;
-  /** `next` (default): a Next/Done button. `auto`: advances when `done()` is true. */
-  advance?: "next" | "auto";
-  /** For `auto` steps: is the thing this step asked for now done? */
-  done?: () => boolean;
+  /** A selector whose element appearing says the thing this step asked for is done. */
+  doneWhen: string;
   /**
-   * Draw the dim around the spotlight. Default true. Off for the last two
-   * steps: the user is now arranging their own dashboard, and a dim over
-   * their own work reads as the page being disabled.
+   * A window event that has to fire, while the step is up, before `doneWhen`
+   * counts: for an element that may be on the page before the user acts.
+   */
+  armedBy?: string;
+  /**
+   * Draw the dim around the spotlight. Default true. Off where the user is
+   * arranging their own work, where a dim reads as the page being disabled.
    */
   dim?: boolean;
 }
 
-const has = (selector: string) => document.querySelector(selector) !== null;
-
-/** The `data-tour` name the dashboard step points at. */
+/** The `data-tour` name the dashboard step points at: the empty dashboard's Add Widgets. */
 export const DASHBOARD_TARGET = "edit-dashboard";
 
 export const GUIDE_STEPS: GuideStep[] = [
   {
     target: "menu-bar",
     title: "This is your menu bar.",
-    body: "Open Apps, pin your favorites, manage your account.",
+    body: "Install an app by clicking **{apps} Apps → App Manager**.",
     along: 0.3,
+    // Up until App Manager opens, through the Apps menu or any other way.
+    doneWhen: '[data-tour="app-manager-page"]',
   },
   {
     target: [DASHBOARD_TARGET, "dashboard-pencil"],
-    title: "Everything else is your dashboard.",
-    body: "Your dashboard is a collection of widgets. A widget is a small piece of an app. Let's add one.",
-    placement: "below",
-    advance: "auto",
-    // Entering edit mode opens the catalog by itself during the tour (see
-    // DashboardGrid), so "done" is the catalog being open.
-    done: () => has('[data-tour="widget-wall-e"]'),
-  },
-  {
-    target: "widget-wall-e",
-    title: "Add your first widget.",
-    advance: "auto",
-    done: () =>
-      !has('[data-tour="widget-wall-e"]') &&
-      has('[data-tour-widget-instance="wall-e"]'),
-  },
-  {
-    target: "done-editing",
-    title: "Great, you added your first widget!",
-    body: "Drag it around or resize it. When it looks right, click Done Editing Dashboard.",
-    placement: "above",
-    dim: false,
-    advance: "auto",
-    done: () => has('[data-tour="dashboard-pencil"]'),
-  },
-  {
-    target: "dashboard-pencil",
-    title: "That's all for now.",
-    body: "You can edit your dashboard any time here. Enjoy MixOS!",
-    placement: "above",
-    dim: false,
-    along: 1,
+    title: "Now, add a widget to your dashboard.",
+    body: "A widget is a small piece of an app.",
+    // Only while something installed has a widget: otherwise the empty
+    // dashboard offers "Install Apps with widgets" instead, with no target
+    // here, and the step waits for them to install one.
+    //
+    // Done when they finish editing with a widget added: the pencil is back
+    // once editing is over and there is a widget. Adding one only arms it,
+    // so they can add as many as they like first. The pencil is there before
+    // any of this too, on a dashboard that has widgets already.
+    armedBy: "dashboard:widget-added",
+    doneWhen: '[data-tour="dashboard-pencil"]',
   },
 ];
 
 /**
  * The step that first talks about the dashboard. Everything before it is
- * about the menu bar, so the dashboard keeps its empty state out of sight
- * until then — derived, not a number, so reordering the steps cannot leave
- * the empty state hidden during its own step.
+ * about the menu bar and App Manager, so the dashboard keeps its empty state
+ * out of sight until then — derived, not a number, so reordering the steps
+ * cannot leave the empty state hidden during its own step.
  */
 export const DASHBOARD_STEP = GUIDE_STEPS.findIndex((s) =>
   (Array.isArray(s.target) ? s.target : [s.target]).includes(DASHBOARD_TARGET),

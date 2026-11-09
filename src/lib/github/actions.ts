@@ -5,7 +5,7 @@
 "use server";
 
 /**
- * Admin > GitHub's buttons.
+ * Deployment > Production Updates's buttons.
  *
  * Every export here is a directly invocable POST endpoint, so each one
  * requires an admin before anything else: the work in ./link.ts calls

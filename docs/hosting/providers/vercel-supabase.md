@@ -87,7 +87,7 @@ stopped.
 ## Previews of the GitHub App's branches
 
 `vercel.json` turns off deployments of branches under `mixos/`, which are the
-ones the [GitHub App](../after-you-install/github-app.md) proposes extensions
+ones the [GitHub App](../after-you-install/production-updates.md) proposes extensions
 and MixOS updates on:
 
 ```json
@@ -175,5 +175,5 @@ deployment doesn't rebuild: its release step ran when it was built.
   that preview's own database.
 - **Signing in sends you back to the sign-in page on a custom domain.** Set
   `NEXTAUTH_URL` to that domain, exactly.
-- **Admin > GitHub refuses to propose.** Your `vercel.json` doesn't turn off
+- **Deployment > Production Updates refuses to propose.** Your `vercel.json` doesn't turn off
   deployments of `mixos/**`. Add the setting above.

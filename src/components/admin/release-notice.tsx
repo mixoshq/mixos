@@ -17,15 +17,21 @@ import { CopyButton } from "./copy-button";
 import ReleaseNotes from "./release-notes";
 import UpdatePullRequestButton from "./update-pull-request";
 
+/** The accent notice's links, as the admin pages' other callouts draw theirs. */
+const ACCENT_LINK = "font-medium text-primary underline underline-offset-2";
+
 /** A link out of MixOS, in a new tab, saying so to a screen reader. */
-function Outbound({ href, children }: { href: string; children: ReactNode }) {
+function Outbound({
+  href,
+  className = "underline underline-offset-2 hover:text-foreground",
+  children,
+}: {
+  href: string;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer noopener"
-      className="underline underline-offset-2 hover:text-foreground"
-    >
+    <a href={href} target="_blank" rel="noreferrer noopener" className={className}>
       {children}
       <span className="sr-only"> (opens in a new tab)</span>
     </a>
@@ -63,7 +69,7 @@ export const RELEASE_NOTICE_ID = "new-release";
 export default function ReleaseNotice({ notice, offer = null }: { notice: ReleaseNoticeData; offer?: UpdateOffer | null }) {
   return (
     <section id={RELEASE_NOTICE_ID} aria-label="A new release of MixOS" className="mb-6 scroll-mt-4">
-      <Notice tone="neutral" icon={<ArrowUpCircle className="h-4 w-4" aria-hidden />}>
+      <Notice tone="accent" icon={<ArrowUpCircle className="h-4 w-4" aria-hidden />}>
         <p>{notice.text}</p>
         {notice.notes.trim() !== "" && (
           <details className="mt-2">
@@ -72,8 +78,12 @@ export default function ReleaseNotice({ notice, offer = null }: { notice: Releas
           </details>
         )}
         <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-          <Outbound href={notice.releaseUrl}>{notice.tag} on mixos.org</Outbound>
-          <Outbound href={notice.upgradeUrl}>How to upgrade</Outbound>
+          <Outbound href={notice.releaseUrl} className={ACCENT_LINK}>
+            {notice.tag} on mixos.org
+          </Outbound>
+          <Outbound href={notice.upgradeUrl} className={ACCENT_LINK}>
+            How to upgrade
+          </Outbound>
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1" data-upgrade-command>
           <p>
@@ -95,7 +105,9 @@ export default function ReleaseNotice({ notice, offer = null }: { notice: Releas
             </pre>
             {offer?.kind === "copy" && offer.compareUrl && (
               <p>
-                <Outbound href={offer.compareUrl}>What changed, on GitHub</Outbound>
+                <Outbound href={offer.compareUrl} className={ACCENT_LINK}>
+                  What changed, on GitHub
+                </Outbound>
               </p>
             )}
           </div>
@@ -120,8 +132,11 @@ function Offer({ offer }: { offer: UpdateOffer }) {
     case "proposed":
       return (
         <p className="mt-3" data-update-offer="proposed">
-          <Outbound href={offer.url}>Pull request #{offer.number}</Outbound> for {offer.tag} was opened on{" "}
-          {offer.repository} {formatLastUpdated(Date.parse(offer.at), "earlier")} by {offer.by}. Admin &gt; GitHub lists
+          <Outbound href={offer.url} className={ACCENT_LINK}>
+            Pull request #{offer.number}
+          </Outbound>{" "}
+          for {offer.tag} was opened on{" "}
+          {offer.repository} {formatLastUpdated(Date.parse(offer.at), "earlier")} by {offer.by}. Deployment &gt; Production Updates lists
           it with its checks. Merging it is the deploy.
         </p>
       );

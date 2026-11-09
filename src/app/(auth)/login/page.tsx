@@ -3,6 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { getBrandName, getLoginLogo } from "@/lib/branding/resolve";
+import { sql } from "@/lib/db/client";
+import { maintenanceState } from "@/lib/platform/maintenance";
+import { databaseReadyForSignIn } from "@/lib/platform/sign-in-database";
+import DatabaseUnavailableCard from "./database-unavailable-card";
 import LoginCard from "./login-card";
 
 /**
@@ -24,7 +28,19 @@ export default async function LoginPage() {
   // stands alone, which is a legitimate treatment rather than a broken state.
   // Never the menu-bar mark: this page does not draw it, so it does not wait
   // on its filters either.
-  const [name, loginLogo] = await Promise.all([getBrandName(), getLoginLogo()]);
+  const [name, loginLogo, ready] = await Promise.all([
+    getBrandName(),
+    getLoginLogo(),
+    databaseReadyForSignIn({
+      ping: () => sql`select 1`,
+      platformBehind: async () => (await maintenanceState()).platformBehind,
+    }),
+  ]);
+
+  // No form without a database to check it against: every way in needs one,
+  // and the form would take a password only to fail on it. The brand still
+  // renders: its reads fall back when the database can't answer.
+  if (!ready) return <DatabaseUnavailableCard logo={loginLogo} name={name} />;
 
   return <LoginCard logo={loginLogo} name={name} />;
 }

@@ -5,6 +5,7 @@
 import type { NextAuthConfig, Session, User } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
+import { installGlobalAppsForNewcomer } from "@/lib/apps/access";
 import { createServiceClient } from "@/lib/db/server";
 import { DUMMY_PASSWORD_HASH, verifyPassword } from "./password";
 import { chargeSignInAttempt } from "./sign-in-limit";
@@ -117,6 +118,19 @@ export async function buildAuthOptions(): Promise<NextAuthConfig> {
     trustHost: true,
     pages: { signIn: "/login" },
     providers: [credentialsProvider],
+    events: {
+      // A newcomer's starter apps (src/lib/apps/access.ts). After the sign-in
+      // rather than in `authorize()`, which stays a password check; a failure
+      // costs the newcomer a starter app, never the sign-in.
+      async signIn({ user }) {
+        if (!user?.id) return;
+        try {
+          await installGlobalAppsForNewcomer(user.id);
+        } catch (err) {
+          console.warn("[auth] starter apps not installed:", err);
+        }
+      },
+    },
     callbacks: {
       /*
        * Runs on EVERY session resolution, not only at sign-in.

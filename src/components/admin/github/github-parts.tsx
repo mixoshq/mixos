@@ -4,7 +4,7 @@
 
 "use client";
 
-/** The small pieces Admin > GitHub's components share. */
+/** The small pieces Deployment > Production Updates's components share. */
 
 import type { ReactNode } from "react";
 import { ExternalLink } from "lucide-react";

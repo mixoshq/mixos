@@ -4,6 +4,7 @@
 
 import { Suspense } from "react";
 import Notice from "@/components/ui/notice";
+import TechTalk from "@/components/admin/tech-talk";
 import GitHubPanel from "@/components/admin/github/github-panel";
 import UpdatePullRequests from "@/components/admin/github/update-pull-requests";
 import { requireAdmin } from "@/lib/apps/access";
@@ -13,6 +14,9 @@ import { readPageState } from "@/lib/github/page-state";
 
 // The link changes on GitHub's say as much as on this page's; never cached.
 export const dynamic = "force-dynamic";
+
+/** The public guide: docs/hosting/after-you-install/production-updates.md, as mixos.org serves it. */
+const PRODUCTION_UPDATES_DOCS = "https://mixos.org/docs/install/after-you-install/production-updates";
 
 /** What the "create the App" round trip ended with, as `?created=` says. */
 const CREATED: Record<CreatedOutcome, { tone: OutcomeTone; text: string }> = {
@@ -78,10 +82,32 @@ export default async function GitHubAdminPage({
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">GitHub</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Link this instance to the repository it is built from, through a private GitHub App you own. One App,
-          installed on one repository, and never on upstream MixOS.
+        <h1 className="text-2xl font-bold text-foreground">Production Updates</h1>
+        {/* flow-root: the paragraph holds the floated pill at its end. */}
+        <p className="mt-1 flow-root text-sm text-muted-foreground">
+          Install, update and remove Apps, Connectors and Themes on your production instance, right from
+          here. Each change opens a request for your developers to review and merge in your GitHub
+          repository, and merging it deploys the latest. Nothing changes on its own.{" "}
+          <a
+            href={PRODUCTION_UPDATES_DOCS}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="font-medium text-primary underline underline-offset-2"
+          >
+            Read the Production Updates guide
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
+          {/* The mechanics, for whoever asks how; closed until then. */}
+          <TechTalk>
+            Production Updates works through a private GitHub App you create and install on the one
+            repository this instance is built from. Installing, updating or removing an App, Connector or
+            Theme here opens a pull request in that repository, on a branch of its own (
+            <code className="font-mono text-xs">mixos/install/…</code>,{" "}
+            <code className="font-mono text-xs">mixos/update/…</code> or{" "}
+            <code className="font-mono text-xs">mixos/remove/…</code>). Your developers review it, and
+            merging it into the default branch is the deploy. The instance never changes its own code, and
+            never merges.
+          </TechTalk>
         </p>
       </div>
       <div className="space-y-6">

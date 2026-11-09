@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 interface Props {
   apps: AppManifest[];
   installedSlugs: string[];
+  /** Start with the Widgets filter on (`?widgets=1`, src/lib/apps/app-manager-url.ts). */
+  initialWidgetsOnly?: boolean;
 }
 
 type StatusFilter = "all" | "installed" | "not-installed";
@@ -24,10 +26,14 @@ const STATUS_OPTIONS: Array<{ value: StatusFilter; label: string }> = [
   { value: "not-installed", label: "Not Installed" },
 ];
 
-export default function AppManagerList({ apps, installedSlugs }: Props) {
+export default function AppManagerList({
+  apps,
+  installedSlugs,
+  initialWidgetsOnly = false,
+}: Props) {
   const [query, setQuery] = useState("");
   const [fullAppOnly, setFullAppOnly] = useState(false);
-  const [widgetsOnly, setWidgetsOnly] = useState(false);
+  const [widgetsOnly, setWidgetsOnly] = useState(initialWidgetsOnly);
   const [status, setStatus] = useState<StatusFilter>("all");
 
   const installedSet = useMemo(() => new Set(installedSlugs), [installedSlugs]);
@@ -144,9 +150,13 @@ export default function AppManagerList({ apps, installedSlugs }: Props) {
             ))
           ) : (
             <div className="px-6 py-8 text-center text-muted-foreground">
-              {query || fullAppOnly || widgetsOnly || status !== "all"
-                ? "No apps match the current filters."
-                : "No apps have been granted to you yet. Ask an admin to grant access."}
+              {/* Widgets on and none of their apps has one: not a filter
+                  that's too narrow, nothing there to find. */}
+              {widgetsOnly && !apps.some((a) => a.widgets.length > 0)
+                ? "No apps with widgets are available to you yet. Ask an admin."
+                : query || fullAppOnly || widgetsOnly || status !== "all"
+                  ? "No apps match the current filters."
+                  : "No apps have been granted to you yet. Ask an admin to grant access."}
             </div>
           )}
         </div>

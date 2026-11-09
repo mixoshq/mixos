@@ -1,14 +1,15 @@
-# The GitHub App
+# Production Updates
 
-Admin > GitHub links an instance to the repository it's built from, through a
-private GitHub App you own. With it linked, a deployment can propose extensions,
-their updates and their removals as pull requests into your repository, which
-you review and merge on GitHub. Nothing merges by itself, and nothing runs on
-the instance until you deploy.
+Deployment > Production Updates lets you install, update and remove Apps,
+Connectors and Themes on your production instance. Each change opens a pull
+request in the GitHub repository the instance is built from, for your
+developers to review and merge, and merging it deploys the latest. It works
+through a private GitHub App you own. Nothing merges by itself, and nothing
+runs on the instance until you deploy.
 
 ## Linking your GitHub repository
 
-Admin > GitHub is off until `GITHUB_APP_ENCRYPTION_KEY` is set. Generate a value,
+Deployment > Production Updates is off until `GITHUB_APP_ENCRYPTION_KEY` is set. Generate a value,
 set it where the instance runs, and restart it:
 
 ```
@@ -40,7 +41,7 @@ default branch, so require pull requests there. In the repository's
 - a tag ruleset on all tags, with **Restrict creations** and
   **Restrict updates**.
 
-Don't put the App on either bypass list. Admin > GitHub shows whether a pull
+Don't put the App on either bypass list. Deployment > Production Updates shows whether a pull
 request rule applies. It reads rulesets only, so if you use classic branch
 protection, or your repository is private on GitHub Free, which has no rulesets,
 confirm the protection on the page instead. Linking doesn't need the rule;
@@ -73,7 +74,7 @@ against the hash mixos.org published, and opens a pull request into your default
 branch that adds the extension's folder, with its `.registry.json`, on the branch
 `mixos/install/<kind>-<slug>`. Nothing runs on the instance.
 
-Admin > GitHub shows what proposals need:
+Deployment > Production Updates shows what proposals need:
 
 - the pull request rule on the default branch, or another protection you
   confirmed;
@@ -176,7 +177,7 @@ permission, when the release changes more files than GitHub lists in a compare
 (300), or when your default branch already has the release's commit.
 
 **Once opened,** the notice names the pull request and offers nothing else.
-Admin > GitHub lists open update pull requests with their checks, as Admin > Apps
+Deployment > Production Updates lists open update pull requests with their checks, as Admin > Apps
 lists proposed extensions: **No CI ran** and **Changed since proposed** mean the
 same there. If you close one without merging, delete its branch on GitHub;
-Admin > GitHub then offers to open another.
+Deployment > Production Updates then offers to open another.

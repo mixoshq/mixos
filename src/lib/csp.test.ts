@@ -16,7 +16,7 @@ test("forms post only to this origin, on every page but one", () => {
   }
 });
 
-test("Admin > GitHub may also post to github.com, where GitHub's manifest flow starts", () => {
+test("Deployment > Production Updates may also post to github.com, where GitHub's manifest flow starts", () => {
   assert.deepEqual(formActionsFor("/admin/github"), ["https://github.com"]);
   assert.equal(
     formAction(buildCsp("n", { formActions: formActionsFor("/admin/github") })),

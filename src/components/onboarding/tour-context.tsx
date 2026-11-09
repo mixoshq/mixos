@@ -8,6 +8,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -16,9 +17,9 @@ import { markOnboardingComplete } from "@/lib/onboarding/actions";
 /**
  * Where the welcome tour is.
  *
- * - `welcome` — the brand takeover with the three screens.
- * - `reveal`  — "Let's begin" was pressed: the lockup is flying to the menu
- *               bar and the overlay is collapsing into it.
+ * - `welcome` — the brand takeover with its two screens.
+ * - `reveal`  — "Let's begin" was pressed: the overlay is collapsing into the
+ *               menu bar, where the lockup already flew on Next.
  * - `guide`   — the overlay is gone; the step bubble is pointing at things.
  * - `done`    — nothing rendered. The only phase a returning user sees.
  */
@@ -36,6 +37,11 @@ export interface BurstOrigin {
   vh: number;
 }
 
+/** A burst under way: where from, and in what colours (the theme's, without). */
+export interface Celebration extends BurstOrigin {
+  colors?: readonly string[];
+}
+
 interface TourContextValue {
   phase: TourPhase;
   /** `welcome` → `reveal`. The overlay calls `revealed()` when its animation ends. */
@@ -44,10 +50,23 @@ interface TourContextValue {
   revealed: () => void;
   /** Any phase → `done`, and stamps completion. Used by Skip. */
   finish: () => void;
-  /** The last step's Done: `finish`, plus confetti bursting from `origin`. */
+  /**
+   * The end of the guide: `finish`, plus the celebration — the message that
+   * says the install is done, now, and confetti from `origin` when the
+   * message calls `burst()`.
+   */
   complete: (origin: BurstOrigin) => void;
+  /**
+   * Set the confetti off, once: the message calls it the moment its mark has
+   * drawn itself on, so the burst lands on the mark finishing.
+   */
+  burst: (colors?: readonly string[]) => void;
   /** Where the confetti is bursting from, for a few seconds after `complete()`; null otherwise. */
-  celebrating: BurstOrigin | null;
+  celebrating: Celebration | null;
+  /** The "is installed" message is up, from `complete()` until it is dismissed. */
+  installed: boolean;
+  /** The message was clicked away. */
+  dismissInstalled: () => void;
   /** Index of the guide step showing, so the page can stage itself around it. */
   guideStep: number;
   setGuideStep: (i: number) => void;
@@ -61,7 +80,10 @@ const TourContext = createContext<TourContextValue>({
   revealed: () => {},
   finish: () => {},
   complete: () => {},
+  burst: () => {},
   celebrating: null,
+  installed: false,
+  dismissInstalled: () => {},
   celebrated: () => {},
   guideStep: 0,
   setGuideStep: () => {},
@@ -94,7 +116,8 @@ export function TourProvider({
     if (active) setPhase("welcome");
   }
 
-  const [celebrating, setCelebrating] = useState<BurstOrigin | null>(null);
+  const [celebrating, setCelebrating] = useState<Celebration | null>(null);
+  const [installed, setInstalled] = useState(false);
   const [guideStep, setGuideStep] = useState(0);
 
   const begin = useCallback(() => setPhase("reveal"), []);
@@ -108,14 +131,24 @@ export function TourProvider({
     // the tour plays again next time, which is the safe direction to fail.
     void markOnboardingComplete();
   }, []);
+  // Where the confetti will burst from, held between `complete()` and the
+  // message's `burst()`; cleared by the burst, so a second call does nothing.
+  const pendingBurst = useRef<BurstOrigin | null>(null);
   const complete = useCallback(
     (origin: BurstOrigin) => {
       finish();
-      setCelebrating(origin);
+      pendingBurst.current = origin;
+      setInstalled(true);
     },
     [finish],
   );
+  const burst = useCallback((colors?: readonly string[]) => {
+    if (!pendingBurst.current) return;
+    setCelebrating({ ...pendingBurst.current, colors });
+    pendingBurst.current = null;
+  }, []);
   const celebrated = useCallback(() => setCelebrating(null), []);
+  const dismissInstalled = useCallback(() => setInstalled(false), []);
 
   return (
     <TourContext.Provider
@@ -125,7 +158,10 @@ export function TourProvider({
         revealed,
         finish,
         complete,
+        burst,
         celebrating,
+        installed,
+        dismissInstalled,
         celebrated,
         guideStep,
         setGuideStep,

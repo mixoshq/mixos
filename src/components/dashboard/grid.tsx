@@ -17,7 +17,9 @@ import {
   type LayoutItem as RGLLayoutItem,
   type Layout as RGLLayout,
 } from "react-grid-layout";
+import Link from "next/link";
 import { Plus, Pencil, Settings } from "lucide-react";
+import { APPS_WITH_WIDGETS_URL } from "@/lib/apps/app-manager-url";
 import type { LayoutItem, DashboardWidget } from "@/lib/dashboard/actions";
 import { saveLayout, removeWidget } from "@/lib/dashboard/actions";
 import type { AppManifest, WidgetDefinition } from "@/lib/apps/types";
@@ -70,17 +72,22 @@ export default function DashboardGrid({
   const [widgetList, setWidgetList] = useState<DashboardWidget[]>(widgets);
   const { width, containerRef } = useContainerWidth();
   const { isEditing, setIsEditing } = useDashboardEdit();
-  // The welcome tour asks for "Edit Dashboard" and then points at a widget
-  // card, so during the tour entering edit mode opens the catalog straight
-  // away — as it does for an empty dashboard anyway, where the only thing to
-  // do in edit mode is add something.
+  // The welcome tour points at "Add Widgets" and then waits for the user to
+  // finish editing with a widget added, so during the tour entering edit
+  // mode opens the catalog straight away — as it does for an empty dashboard
+  // anyway, where the only thing to do in edit mode is add something.
   const { phase: tourPhase, guideStep } = useTour();
   const tourActive = tourPhase === "guide";
-  // The tour talks about the menu bar before it talks about the dashboard.
-  // Until it gets there, an empty dashboard shows nothing at all — "Your
+  // The tour talks about the menu bar and App Manager before it talks about
+  // the dashboard. Until it gets there, an empty dashboard shows nothing at all — "Your
   // dashboard is empty" and its button would be competing with the bubble
   // for the eye, and the button is the very thing that step asks for.
   const emptyStateHidden = tourPhase !== "done" && guideStep < DASHBOARD_STEP;
+  // Whether anything installed has a widget to add. Without one, the empty
+  // dashboard offers App Manager instead of the catalog, the right-click
+  // menu on empty space is left to the browser, and the welcome tour's
+  // widget step waits: there is nothing to add yet.
+  const hasWidgetApps = availableApps.some((a) => a.widgets.length > 0);
   const currentBreakpointRef = useRef<Breakpoint>("lg");
   const [isDraggingWidget, setIsDraggingWidget] = useState(false);
   const [isCollapsing, setIsCollapsing] = useState(false);
@@ -141,12 +148,12 @@ export default function DashboardGrid({
   // event bubbles here after it, so a right-click on one is left alone.
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {
-      if (isEditing) return;
+      if (isEditing || !hasWidgetApps) return;
       if ((e.target as HTMLElement).closest(".react-grid-item")) return;
       e.preventDefault();
       setContextMenu({ x: e.clientX, y: e.clientY });
     },
-    [isEditing],
+    [isEditing, hasWidgetApps],
   );
 
   // In edit mode the edit bar already offers Configure, and "Edit Dashboard"
@@ -357,7 +364,16 @@ export default function DashboardGrid({
     return { app, def };
   };
 
+  // Add Widgets: edit mode with the catalog open, whatever is already there.
+  const handleAddWidgets = useCallback(() => {
+    handleEnterEdit();
+    setCatalogOpen(true);
+  }, [handleEnterEdit]);
+
   // Configure is left out, not disabled, for a widget with nothing to configure.
+  // Empty space offers Add Widgets, and Edit Dashboard too once there is a
+  // widget to arrange; a widget, Edit Dashboard alone, since adding reads
+  // oddly from one particular widget.
   const contextMenuItems = (widgetId?: string): MenuItem[] => {
     const items: MenuItem[] = [];
     const widget = widgetId
@@ -373,11 +389,21 @@ export default function DashboardGrid({
         onClick: () => setConfiguringId(widget.id),
       });
     }
-    items.push({
+    const editDashboard: MenuItem = {
       label: "Edit Dashboard",
       icon: <Pencil className="h-4 w-4 text-muted-foreground" />,
       onClick: handleEnterEdit,
-    });
+    };
+    if (widgetId) {
+      items.push(editDashboard);
+    } else {
+      if (widgetList.length > 0) items.push(editDashboard);
+      items.push({
+        label: "Add Widgets",
+        icon: <Plus className="h-4 w-4 text-muted-foreground" />,
+        onClick: handleAddWidgets,
+      });
+    }
     return items;
   };
 
@@ -403,18 +429,29 @@ export default function DashboardGrid({
           <p className="text-lg text-muted-foreground">
             Your dashboard is empty
           </p>
-          {!isEditing && (
-            <button
-              onClick={() => {
-                setIsEditing(true);
-                setCatalogOpen(true);
-              }}
-              data-tour="edit-dashboard"
-              className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
-            >
-              Edit Dashboard
-            </button>
-          )}
+          {!isEditing &&
+            (hasWidgetApps ? (
+              <button
+                onClick={() => {
+                  setIsEditing(true);
+                  setCatalogOpen(true);
+                }}
+                data-tour="edit-dashboard"
+                className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
+              >
+                Add Widgets
+              </button>
+            ) : (
+              // Nothing to add yet: App Manager, filtered to the apps that
+              // have widgets. No data-tour, so the welcome tour's widget step
+              // waits for the button above.
+              <Link
+                href={APPS_WITH_WIDGETS_URL}
+                className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
+              >
+                Install Apps with widgets
+              </Link>
+            ))}
         </div>
       ) : (
         <>
@@ -531,7 +568,6 @@ export default function DashboardGrid({
       {catalogOpen && (
         <WidgetCatalog
           apps={availableApps}
-          backdrop={!tourActive}
           onClose={() => setCatalogOpen(false)}
           onWidgetAdded={handleWidgetAdded}
         />

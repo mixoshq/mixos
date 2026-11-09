@@ -184,7 +184,7 @@ function Outcome({ outcome }: { outcome: UpdateOutcome }) {
           </Row>
         </dl>
         <p className="text-sm text-muted-foreground">
-          Admin &gt; GitHub lists it with its checks. Back up the database before you merge: migrations only go
+          Deployment &gt; Production Updates lists it with its checks. Back up the database before you merge: migrations only go
           forward.
         </p>
       </div>
