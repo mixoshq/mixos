@@ -6,26 +6,30 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import Image from "next/image";
+import { Button } from "@/components/ui/button";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { fitLogo, type LogoBox } from "@/lib/branding/fit";
 import type { BrandLogo } from "@/lib/branding/types";
 import { cn } from "@/lib/utils";
+import MixosMarkDrawn, { isMixosMark } from "./mixos-mark";
 import { useTour } from "./tour-context";
 
 /**
- * The end of the welcome tour: "MixOS is installed!", in the middle of the
+ * The end of the welcome tour: "MixOS is yours.", in the middle of the
  * screen, while the confetti shoots up from the bottom (./confetti.tsx).
  *
- * Above the headline, the install's mark animates in, once: drawn on by a
- * sweep as it turns into place, then one glint across it. The mark itself, not a drawing of it — whatever the
- * install's brand is, it is what plays. Motion is CSS (`celebrate-*` in
- * globals.css); reduced motion gets the mark, still.
+ * Above the headline, the install's mark, once. MixOS's own draws itself on,
+ * stroke by stroke (./mixos-mark.tsx, traced from the PNG). Any other mark —
+ * a theme's, an app's — is an image, so it animates in as one: drawn on by a
+ * sweep as it turns into place, then one glint across it. Motion is CSS
+ * (`mark-draw` and `celebrate-*` in globals.css); reduced motion gets the
+ * mark, still.
  *
  * Two layers around the confetti (z-120): the dim under it, which takes the
  * click, and the card over it, which lets clicks through — so the pieces fly
- * behind and around the card without crossing its words. A click anywhere
- * closes it, as do Enter and Escape. It fades rather than vanishing, then
- * unmounts.
+ * behind and around the card without crossing its words. Setup Complete
+ * closes it, and so does a click anywhere else, Enter or Escape. It fades
+ * rather than vanishing, then unmounts.
  */
 
 const MARK_BOX: LogoBox = { height: 88, maxWidth: 200 };
@@ -96,41 +100,57 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
             aria-hidden
             className="relative mx-auto flex h-36 w-36 items-center justify-center"
           >
-            <span className="celebrate-logo relative block">
-              {mark ? (
-                <span className="celebrate-draw relative block">
-                  <Image
-                    src={mark.src}
-                    alt=""
-                    width={mark.width}
-                    height={mark.height}
-                    className="block"
-                  />
-                  {/* The glint, cut to the mark's own shape. */}
-                  <span
-                    className="celebrate-glint absolute inset-0"
-                    style={
-                      {
-                        maskImage: `url("${mark.src}")`,
-                        WebkitMaskImage: `url("${mark.src}")`,
-                      } as CSSProperties
-                    }
-                  />
-                </span>
-              ) : (
-                <span className="celebrate-draw block h-20 w-20 rounded-2xl bg-brand" />
-              )}
-            </span>
+            {isMixosMark(mark?.src) ? (
+              <MixosMarkDrawn height={MARK_BOX.height} />
+            ) : (
+              <span className="celebrate-logo relative block">
+                {mark ? (
+                  <span className="celebrate-draw relative block">
+                    <Image
+                      src={mark.src}
+                      alt=""
+                      width={mark.width}
+                      height={mark.height}
+                      className="block"
+                    />
+                    {/* The glint, cut to the mark's own shape. */}
+                    <span
+                      className="celebrate-glint absolute inset-0"
+                      style={
+                        {
+                          maskImage: `url("${mark.src}")`,
+                          WebkitMaskImage: `url("${mark.src}")`,
+                        } as CSSProperties
+                      }
+                    />
+                  </span>
+                ) : (
+                  <span className="celebrate-draw block h-20 w-20 rounded-2xl bg-brand" />
+                )}
+              </span>
+            )}
           </div>
           <h2
             id="installed-title"
             className="mt-2 font-heading text-2xl font-bold text-foreground sm:text-3xl"
           >
-            {name} is installed!
+            {name} is yours.
           </h2>
           <p className="mt-2 text-base leading-relaxed text-muted-foreground">
-            Add more apps, arrange your dashboard, set up your workspace.
+            Add more apps, arrange your dashboard,
+            <br />
+            set up your workspace.
           </p>
+          {/* The card's one control, in a layer that otherwise lets clicks
+              through to the dim. Focused, so Enter is it too. */}
+          <Button
+            variant="primary"
+            autoFocus
+            onClick={() => setLeaving(true)}
+            className="pointer-events-auto mt-6"
+          >
+            Setup Complete
+          </Button>
         </div>
       </div>
     </>
