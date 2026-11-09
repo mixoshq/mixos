@@ -6,15 +6,6 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import Image from "next/image";
-import {
-  CalendarDays,
-  GitPullRequest,
-  MessageSquare,
-  Sheet,
-  SquareKanban,
-  TrendingUp,
-  type LucideIcon,
-} from "lucide-react";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { fitLogo, type LogoBox } from "@/lib/branding/fit";
 import type { BrandLogo } from "@/lib/branding/types";
@@ -25,11 +16,11 @@ import { useTour } from "./tour-context";
  * The end of the welcome tour: "MixOS is installed!", in the middle of the
  * screen, while the confetti shoots up from the bottom (./confetti.tsx).
  *
- * Above the headline, the install's mark, and apps springing out from
- * behind it into an arch — a sheet, a chat, pull requests, a board, a chart,
- * a calendar — then floating there: the workspace it just set up, and what
- * comes next. Colours are theme tokens; motion is CSS (`celebrate-*` in
- * globals.css), and reduced motion gets the arch already made, still.
+ * Above the headline, the install's mark animates in, once: drawn on by a
+ * sweep as it turns into place, a ring pinging out as it lands, then one
+ * glint across it. The mark itself, not a drawing of it — whatever the
+ * install's brand is, it is what plays. Motion is CSS (`celebrate-*` in
+ * globals.css); reduced motion gets the mark, still.
  *
  * Two layers around the confetti (z-120): the dim under it, which takes the
  * click, and the card over it, which lets clicks through — so the pieces fly
@@ -38,27 +29,8 @@ import { useTour } from "./tour-context";
  * unmounts.
  */
 
-const MARK_BOX: LogoBox = { height: 48, maxWidth: 120 };
+const MARK_BOX: LogoBox = { height: 88, maxWidth: 200 };
 const LEAVE_MS = 300;
-
-/** Each app's place in the arch, from the mark's centre, and its colour. */
-const APPS: { icon: LucideIcon; tint: string; x: number; y: number }[] = [
-  { icon: Sheet, tint: "text-cat-3", x: -112, y: 12 },
-  { icon: MessageSquare, tint: "text-cat-2", x: -84, y: -40 },
-  { icon: GitPullRequest, tint: "text-cat-1", x: -34, y: -64 },
-  { icon: SquareKanban, tint: "text-cat-4", x: 34, y: -64 },
-  { icon: TrendingUp, tint: "text-success", x: 84, y: -40 },
-  { icon: CalendarDays, tint: "text-cat-5", x: 112, y: 12 },
-];
-
-/** Twinkles around the arch: where, and when in their loop. */
-const SPARKLES = [
-  { x: -132, y: -34, delay: 0 },
-  { x: 128, y: -30, delay: 600 },
-  { x: -60, y: -86, delay: 1100 },
-  { x: 62, y: -88, delay: 300 },
-  { x: 0, y: -96, delay: 900 },
-];
 
 export default function Installed({
   name,
@@ -121,55 +93,36 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
             "celebrate-card w-full max-w-md px-8 pb-8 pt-6 text-center shadow-2xl",
           )}
         >
-          <div aria-hidden className="relative mx-auto h-36 w-72">
-            {/* Everything is placed from the mark's centre, low in the box so
-              the arch has room above it. */}
-            <div className="absolute left-1/2 top-[6.5rem]">
-              {SPARKLES.map((s, i) => (
-                <span
-                  key={i}
-                  className="celebrate-sparkle absolute block h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[1px] bg-primary"
-                  style={
-                    {
-                      left: s.x,
-                      top: s.y,
-                      animationDelay: `${s.delay}ms`,
-                    } as CSSProperties
-                  }
-                />
-              ))}
-              {APPS.map(({ icon: Icon, tint, x, y }, i) => (
-                <span
-                  key={i}
-                  className="celebrate-tile absolute -ml-4 -mt-4 flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-card shadow-md"
-                  style={
-                    {
-                      "--tile-x": `${x}px`,
-                      "--tile-y": `${y}px`,
-                      "--tile-delay": `${250 + i * 90}ms`,
-                    } as CSSProperties
-                  }
-                >
-                  <Icon className={`h-4 w-4 ${tint}`} />
-                </span>
-              ))}
-              <span className="celebrate-ring absolute -ml-9 -mt-9 block h-[4.5rem] w-[4.5rem] rounded-full border-2 border-primary/40" />
-              {/* w-max: placed in a box with no width of its own, it would
-                otherwise shrink, and the mark with it, to nothing. */}
-              <span className="celebrate-mark absolute flex w-max -translate-x-1/2 -translate-y-1/2 items-center justify-center">
-                {mark ? (
+          <div
+            aria-hidden
+            className="relative mx-auto flex h-36 w-36 items-center justify-center"
+          >
+            <span className="celebrate-ping absolute inset-2 rounded-full border-2 border-primary/40" />
+            <span className="celebrate-logo relative block">
+              {mark ? (
+                <span className="celebrate-draw relative block">
                   <Image
                     src={mark.src}
                     alt=""
                     width={mark.width}
                     height={mark.height}
-                    className="shrink-0"
+                    className="block"
                   />
-                ) : (
-                  <span className="block h-10 w-10 rounded-xl bg-brand" />
-                )}
-              </span>
-            </div>
+                  {/* The glint, cut to the mark's own shape. */}
+                  <span
+                    className="celebrate-glint absolute inset-0"
+                    style={
+                      {
+                        maskImage: `url("${mark.src}")`,
+                        WebkitMaskImage: `url("${mark.src}")`,
+                      } as CSSProperties
+                    }
+                  />
+                </span>
+              ) : (
+                <span className="celebrate-draw block h-20 w-20 rounded-2xl bg-brand" />
+              )}
+            </span>
           </div>
           <h2
             id="installed-title"
