@@ -59,7 +59,7 @@
  *
  * The notice is on every admin page, so what it offers is read from this
  * instance alone, never from GitHub: the link, and this instance's own record
- * of having opened a pull request for the release. Developers > GitHub App, one page,
+ * of having opened a pull request for the release. Deployment > GitHub App, one page,
  * reads GitHub for the open update pull requests and their checks
  * (./proposals.ts), and offers the button again when the recorded pull request
  * is no longer open there.
@@ -178,7 +178,7 @@ async function recordedProposal(
  * nothing linked, or the link off. Otherwise the button (a fork of upstream),
  * the merge by hand (any other repository), or the pull request this instance
  * already opened for the release. `evenIfProposed` skips that last answer:
- * Developers > GitHub App, which can see that the recorded pull request is no longer
+ * Deployment > GitHub App, which can see that the recorded pull request is no longer
  * open, offers the button again.
  */
 export async function mixosUpdateOffer(
@@ -190,7 +190,7 @@ export async function mixosUpdateOffer(
   try {
     state = await readGitHubState();
   } catch {
-    // A record that can't be read: Developers > GitHub App says so.
+    // A record that can't be read: Deployment > GitHub App says so.
     return null;
   }
   if (!state.app || !state.link || state.link.disabled) return null;
@@ -616,11 +616,11 @@ export async function proposeMixOSUpdate(input: unknown, ctx: ProposeContext): P
     return await locked(async (lease) => {
       const state = await readGitHubState();
       if (!state.app || !state.link) {
-        throw new ProposalRefusal(refused("not-linked", "Link a repository on Developers > GitHub App first.", "info"));
+        throw new ProposalRefusal(refused("not-linked", "Link a repository on Deployment > GitHub App first.", "info"));
       }
       if (state.link.disabled) {
         throw new ProposalRefusal(
-          refused("disabled", `The GitHub link is off: ${state.link.disabled.detail} Check again on Developers > GitHub App.`, "danger"),
+          refused("disabled", `The GitHub link is off: ${state.link.disabled.detail} Check again on Deployment > GitHub App.`, "danger"),
         );
       }
       const record = state.link.repository;
@@ -644,7 +644,7 @@ export async function proposeMixOSUpdate(input: unknown, ctx: ProposeContext): P
         throw new ProposalRefusal(
           refused(
             "checklist",
-            "Not opened. Confirm on Developers > GitHub App that no host builds previews of the App's branches. The App can't " +
+            "Not opened. Confirm on Deployment > GitHub App that no host builds previews of the App's branches. The App can't " +
               "read those settings.",
             "warning",
           ),
