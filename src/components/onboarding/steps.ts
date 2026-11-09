@@ -8,11 +8,16 @@
  * and draws the bubble next to it — and draws nothing while the target is not
  * on the page, which is how a step waits for the user to come back to it.
  *
- * Every step ends on something the user does — opens the Apps menu, closes
- * it, adds a widget — and moves on the moment the page shows it happened:
- * an element appearing (`doneWhen`), the target going (`endsWithTarget`), or
- * an event the page announces (`doneOn`). No Next button: the action is the
- * button. A step waits as long as it takes, with Skip tour on it throughout.
+ * Every step ends on something the user does, and moves on the moment the
+ * page shows it happened: an element appearing (`doneWhen`), counted only
+ * after an event the page announces (`armedBy`) where that element can be
+ * there before the user acts. No Next button: the action is the button. A
+ * step waits as long as it takes, with Skip tour throughout.
+ *
+ * What happens between steps is left alone on purpose. Once App Manager is
+ * open the guide says nothing until the dashboard is back — someone
+ * installing apps may want more than one — and once the user is editing it
+ * says nothing until they are done, however many widgets they add.
  *
  * Add a step by adding an entry here and a `data-tour="<name>"` on the
  * element it should point at.
@@ -39,18 +44,12 @@ export interface GuideStep {
    */
   along?: number;
   /** A selector whose element appearing says the thing this step asked for is done. */
-  doneWhen?: string;
-  /** A window event that says the thing this step asked for is done. */
-  doneOn?: string;
+  doneWhen: string;
   /**
-   * Closing what the step points at ends the step, as following it does.
-   * For a target inside a menu, which closes on any click outside it: the
-   * bubble would otherwise be left pointing at nothing, and the tour held
-   * where nobody can see it.
+   * A window event that has to fire, while the step is up, before `doneWhen`
+   * counts: for an element that may be on the page before the user acts.
    */
-  endsWithTarget?: boolean;
-  /** The last step: where the confetti bursts from when it is done. */
-  celebrateAt?: () => Element | null;
+  armedBy?: string;
   /**
    * Draw the dim around the spotlight. Default true. Off where the user is
    * arranging their own work, where a dim reads as the page being disabled.
@@ -58,11 +57,8 @@ export interface GuideStep {
   dim?: boolean;
 }
 
-/** The `data-tour` name the dashboard step points at. */
+/** The `data-tour` name the dashboard step points at: the empty dashboard's Add Widgets. */
 export const DASHBOARD_TARGET = "edit-dashboard";
-
-/** The `data-tour` name of App Manager in the Apps menu. */
-export const APP_MANAGER_LINK = "apps-menu-app-manager";
 
 export const GUIDE_STEPS: GuideStep[] = [
   {
@@ -70,28 +66,19 @@ export const GUIDE_STEPS: GuideStep[] = [
     title: "This is your menu bar.",
     body: "Install an app by clicking **Apps → App Manager**.",
     along: 0.3,
-    // The Apps menu, open: App Manager is in it.
-    doneWhen: `[data-tour="${APP_MANAGER_LINK}"]`,
-  },
-  {
-    target: APP_MANAGER_LINK,
-    title: "Then click App Manager.",
-    body: "That's where you install apps, and it's always here in the Apps menu.",
-    // Clicking it closes the menu on the way to App Manager, and so does
-    // clicking anywhere else; either way the guide moves on, and waits.
-    endsWithTarget: true,
+    // Up until App Manager opens, through the Apps menu or any other way.
+    doneWhen: '[data-tour="app-manager-page"]',
   },
   {
     target: [DASHBOARD_TARGET, "dashboard-pencil"],
     title: "Now, add a widget to your dashboard.",
-    body: "A widget is a small piece of an app. Start here.",
-    // DashboardGrid's, once a widget from the catalog is on the dashboard.
-    doneOn: "dashboard:widget-added",
-    // The dashboard appends, so the widget just added is the last one.
-    celebrateAt: () => {
-      const widgets = document.querySelectorAll("[data-tour-widget-instance]");
-      return widgets[widgets.length - 1] ?? null;
-    },
+    body: "A widget is a small piece of an app.",
+    // Done when they finish editing with a widget added: the pencil is back
+    // once editing is over and there is a widget. Adding one only arms it,
+    // so they can add as many as they like first. The pencil is there before
+    // any of this too, on a dashboard that has widgets already.
+    armedBy: "dashboard:widget-added",
+    doneWhen: '[data-tour="dashboard-pencil"]',
   },
 ];
 

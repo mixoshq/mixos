@@ -55,8 +55,6 @@ const getFalse = () => false;
 
 /** A beat after the overlay has gone, so the bar is seen before it is explained. */
 const START_DELAY_MS = 400;
-/** Long enough for the catalog to close and the new widget to be drawn. */
-const SETTLE_MS = 400;
 
 const BUBBLE_W = 416; // w-[26rem]; a constant so placement needs no measuring
 /** About the tallest a bubble gets: less room than this on its side flips it. */
@@ -75,22 +73,25 @@ function selectorFor(step: GuideStep): string {
 
 /**
  * The step's target rect, and whether the step is done: its `doneWhen`
- * element is on the page, its `doneOn` event fired, or, for an
- * `endsWithTarget` step, its target came and went.
+ * element is on the page — once its `armedBy` event has fired, for a step
+ * that has one.
  */
 function useStepState(step: GuideStep): { rect: Rect | null; done: boolean } {
   const [rect, setRect] = useState<Rect | null>(null);
   const [done, setDone] = useState(false);
   const selector = selectorFor(step);
-  const { doneWhen, doneOn, endsWithTarget } = step;
+  const { doneWhen, armedBy } = step;
 
   useEffect(() => {
     let frame = 0;
-    let seen = false;
+    let armed = !armedBy;
+    const arm = () => {
+      armed = true;
+    };
+    if (armedBy) window.addEventListener(armedBy, arm);
     const tick = () => {
       const el = document.querySelector<HTMLElement>(selector);
       if (el) {
-        seen = true;
         const r = el.getBoundingClientRect();
         setRect((prev) =>
           prev &&
@@ -103,21 +104,16 @@ function useStepState(step: GuideStep): { rect: Rect | null; done: boolean } {
         );
       } else {
         setRect(null);
-        if (endsWithTarget && seen) setDone(true);
       }
-      if (doneWhen && document.querySelector(doneWhen)) setDone(true);
+      if (armed && document.querySelector(doneWhen)) setDone(true);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [selector, endsWithTarget, doneWhen]);
-
-  useEffect(() => {
-    if (!doneOn) return;
-    const onDone = () => setDone(true);
-    window.addEventListener(doneOn, onDone);
-    return () => window.removeEventListener(doneOn, onDone);
-  }, [doneOn]);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (armedBy) window.removeEventListener(armedBy, arm);
+    };
+  }, [selector, doneWhen, armedBy]);
 
   return { rect, done };
 }
@@ -135,13 +131,11 @@ function withBold(text: string): ReactNode {
   );
 }
 
-/** The confetti's origin: the centre of `el`, or of the screen without one. */
-function burstFrom(el: Element | null | undefined): BurstOrigin {
+/** The confetti's origin: the bottom centre of the screen, where it shoots up from. */
+function bottomCentre(): BurstOrigin {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  if (!el) return { x: vw / 2, y: vh / 2, vw, vh };
-  const r = el.getBoundingClientRect();
-  return { x: r.left + r.width / 2, y: r.top + r.height / 2, vw, vh };
+  return { x: vw / 2, y: vh, vw, vh };
 }
 
 /**
@@ -171,16 +165,13 @@ function Steps() {
     const t = window.setTimeout(() => setStarted(true), START_DELAY_MS);
     return () => clearTimeout(t);
   }, []);
-  // Skip is in the bubble here; the takeover's own Skip left with it.
   const step = GUIDE_STEPS[index];
   const last = index === GUIDE_STEPS.length - 1;
-  // Stable, so a step's pending advance isn't restarted by a render.
+  // Stable, so a step's pending advance isn't restarted by a render. The
+  // last one is the end of the tour: the celebration.
   const onAdvance = useCallback(
-    () =>
-      last
-        ? complete(burstFrom(step.celebrateAt?.()))
-        : setGuideStep(index + 1),
-    [last, complete, step, setGuideStep, index],
+    () => (last ? complete(bottomCentre()) : setGuideStep(index + 1)),
+    [last, complete, setGuideStep, index],
   );
   if (!started) return null;
   // Keyed on the index so each step gets a fresh `done`, never the previous
@@ -199,13 +190,12 @@ function Step({
   const { rect, done } = useStepState(step);
 
   // A step advances itself once it is done. Deferred so the setState lands
-  // outside the frame loop's render, and for a `doneOn` step until the page
-  // has drawn what the event announced: the confetti bursts from it.
+  // outside the frame loop's render.
   useEffect(() => {
     if (!done) return;
-    const t = window.setTimeout(onAdvance, step.doneOn ? SETTLE_MS : 0);
+    const t = window.setTimeout(onAdvance, 0);
     return () => clearTimeout(t);
-  }, [done, onAdvance, step.doneOn]);
+  }, [done, onAdvance]);
 
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -218,7 +208,9 @@ function Step({
 
   return createPortal(
     <>
-      {rect && <Bubble step={step} rect={rect} vw={vw} vh={vh} />}
+      {/* Not once it's done: its target can be the very thing whose
+          appearance said so — the pencil, back after editing. */}
+      {rect && !done && <Bubble step={step} rect={rect} vw={vw} vh={vh} />}
       <button
         type="button"
         onClick={finish}

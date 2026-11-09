@@ -70,10 +70,10 @@ export default function DashboardGrid({
   const [widgetList, setWidgetList] = useState<DashboardWidget[]>(widgets);
   const { width, containerRef } = useContainerWidth();
   const { isEditing, setIsEditing } = useDashboardEdit();
-  // The welcome tour points at "Edit Dashboard" and then waits for a widget,
-  // so during the tour entering edit mode opens the catalog straight away —
-  // as it does for an empty dashboard anyway, where the only thing to do in
-  // edit mode is add something.
+  // The welcome tour points at "Add Widgets" and then waits for the user to
+  // finish editing with a widget added, so during the tour entering edit
+  // mode opens the catalog straight away — as it does for an empty dashboard
+  // anyway, where the only thing to do in edit mode is add something.
   const { phase: tourPhase, guideStep } = useTour();
   const tourActive = tourPhase === "guide";
   // The tour talks about the menu bar and App Manager before it talks about
@@ -412,7 +412,7 @@ export default function DashboardGrid({
               data-tour="edit-dashboard"
               className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
             >
-              Edit Dashboard
+              Add Widgets
             </button>
           )}
         </div>
