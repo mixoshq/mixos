@@ -159,11 +159,11 @@ function withBold(text: string): ReactNode {
   );
 }
 
-/** The confetti's origin: the bottom centre of the screen, where it shoots up from. */
-function bottomCentre(): BurstOrigin {
+/** The confetti's origin: the centre of the screen, behind the message card. */
+function screenCentre(): BurstOrigin {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  return { x: vw / 2, y: vh, vw, vh };
+  return { x: vw / 2, y: vh / 2, vw, vh };
 }
 
 /**
@@ -198,7 +198,7 @@ function Steps() {
   // Stable, so a step's pending advance isn't restarted by a render. The
   // last one is the end of the tour: the celebration.
   const onAdvance = useCallback(
-    () => (last ? complete(bottomCentre()) : setGuideStep(index + 1)),
+    () => (last ? complete(screenCentre()) : setGuideStep(index + 1)),
     [last, complete, setGuideStep, index],
   );
   if (!started) return null;

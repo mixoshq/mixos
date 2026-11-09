@@ -8,10 +8,11 @@ import { useEffect, type CSSProperties } from "react";
 import { useTour, type BurstOrigin } from "./tour-context";
 
 /**
- * Confetti for finishing the tour. It shoots up from the bottom centre of the
- * screen like a fountain, fanning left and right until it reaches the top and
- * the sides, then falls under gravity until it is off the bottom. One piece
- * is a straggler: it reaches its edge and then takes its time coming down.
+ * Confetti for finishing the tour. It bursts from the centre of the screen,
+ * from behind the message card (./installed.tsx, which sits above it), out in
+ * every direction until it reaches the edges, then falls under gravity until
+ * it is off the bottom. One piece is a straggler: it goes straight up, then
+ * takes its time coming down.
  *
  * Pure CSS motion. Each piece is a `<span>` positioned at the origin with
  * its own burst vector, drift, spin, duration and delay as inline custom
@@ -72,19 +73,17 @@ function pieceStyles(origin: BurstOrigin): CSSProperties[] {
   return Array.from({ length: PIECES }, (_, i) => {
     const r = (salt: number) => scatter(i, salt);
     const straggler = i === 0;
-    // The origin is the bottom centre, so the whole burst fans upward —
-    // from up-and-left (1.18π) through straight up (1.5π) to up-and-right
-    // (1.82π), clear of the floor on either side, so every piece is seen
-    // rising before it falls. The straggler goes straight up.
-    const angle = straggler ? Math.PI * 1.5 : Math.PI * (1.18 + r(1) * 0.64);
+    // The origin is the centre, so the burst goes every way round. The
+    // straggler goes straight up.
+    const angle = straggler ? Math.PI * 1.5 : Math.PI * 2 * r(1);
     const dx = Math.cos(angle);
     const dy = Math.sin(angle);
     // How far along its ray a piece gets, as a fraction of the distance to
     // the edge. Square-rooting the hash skews the spread toward the far end
     // — enough pieces reach the edges to cover the screen — while the rest
-    // stop anywhere from a quarter of the way out, so the burst's front is
-    // a cloud, not the outline of the viewport.
-    const fraction = 0.25 + 0.75 * Math.sqrt(r(2));
+    // stop anywhere from just under halfway out, so the burst's front is a
+    // cloud, not the outline of the viewport, and few stop behind the card.
+    const fraction = 0.45 + 0.55 * Math.sqrt(r(2));
     const reach = reachToEdge(x, y, dx, dy, vw, vh) * fraction;
     return {
       "--burst-x": `${dx * reach}px`,
