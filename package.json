@@ -6,7 +6,8 @@
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true; [ ! -f scripts/core-excludes.ts ] || tsx scripts/core-excludes.ts || true",
     "predev": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
-    "dev": "next dev",
+    "dev": "tsx scripts/dev.ts",
+    "status": "node scripts/check-node.mjs && tsx scripts/status.ts",
     "dev:docker": "node scripts/check-node.mjs && tsx scripts/docker-up.ts",
     "docker:prod": "node scripts/check-node.mjs && tsx scripts/docker-up.ts --prod",
     "docker:down": "tsx scripts/docker-down.ts",
