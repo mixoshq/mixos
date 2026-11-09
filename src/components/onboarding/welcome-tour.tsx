@@ -377,9 +377,9 @@ function Takeover({ branding }: { branding: Branding }) {
       case "next":
         // A keycap, faint until hovered, under the line's right edge: press
         // Enter, or click it. Its name says both what it does and what it shows.
-        // Once it is up it blinks now and then (`keycap-blink`, globals.css);
-        // the class goes on with it, so the first blink comes a few seconds
-        // after it appears, not while it is still fading in.
+        // Once it is up it blinks like a cursor (`keycap-blink`, globals.css);
+        // the class goes on with it, so the blinking starts once it has
+        // faded in, not while it still is.
         return (
           <div key={i} className={`${gap} flex justify-end ${fade(i)}`}>
             <button
