@@ -262,7 +262,7 @@ export function CheckLines({ lines, ready }: { lines: ProposalCheckLine[]; ready
       </ul>
       {!ready && (
         <p className="mt-3 text-sm text-muted-foreground">
-          Fix what doesn&apos;t hold, then open this again. Deployment &gt; GitHub App has the branch rule and the checklist.
+          Fix what doesn&apos;t hold, then open this again. Deployment &gt; Production Updates has the branch rule and the checklist.
         </p>
       )}
     </section>

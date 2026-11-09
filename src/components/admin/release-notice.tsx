@@ -136,7 +136,7 @@ function Offer({ offer }: { offer: UpdateOffer }) {
             Pull request #{offer.number}
           </Outbound>{" "}
           for {offer.tag} was opened on{" "}
-          {offer.repository} {formatLastUpdated(Date.parse(offer.at), "earlier")} by {offer.by}. Deployment &gt; GitHub App lists
+          {offer.repository} {formatLastUpdated(Date.parse(offer.at), "earlier")} by {offer.by}. Deployment &gt; Production Updates lists
           it with its checks. Merging it is the deploy.
         </p>
       );

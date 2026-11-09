@@ -14,8 +14,8 @@ import { readPageState } from "@/lib/github/page-state";
 // The link changes on GitHub's say as much as on this page's; never cached.
 export const dynamic = "force-dynamic";
 
-/** The public guide to the App: docs/hosting/after-you-install/github-app.md, as mixos.org serves it. */
-const GITHUB_APP_DOCS = "https://mixos.org/docs/install/after-you-install/github-app";
+/** The public guide: docs/hosting/after-you-install/github-app.md, as mixos.org serves it. */
+const PRODUCTION_UPDATES_DOCS = "https://mixos.org/docs/install/after-you-install/github-app";
 
 /** What the "create the App" round trip ended with, as `?created=` says. */
 const CREATED: Record<CreatedOutcome, { tone: OutcomeTone; text: string }> = {
@@ -81,22 +81,35 @@ export default async function GitHubAdminPage({
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">GitHub App</h1>
+        <h1 className="text-2xl font-bold text-foreground">Production Updates</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Manage extensions on this live instance without a developer making the change in a checkout. With
-          the App linked, installing, updating or removing an app, connector or theme here opens a pull request
-          in the GitHub repository this instance is built from. Nothing changes on its own: you review and merge
-          it on GitHub, and merging is the deploy.{" "}
+          Install, update and remove Apps, Connectors and Themes on your production instance, right from
+          here. Each change opens a request for your developers to review and merge in your GitHub
+          repository, and merging it deploys the latest. Nothing changes on its own.{" "}
           <a
-            href={GITHUB_APP_DOCS}
+            href={PRODUCTION_UPDATES_DOCS}
             target="_blank"
             rel="noreferrer noopener"
             className="font-medium text-primary underline underline-offset-2"
           >
-            Read the GitHub App guide
+            Read the Production Updates guide
             <span className="sr-only"> (opens in a new tab)</span>
           </a>
         </p>
+        {/* The mechanics, for whoever asks how; closed until then. */}
+        <details className="mt-3 text-sm text-muted-foreground">
+          <summary className="cursor-pointer font-medium text-foreground">Tech Talk</summary>
+          <p className="mt-2">
+            Production Updates works through a private GitHub App you create and install on the one
+            repository this instance is built from. Installing, updating or removing an App, Connector or
+            Theme here opens a pull request in that repository, on a branch of its own (
+            <code className="font-mono text-xs">mixos/install/…</code>,{" "}
+            <code className="font-mono text-xs">mixos/update/…</code> or{" "}
+            <code className="font-mono text-xs">mixos/remove/…</code>). Your developers review it, and
+            merging it into the default branch is the deploy. The instance never changes its own code, and
+            never merges.
+          </p>
+        </details>
       </div>
       <div className="space-y-6">
         {created && <Notice tone={CREATED[created].tone}>{CREATED[created].text}</Notice>}
