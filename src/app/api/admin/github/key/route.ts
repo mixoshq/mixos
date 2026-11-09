@@ -12,7 +12,7 @@ import { replacePrivateKey } from "@/lib/github/link";
 import type { GitHubOutcome } from "@/lib/github/outcomes";
 
 /**
- * Admin > GitHub's Replace private key: the pasted key arrives here, in the
+ * Developers > GitHub App's Replace private key: the pasted key arrives here, in the
  * body of a same-origin POST, and the work is replacePrivateKey()
  * (src/lib/github/link.ts).
  *

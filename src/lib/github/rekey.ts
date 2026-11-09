@@ -77,7 +77,7 @@ export async function rekeyStoredKey(oldKey: Buffer, newKey: Buffer, db: Sql = s
     try {
       fingerprint = keyFingerprint(parsePrivateKey(pem));
     } catch {
-      throw new RekeyError("The stored App key decrypts, but isn't a private key. Replace it on Admin > GitHub.");
+      throw new RekeyError("The stored App key decrypts, but isn't a private key. Replace it on Developers > GitHub App.");
     }
     const sealed = encrypt(pem, newKey);
     if (decrypt(sealed, newKey) !== pem) throw new RekeyError("The re-encrypted key didn't decrypt. Nothing changed.");

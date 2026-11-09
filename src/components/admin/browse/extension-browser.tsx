@@ -163,7 +163,7 @@ export default function ExtensionBrowser({
               <p>{proposal.off}</p>
               <p className="mt-1">
                 <Link href="/admin/github" className="underline underline-offset-2">
-                  Admin &gt; GitHub
+                  Developers &gt; GitHub App
                 </Link>
               </p>
             </Notice>

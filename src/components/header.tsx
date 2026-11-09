@@ -7,7 +7,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ADMIN_SECTIONS } from "@/lib/admin/sections";
+import { ADMIN_SECTIONS, DEVELOPER_SECTIONS } from "@/lib/admin/sections";
 import { useSession, signOut } from "next-auth/react";
 import { useState, useRef, useEffect } from "react";
 import {
@@ -188,29 +188,38 @@ export default function Header({
             >
               {isAdmin && (
                 <>
-                  <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Administration
-                  </p>
-                  {/* Mapped from the shared list rather than written out, so this
-                    menu and the admin sidebar cannot disagree about what
-                    Administration contains. See src/lib/admin/sections.ts. */}
-                  {ADMIN_SECTIONS.map((section) => {
-                    const Icon = section.icon;
-                    return (
-                      <Link
-                        key={section.href}
-                        href={section.href}
-                        onClick={() => setMenuOpen(false)}
-                        className="flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent"
-                      >
-                        <Icon
-                          className="h-4 w-4 text-muted-foreground"
-                          aria-hidden
-                        />
-                        {section.label}
-                      </Link>
-                    );
-                  })}
+                  {/* Mapped from the shared lists rather than written out, so
+                    this menu and the settings sidebar cannot disagree about
+                    what each group contains. See src/lib/admin/sections.ts. */}
+                  {(
+                    [
+                      ["Administration", ADMIN_SECTIONS],
+                      ["Developers", DEVELOPER_SECTIONS],
+                    ] as const
+                  ).map(([heading, sections]) => (
+                    <div key={heading}>
+                      <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                        {heading}
+                      </p>
+                      {sections.map((section) => {
+                        const Icon = section.icon;
+                        return (
+                          <Link
+                            key={section.href}
+                            href={section.href}
+                            onClick={() => setMenuOpen(false)}
+                            className="flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent"
+                          >
+                            <Icon
+                              className="h-4 w-4 text-muted-foreground"
+                              aria-hidden
+                            />
+                            {section.label}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  ))}
                   <div className="my-1 border-t border-border" />
                 </>
               )}
