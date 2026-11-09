@@ -6,6 +6,7 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import Image from "next/image";
+import { SquareCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { fitLogo, type LogoBox } from "@/lib/branding/fit";
@@ -16,10 +17,13 @@ import { useTour } from "./tour-context";
 
 /**
  * The end of the welcome tour: "MixOS is yours.", in the middle of the
- * screen, while the confetti shoots up from the bottom (./confetti.tsx).
+ * screen, its mark drawing itself on above the headline — and the moment
+ * the mark is done, confetti shoots up from the bottom (./confetti.tsx,
+ * through `burst()`): at once under reduced motion, where nothing draws, and
+ * after BURST_FALLBACK_MS if the animation's end never arrives.
  *
- * Above the headline, the install's mark, once. MixOS's own draws itself on,
- * stroke by stroke (./mixos-mark.tsx, traced from the PNG). Any other mark —
+ * MixOS's own mark draws itself on stroke by stroke (./mixos-mark.tsx,
+ * traced from the PNG). Any other mark —
  * a theme's, an app's — is an image, so it animates in as one: drawn on by a
  * sweep as it turns into place, then one glint across it. Motion is CSS
  * (`mark-draw` and `celebrate-*` in globals.css); reduced motion gets the
@@ -34,6 +38,8 @@ import { useTour } from "./tour-context";
 
 const MARK_BOX: LogoBox = { height: 88, maxWidth: 200 };
 const LEAVE_MS = 300;
+/** Past the longest the mark takes to draw (200ms beat + 1400ms). */
+const BURST_FALLBACK_MS = 3000;
 
 export default function Installed({
   name,
@@ -48,9 +54,19 @@ export default function Installed({
 }
 
 function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
-  const { dismissInstalled } = useTour();
+  const { dismissInstalled, burst } = useTour();
   const [leaving, setLeaving] = useState(false);
   const mark = logo ? fitLogo(logo, MARK_BOX) : null;
+
+  // The confetti, on the mark's last stroke; see the doc above.
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      burst();
+      return;
+    }
+    const t = window.setTimeout(burst, BURST_FALLBACK_MS);
+    return () => clearTimeout(t);
+  }, [burst]);
 
   // Fade, then go.
   useEffect(() => {
@@ -101,9 +117,14 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
             className="relative mx-auto flex h-36 w-36 items-center justify-center"
           >
             {isMixosMark(mark?.src) ? (
-              <MixosMarkDrawn height={MARK_BOX.height} />
+              <MixosMarkDrawn height={MARK_BOX.height} onDrawn={burst} />
             ) : (
-              <span className="celebrate-logo relative block">
+              <span
+                className="celebrate-logo relative block"
+                onAnimationEnd={(e) => {
+                  if (e.animationName === "celebrate-logo-in") burst();
+                }}
+              >
                 {mark ? (
                   <span className="celebrate-draw relative block">
                     <Image
@@ -145,6 +166,7 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
               through to the dim. Focused, so Enter is it too. */}
           <Button
             variant="primary"
+            icon={<SquareCheck className="h-4 w-4" aria-hidden />}
             autoFocus
             onClick={() => setLeaving(true)}
             className="pointer-events-auto mt-6"

@@ -146,7 +146,14 @@ export function isMixosMark(src: string | undefined): boolean {
  * The mark, each loop drawing itself on from its top corner, mirror-wise, in
  * the `mark-draw` animation (globals.css). Decorative.
  */
-export default function MixosMarkDrawn({ height }: { height: number }) {
+export default function MixosMarkDrawn({
+  height,
+  onDrawn,
+}: {
+  height: number;
+  /** When the strokes finish drawing; both end together, so it may come twice. */
+  onDrawn?: () => void;
+}) {
   // Ids for the gradients and masks, unique to this copy, and safe in url().
   const id = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const gradient = (key: string, g: typeof GRADIENT_A | typeof GRADIENT_B) => (
@@ -178,6 +185,9 @@ export default function MixosMarkDrawn({ height }: { height: number }) {
   );
   return (
     <svg
+      onAnimationEnd={(e) => {
+        if (e.animationName === "mark-draw") onDrawn?.();
+      }}
       aria-hidden
       viewBox="0 0 256 244"
       height={height}
