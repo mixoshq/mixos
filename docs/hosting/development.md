@@ -49,6 +49,15 @@ yourself:
   Mac, run **Shell Command: Install 'code' command in PATH** from VS Code's
   Command Palette.
 
+## On a Mac, without a terminal
+
+**MixOS Launcher** is a Mac app for the same job. It has a window listing every
+copy of MixOS on your Mac with its status, and a menu bar icon to open, start
+and stop them. **Set Up a New Copy…** checks for git, Node and Docker,
+downloads MixOS's newest release, and starts it. Build it with
+`npm run desktop:mac`. [desktop/macos](../../desktop/macos/README.md) has the
+rest.
+
 ## Quick start with `/mixos init`
 
 The easiest way to set up a development copy is to let Claude do it, in VS Code.
