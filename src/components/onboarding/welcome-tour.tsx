@@ -346,6 +346,9 @@ function Takeover({ branding }: { branding: Branding }) {
   const fade = (i: number) =>
     `transition-opacity duration-500 ${visible(i) ? "opacity-100" : "opacity-0"}`;
 
+  /** The screen has the dashboard picture on it, which plays. */
+  const playing = beats.some((b) => b.kind === "illustration");
+
   const beat = (b: Beat, i: number) => {
     const gap = gapAbove(beats, i);
     switch (b.kind) {
@@ -391,7 +394,8 @@ function Takeover({ branding }: { branding: Branding }) {
         // Enter, or click it. Its name says both what it does and what it shows.
         // Once it is up it blinks like a cursor (`keycap-blink`, globals.css);
         // the class goes on with it, so the blinking starts once it has
-        // faded in, not while it still is.
+        // faded in, not while it still is. Not beside the playing picture:
+        // one thing moving on the screen at a time.
         return (
           <div key={i} className={`${gap} mx-auto flex max-w-xl justify-end ${fade(i)}`}>
             <button
@@ -400,7 +404,9 @@ function Takeover({ branding }: { branding: Branding }) {
               disabled={!visible(i)}
               aria-label="Next (Enter)"
               aria-keyshortcuts="Enter"
-              className={`flex items-center gap-1.5 rounded-md border border-b-2 border-brand-foreground/25 px-2 py-1 font-mono text-xs text-brand-foreground/60 transition-colors hover:border-brand-foreground/50 hover:text-brand-foreground ${visible(i) ? "keycap-blink" : ""}`}
+              className={`flex items-center gap-1.5 rounded-md border border-b-2 border-brand-foreground/25 px-2 py-1 font-mono text-xs text-brand-foreground/60 transition-colors hover:border-brand-foreground/50 hover:text-brand-foreground ${
+                visible(i) && !playing ? "keycap-blink" : ""
+              }`}
             >
               Enter
               <CornerDownLeft className="h-3.5 w-3.5" aria-hidden />

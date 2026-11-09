@@ -25,6 +25,9 @@ const MINI_LOGO_BOX: LogoBox = { height: 12, maxWidth: 80 };
  * widgets, each one fed by a different kind of tool — a sheet, a team chat,
  * pull requests, a board — and one number they add up to.
  *
+ * Framed at 16:10, a laptop screen's shape, so it reads as the screen the
+ * person is about to look at rather than a diagram.
+ *
  * Drawn, not screenshotted: every colour is a theme token, so it shows the
  * workspace the person is about to see, in its colours, under any theme, and
  * it can't drift from a real dashboard nobody has built yet. The lines and
@@ -50,17 +53,24 @@ const STEP_MS = 1200;
 const REST_MS = 1400;
 const MOVE_MS = 900;
 
-/** A widget's place on a six-column, two-row dashboard. */
+/** A widget's place on a six-column, three-row dashboard. */
 type Slot = { x: number; y: number; w: number; h: number };
 type WidgetKey = "pipeline" | "revenue" | "chat" | "pulls" | "board";
 
-/** Where each widget sits in the two arrangements the loop moves between. */
+const COLS = 6;
+const ROWS = 3;
+
+/**
+ * Where each widget sits in the two arrangements the loop moves between.
+ * Each fills the grid exactly, and every widget moves between them; Revenue
+ * and Pull requests change size as well.
+ */
 const ARRANGEMENTS: Record<WidgetKey, [Slot, Slot]> = {
-  pipeline: [{ x: 0, y: 0, w: 4, h: 1 }, { x: 2, y: 0, w: 2, h: 1 }],
-  revenue: [{ x: 4, y: 0, w: 2, h: 1 }, { x: 0, y: 0, w: 2, h: 1 }],
-  chat: [{ x: 0, y: 1, w: 2, h: 1 }, { x: 3, y: 1, w: 3, h: 1 }],
-  pulls: [{ x: 2, y: 1, w: 2, h: 1 }, { x: 4, y: 0, w: 2, h: 1 }],
-  board: [{ x: 4, y: 1, w: 2, h: 1 }, { x: 0, y: 1, w: 3, h: 1 }],
+  pipeline: [{ x: 0, y: 0, w: 4, h: 1 }, { x: 2, y: 0, w: 4, h: 1 }],
+  revenue: [{ x: 4, y: 0, w: 2, h: 2 }, { x: 0, y: 0, w: 2, h: 1 }],
+  chat: [{ x: 0, y: 1, w: 2, h: 2 }, { x: 4, y: 1, w: 2, h: 2 }],
+  pulls: [{ x: 2, y: 1, w: 2, h: 1 }, { x: 0, y: 2, w: 4, h: 1 }],
+  board: [{ x: 2, y: 2, w: 4, h: 1 }, { x: 0, y: 1, w: 4, h: 1 }],
 };
 
 const REVENUE = ["$41.7k", "$44.9k", "$48.2k", "$52.6k", "$50.1k", "$55.3k"];
@@ -69,6 +79,8 @@ const SERIES = [35, 50, 42, 60, 55, 75, 90, 70, 82, 64, 88, 95];
 const PILLS = ["bg-success/40", "bg-cat-1/40", "bg-warning/40"];
 const CHAT_DOTS = ["bg-cat-2/50", "bg-cat-4/50", "bg-cat-5/50"];
 const CHAT_WIDTHS = ["w-3/4", "w-1/2", "w-2/3", "w-4/5"];
+/** Enough to fill the chat at its tallest; shorter places clip the oldest. */
+const CHAT_ROWS = 12;
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -115,11 +127,11 @@ export default function DashboardIllustration({
   return (
     <div
       aria-hidden
-      className="overflow-hidden rounded-xl border border-brand-foreground/15 text-left shadow-2xl shadow-black/30"
+      className="flex aspect-[16/10] flex-col overflow-hidden rounded-xl border border-brand-foreground/15 text-left shadow-2xl shadow-black/30"
     >
       {/* The menu bar, as the real one lays it out: brand left, then
           Dashboard and Apps, the account at the far end. */}
-      <div className="flex h-6 items-center gap-1.5 border-b border-brand-foreground/10 bg-brand px-2.5 sm:h-7">
+      <div className="flex h-6 shrink-0 items-center gap-1.5 border-b border-brand-foreground/10 bg-brand px-2.5 sm:h-7">
         {mark && <Image src={mark.src} alt="" width={mark.width} height={mark.height} />}
         <span className="max-w-[40%] truncate font-heading text-[9px] font-bold leading-none text-brand-foreground sm:text-[10px]">
           {name}
@@ -129,14 +141,15 @@ export default function DashboardIllustration({
         <span className="ml-auto h-2.5 w-2.5 rounded-full bg-brand-foreground/30" />
       </div>
 
-      {/* Placed absolutely, in percentages of a six-by-two grid, so a widget
-          can glide to a new place and size; a grid track can't animate. The
-          padding on each slot is the gap between widgets. */}
-      <div className="aspect-[12/5] bg-muted p-[3px] sm:aspect-[16/5] sm:p-1">
+      {/* Placed absolutely, in percentages of a six-by-three grid, so a
+          widget can glide to a new place and size; a grid track can't
+          animate. The padding on each slot is the gap between widgets. Lists
+          carry more rows than the smaller places show, and clip. */}
+      <div className="min-h-0 flex-1 bg-muted p-[3px] sm:p-1">
         <div className="relative h-full">
           <Widget slot={place("pipeline")} icon={Sheet} tint="text-cat-3" title="Pipeline" shown={shown} order={0}>
             <div className="space-y-1.5">
-              {[0.9, 0.7, 0.8, 0.6, 0.75].map((w, i) => (
+              {[0.9, 0.7, 0.8, 0.6, 0.75, 0.85].map((w, i) => (
                 <div key={i} className="flex items-center gap-1.5">
                   <Line className="w-[38%]" style={{ opacity: w }} />
                   <Line className="w-[22%]" />
@@ -173,15 +186,18 @@ export default function DashboardIllustration({
           </Widget>
 
           <Widget slot={place("chat")} icon={MessageSquare} tint="text-cat-2" title="Team chat" shown={shown} order={2}>
-            {/* The four latest of an endless conversation: each step, a new
-                message comes in at the bottom and the oldest leaves. */}
-            <div className="space-y-1.5">
-              {[0, 1, 2, 3].map((row) => {
+            {/* The latest of an endless conversation, held to the bottom so the
+                newest is always in view: each step, a new message comes in
+                there and the oldest leaves off the top. */}
+            <div className="flex h-full flex-col justify-end gap-1.5">
+              {Array.from({ length: CHAT_ROWS }, (_, row) => {
                 const k = step + row;
                 return (
                   <div
                     key={k}
-                    className={`flex items-center gap-1 ${row === 3 && step > 0 ? "illustration-in" : ""}`}
+                    className={`flex shrink-0 items-center gap-1 ${
+                      row === CHAT_ROWS - 1 && step > 0 ? "illustration-in" : ""
+                    }`}
                   >
                     <span className={`h-2 w-2 shrink-0 rounded-full ${CHAT_DOTS[k % CHAT_DOTS.length]}`} />
                     <Line className={CHAT_WIDTHS[k % CHAT_WIDTHS.length]} />
@@ -195,11 +211,11 @@ export default function DashboardIllustration({
             {/* One pull request's check is running at a time, and it moves on
                 each step, as checks pass and the next one starts. */}
             <div className="space-y-1.5">
-              {[0, 1, 2, 3].map((i) => (
+              {[0, 1, 2, 3, 4].map((i) => (
                 <div key={i} className="flex items-center gap-1">
                   <span
                     className={`h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-500 ${
-                      (i + step) % 4 === 1 ? "bg-warning" : "bg-success"
+                      (i + step) % 5 === 1 ? "bg-warning" : "bg-success"
                     }`}
                   />
                   <Line className={i % 2 ? "w-2/3" : "w-4/5"} />
@@ -259,10 +275,10 @@ function Widget({
         shown ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
       }`}
       style={{
-        left: `${(slot.x / 6) * 100}%`,
-        top: `${(slot.y / 2) * 100}%`,
-        width: `${(slot.w / 6) * 100}%`,
-        height: `${(slot.h / 2) * 100}%`,
+        left: `${(slot.x / COLS) * 100}%`,
+        top: `${(slot.y / ROWS) * 100}%`,
+        width: `${(slot.w / COLS) * 100}%`,
+        height: `${(slot.h / ROWS) * 100}%`,
         transition: `opacity 500ms ease-out ${delay}ms, transform 500ms ease-out ${delay}ms, left ${glide}, top ${glide}, width ${glide}, height ${glide}`,
       }}
     >
