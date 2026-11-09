@@ -8,6 +8,7 @@
     "predev": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
     "dev": "tsx scripts/dev.ts",
     "status": "node scripts/check-node.mjs && tsx scripts/status.ts",
+    "desktop:mac": "bash desktop/macos/build.sh",
     "dev:docker": "node scripts/check-node.mjs && tsx scripts/docker-up.ts",
     "docker:prod": "node scripts/check-node.mjs && tsx scripts/docker-up.ts --prod",
     "docker:down": "tsx scripts/docker-down.ts",

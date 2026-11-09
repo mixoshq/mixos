@@ -1,0 +1,148 @@
+# MixOS Launcher for macOS
+
+A Mac app for running MixOS on your own computer, without a terminal. It has a
+window that lists every copy of MixOS on the Mac with its status, and a menu
+bar icon, the MixOS mark, for opening, starting and stopping a copy.
+
+- **See whether each copy is up.** You get a ✓ or ✗ for its web server, its
+  database, its sign-in page and Studio, and the fix for anything that failed.
+  The menu bar mark is full while a copy is up, dimmed while none is, and a
+  warning sign when a running copy fails a check.
+- **Start, stop and open** a copy. Starting one opens it in your browser once
+  it answers, which you can turn off in Settings. If another MixOS already has
+  the port, the app offers the next free one as a button.
+- **Set up a new copy.** It checks that the Mac has git, Node and Docker, and
+  offers each one's installer or a fix if not. Then it downloads MixOS's newest
+  release into a folder you choose, installs its dependencies and starts it.
+  The new copy gets a database of its own, separate from every other copy.
+
+**It finds copies by itself**, the moment it opens, with nothing to set up:
+
+- every copy running in Docker;
+- every host `npm run dev`;
+- every copy whose database is running without its app;
+- every copy that has ever started MixOS, even when it's stopped now.
+
+Copies starting and stopping show up straight away. A copy stays on the list
+once seen, until you remove it. **Add an Existing Copy…** adds one that has
+never run.
+
+## Install
+
+Open `MixOS-Launcher-<version>.dmg`. It opens on one window: MixOS Launcher on
+the left, your Applications folder on the right, and an arrow between them.
+Drag the app onto Applications, then eject the disk.
+
+The app is signed ad hoc, not with an Apple Developer ID, and it isn't
+notarized. On the Mac that built it, it opens straight away. A copy downloaded
+or AirDropped onto another Mac is stopped the first time it opens. Allow it in
+**System Settings › Privacy & Security** with **Open Anyway**, once. Since
+macOS 15, Control-click › Open no longer does this. The installer window says
+so too.
+
+It needs macOS 13 or later. What it sets up needs Docker Desktop and Node 22 or
+newer, and it tells you if either is missing.
+
+## Build it
+
+From the repository root:
+
+```bash
+npm run desktop:mac                       # this Mac's architecture
+bash desktop/macos/build.sh --universal   # Apple silicon and Intel in one app
+```
+
+Both write `desktop/macos/dist/MixOS Launcher.app` and
+`desktop/macos/dist/MixOS-Launcher-<version>.dmg`. You need Xcode, or the
+command line tools, with Swift 5.9 or later. There's no Xcode project: it's a
+Swift package, and `build.sh` wraps the binary in an app bundle. The icon and
+the in-app logo are drawn from `public/logo.png` at build time
+(`make-icon.swift`), and the version and the Node requirement come from
+`package.json`.
+
+**The installer.** The .dmg's window is laid out by
+[dmgbuild](https://github.com/dmgbuild/dmgbuild), pinned to 1.6.7
+(`dmg-settings.py`). Its background, with the MixOS mark, the arrow and the
+instructions, is drawn by `make-dmg-background.swift` at 1× and 2×. `build.sh`
+holds the layout numbers, the window size and each icon's position, and hands
+the same ones to both. That keeps the icons at the ends of the arrow.
+
+dmgbuild writes the layout straight into the disk image's `.DS_Store`. It
+doesn't script Finder, so it needs no Automation permission and builds the
+same over SSH or in CI. It needs Python 3.10+, newer than macOS's own:
+
+- with `uv` installed, `build.sh` runs it through uv, which brings its own
+  Python;
+- otherwise any `python3` 3.10+ gets a virtualenv in `.build/`;
+- with neither, the .dmg still installs (the app and an Applications link),
+  just without the window. `brew install uv` gives you the full one.
+
+To work on it, open `desktop/macos/Package.swift` in Xcode, or use
+`swift build` and `swift test` in `desktop/macos`. A binary run with
+`swift run` has no bundle around it, so it shows a system symbol in place of
+the logo.
+
+## How it works
+
+The app decides nothing about MixOS itself. It runs each copy's own commands,
+in that copy's folder:
+
+| To | It runs |
+|---|---|
+| Show a copy's status | `npm run --silent status -- --json` |
+| Start a copy | `npm run dev:docker -- --detach --no-open` |
+| Stop a copy | `npm run docker:down` |
+| Set up a new copy | `git clone`, then the newest release tag, `npm ci`, and the start above |
+
+What it shows is therefore what that copy's code says, and a newer MixOS
+explains itself to an older app. `npm run status -- --json` only ever gains
+fields. A copy from before that command shows **Status unavailable**, and it
+can still be started and stopped.
+
+**Finding copies** is the app's own work, in Swift (`Detection.swift`), so it
+needs no copy to ask first and no Node. Each copy is traced to its folder:
+
+| What | How it's seen | Its folder |
+|---|---|---|
+| A copy in Docker | `docker ps -a`, and `docker events` to follow it live | the container's compose working-directory label |
+| A host `npm run dev` | `lsof`, every 5 seconds | the Node process's working directory, if that answers MixOS's `/api/health/live` |
+| A database on its own | `supabase_db_<instance>` among the containers | the instance's claim, or its compose containers |
+| A copy that has run | `~/.mixos/instances.json` (see [More than one instance](../../docs/local-docker.md#more-than-one-instance-on-one-machine)) | the claim |
+
+A scan takes about a tenth of a second. Detection answers *what runs, from
+where*. Whether a running copy is healthy is the copy's own answer, so
+`npm run status -- --json` runs whenever a copy starts or stops, and once a
+minute besides.
+
+**The PATH.** An app opened from Finder gets launchd's bare `PATH`, with no
+Homebrew, no nvm and no Docker CLI. The app asks your login shell for its
+`PATH` once at launch (`zsh -l -i`), with a 10-second limit, and adds the usual
+install locations after it. Commands run with `NO_COLOR=1` and
+`MIXOS_OPEN_BROWSER=false`, so MixOS's scripts know nobody is at a terminal.
+
+## Tests
+
+```bash
+cd desktop/macos && swift test
+```
+
+They cover reading the status report and the claims, the login-shell `PATH`,
+the command runner, the recommended-port parsing and the folder rules. One test
+runs against a real checkout from a bare, Finder-like environment, and only
+when asked:
+
+```bash
+env -i HOME="$HOME" USER="$USER" SHELL="$SHELL" PATH=/usr/bin:/bin \
+  MIXOS_LAUNCHER_LIVE=/path/to/your/mixos swift test --filter Live
+```
+
+## When something looks wrong
+
+The app logs what it detects, and every change to its list, to the macOS
+unified log:
+
+```bash
+/usr/bin/log stream --predicate 'subsystem == "org.mixos.launcher"'
+```
+
+The full path matters in zsh, which has a `log` command of its own.
