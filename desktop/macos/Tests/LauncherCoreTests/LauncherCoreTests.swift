@@ -160,6 +160,137 @@ final class OutputTests: XCTestCase {
   }
 }
 
+final class DetectionTests: XCTestCase {
+  var scratch: URL!
+  var main: String!
+  var feature: String!
+
+  /// Two checkouts on disk: `main` claimed as `mixos`, `feature` with an
+  /// .env.instance of its own.
+  override func setUpWithError() throws {
+    scratch = FileManager.default.temporaryDirectory.appendingPathComponent("detect-\(UUID().uuidString)")
+    for name in ["main", "feature"] {
+      let dir = scratch.appendingPathComponent(name)
+      try FileManager.default.createDirectory(at: dir.appendingPathComponent("scripts"), withIntermediateDirectories: true)
+      FileManager.default.createFile(atPath: dir.appendingPathComponent("scripts/instance.ts").path, contents: nil)
+      FileManager.default.createFile(atPath: dir.appendingPathComponent("docker-compose.yml").path, contents: nil)
+    }
+    try "MIXOS_INSTANCE=mixos-feature\nMIXOS_SUPABASE_PORT_BASE=54340\n"
+      .write(to: scratch.appendingPathComponent("feature/.env.instance"), atomically: true, encoding: .utf8)
+    main = Detection.canonical(scratch.appendingPathComponent("main").path)
+    feature = Detection.canonical(scratch.appendingPathComponent("feature").path)
+  }
+
+  override func tearDownWithError() throws {
+    try? FileManager.default.removeItem(at: scratch)
+  }
+
+  func isMixOS(_ path: String) -> Bool { CheckoutFolder.isMixOS(URL(fileURLWithPath: path)) }
+
+  func testDockerRowsAndTheirPublishedPort() {
+    let rows = Detection.parseDockerRows(
+      "mixos-app-dev-1\trunning\tmixos\tapp-dev\t/Users/me/mixos\t127.0.0.1:3000->3000/tcp\n" +
+        "supabase_db_mixos\texited\t\t\t\t\n"
+    )
+    XCTAssertEqual(rows.count, 2)
+    XCTAssertTrue(rows[0].running)
+    XCTAssertEqual(rows[0].service, "app-dev")
+    XCTAssertFalse(rows[1].running)
+    XCTAssertEqual(Detection.publishedPort(rows[0].ports), 3000)
+    XCTAssertNil(Detection.publishedPort("0.0.0.0:54323->3000/udp"))
+  }
+
+  func testListenersAndWorkingDirectoriesFromLsof() {
+    let listeners = Detection.parseListeners("p501\ncnode\nf20\nn*:3002\nf21\nn[::1]:3002\np77\ncRaycast\nn127.0.0.1:7265\n")
+    XCTAssertEqual(listeners, [
+      Listener(pid: 501, command: "node", port: 3002),
+      Listener(pid: 77, command: "Raycast", port: 7265),
+    ])
+    XCTAssertEqual(Detection.parseCwds("p501\nfcwd\nn/Users/me/mixos\n"), [501: "/Users/me/mixos"])
+  }
+
+  func testTheInstanceNameComesFromEnvInstanceOrIsMixos() {
+    XCTAssertEqual(Detection.instanceName(of: feature), "mixos-feature")
+    XCTAssertEqual(Detection.instanceName(of: main), "mixos")
+  }
+
+  func testAClaimAloneIsAStoppedCopyOnTheList() {
+    let copies = Detection.merge(
+      containers: [], hostServers: [],
+      claims: ["mixos": Claim(checkout: main, portBase: 54320, inspectorPort: 8083)], isMixOS: isMixOS
+    )
+    XCTAssertEqual(copies[main]?.instance, "mixos")
+    XCTAssertEqual(copies[main]?.running, false)
+  }
+
+  func testARunningAppContainerIsItsFoldersAppWithItsPublishedAddress() {
+    let copies = Detection.merge(
+      containers: [ContainerRow(name: "mixos-feature-app-dev-1", running: true, project: "mixos-feature",
+                                service: "app-dev", workingDir: feature, ports: "127.0.0.1:3001->3000/tcp")],
+      hostServers: [], claims: [:], isMixOS: isMixOS
+    )
+    XCTAssertEqual(copies[feature]?.app?.url, "http://localhost:3001")
+    XCTAssertEqual(copies[feature]?.app?.docker, true)
+    XCTAssertEqual(copies[feature]?.instance, "mixos-feature")
+  }
+
+  func testADatabaseIsTracedToItsFolderThroughTheClaimOrComposesContainers() {
+    let copies = Detection.merge(
+      containers: [
+        ContainerRow(name: "supabase_db_mixos", running: true, project: "", service: "", workingDir: "", ports: ""),
+        // Stopped, but it still says which folder `mixos-feature` is.
+        ContainerRow(name: "mixos-feature-cron-1", running: false, project: "mixos-feature", service: "cron",
+                     workingDir: feature, ports: ""),
+        ContainerRow(name: "supabase_db_mixos-feature", running: true, project: "", service: "", workingDir: "", ports: ""),
+        ContainerRow(name: "supabase_db_nobody", running: true, project: "", service: "", workingDir: "", ports: ""),
+      ],
+      hostServers: [],
+      claims: ["mixos": Claim(checkout: main, portBase: 54320, inspectorPort: 8083)],
+      isMixOS: isMixOS
+    )
+    XCTAssertEqual(copies[main]?.databaseRunning, true)
+    XCTAssertNil(copies[main]?.app, "a database alone is not an app")
+    XCTAssertEqual(copies[feature]?.databaseRunning, true)
+    XCTAssertEqual(copies.count, 2, "a database no folder is known for is left out")
+  }
+
+  func testAHostServerIsItsFoldersAppUnlessDockerAlreadyServesIt() {
+    let docker = ContainerRow(name: "mixos-app-dev-1", running: true, project: "mixos", service: "app-dev",
+                              workingDir: main, ports: "127.0.0.1:3000->3000/tcp")
+    let copies = Detection.merge(
+      containers: [docker],
+      hostServers: [HostServer(pid: 9, port: 3002, checkout: main), HostServer(pid: 10, port: 3005, checkout: feature)],
+      claims: [:], isMixOS: isMixOS
+    )
+    XCTAssertEqual(copies[main]?.app?.url, "http://localhost:3000")
+    XCTAssertEqual(copies[feature]?.app?.url, "http://localhost:3005")
+    XCTAssertEqual(copies[feature]?.app?.docker, false)
+    XCTAssertEqual(copies[feature]?.instance, "mixos-feature")
+  }
+
+  func testContainersFromFoldersThatArentMixOSAreIgnored() {
+    let copies = Detection.merge(
+      containers: [ContainerRow(name: "web-app-1", running: true, project: "web", service: "app",
+                                workingDir: scratch.path, ports: "127.0.0.1:3000->3000/tcp")],
+      hostServers: [], claims: [:], isMixOS: isMixOS
+    )
+    XCTAssertTrue(copies.isEmpty)
+  }
+
+  func testOneFolderReachedTwoWaysIsOneCopy() throws {
+    let link = scratch.appendingPathComponent("link")
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: main)
+    let copies = Detection.merge(
+      containers: [ContainerRow(name: "mixos-cron-1", running: true, project: "mixos", service: "cron",
+                                workingDir: link.path, ports: "")],
+      hostServers: [],
+      claims: ["mixos": Claim(checkout: main + "/", portBase: 54320, inspectorPort: 8083)],
+      isMixOS: isMixOS
+    )
+    XCTAssertEqual(Array(copies.keys), [main])
+  }
+}
+
 /// Against a real checkout, from the bare environment an app opened in Finder
 /// gets. Skipped unless MIXOS_LAUNCHER_LIVE names one:
 ///
@@ -180,6 +311,19 @@ final class LiveCheckoutTests: XCTestCase {
     let report = try XCTUnwrap(StatusReport.parse(result.output), "No report in: \(result.output)")
     XCTAssertEqual(URL(fileURLWithPath: report.checkout).standardizedFileURL.path, URL(fileURLWithPath: path).standardizedFileURL.path)
     XCTAssertFalse(report.checks.isEmpty)
+  }
+
+  func testDetectionFindsTheCheckoutOnThisMac() async throws {
+    let path = try XCTUnwrap(ProcessInfo.processInfo.environment["MIXOS_LAUNCHER_LIVE"])
+    let detector = Detector(runner: CommandRunner(path: await LoginShell.resolvePath()))
+    let started = Date()
+    let copies = await detector.scan()
+    for copy in copies.values.sorted(by: { $0.checkout < $1.checkout }) {
+      print("detected:", copy.checkout, copy.instance ?? "-", copy.app?.url ?? "no app", copy.app?.how ?? "",
+            copy.databaseRunning ? "database running" : "")
+    }
+    print("scan took", Date().timeIntervalSince(started), "s")
+    XCTAssertNotNil(copies[Detection.canonical(path)])
   }
 
   override func setUp() async throws {

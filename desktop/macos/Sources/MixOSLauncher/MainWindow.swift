@@ -7,34 +7,51 @@ import SwiftUI
 
 /// The window: every copy of MixOS on this Mac down the side, the selected
 /// one's status, actions and output on the right.
+///
+/// A fixed-width column and a divider, not NavigationSplitView. That one
+/// sizes itself from the split view frames AppKit saves between launches, and
+/// a saved height of 3,268 points, in a window 548 high, put the sidebar's
+/// rows and every button above the top of the window: a window that looked
+/// empty while its list was full. Nothing here is saved, so nothing can be
+/// restored wrong.
 struct MainWindow: View {
   @EnvironmentObject private var store: Store
 
   var body: some View {
-    NavigationSplitView {
+    HStack(spacing: 0) {
       List(selection: $store.selection) {
         Section("MixOS on this Mac") {
           ForEach(store.checkouts) { checkout in
             CheckoutRow(checkout: checkout).tag(checkout.id)
           }
-        }
-      }
-      .navigationSplitViewColumnWidth(min: 220, ideal: 250)
-      .toolbar {
-        ToolbarItem {
-          Menu {
-            Button("Set Up a New Copy…") { store.showingSetup = true }
-            Button("Add an Existing Copy…") { AddCheckout.choose(store) }
-          } label: {
-            Label("Add", systemImage: "plus")
+          if store.checkouts.isEmpty {
+            Text("Looking for copies of MixOS…").foregroundStyle(.secondary)
           }
         }
       }
-    } detail: {
-      if let checkout = store.checkouts.first(where: { $0.id == store.selection }) {
-        CheckoutDetail(checkout: checkout)
-      } else {
-        Welcome()
+      .listStyle(.sidebar)
+      .frame(width: 250)
+
+      Divider()
+
+      Group {
+        if let checkout = store.checkouts.first(where: { $0.id == store.selection }) {
+          // Scrolls, rather than clips, in a window too short for a long log.
+          ScrollView { CheckoutDetail(checkout: checkout) }
+        } else {
+          Welcome()
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    .toolbar {
+      ToolbarItem {
+        Menu {
+          Button("Set Up a New Copy…") { store.showingSetup = true }
+          Button("Add an Existing Copy…") { AddCheckout.choose(store) }
+        } label: {
+          Label("Add", systemImage: "plus")
+        }
       }
     }
     .sheet(isPresented: $store.showingSetup) {
@@ -108,7 +125,7 @@ struct CheckoutDetail: View {
         Button {
           store.start(checkout)
         } label: {
-          Label(report?.app == nil ? "Start" : "Restart", systemImage: "play.fill")
+          Label(store.isRunning(checkout) ? "Restart" : "Start", systemImage: "play.fill")
         }
         .buttonStyle(.borderedProminent)
         .disabled(busy)
@@ -117,13 +134,13 @@ struct CheckoutDetail: View {
         } label: {
           Label("Stop", systemImage: "stop.fill")
         }
-        .disabled(busy || report?.app == nil)
+        .disabled(busy || !store.hasAnythingRunning(checkout))
         Button {
           store.open(checkout)
         } label: {
           Label("Open in Browser", systemImage: "safari")
         }
-        .disabled(report?.app == nil)
+        .disabled(store.appURL(of: checkout) == nil)
         Spacer()
         if store.refreshing.contains(checkout.id) { ProgressView().controlSize(.small) }
         Button {
@@ -151,6 +168,15 @@ struct CheckoutDetail: View {
           color: .orange,
           text: "This copy has no database of its own yet: `\(report?.instance ?? "")` belongs to \(owner). " +
             "Start gives it an instance and a fresh database of its own."
+        )
+      }
+
+      if let copy = store.detected[checkout.id], report == nil || report?.app == nil, copy.running {
+        Notice(
+          symbol: copy.app == nil ? "cylinder.split.1x2" : "dot.radiowaves.left.and.right",
+          color: copy.app == nil ? .blue : .green,
+          text: copy.app.map { "Running \($0.how) at \($0.url). Its checks are on their way." }
+            ?? "Its database is running, but its app isn't. Start runs both; Stop stops both."
         )
       }
 
