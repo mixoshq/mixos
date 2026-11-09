@@ -73,7 +73,7 @@ export function buildCsp(nonce: string, options: { formActions?: readonly string
 }
 
 /**
- * The one page whose form may post somewhere else: Deployment > GitHub App posts the App
+ * The one page whose form may post somewhere else: Deployment > Production Updates posts the App
  * manifest to github.com, which is how GitHub's manifest flow works
  * (src/components/admin/github/create-app.tsx). Every other page keeps
  * `form-action 'self'`. Exact path match: nothing under it, and no other page.

@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Deployment > GitHub App: link this instance to the one repository it is built from,
+ * Deployment > Production Updates: link this instance to the one repository it is built from,
  * through a private GitHub App the operator owns. The work behind the server
  * actions in ./actions.ts and the two routes GitHub sends the admin back to.
  *
@@ -760,13 +760,13 @@ export async function withLinkedRepository<T>(
   }
   const state = await readGitHubState();
   if (!state.app || !state.link) {
-    throw new GitHubLinkError(refused("not-linked", "Link a repository on Deployment > GitHub App first.", "info"));
+    throw new GitHubLinkError(refused("not-linked", "Link a repository on Deployment > Production Updates first.", "info"));
   }
   if (state.link.disabled) {
     throw new GitHubLinkError(
       refused(
         "disabled",
-        `The GitHub link is off: ${state.link.disabled.detail} Check again on Deployment > GitHub App.`,
+        `The GitHub link is off: ${state.link.disabled.detail} Check again on Deployment > Production Updates.`,
         "danger",
       ),
     );
@@ -782,7 +782,7 @@ export async function withLinkedRepository<T>(
       refused(
         "moved",
         `GitHub now lists the repository as ${fullName(repository)} with default branch ${repository.defaultBranch}. ` +
-          "Check again on Deployment > GitHub App to record that.",
+          "Check again on Deployment > Production Updates to record that.",
       ),
     );
   }

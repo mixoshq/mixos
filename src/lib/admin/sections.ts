@@ -44,13 +44,14 @@ export const ADMIN_SECTIONS: NavSection[] = [
 ];
 
 /**
- * How changes reach this deployed instance: the GitHub App, which turns an
- * extension installed, updated or removed here into a pull request on the
- * repository it's built from. An admin page still (`/admin/github`, behind
+ * How changes reach this deployed instance: Production Updates, which turns
+ * an app, connector or theme installed, updated or removed here into a pull
+ * request on the repository it's built from, through a GitHub App. Not
+ * called that here: an "App" in the menu would read as one of the apps. An admin page still (`/admin/github`, behind
  * `requireAdmin`), at the URL it always had. A group left empty isn't shown.
  */
 export const DEPLOYMENT_SECTIONS: NavSection[] = [
-  { label: "GitHub App", href: "/admin/github", icon: GitPullRequest },
+  { label: "Production Updates", href: "/admin/github", icon: GitPullRequest },
 ];
 
 /**

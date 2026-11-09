@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import UpdatePullRequestButton from "../update-pull-request";
 
 /**
- * The GitHub App's open MixOS update pull requests, on Deployment > GitHub App, with
+ * The GitHub App's open MixOS update pull requests, on Deployment > Production Updates, with
  * what their checks say (src/lib/github/proposals.ts): "No CI ran" and
  * "Changed since proposed" as for an extension's. Here and not on the release
  * notice, which is on every admin page: this reads GitHub, and the notice

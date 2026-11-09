@@ -7,7 +7,7 @@ removing extensions. Three pages go further:
 - **[Upgrading MixOS](upgrading.md)**: taking a new release, and rolling back.
 - **[Securing your install](securing.md)**: who can reach it, taking access
   away, and what to watch.
-- **[The GitHub App](github-app.md)**: linking your repository, so a deployment
+- **[Production Updates](github-app.md)**: linking your repository, so a deployment
   can propose extensions and updates as pull requests.
 
 ## Sign in and add your team
@@ -422,7 +422,7 @@ be deleted, the code still goes and the data stays.
 
 ## Link the GitHub App
 
-Deployment > GitHub App links a deployment to the repository it's built from, through a
+Deployment > Production Updates links a deployment to the repository it's built from, through a
 private GitHub App you own, installed on that one repository. Then the
 deployment can propose extensions, their updates and their removals as pull
 requests, which you review and merge on GitHub. It's off until

@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Deployment > GitHub App's work functions without a database: each asks for the admin
+ * Deployment > Production Updates's work functions without a database: each asks for the admin
  * before anything else, and the branch rule's precondition for later
  * proposals. The flows themselves are in ./link.integration.test.ts.
  */

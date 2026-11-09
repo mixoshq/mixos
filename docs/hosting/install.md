@@ -276,7 +276,7 @@ any required key that's missing.
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind. See [Fixing what an instance runs](after-you-install/README.md#fixing-what-an-instance-runs) |
 | `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance checks mixos.org once a day for updates to MixOS and its extensions. `false` sends nothing. See [Release and update notices](after-you-install/README.md#release-and-update-notices) |
 | `MIXOS_RELEASE_CHANNEL` | No, default `stable` | Which releases of MixOS the admin pages tell you about: `stable`, or `prerelease` to include prereleases, such as `v0.3.0-rc.1` |
-| `GITHUB_APP_ENCRYPTION_KEY` | No | Turns on Deployment > GitHub App. See [The GitHub App](after-you-install/github-app.md) |
+| `GITHUB_APP_ENCRYPTION_KEY` | No | Turns on Deployment > Production Updates. See [Production Updates](after-you-install/github-app.md) |
 | `MIXOS_COMMIT` | No | The commit the admin pages show beside the version. See [Which build is running](after-you-install/README.md#which-build-is-running) |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated email domains that accounts may use. Blank means any |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | No | Web Push, for apps that send notifications |

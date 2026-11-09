@@ -34,7 +34,7 @@ const INSTALL_LINK =
 const KEY_UNUSABLE = new Set(["key-refused", "key-unreadable", "github-unauthorized"]);
 
 /**
- * Deployment > GitHub App: create the App, install it, link it, and look after the
+ * Deployment > Production Updates: create the App, install it, link it, and look after the
  * link. Everything shown comes from the server's read of this instance
  * (src/lib/github/page-state.ts); the buttons run the actions in
  * src/lib/github/actions.ts, each of which checks the admin again.
