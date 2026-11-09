@@ -19,18 +19,25 @@ export default function ReleaseBannerShell({ tag, children }: { tag: string; chi
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
   return (
+    // The accent's tint on the page background, as the admin pages' callouts
+    // are drawn: the text keeps the body's foreground rather than naming it
+    // here, since the contrast rule measures a `brand-accent` fill on the
+    // menu bar's `--brand`, which this sits above, not on.
     <section
       aria-label="A newer release of MixOS"
       data-release-banner={tag}
-      className="shrink-0 border-b border-border bg-card text-sm text-foreground"
+      className="shrink-0 border-b border-brand-accent/30 bg-brand-accent/10 text-xs"
     >
-      <div className="flex items-start gap-2 px-4 py-1.5 sm:px-6 lg:px-8">
+      {/* Slim, so it costs the page little above the menu bar: 12px text and
+          24px controls (CopyButton's `compact`), under the touch floor. */}
+      <div className="flex items-center gap-2 px-4 py-0.5 sm:px-6 lg:px-8">
         {children}
         <IconButton
           variant="ghost"
           size="sm"
           label="Dismiss until the next release"
-          icon={<X className="h-4 w-4" aria-hidden />}
+          icon={<X className="h-3.5 w-3.5" aria-hidden />}
+          className="h-6 w-6"
           onClick={() => {
             setDismissed(true);
             dismissReleaseBannerAction({ tag }).catch(() => {});
