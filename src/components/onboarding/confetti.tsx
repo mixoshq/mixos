@@ -31,7 +31,7 @@ import { useTour, type BurstOrigin } from "./tour-context";
  * Colours are the theme's tokens, so the burst matches the running theme.
  */
 
-const PIECES = 480;
+const PIECES = 1983;
 const STRAGGLER_MS = 5500;
 
 const COLORS = [
