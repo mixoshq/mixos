@@ -56,9 +56,9 @@ export default async function MainLayout({
         <TourProvider active={onboardingCompletedAt === null}>
           <DashboardEditProvider>
             <div className="flex h-screen flex-col">
-              <HeaderShell logo={menuBarLogo} name={name} />
-              {/* In the column, not over it: the page below starts after it, so nothing overlaps. */}
+              {/* In the column, not over it: the menu bar and the page start after it, so nothing overlaps. */}
               <ReleaseBanner isAdmin={session.user.isAdmin} userId={session.user.id} />
+              <HeaderShell logo={menuBarLogo} name={name} />
               <main className="flex-1 overflow-auto bg-muted">{children}</main>
             </div>
             <WelcomeTour branding={{ name, menuBarLogo, loginLogo }} />

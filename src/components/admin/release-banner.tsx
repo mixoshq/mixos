@@ -19,7 +19,8 @@ export const RELEASE_NOTICE_URL = `/admin/apps#${RELEASE_NOTICE_ID}`;
 /**
  * The slim banner over every page of the main interface, for admins, when a
  * newer release of MixOS is out (src/lib/platform/release-banner.ts says when).
- * The main layout renders it under the menu bar, with the session it already
+ * In the admin pages' accent, as their full notice is (./release-notice.tsx).
+ * The main layout renders it above the menu bar, with the session it already
  * resolved; for anyone but an admin it returns before reading anything. The
  * release comes from the stored answer, read once per request with the admin
  * pages' notice (src/lib/platform/release-view.ts).
@@ -36,18 +37,18 @@ export default async function ReleaseBanner({ isAdmin, userId }: { isAdmin: bool
 export function ReleaseBannerView({ banner }: { banner: Banner }) {
   return (
     <ReleaseBannerShell tag={banner.tag}>
-      <ArrowUpCircle className="mt-2 h-4 w-4 shrink-0" aria-hidden />
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-        <p className="min-w-0 py-1">
+      <ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3">
+        <p className="min-w-0">
           MixOS {banner.tag} is out (you run {banner.current}). Run{" "}
-          <code className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-xs">
+          <code className="rounded border border-border bg-background px-1 font-mono text-[11px]">
             {UPGRADE_COMMAND}
           </code>{" "}
           in Claude Code to upgrade.
         </p>
-        <span className="flex items-center gap-x-3">
-          <CopyButton text={UPGRADE_COMMAND} label="Copy" />
-          <Link href={RELEASE_NOTICE_URL} className="underline underline-offset-2">
+        <span className="flex items-center gap-x-2">
+          <CopyButton text={UPGRADE_COMMAND} label="Copy" compact />
+          <Link href={RELEASE_NOTICE_URL} className="font-medium text-primary underline underline-offset-2">
             Details
           </Link>
         </span>
