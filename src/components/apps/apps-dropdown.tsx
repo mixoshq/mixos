@@ -19,7 +19,7 @@ import {
 import { usePreferences } from "@/components/preferences-context";
 import { useListReorder } from "@/lib/dnd/use-list-reorder";
 import AppsMoreMenu from "@/components/apps/apps-more-menu";
-import { APP_MANAGER_LINK, GUIDE_STEPS, OPEN_APPS_MENU } from "@/components/onboarding/steps";
+import { APP_MANAGER_LINK, GUIDE_STEPS } from "@/components/onboarding/steps";
 import { useTour } from "@/components/onboarding/tour-context";
 import type { AppManifest } from "@/lib/apps/types";
 import { CARD_SURFACE } from "@/components/ui/card";
@@ -99,13 +99,6 @@ export default function AppsDropdown() {
       cancelled = true;
       window.removeEventListener("apps:installed-changed", onChanged);
     };
-  }, []);
-
-  // The welcome tour opens the menu to point at App Manager in it.
-  useEffect(() => {
-    const open = () => setDropdownOpen(true);
-    window.addEventListener(OPEN_APPS_MENU, open);
-    return () => window.removeEventListener(OPEN_APPS_MENU, open);
   }, []);
 
   useEffect(() => {
