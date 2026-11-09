@@ -112,7 +112,7 @@ The install guide is in [`docs/hosting/`](docs/hosting/), in five parts:
    removing extensions; with
    [Upgrading MixOS](docs/hosting/after-you-install/upgrading.md),
    [Securing your install](docs/hosting/after-you-install/securing.md) and
-   [The GitHub App](docs/hosting/after-you-install/github-app.md).
+   [Production Updates](docs/hosting/after-you-install/production-updates.md).
 
 A deployment is the server, a Postgres 13+ database from any provider, and a
 five-minute tick against `/api/cron`. MixOS connects to the database with one

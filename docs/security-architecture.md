@@ -3704,7 +3704,7 @@ again and before every proposal (`branchRuleSatisfied()`). That lists ruleset ru
 protection doesn't show there, and private repositories on GitHub Free can't
 have rulesets, so an admin can confirm either, with the repository's name
 typed, audited. If GitHub won't show the rules at all (a 403 or 404), linking
-goes ahead and records that, since linking doesn't need the rule. [The Production Updates guide](hosting/after-you-install/github-app.md#linking-your-github-repository)
+goes ahead and records that, since linking doesn't need the rule. [The Production Updates guide](hosting/after-you-install/production-updates.md#linking-your-github-repository)
 gives the ruleset.
 
 ### Proposing an install

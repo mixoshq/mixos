@@ -87,7 +87,7 @@ stopped.
 ## Previews of the GitHub App's branches
 
 `vercel.json` turns off deployments of branches under `mixos/`, which are the
-ones the [GitHub App](../after-you-install/github-app.md) proposes extensions
+ones the [GitHub App](../after-you-install/production-updates.md) proposes extensions
 and MixOS updates on:
 
 ```json

@@ -7,7 +7,7 @@ removing extensions. Three pages go further:
 - **[Upgrading MixOS](upgrading.md)**: taking a new release, and rolling back.
 - **[Securing your install](securing.md)**: who can reach it, taking access
   away, and what to watch.
-- **[Production Updates](github-app.md)**: linking your repository, so a deployment
+- **[Production Updates](production-updates.md)**: linking your repository, so a deployment
   can propose extensions and updates as pull requests.
 
 ## Sign in and add your team
@@ -109,7 +109,7 @@ admins aren't told about new or withdrawn releases. The Registry API docs say
 
 Installing, updating and removing an extension are changes to your repository.
 You make them in a [development copy](../development.md), commit them, and
-deploy; or, with the [GitHub App](github-app.md) linked, a deployment proposes
+deploy; or, with the [GitHub App](production-updates.md) linked, a deployment proposes
 them as a pull request.
 
 ### Fixing what an instance runs
@@ -157,7 +157,7 @@ A deployment runs what its build carries. Its Browse pages show the catalogue,
 and say: "This deployment runs a build. Install and register in a checkout of
 your repository, commit, and deploy." With the GitHub App linked, a deployment
 can propose an extension as a pull request instead; see
-[Proposing an extension](github-app.md#proposing-an-extension). To add one from a
+[Proposing an extension](production-updates.md#proposing-an-extension). To add one from a
 checkout:
 
 1. In a checkout of your repository, running `npm run dev`, install it from
@@ -276,9 +276,9 @@ out, or when the installed one was withdrawn: see
    and a commit message that names both releases; `/mixos deploy` does the same.
 5. Merge it into the branch your host deploys.
 
-On a deployment with the [GitHub App](github-app.md) linked, **Propose update**
+On a deployment with the [GitHub App](production-updates.md) linked, **Propose update**
 on the notice or the listing does steps 1 to 5 as a pull request; see
-[Proposing an extension](github-app.md#proposing-an-extension).
+[Proposing an extension](production-updates.md#proposing-an-extension).
 
 An update that stops midway leaves the old folder in `.mixos/backup/`, and
 `npm run register -- --recover` asks whether to put it back or keep the new
@@ -307,9 +307,9 @@ Removing an extension is a change to your repository, as installing one is:
    from the Registry takes its `.registry.json` with it.
 3. Merge it into the branch your host deploys.
 
-On a deployment with the [GitHub App](github-app.md) linked, **Propose removal**
+On a deployment with the [GitHub App](production-updates.md) linked, **Propose removal**
 in the Remove dialog does all three as a pull request; see
-[Proposing an extension](github-app.md#proposing-an-extension).
+[Proposing an extension](production-updates.md#proposing-an-extension).
 
 Its data stays in each database: an app's tables, settings, API keys, grants and
 scheduled jobs, and a connector's credentials. The release step marks a removed
@@ -426,4 +426,4 @@ Deployment > Production Updates links a deployment to the repository it's built 
 private GitHub App you own, installed on that one repository. Then the
 deployment can propose extensions, their updates and their removals as pull
 requests, which you review and merge on GitHub. It's off until
-`GITHUB_APP_ENCRYPTION_KEY` is set. See [The GitHub App](github-app.md).
+`GITHUB_APP_ENCRYPTION_KEY` is set. See [Production Updates](production-updates.md).
