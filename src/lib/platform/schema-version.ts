@@ -41,7 +41,8 @@
  * Not every host waits for readiness, so the proxy asks too
  * (`./maintenance.ts`): while the platform schema is behind, every request but
  * the two health probes gets the maintenance response instead of reaching a
- * route that would query it.
+ * route that would query it. Loading the sign-in page is the one page let
+ * through, and it says sign-in is unavailable (`./sign-in-database.ts`).
  *
  * ── THE COMPARISON IS `<`, NOT `!==` ────────────────────────────────────────
  *
