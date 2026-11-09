@@ -43,7 +43,7 @@ export function NavGroup({
     <div>
       <h2
         id={id}
-        className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-muted-foreground"
+        className="mb-2 px-3 text-xs font-bold uppercase tracking-widest text-muted-foreground"
       >
         {label}
       </h2>
