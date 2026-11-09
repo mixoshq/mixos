@@ -25,9 +25,8 @@ import { GUIDE_STEPS, type GuideStep } from "./steps";
  * THE PAGE STAYS LIVE. The dim is a box-shadow on the spotlight, not a
  * backdrop element, and the spotlight has `pointer-events: none` — so the
  * thing being pointed at is clickable while the bubble is up. That is what
- * lets an `auto` step ask for a real action: the user clicks the very control
- * in the spotlight, the page announces what changed (`doneOn`), and the guide
- * moves on.
+ * lets every step ask for a real action: the user clicks the very control in
+ * the spotlight, the page shows what changed, and the guide moves on.
  *
  * MEASURED EVERY FRAME. One animation-frame loop while a step is showing:
  * find the target (first of the step's candidates that exists) and read its
@@ -66,14 +65,15 @@ function selectorFor(step: GuideStep): string {
 }
 
 /**
- * The step's target rect, and whether the step is done: its `doneOn` event
- * fired, or, for an `endsWithTarget` step, its target came and went.
+ * The step's target rect, and whether the step is done: its `doneWhen`
+ * element is on the page, its `doneOn` event fired, or, for an
+ * `endsWithTarget` step, its target came and went.
  */
 function useStepState(step: GuideStep): { rect: Rect | null; done: boolean } {
   const [rect, setRect] = useState<Rect | null>(null);
   const [done, setDone] = useState(false);
   const selector = selectorFor(step);
-  const { doneOn, endsWithTarget } = step;
+  const { doneWhen, doneOn, endsWithTarget } = step;
 
   useEffect(() => {
     let frame = 0;
@@ -96,11 +96,12 @@ function useStepState(step: GuideStep): { rect: Rect | null; done: boolean } {
         setRect(null);
         if (endsWithTarget && seen) setDone(true);
       }
+      if (doneWhen && document.querySelector(doneWhen)) setDone(true);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [selector, endsWithTarget]);
+  }, [selector, endsWithTarget, doneWhen]);
 
   useEffect(() => {
     if (!doneOn) return;
@@ -151,29 +152,26 @@ function Steps() {
   // Skip is in the bubble here; the takeover's own Skip left with it.
   const step = GUIDE_STEPS[index];
   const last = index === GUIDE_STEPS.length - 1;
-  // Stable, so an `auto` step's pending advance isn't restarted by a render.
+  // Stable, so a step's pending advance isn't restarted by a render.
   const onAdvance = useCallback(
-    (origin?: BurstOrigin) =>
+    () =>
       last
-        ? complete(origin ?? burstFrom(step.celebrateAt?.()))
+        ? complete(burstFrom(step.celebrateAt?.()))
         : setGuideStep(index + 1),
     [last, complete, step, setGuideStep, index],
   );
   if (!started) return null;
   // Keyed on the index so each step gets a fresh `done`, never the previous
   // step's stale true.
-  return <Step key={index} step={step} last={last} onAdvance={onAdvance} />;
+  return <Step key={index} step={step} onAdvance={onAdvance} />;
 }
 
 function Step({
   step,
-  last,
   onAdvance,
 }: {
   step: GuideStep;
-  last: boolean;
-  /** The last step passes where its Done button is, for the confetti. */
-  onAdvance: (origin?: BurstOrigin) => void;
+  onAdvance: () => void;
 }) {
   const { finish } = useTour();
   const { rect, done } = useStepState(step);
@@ -203,7 +201,7 @@ function Step({
   // has drawn what the event announced: the confetti bursts from it.
   useEffect(() => {
     if (!done) return;
-    const t = window.setTimeout(() => onAdvance(), step.doneOn ? SETTLE_MS : 0);
+    const t = window.setTimeout(onAdvance, step.doneOn ? SETTLE_MS : 0);
     return () => clearTimeout(t);
   }, [done, onAdvance, step.doneOn]);
 
@@ -232,9 +230,11 @@ function Step({
 
   return createPortal(
     <>
+      {/* The dim and the bubble fade in together, gently: they arrive over a
+          page the user is already looking at. */}
       <div
         aria-hidden
-        className="pointer-events-none fixed z-[90] rounded-md transition-[top,left,width,height] duration-150"
+        className="tour-bubble-in pointer-events-none fixed z-[90] rounded-md transition-[top,left,width,height] duration-150"
         style={{
           top: rect.top,
           left: rect.left,
@@ -248,7 +248,7 @@ function Step({
         aria-labelledby="tour-step-title"
         className={cn(
           CARD_SURFACE,
-          "tour-screen-in fixed z-[95] w-[26rem] max-w-[calc(100vw-2rem)] p-4 shadow-lg",
+          "tour-bubble-in fixed z-[95] w-[26rem] max-w-[calc(100vw-2rem)] p-4 shadow-lg",
         )}
         style={{ left, ...vertical }}
       >
@@ -274,42 +274,15 @@ function Step({
             {step.body}
           </p>
         )}
-        <div className="mt-4 flex items-center justify-between">
-          <span className="flex items-center gap-3 text-xs text-muted-foreground">
-            {GUIDE_STEPS.indexOf(step) + 1} of {GUIDE_STEPS.length}
-            {/* On every step that waits: only a closing Done goes without. */}
-            {!(last && step.advance !== "auto") && (
-              <button
-                type="button"
-                onClick={finish}
-                className="underline underline-offset-2 hover:text-foreground"
-              >
-                Skip tour
-              </button>
-            )}
-          </span>
-          {step.advance === "auto" ? (
-            <span className="text-xs text-muted-foreground">
-              Waiting for you…
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={(e) => {
-                const r = e.currentTarget.getBoundingClientRect();
-                onAdvance({
-                  x: r.left + r.width / 2,
-                  y: r.top + r.height / 2,
-                  vw: window.innerWidth,
-                  vh: window.innerHeight,
-                });
-              }}
-              className="rounded-md bg-brand px-4 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand/90"
-            >
-              {last ? "Done" : "Next"}
-            </button>
-          )}
-        </div>
+        {/* No count and no Next: the step moves on when the user does what
+            it asks. Skip is the one way out, and kept quiet. */}
+        <button
+          type="button"
+          onClick={finish}
+          className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+        >
+          Skip tour
+        </button>
       </div>
     </>,
     document.body,

@@ -19,7 +19,8 @@ import {
 import { usePreferences } from "@/components/preferences-context";
 import { useListReorder } from "@/lib/dnd/use-list-reorder";
 import AppsMoreMenu from "@/components/apps/apps-more-menu";
-import { APP_MANAGER_LINK, OPEN_APPS_MENU } from "@/components/onboarding/steps";
+import { APP_MANAGER_LINK, GUIDE_STEPS, OPEN_APPS_MENU } from "@/components/onboarding/steps";
+import { useTour } from "@/components/onboarding/tour-context";
 import type { AppManifest } from "@/lib/apps/types";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -59,6 +60,15 @@ export default function AppsDropdown() {
   const iconOnly = menuBarAppDisplay === "icon";
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // While the welcome tour's guide is up the page is dimmed (z-90, see
+  // src/components/onboarding/guide.tsx), and the guide asks for this menu:
+  // it opens above the dim and under the bubble (z-95), whole and readable.
+  // With all of it lit, the dim's cut-out no longer marks App Manager, so the
+  // step that points at it marks it the way the menu marks a hovered row.
+  const { phase, guideStep } = useTour();
+  const overGuide = phase === "guide";
+  const appManagerPointedAt =
+    overGuide && GUIDE_STEPS[guideStep]?.target === APP_MANAGER_LINK;
   const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -290,7 +300,8 @@ export default function AppsDropdown() {
             className={cn(
               "mix-popover",
               CARD_SURFACE,
-              "absolute left-0 top-full z-50 mt-1 w-64 py-1 shadow-lg",
+              "absolute left-0 top-full mt-1 w-64 py-1 shadow-lg",
+              overGuide ? "z-[91]" : "z-50",
             )}
           >
             {dropdownApps.length > 0 ? (
@@ -345,7 +356,10 @@ export default function AppsDropdown() {
               href="/apps"
               onClick={() => setDropdownOpen(false)}
               data-tour={APP_MANAGER_LINK}
-              className="flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent"
+              className={cn(
+                "flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent",
+                appManagerPointedAt && "bg-accent",
+              )}
             >
               <LayoutGrid className="h-4 w-4 text-muted-foreground" />
               App Manager
