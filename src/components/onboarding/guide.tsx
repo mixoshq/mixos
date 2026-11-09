@@ -42,8 +42,9 @@ import { GUIDE_STEPS, type GuideStep } from "./steps";
  * positioned from viewport coordinates, so where it is in the React tree
  * does not matter and where it is on screen always does.
  *
- * SKIP IS NOT IN THE BUBBLE. It is a quiet outline of its own in the
- * bottom-left corner, above the dim, drawn in the page's background colour
+ * SKIP IS NOT IN THE BUBBLE. It is quiet words of their own in the
+ * bottom-left corner, outlined only under the pointer, above the dim, in the
+ * page's background colour
  * so it reads as part of the dimmed page rather than another card — and in
  * the muted text colour when there is no dim behind it, where that colour
  * would vanish. It stays while a step waits out of sight — on App Manager,
@@ -241,9 +242,10 @@ function Step({ step, onAdvance }: { step: GuideStep; onAdvance: () => void }) {
           onClick={finish}
           className={cn(
             "tour-bubble-in fixed z-[95] rounded-full border bg-transparent px-3 py-1.5 text-xs font-medium transition-colors",
+            // The outline only on hover: at rest it's the words alone.
             overDim
-              ? "border-background/60 text-background hover:border-background"
-              : "border-border text-muted-foreground hover:text-foreground",
+              ? "border-transparent text-background hover:border-background/60"
+              : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
           )}
           style={skipAt}
         >
