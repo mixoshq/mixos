@@ -371,8 +371,9 @@ export default function DashboardGrid({
   }, [handleEnterEdit]);
 
   // Configure is left out, not disabled, for a widget with nothing to configure.
-  // Empty space offers Add Widgets; a widget, Edit Dashboard, since adding
-  // reads oddly from one particular widget.
+  // Empty space offers Add Widgets, and Edit Dashboard too once there is a
+  // widget to arrange; a widget, Edit Dashboard alone, since adding reads
+  // oddly from one particular widget.
   const contextMenuItems = (widgetId?: string): MenuItem[] => {
     const items: MenuItem[] = [];
     const widget = widgetId
@@ -388,19 +389,21 @@ export default function DashboardGrid({
         onClick: () => setConfiguringId(widget.id),
       });
     }
-    items.push(
-      widgetId
-        ? {
-            label: "Edit Dashboard",
-            icon: <Pencil className="h-4 w-4 text-muted-foreground" />,
-            onClick: handleEnterEdit,
-          }
-        : {
-            label: "Add Widgets",
-            icon: <Plus className="h-4 w-4 text-muted-foreground" />,
-            onClick: handleAddWidgets,
-          },
-    );
+    const editDashboard: MenuItem = {
+      label: "Edit Dashboard",
+      icon: <Pencil className="h-4 w-4 text-muted-foreground" />,
+      onClick: handleEnterEdit,
+    };
+    if (widgetId) {
+      items.push(editDashboard);
+    } else {
+      if (widgetList.length > 0) items.push(editDashboard);
+      items.push({
+        label: "Add Widgets",
+        icon: <Plus className="h-4 w-4 text-muted-foreground" />,
+        onClick: handleAddWidgets,
+      });
+    }
     return items;
   };
 
