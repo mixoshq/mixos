@@ -31,9 +31,9 @@ import { useTour } from "./tour-context";
  * a delay before each; the beats fade in one at a time and Next — the Enter
  * key, or the faint keycap that says so — fades the whole screen out before
  * the next one begins. The pauses are the design — two seconds on the
- * welcome line before the keycap, a second on the picture before
- * the words for it, two on those before the tagline, a beat and a half on the
- * tagline before "Let's begin" appears.
+ * welcome line before the keycap, a second on the picture before the words
+ * for it and two on those before the keycap again, then the tagline alone,
+ * two seconds before "Let's begin". Enter is Let's begin too, there.
  *
  * NEXT SENDS THE LOGO HOME. The second screen is the workspace's, not the
  * sign-in page's: the welcome line fades out completely (COPY_FADE_MS), then
@@ -50,7 +50,7 @@ import { useTour } from "./tour-context";
  * swap. So when they are not the same file the sign-in mark fades where it is,
  * over the flight's length, and only the wordmark flies.
  *
- * THE REVEAL IS A COLLAPSE. "Let's begin" fades the copy and the picture, then
+ * THE REVEAL IS A COLLAPSE. "Let's begin" fades the tagline and itself, then
  * the overlay's height collapses to the bar's bottom edge, under a lockup that
  * is already in place. Both are `bg-brand`, so the overlay's last frame is the
  * bar and it unmounts without a seam. Reduced motion moves the lockup without
@@ -108,15 +108,21 @@ const screens = (name: string): Screen[] => [
       { kind: "illustration", delay: FLY_MS - 400 },
       {
         kind: "body",
-        text: `${name} is a workspace of apps that connect your favorite tools (Google Sheets, Slack, GitHub, Trello, etc.) into a single place, shaped around how you actually work.`,
+        text: `${name} is a workspace of apps that connect your favorite tools into a single place, shaped around how you actually work.`,
         delay: 1000,
       },
+      { kind: "next", delay: 2000 },
+    ],
+  },
+  {
+    layout: "corner",
+    beats: [
       {
         kind: "statement",
         text: "Let computers do computer things so humans can do human things.",
-        delay: 2000,
+        delay: 200,
       },
-      { kind: "begin", delay: 1500 },
+      { kind: "begin", delay: 2000 },
     ],
   },
 ];
@@ -275,12 +281,18 @@ function Takeover({ branding }: { branding: Branding }) {
     );
   }, [layout, SCREENS, screen, sameMark]);
 
-  // Enter is Next while the keycap is showing — unless focus is on a control
-  // Enter already activates, the keycap itself included, so it can't go twice.
-  const nextBeat = beats.findIndex((b) => b.kind === "next");
-  const canNext = nextBeat >= 0 && nextBeat < shown && !exiting && !revealing;
+  // Enter does what the screen's control does — the keycap's Next, or Let's
+  // begin — once that control is showing; unless focus is on a control Enter
+  // already activates, that one included, so it can't go twice.
+  const actionBeat = beats.findIndex((b) => b.kind === "next" || b.kind === "begin");
+  const onEnter =
+    actionBeat >= 0 && actionBeat < shown && !exiting && !revealing
+      ? beats[actionBeat].kind === "next"
+        ? next
+        : begin
+      : null;
   useEffect(() => {
-    if (!canNext) return;
+    if (!onEnter) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Enter" || e.repeat || e.isComposing || e.defaultPrevented) return;
       if (
@@ -290,11 +302,11 @@ function Takeover({ branding }: { branding: Branding }) {
         return;
       }
       e.preventDefault();
-      next();
+      onEnter();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canNext, next]);
+  }, [onEnter]);
 
   useEffect(() => {
     if (!revealing) return;
@@ -314,8 +326,8 @@ function Takeover({ branding }: { branding: Branding }) {
     }
 
     // The lockup is already in the bar's corner: it flew there on Next. The
-    // copy and the picture fade out first (COPY_FADE_MS, driven by
-    // `revealing` in render), then the overlay collapses onto the bar.
+    // tagline fades out first (COPY_FADE_MS, driven by `revealing` in
+    // render), then the overlay collapses onto the bar.
     timers.push(
       window.setTimeout(() => {
         // The bar's bottom edge, not its height: the overlay is anchored to
@@ -381,7 +393,7 @@ function Takeover({ branding }: { branding: Branding }) {
         // the class goes on with it, so the blinking starts once it has
         // faded in, not while it still is.
         return (
-          <div key={i} className={`${gap} flex justify-end ${fade(i)}`}>
+          <div key={i} className={`${gap} mx-auto flex max-w-xl justify-end ${fade(i)}`}>
             <button
               type="button"
               onClick={next}
@@ -402,6 +414,7 @@ function Takeover({ branding }: { branding: Branding }) {
               type="button"
               onClick={begin}
               disabled={!visible(i)}
+              aria-keyshortcuts="Enter"
               className="rounded-md bg-brand-foreground px-6 py-2.5 text-base font-semibold text-brand shadow-sm transition-colors hover:bg-brand-foreground/90"
             >
               Let&apos;s begin
