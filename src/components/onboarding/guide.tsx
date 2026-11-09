@@ -5,12 +5,14 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
+import { LayoutGrid, type LucideIcon } from "lucide-react";
 import { createPortal } from "react-dom";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { useDashboardEdit } from "@/components/dashboard/edit-mode-context";
@@ -40,14 +42,15 @@ import { GUIDE_STEPS, type GuideStep } from "./steps";
  * positioned from viewport coordinates, so where it is in the React tree
  * does not matter and where it is on screen always does.
  *
- * SKIP IS NOT IN THE BUBBLE. It is a chip of its own in the bottom-right
- * corner, above the dim, and it stays while a step waits out of sight — on
- * App Manager, say — so there is always a way out of a tour that is waiting
- * for something the user may never do — except while the dashboard is being
- * edited, where Done Editing is the tour's last step and Skip would be a
- * second way to end it. Where the step points into that
- * corner (the dashboard's pencil), the chip steps left of it: the bubble
- * goes above such a target, so up would put the two on top of each other.
+ * SKIP IS NOT IN THE BUBBLE. It is a quiet outline of its own in the
+ * bottom-left corner, above the dim, drawn in the page's background colour
+ * so it reads as part of the dimmed page rather than another card — and in
+ * the muted text colour when there is no dim behind it, where that colour
+ * would vanish. It stays while a step waits out of sight — on App Manager,
+ * say — so there is always a way out of a tour that is waiting for something
+ * the user may never do, except while the dashboard is being edited, where
+ * Done Editing is the tour's last step and Skip would be a second way to end
+ * it. A target reaching into that corner moves it to the target's right.
  */
 
 type Rect = { top: number; left: number; width: number; height: number };
@@ -62,7 +65,7 @@ const START_DELAY_MS = 400;
 const BUBBLE_W = 416; // w-[26rem]; a constant so placement needs no measuring
 /** About the tallest a bubble gets: less room than this on its side flips it. */
 const BUBBLE_MIN_H = 140;
-/** Skip's corner, with room to spare: a target reaching into it moves Skip left. */
+/** Skip's corner, with room to spare: a target reaching into it moves Skip right. */
 const SKIP_CLEAR_W = 160;
 const SKIP_CLEAR_H = 72;
 const BUBBLE_GAP = 12;
@@ -121,15 +124,36 @@ function useStepState(step: GuideStep): { rect: Rect | null; done: boolean } {
   return { rect, done };
 }
 
-/** A step's body, with its `**…**` parts in bold, in the title's colour. */
+/**
+ * Icons a step's body can draw as `{name}`: the ones on the controls it sends
+ * the user to, so the words match what they will see. Decorative: the name
+ * beside each says the same.
+ */
+const BODY_ICONS: Record<string, LucideIcon> = {
+  apps: LayoutGrid, // the Apps button's (src/components/apps/apps-dropdown.tsx)
+};
+
+function withIcons(text: string): ReactNode[] {
+  return text.split(/\{(\w+)\}/).map((part, i) => {
+    if (i % 2 === 0) return part;
+    const Icon = BODY_ICONS[part];
+    return Icon ? (
+      <Icon key={i} aria-hidden className="mb-0.5 inline h-3.5 w-3.5 align-middle" />
+    ) : (
+      `{${part}}`
+    );
+  });
+}
+
+/** A step's body: its `**…**` parts in bold, in the title's colour, and its `{icons}` drawn. */
 function withBold(text: string): ReactNode {
   return text.split(/\*\*(.+?)\*\*/).map((part, i) =>
     i % 2 ? (
       <strong key={i} className="font-semibold text-foreground">
-        {part}
+        {withIcons(part)}
       </strong>
     ) : (
-      part
+      <Fragment key={i}>{withIcons(part)}</Fragment>
     ),
   );
 }
@@ -198,13 +222,13 @@ function Step({ step, onAdvance }: { step: GuideStep; onAdvance: () => void }) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
-  // Skip's corner, unless the target is in it: then just left of the target.
+  // Skip's corner, unless the target is in it: then just right of the target.
   const skipAt =
-    rect &&
-    rect.left + rect.width > vw - SKIP_CLEAR_W &&
-    rect.top + rect.height > vh - SKIP_CLEAR_H
-      ? { right: vw - rect.left + BUBBLE_GAP, bottom: EDGE }
-      : { right: EDGE, bottom: EDGE };
+    rect && rect.left < SKIP_CLEAR_W && rect.top + rect.height > vh - SKIP_CLEAR_H
+      ? { left: rect.left + rect.width + BUBBLE_GAP, bottom: EDGE }
+      : { left: EDGE, bottom: EDGE };
+  // Whether the dim is behind it, which is when the bubble is up.
+  const overDim = !!rect && !done && (step.dim ?? true);
 
   return createPortal(
     <>
@@ -215,7 +239,12 @@ function Step({ step, onAdvance }: { step: GuideStep; onAdvance: () => void }) {
         <button
           type="button"
           onClick={finish}
-          className="tour-bubble-in fixed z-[95] rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+          className={cn(
+            "tour-bubble-in fixed z-[95] rounded-full border bg-transparent px-3 py-1.5 text-xs font-medium transition-colors",
+            overDim
+              ? "border-background/60 text-background hover:border-background"
+              : "border-border text-muted-foreground hover:text-foreground",
+          )}
           style={skipAt}
         >
           Skip tour

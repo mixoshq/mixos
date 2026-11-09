@@ -32,7 +32,8 @@ export interface GuideStep {
   title: string;
   /**
    * Optional: a step whose title says it all needs no second sentence.
-   * `**…**` sets a part in bold, for the names of the things to click.
+   * `**…**` sets a part in bold, for the names of the things to click, and
+   * `{apps}` draws the icon on the Apps button (guide.tsx's BODY_ICONS).
    */
   body?: string;
   /** Which side of the target the bubble sits on. Default `below`. */
@@ -64,7 +65,7 @@ export const GUIDE_STEPS: GuideStep[] = [
   {
     target: "menu-bar",
     title: "This is your menu bar.",
-    body: "Install an app by clicking **Apps → App Manager**.",
+    body: "Install an app by clicking **{apps} Apps → App Manager**.",
     along: 0.3,
     // Up until App Manager opens, through the Apps menu or any other way.
     doneWhen: '[data-tour="app-manager-page"]',
