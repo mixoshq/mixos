@@ -22,15 +22,16 @@ import { useTour } from "./tour-context";
  * is what keeps the logo at the same pixel across the redirect: the sign-in
  * card fades its frame and fields on submit, the server redirects here, and
  * the logo simply has not moved. The first screen's copy is positioned over
- * the ghost, where the form used to be. Once it has drawn, the wordmark gives
- * way to it — the welcome line says the name itself — keeping its box, so the
- * mark stays where it is, and comes back as the lockup lands in the corner.
+ * the ghost, where the form used to be. The wordmark is never drawn here —
+ * the welcome line says the name itself, and the sign-in card faded it with
+ * the form — but keeps its box, so the mark stays where it is. It fades in
+ * as the lockup lands in the corner.
  *
  * THE COPY IS CHOREOGRAPHED, NOT PAGED. Each screen is a list of beats with
  * a delay before each; the beats fade in one at a time and Next — the Enter
  * key, or the faint keycap that says so — fades the whole screen out before
- * the next one begins. The pauses are the design — a second on the welcome
- * line before the keycap, a second on the picture before
+ * the next one begins. The pauses are the design — two seconds on the
+ * welcome line before the keycap, a second on the picture before
  * the words for it, two on those before the tagline, a beat and a half on the
  * tagline before "Let's begin" appears.
  *
@@ -96,7 +97,7 @@ const screens = (name: string): Screen[] => [
         text: `Welcome to ${name}, your new home base.`,
         delay: 400,
       },
-      { kind: "next", delay: 1000 },
+      { kind: "next", delay: 2000 },
     ],
   },
   {
@@ -146,8 +147,8 @@ function prefersReducedMotion(): boolean {
  * flow the pieces would move with it as the layout changes around them.
  * `ms` of 0 moves them without a flight.
  *
- * The wordmark, faded out on the first screen, fades back in over the flight,
- * so it lands as the bar's own does.
+ * The wordmark, hidden on the first screen, fades in over the flight, so it
+ * lands as the bar's own does: inline, over the class that hid it.
  *
  * A sign-in mark that differs from the bar's is pinned too but does not fly —
  * it fades where it is. Pinning it still matters: left in flow it would jump
@@ -242,18 +243,6 @@ function Takeover({ branding }: { branding: Branding }) {
 
   const { layout, beats } = SCREENS[screen];
   const revealing = phase === "reveal";
-
-  // The sign-in page's wordmark, drawn where sign-in left it, gives way to
-  // the welcome line, which says the name itself. Opacity only: its box
-  // stays, so the mark above it doesn't move. `flyHome` brings it back.
-  useEffect(() => {
-    const word = cardRef.current?.querySelector<HTMLElement>(
-      '[data-tour="login-wordmark"]',
-    );
-    if (!word) return;
-    word.style.transition = `opacity ${COPY_FADE_MS}ms ease-out`;
-    word.style.opacity = "0";
-  }, []);
 
   // Reveal the next beat after its delay. Re-arms whenever `shown` moves.
   useEffect(() => {
@@ -388,6 +377,9 @@ function Takeover({ branding }: { branding: Branding }) {
       case "next":
         // A keycap, faint until hovered, under the line's right edge: press
         // Enter, or click it. Its name says both what it does and what it shows.
+        // Once it is up it blinks now and then (`keycap-blink`, globals.css);
+        // the class goes on with it, so the first blink comes a few seconds
+        // after it appears, not while it is still fading in.
         return (
           <div key={i} className={`${gap} flex justify-end ${fade(i)}`}>
             <button
@@ -396,7 +388,7 @@ function Takeover({ branding }: { branding: Branding }) {
               disabled={!visible(i)}
               aria-label="Next (Enter)"
               aria-keyshortcuts="Enter"
-              className="flex items-center gap-1.5 rounded-md border border-b-2 border-brand-foreground/25 px-2 py-1 font-mono text-xs text-brand-foreground/60 transition-colors hover:border-brand-foreground/50 hover:text-brand-foreground"
+              className={`flex items-center gap-1.5 rounded-md border border-b-2 border-brand-foreground/25 px-2 py-1 font-mono text-xs text-brand-foreground/60 transition-colors hover:border-brand-foreground/50 hover:text-brand-foreground ${visible(i) ? "keycap-blink" : ""}`}
             >
               Enter
               <CornerDownLeft className="h-3.5 w-3.5" aria-hidden />
@@ -430,7 +422,7 @@ function Takeover({ branding }: { branding: Branding }) {
       {/* The sign-in page's layout, so the logo is where sign-in left it. */}
       <div className="flex min-h-screen flex-col items-center justify-center px-4">
         <div ref={cardRef} className="w-full max-w-sm p-8 text-center">
-          <LoginLockup logo={loginLogo} name={name} />
+          <LoginLockup logo={loginLogo} name={name} nameShown={false} />
 
           <div className="relative mt-8">
             <div className="invisible" aria-hidden>
@@ -438,8 +430,10 @@ function Takeover({ branding }: { branding: Branding }) {
             </div>
 
             {layout === "card" && (
-              // As wide as the welcome line, so the keycap ends where it does.
-              <div className="absolute left-1/2 top-0 w-max max-w-[calc(100vw-2rem)] -translate-x-1/2">
+              // As wide as the welcome line, so the keycap ends where it does,
+              // and raised into the wordmark's place: the wordmark has faded,
+              // and the line says the name, so it sits close under the mark.
+              <div className="absolute -top-12 left-1/2 w-max max-w-[calc(100vw-2rem)] -translate-x-1/2">
                 {beats.map(beat)}
               </div>
             )}

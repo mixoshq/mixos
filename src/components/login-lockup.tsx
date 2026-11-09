@@ -16,13 +16,19 @@ import type { BrandLogo } from "@/lib/branding/types";
  *
  * Both values come from `getBranding()`, resolved on the server: the theme,
  * then the apps' brand filters, then whatever the theme claims outright.
+ *
+ * `nameShown` false hides the wordmark but keeps its box, so the mark above it
+ * stays put: the sign-in card fades it with the form on submit, and the tour
+ * never draws it, since its welcome line says the name.
  */
 export default function LoginLockup({
   logo,
   name,
+  nameShown = true,
 }: {
   logo: BrandLogo | null;
   name: string;
+  nameShown?: boolean;
 }) {
   const mark = logo ? fitLogo(logo, LOGIN_LOGO_BOX) : null;
   return (
@@ -50,7 +56,9 @@ export default function LoginLockup({
         */}
         <span
           data-tour="login-wordmark"
-          className="-my-1 inline-block py-1 leading-none"
+          className={`-my-1 inline-block py-1 leading-none transition-opacity duration-300 ${
+            nameShown ? "" : "opacity-0"
+          }`}
         >
           {name}
         </span>

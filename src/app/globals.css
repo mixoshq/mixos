@@ -349,10 +349,38 @@ h6 {
   animation: login-shake 500ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
 
+/* The welcome tour's Enter keycap: at rest most of each cycle, then a quick
+   blink, so the eye finds a control drawn faint on purpose. Still while it is
+   hovered or focused, where the eye already is. */
+@keyframes keycap-blink {
+  0%,
+  86%,
+  100% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 0.15;
+  }
+}
+
+.keycap-blink {
+  animation: keycap-blink 5s ease-in-out infinite;
+}
+
+.keycap-blink:hover,
+.keycap-blink:focus-visible {
+  animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tour-screen-in,
   .login-shake,
   .confetti-piece {
     animation-duration: 1ms;
+  }
+
+  /* Not shortened like the rest: a loop at 1ms would flicker. */
+  .keycap-blink {
+    animation: none;
   }
 }
