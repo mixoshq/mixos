@@ -5,13 +5,14 @@
 /**
  * The guide that follows the welcome screens, one step per thing worth
  * pointing at. A step names a `data-tour` target; the Guide measures it live
- * and draws the bubble next to it.
+ * and draws the bubble next to it — and draws nothing while the target is not
+ * on the page, which is how a step waits for the user to come back to it.
  *
  * Two kinds of step. A `next` step is read and dismissed with its button. An
- * `auto` step asks the user to do something real — click Edit Dashboard, add
- * the widget — and moves on the moment the page shows it happened, which
- * `done()` decides from the DOM. No Next button on those: the action is the
- * button.
+ * `auto` step asks the user to do something real — add a widget — and moves
+ * on the moment the page announces it happened (`doneOn`). No button on
+ * those: the action is the button. A step waits as long as it takes; Skip
+ * tour is on every one but a closing Done.
  *
  * Add a step by adding an entry here and a `data-tour="<name>"` on the
  * element it should point at.
@@ -34,22 +35,51 @@ export interface GuideStep {
    * on-screen regardless, and its arrow always points at the target.
    */
   along?: number;
-  /** `next` (default): a Next/Done button. `auto`: advances when `done()` is true. */
+  /** `next` (default): a Next/Done button. `auto`: advances on `doneOn`. */
   advance?: "next" | "auto";
-  /** For `auto` steps: is the thing this step asked for now done? */
-  done?: () => boolean;
   /**
-   * Draw the dim around the spotlight. Default true. Off for the last two
-   * steps: the user is now arranging their own dashboard, and a dim over
-   * their own work reads as the page being disabled.
+   * For `auto` steps: the window event that says the thing this step asked
+   * for is done.
+   */
+  doneOn?: string;
+  /**
+   * The page the step happens on. The guide goes there when the step starts,
+   * once: after that the user is free to wander off, and the step waits for
+   * its target to be back.
+   */
+  route?: string;
+  /**
+   * A window event the guide dispatches once the step's page is up, for a
+   * target that something has to open first: the Apps menu.
+   */
+  opens?: string;
+  /**
+   * Closing what the step points at dismisses the step, as its button does.
+   * For a target inside a menu, which closes on any click outside it: the
+   * bubble would otherwise be left pointing at nothing, and the tour held
+   * where nobody can see it.
+   */
+  endsWithTarget?: boolean;
+  /**
+   * The last step, when it is `auto`: where the confetti bursts from, since
+   * there is no Done button for it to burst from.
+   */
+  celebrateAt?: () => Element | null;
+  /**
+   * Draw the dim around the spotlight. Default true. Off where the user is
+   * arranging their own work, where a dim reads as the page being disabled.
    */
   dim?: boolean;
 }
 
-const has = (selector: string) => document.querySelector(selector) !== null;
-
 /** The `data-tour` name the dashboard step points at. */
 export const DASHBOARD_TARGET = "edit-dashboard";
+
+/** The `data-tour` name of App Manager in the Apps menu. */
+export const APP_MANAGER_LINK = "apps-menu-app-manager";
+
+/** Opens the Apps menu (AppsDropdown listens for it). */
+export const OPEN_APPS_MENU = "tour:open-apps-menu";
 
 export const GUIDE_STEPS: GuideStep[] = [
   {
@@ -59,47 +89,33 @@ export const GUIDE_STEPS: GuideStep[] = [
     along: 0.3,
   },
   {
+    target: APP_MANAGER_LINK,
+    title: "Install apps in App Manager.",
+    body: "Switch one on to add it to your workspace. You can always find this page again in the Apps menu.",
+    route: "/apps",
+    opens: OPEN_APPS_MENU,
+    endsWithTarget: true,
+  },
+  {
     target: [DASHBOARD_TARGET, "dashboard-pencil"],
-    title: "Everything else is your dashboard.",
-    body: "Your dashboard is a collection of widgets. A widget is a small piece of an app. Let's add one.",
-    placement: "below",
+    title: "Now, add a widget to your dashboard.",
+    body: "A widget is a small piece of an app. Start here.",
     advance: "auto",
-    // Entering edit mode opens the catalog by itself during the tour (see
-    // DashboardGrid), so "done" is the catalog being open.
-    done: () => has('[data-tour="widget-wall-e"]'),
-  },
-  {
-    target: "widget-wall-e",
-    title: "Add your first widget.",
-    advance: "auto",
-    done: () =>
-      !has('[data-tour="widget-wall-e"]') &&
-      has('[data-tour-widget-instance="wall-e"]'),
-  },
-  {
-    target: "done-editing",
-    title: "Great, you added your first widget!",
-    body: "Drag it around or resize it. When it looks right, click Done Editing Dashboard.",
-    placement: "above",
-    dim: false,
-    advance: "auto",
-    done: () => has('[data-tour="dashboard-pencil"]'),
-  },
-  {
-    target: "dashboard-pencil",
-    title: "That's all for now.",
-    body: "You can edit your dashboard any time here. Enjoy MixOS!",
-    placement: "above",
-    dim: false,
-    along: 1,
+    // DashboardGrid's, once a widget from the catalog is on the dashboard.
+    doneOn: "dashboard:widget-added",
+    // The dashboard appends, so the widget just added is the last one.
+    celebrateAt: () => {
+      const widgets = document.querySelectorAll("[data-tour-widget-instance]");
+      return widgets[widgets.length - 1] ?? null;
+    },
   },
 ];
 
 /**
  * The step that first talks about the dashboard. Everything before it is
- * about the menu bar, so the dashboard keeps its empty state out of sight
- * until then — derived, not a number, so reordering the steps cannot leave
- * the empty state hidden during its own step.
+ * about the menu bar and App Manager, so the dashboard keeps its empty state
+ * out of sight until then — derived, not a number, so reordering the steps
+ * cannot leave the empty state hidden during its own step.
  */
 export const DASHBOARD_STEP = GUIDE_STEPS.findIndex((s) =>
   (Array.isArray(s.target) ? s.target : [s.target]).includes(DASHBOARD_TARGET),

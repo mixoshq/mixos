@@ -70,14 +70,14 @@ export default function DashboardGrid({
   const [widgetList, setWidgetList] = useState<DashboardWidget[]>(widgets);
   const { width, containerRef } = useContainerWidth();
   const { isEditing, setIsEditing } = useDashboardEdit();
-  // The welcome tour asks for "Edit Dashboard" and then points at a widget
-  // card, so during the tour entering edit mode opens the catalog straight
-  // away — as it does for an empty dashboard anyway, where the only thing to
-  // do in edit mode is add something.
+  // The welcome tour points at "Edit Dashboard" and then waits for a widget,
+  // so during the tour entering edit mode opens the catalog straight away —
+  // as it does for an empty dashboard anyway, where the only thing to do in
+  // edit mode is add something.
   const { phase: tourPhase, guideStep } = useTour();
   const tourActive = tourPhase === "guide";
-  // The tour talks about the menu bar before it talks about the dashboard.
-  // Until it gets there, an empty dashboard shows nothing at all — "Your
+  // The tour talks about the menu bar and App Manager before it talks about
+  // the dashboard. Until it gets there, an empty dashboard shows nothing at all — "Your
   // dashboard is empty" and its button would be competing with the bubble
   // for the eye, and the button is the very thing that step asks for.
   const emptyStateHidden = tourPhase !== "done" && guideStep < DASHBOARD_STEP;
@@ -531,7 +531,6 @@ export default function DashboardGrid({
       {catalogOpen && (
         <WidgetCatalog
           apps={availableApps}
-          backdrop={!tourActive}
           onClose={() => setCatalogOpen(false)}
           onWidgetAdded={handleWidgetAdded}
         />
