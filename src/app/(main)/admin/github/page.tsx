@@ -4,7 +4,7 @@
 
 import { Suspense } from "react";
 import Notice from "@/components/ui/notice";
-import TechTalk from "@/components/ui/tech-talk";
+import TechTalk from "@/components/admin/tech-talk";
 import GitHubPanel from "@/components/admin/github/github-panel";
 import UpdatePullRequests from "@/components/admin/github/update-pull-requests";
 import { requireAdmin } from "@/lib/apps/access";
