@@ -37,6 +37,11 @@ export interface BurstOrigin {
   vh: number;
 }
 
+/** A burst under way: where from, and in what colours (the theme's, without). */
+export interface Celebration extends BurstOrigin {
+  colors?: readonly string[];
+}
+
 interface TourContextValue {
   phase: TourPhase;
   /** `welcome` → `reveal`. The overlay calls `revealed()` when its animation ends. */
@@ -55,9 +60,9 @@ interface TourContextValue {
    * Set the confetti off, once: the message calls it the moment its mark has
    * drawn itself on, so the burst lands on the mark finishing.
    */
-  burst: () => void;
+  burst: (colors?: readonly string[]) => void;
   /** Where the confetti is bursting from, for a few seconds after `complete()`; null otherwise. */
-  celebrating: BurstOrigin | null;
+  celebrating: Celebration | null;
   /** The "is installed" message is up, from `complete()` until it is dismissed. */
   installed: boolean;
   /** The message was clicked away. */
@@ -111,7 +116,7 @@ export function TourProvider({
     if (active) setPhase("welcome");
   }
 
-  const [celebrating, setCelebrating] = useState<BurstOrigin | null>(null);
+  const [celebrating, setCelebrating] = useState<Celebration | null>(null);
   const [installed, setInstalled] = useState(false);
   const [guideStep, setGuideStep] = useState(0);
 
@@ -137,9 +142,9 @@ export function TourProvider({
     },
     [finish],
   );
-  const burst = useCallback(() => {
+  const burst = useCallback((colors?: readonly string[]) => {
     if (!pendingBurst.current) return;
-    setCelebrating(pendingBurst.current);
+    setCelebrating({ ...pendingBurst.current, colors });
     pendingBurst.current = null;
   }, []);
   const celebrated = useCallback(() => setCelebrating(null), []);
