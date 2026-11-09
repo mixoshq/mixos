@@ -19,6 +19,7 @@ import {
 import { usePreferences } from "@/components/preferences-context";
 import { useListReorder } from "@/lib/dnd/use-list-reorder";
 import AppsMoreMenu from "@/components/apps/apps-more-menu";
+import { APP_MANAGER_LINK, OPEN_APPS_MENU } from "@/components/onboarding/steps";
 import type { AppManifest } from "@/lib/apps/types";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -88,6 +89,13 @@ export default function AppsDropdown() {
       cancelled = true;
       window.removeEventListener("apps:installed-changed", onChanged);
     };
+  }, []);
+
+  // The welcome tour opens the menu to point at App Manager in it.
+  useEffect(() => {
+    const open = () => setDropdownOpen(true);
+    window.addEventListener(OPEN_APPS_MENU, open);
+    return () => window.removeEventListener(OPEN_APPS_MENU, open);
   }, []);
 
   useEffect(() => {
@@ -336,6 +344,7 @@ export default function AppsDropdown() {
             <Link
               href="/apps"
               onClick={() => setDropdownOpen(false)}
+              data-tour={APP_MANAGER_LINK}
               className="flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-accent"
             >
               <LayoutGrid className="h-4 w-4 text-muted-foreground" />
