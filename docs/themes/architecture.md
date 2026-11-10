@@ -24,6 +24,7 @@ themes/
 
 | Field | Required | Description | Example |
 | --- | --- | --- | --- |
+| `$schema` | ✅ | Which shape the manifest is, and so which MixOS reads it: `https://mixos.org/schemas/theme/v1.json`, written first. The build refuses a manifest without it, or with a version this MixOS doesn't read. See [`$schema`](../apps/architecture.md#schema-which-shape-a-file-is). | `"$schema": "https://mixos.org/schemas/theme/v1.json"` |
 | `name` | ✅ | Display name. The folder name is the slug; this is what a person reads. | `"name": "MixOS Dark"` |
 | `description` | ✅ | What the theme looks like and who it is for. | `"description": "Slate and cyan on a dark ground."` |
 | `tagline` |  | One line for a listing card on mixos.org — the version that fits beside the icon in a grid. Max 100 characters, single line. Where it is absent, `description` is used instead; setting only one of the two is the normal case. | `"tagline": "Slate and cyan on a dark ground"` |
@@ -48,13 +49,16 @@ shows its notes from the last 14 days behind the gift icon in the menu bar,
 and App Manager's Release Notes page keeps all of them. The file is optional.
 
 ```json
-[
-  { "date": "2026-10-20", "note": "Muted text is a shade darker, so captions and dates are easier to read." },
-  { "date": "2026-08-28", "note": "First release: white panels under a dark slate menu bar, with cyan accents." }
-]
+{
+  "$schema": "https://mixos.org/schemas/release-notes/v1.json",
+  "notes": [
+    { "date": "2026-10-20", "note": "Muted text is a shade darker, so captions and dates are easier to read." },
+    { "date": "2026-08-28", "note": "First release: white panels under a dark slate menu bar, with cyan accents." }
+  ]
+}
 ```
 
-Each note is `{ "date", "version"?, "note" }`: the day the change shipped as
+The file is `{ "$schema", "notes" }`, and each note is `{ "date", "version"?, "note" }`: the day the change shipped as
 `YYYY-MM-DD`, no later than tomorrow, an optional release version, and one line
 of plain text, 300 characters or fewer. Newest first, and no note twice on one
 day. The build checks the file, and so does a Registry install before the theme

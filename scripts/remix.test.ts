@@ -31,11 +31,11 @@ function git(root: string, ...args: string[]): string {
 function checkout(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "mixos-remix-"));
   roots.push(root);
-  write(root, "apps/careers/app.json", JSON.stringify({ name: "Career", license: "MPL-2.0" }));
+  write(root, "apps/careers/app.json", JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Career", license: "MPL-2.0" }));
   write(root, "apps/careers/pages/Main.tsx", "export default function Main() { return null; }\n");
   write(root, "apps/careers/widgets/application-pipeline.tsx", "export default function W() { return null; }\n");
   write(root, "apps/careers/api/applications/[id]/route.ts", "export const PATCH = 1;\nexport const DELETE = 2;\n");
-  write(root, "apps/deals/app.json", JSON.stringify({ name: "Deals", license: "MPL-2.0" }));
+  write(root, "apps/deals/app.json", JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Deals", license: "MPL-2.0" }));
   write(root, "apps/deals/pages/deals.tsx", 'export const href = "/apps/deals/42";\n');
   git(root, "init", "-q");
   git(root, "add", "-A");
@@ -95,7 +95,7 @@ test("uncommitted changes in the source mark it modified", () => {
 
 test("a source that was never committed has no commit, and is modified", () => {
   const root = checkout();
-  write(root, "apps/fresh/app.json", JSON.stringify({ name: "Fresh" }));
+  write(root, "apps/fresh/app.json", JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Fresh" }));
   const pinned = pinSource(root, "fresh", "deals");
   assert.equal(pinned.source.commitSha, null);
   assert.equal(pinned.source.modified, true);
@@ -143,7 +143,7 @@ test("a source can't be its own target", () => {
 
 test("a well-formed entry passes the manifest schema", () => {
   const root = checkout();
-  const parsed = RawAppManifestSchema.safeParse({ name: "Deals", remixedFrom: [entryFor(root)] });
+  const parsed = RawAppManifestSchema.safeParse({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Deals", remixedFrom: [entryFor(root)] });
   assert.equal(parsed.success, true, parsed.success ? "" : JSON.stringify(parsed.error.issues));
 });
 
@@ -232,7 +232,7 @@ test("check finds what doesn't hold at the moment of the remix", () => {
 
 test("check refuses an adapted remix the license doesn't allow", () => {
   const root = checkout();
-  write(root, "apps/careers/app.json", JSON.stringify({ name: "Career", license: "GPL-3.0-only" }));
+  write(root, "apps/careers/app.json", JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Career", license: "GPL-3.0-only" }));
   git(root, "add", "-A");
   git(root, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "gpl");
   record(root, [entryFor(root, { license: { spdx: "GPL-3.0-only", mode: "adapted" } })]);

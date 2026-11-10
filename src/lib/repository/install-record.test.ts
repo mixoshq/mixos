@@ -99,6 +99,7 @@ describe("writing and reading it", () => {
   test("is written in one key order, and read back as it was", () => {
     const text = serializeInstallRecord({ ...RECORD, requiresMixOS: null, gitTag: null });
     assert.deepEqual(Object.keys(JSON.parse(text)), [
+      "$schema",
       "source",
       "kind",
       "slug",
@@ -149,8 +150,22 @@ describe("writing and reading it", () => {
     assert.deepEqual(readInstallRecord(text), { state: "invalid", reason: "it is not JSON" });
 
     const wrong = dir("wrong");
-    fs.writeFileSync(path.join(wrong, INSTALL_RECORD_FILE), JSON.stringify({ ...RECORD, version: "latest" }));
+    fs.writeFileSync(
+      path.join(wrong, INSTALL_RECORD_FILE),
+      JSON.stringify({ $schema: "https://mixos.org/schemas/registry-install/v1.json", ...RECORD, version: "latest" }),
+    );
     assert.match((readInstallRecord(wrong) as { reason: string }).reason, /^version: /);
+
+    // Which shape it is comes first: a record with none, or another, says so.
+    const shapeless = dir("shapeless");
+    fs.writeFileSync(path.join(shapeless, INSTALL_RECORD_FILE), JSON.stringify(RECORD));
+    assert.match((readInstallRecord(shapeless) as { reason: string }).reason, /has no "\$schema"/);
+    const newer = dir("newer");
+    fs.writeFileSync(
+      path.join(newer, INSTALL_RECORD_FILE),
+      JSON.stringify({ $schema: "https://mixos.org/schemas/registry-install/v2.json", ...RECORD }),
+    );
+    assert.match((readInstallRecord(newer) as { reason: string }).reason, /It needs a newer MixOS/);
   });
 
   test("a record is its folder's only when it names that kind and slug", () => {

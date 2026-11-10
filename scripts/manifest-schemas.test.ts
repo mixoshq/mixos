@@ -19,7 +19,7 @@ const sync = (budgetMs = 200_000) => ({
 
 /** The problems the schema reports for `manifest`, one line each. */
 function problems(manifest: Record<string, unknown>): string {
-  const parsed = RawAppManifestSchema.safeParse({ name: "Calls", ...manifest });
+  const parsed = RawAppManifestSchema.safeParse({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Calls", ...manifest });
   return parsed.success ? "" : formatZodError(parsed.error);
 }
 
@@ -112,6 +112,7 @@ test("a connector is declared once across both lists", () => {
 // ── connector manifests ─────────────────────────────────────────────────────
 
 const connector = (extra: Record<string, unknown> = {}) => ({
+  $schema: "https://mixos.org/schemas/connector/v1.json",
   name: "crm",
   displayName: "CRM",
   version: "1.0.0",

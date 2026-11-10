@@ -759,9 +759,43 @@ export function writeRelease(root: string, raw: string, options: { today?: strin
   for (const name of ["package.json", "package-lock.json"]) {
     if (setVersion(path.join(root, name), version)) files.push(name);
   }
+  // A prerelease isn't a release a floor can name (mixos.org's requires-mixos
+  // check), so the schemas wait for the stable one.
+  if (parsed.pre.length === 0) {
+    const index = path.join(root, SCHEMA_INDEX);
+    if (fs.existsSync(index)) {
+      const before = fs.readFileSync(index, "utf8");
+      const after = stampSchemaSince(before, version);
+      if (after !== before) {
+        fs.writeFileSync(index, after);
+        files.push(SCHEMA_INDEX);
+      }
+    }
+  }
   fs.writeFileSync(path.join(root, "CHANGELOG.md"), insertSection(s.changelog, section));
   files.push("CHANGELOG.md");
   return { version, files, section };
+}
+
+// ── The schemas a release first reads ───────────────────────────────────────
+
+/** The index of the JSON Schemas of extension files (scripts/json-schemas.ts). */
+export const SCHEMA_INDEX = "docs/schemas/index.json";
+
+/** `since` for a schema no release has carried yet. */
+export const UNRELEASED = "unreleased";
+
+/**
+ * The schema index with every unreleased schema now first read by `version`.
+ * mixos.org sets that as the minimum MixOS version of a release whose files
+ * name the schema, because an older MixOS refuses the `$schema` key itself.
+ * Text in, text out, so the caller can tell whether anything changed.
+ */
+export function stampSchemaSince(indexText: string, version: string): string {
+  const index = JSON.parse(indexText) as { schemas?: { since?: string }[] };
+  if (!Array.isArray(index.schemas) || !index.schemas.some((e) => e.since === UNRELEASED)) return indexText;
+  const schemas = index.schemas.map((e) => (e.since === UNRELEASED ? { ...e, since: version } : e));
+  return `${JSON.stringify({ ...index, schemas }, null, 2)}\n`;
 }
 
 function today(): string {

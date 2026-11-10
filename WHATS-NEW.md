@@ -10,6 +10,18 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-11-10
+
+- **Every extension JSON file says which shape it is.** `app.json`,
+  `connector.json`, `theme.json`, `release-notes.json` and `.registry.json`
+  start with a `$schema` URL, such as
+  `"$schema": "https://mixos.org/schemas/app/v1.json"`, and the build refuses
+  a file without it, saying what to add. `release-notes.json` is now an
+  object, `{ "$schema", "notes": [...] }`. Editors complete and check the
+  files from it. `npm run schemas` writes the schemas into `docs/schemas/`,
+  and mixos.org serves them. See
+  [`$schema`](docs/apps/architecture.md#schema-which-shape-a-file-is).
+
 ## 2026-11-08
 
 - **MixOS Launcher, a Mac app.** It has a window listing every copy of MixOS on

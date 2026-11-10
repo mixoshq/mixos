@@ -3,7 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Stamp `lastUpdated` on every app/connector manifest the current commit touches.
+ * Stamp `lastUpdated` on every app/connector manifest the current commit touches,
+ * and `$schema` on one that has none.
  *
  *   npx tsx scripts/stamp-updated.ts              # stamp what's staged, re-stage it
  *   npx tsx scripts/stamp-updated.ts --dry-run    # report, write nothing
@@ -45,6 +46,7 @@
 import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
+import { schemaUrl } from "../src/lib/extensions/schema-urls";
 import { readInstallRecord, recordMismatch } from "../src/lib/repository/install-record";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -345,12 +347,25 @@ function readLastUpdated(raw: string): string | null {
   }
 }
 
+/** The `$schema` of each root's manifest (src/lib/extensions/schema-urls.ts). */
+const MANIFEST_SCHEMA: Record<string, string> = {
+  apps: schemaUrl("app"),
+  connectors: schemaUrl("connector"),
+  themes: schemaUrl("theme"),
+};
+
 /** Apply `lastUpdated` to manifest text, preserving key order and appending the
  *  field when new — the diff stays one line instead of a whole-file reshuffle.
- *  Two-space indent matches every other manifest in the repo. */
-function withStamp(raw: string, at: string): string {
+ *  A manifest with no `$schema` gets one, first, at the version this MixOS
+ *  writes: the build refuses a manifest without it. One that has one keeps it,
+ *  whatever it says; moving a file to another version is a change of its
+ *  shape, not a stamp. Two-space indent matches every other manifest in the
+ *  repo. */
+export function withStamp(raw: string, at: string, root: string): string {
   const obj = JSON.parse(raw) as Record<string, unknown>;
-  return JSON.stringify({ ...obj, lastUpdated: at }, null, 2) + "\n";
+  const schema = MANIFEST_SCHEMA[root];
+  const shaped = schema && !("$schema" in obj) ? { $schema: schema, ...obj } : obj;
+  return JSON.stringify({ ...shaped, lastUpdated: at }, null, 2) + "\n";
 }
 
 /** The index's blob for a path, or null when the path isn't tracked yet. */
@@ -387,12 +402,12 @@ function stampStaged(target: Target, at: string): boolean {
   // Untracked (a brand-new manifest not yet added): nothing in the index to
   // stamp, so the working tree IS the content, and `git add` is the way in.
   if (staged === null) {
-    fs.writeFileSync(abs, withStamp(fs.readFileSync(abs, "utf-8"), at), "utf-8");
+    fs.writeFileSync(abs, withStamp(fs.readFileSync(abs, "utf-8"), at, target.root), "utf-8");
     git(["add", "--", target.manifestRel]);
     return false;
   }
 
-  const next = withStamp(staged, at);
+  const next = withStamp(staged, at, target.root);
 
   // Write the stamped blob into the index directly. `update-index --cacheinfo`
   // reuses the path's existing mode so an executable bit or symlink entry is not
@@ -474,7 +489,7 @@ function main(): void {
         if (stampStaged(target, now)) preservedWip.push(target.manifestRel);
       } else {
         const abs = path.join(ROOT, target.manifestRel);
-        fs.writeFileSync(abs, withStamp(fs.readFileSync(abs, "utf-8"), now), "utf-8");
+        fs.writeFileSync(abs, withStamp(fs.readFileSync(abs, "utf-8"), now, target.root), "utf-8");
       }
     }
     stamped.push(target.manifestRel);

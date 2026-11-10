@@ -183,7 +183,7 @@ const ROUTE =
   "});\n";
 
 const app = (manifest: Record<string, unknown>, extra: Record<string, string> = {}): TarEntry[] =>
-  files({ "app.json": `${JSON.stringify(manifest, null, 2)}\n`, "api/items/route.ts": ROUTE, ...extra });
+  files({ "app.json": `${JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", ...manifest }, null, 2)}\n`, "api/items/route.ts": ROUTE, ...extra });
 
 interface ReleaseFixture {
   /** Dotted, or null for a website release, named by its commit. */
@@ -225,7 +225,7 @@ const NOTES_NEW = app(
 );
 
 const theme = (css: string, extra: Record<string, string> = {}): TarEntry[] =>
-  files({ "theme.json": `${JSON.stringify({ name: "Dusk", description: "A dark theme." }, null, 2)}\n`, "theme.css": css, ...extra });
+  files({ "theme.json": `${JSON.stringify({ $schema: "https://mixos.org/schemas/theme/v1.json", name: "Dusk", description: "A dark theme." }, null, 2)}\n`, "theme.css": css, ...extra });
 const DUSK_1_0 = theme(":root { --background: #101010; }\n", { "assets/old.woff2": "old font\n" });
 const DUSK_1_1 = theme(":root { --background: #121212; }\n");
 
@@ -681,7 +681,7 @@ describe("an update", { concurrency: false }, () => {
 
     // A local extension, with no install record.
     fs.mkdirSync(path.join(root, "apps/local-app"), { recursive: true });
-    fs.writeFileSync(path.join(root, "apps/local-app/app.json"), '{"name":"Local"}\n');
+    fs.writeFileSync(path.join(root, "apps/local-app/app.json"), '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Local"}\n');
     await assert.rejects(
       installExtension("app", "local-app", { update: {} }),
       refused(/^apps\/local-app has no install record \(apps\/local-app\/\.registry\.json\), so it is a local extension/),

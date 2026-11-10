@@ -53,11 +53,16 @@ One thing to leave out: the listing page already displays the app's name, `tagli
 `release-notes.json` beside `app.json` tells the people who use the app what changed, one line at a time. MixOS shows the notes from the last 14 days behind the gift icon in the menu bar, with a dot on each one a person hasn't seen, to everyone who has the app installed. App Manager's Release Notes page keeps all of them. The file is optional: an app without one has no notes.
 
 ```json
-[
-  { "date": "2026-10-20", "version": "1.2.0", "note": "Filter the pipeline by owner, and the filter is still there when you come back." },
-  { "date": "2026-08-28", "note": "First release: your pipeline by stage, as a dashboard widget and a page." }
-]
+{
+  "$schema": "https://mixos.org/schemas/release-notes/v1.json",
+  "notes": [
+    { "date": "2026-10-20", "version": "1.2.0", "note": "Filter the pipeline by owner, and the filter is still there when you come back." },
+    { "date": "2026-08-28", "note": "First release: your pipeline by stage, as a dashboard widget and a page." }
+  ]
+}
 ```
+
+`$schema` says which shape the file is, as every extension file does (see [`$schema`](#schema-which-shape-a-file-is)); `notes` is the list, and each note is:
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -65,7 +70,7 @@ One thing to leave out: the listing page already displays the app's name, `tagli
 | `version` |  | The release it shipped in, three numbers with no `v`: `1.2.0`. |
 | `note` | ✅ | One line of plain text, 300 characters or fewer. No Markdown: it is printed as it is. |
 
-The build checks the file, and so does a Registry install before the app lands: the newest note first, no note twice on one day, no field but these three, and at most 256 KB. A file that breaks a rule stops the build, as a bad manifest does. It is a file of its own, not a field in `app.json`, because it keeps the app's whole history.
+The build checks the file, and so does a Registry install before the app lands: its `$schema`, the newest note first, no note twice on one day, no field but these three, and at most 256 KB. A file that breaks a rule stops the build, as a bad manifest does. It is a file of its own, not a field in `app.json`, because it keeps the app's whole history.
 
 Writing one:
 
@@ -80,6 +85,7 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
 
 ```json
 {
+  "$schema": "https://mixos.org/schemas/app/v1.json",
   "name": "My App",
   "description": "A brief description of what this app does",
   "tagline": "The one-line version, for a listing card",
@@ -115,10 +121,40 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
 
 `roles` and `defaultRole` are optional — omit them for apps that don't need in-app permission tiers. See [Roles & Permissions](./roles.md).
 
+### `$schema`: which shape a file is
+
+Every JSON file an extension carries starts by saying which shape it is, with
+the URL of its JSON Schema on mixos.org:
+
+| File | `$schema` |
+| --- | --- |
+| `app.json` | `https://mixos.org/schemas/app/v1.json` |
+| `connector.json` | `https://mixos.org/schemas/connector/v1.json` |
+| `theme.json` | `https://mixos.org/schemas/theme/v1.json` |
+| `release-notes.json` | `https://mixos.org/schemas/release-notes/v1.json` |
+| `.registry.json` | `https://mixos.org/schemas/registry-install/v1.json`, written by install |
+
+- **Required.** The build, and a Registry install, refuse a file without it.
+  The templates carry it, and the pre-commit hook adds it to a manifest that
+  has none.
+- **Read at exactly one version**, the one this MixOS writes. A newer one is
+  for a newer MixOS, which the build says, and an older one is a shape this
+  MixOS no longer reads. Each file has its own version, so one changing shape
+  doesn't move the others.
+- **An editor reads it too.** VS Code and others fetch the schema and complete
+  and check the file as you type. The schemas are generated from the same
+  rules the build validates with (`npm run schemas`, into
+  [`docs/schemas/`](../schemas/)), so a file the schema accepts is one the
+  build reads.
+- **It decides which MixOS can install a release.** MixOS refuses a manifest
+  key it doesn't know, `$schema` included, so mixos.org sets each release's
+  minimum MixOS version to the first release that reads its manifest's schema.
+
 ### Field Reference
 
 | Field | Required | Description | Example |
 | --- | --- | --- | --- |
+| `$schema` | ✅ | Which shape the manifest is, and so which MixOS reads it: `https://mixos.org/schemas/app/v1.json`, written first. See [`$schema`](#schema-which-shape-a-file-is). | `"$schema": "https://mixos.org/schemas/app/v1.json"` |
 | `name` | ✅ | Display name shown in the App Manager, the Apps admin page, and the header dropdown. | `"name": "Sales Dashboard"` |
 | `description` |  | Brief summary of what the app does. Shown in the App Manager and the Apps admin page. | `"description": "Real-time sales metrics and pipeline overview"` |
 | `tagline` |  | The one-line version of `description`, for surfaces with room for a sentence and not a paragraph — a listing card, a tile subtitle. Max 100 characters, single line. Where it is absent, `description` is used instead; setting only one of the two is the normal case. | `"tagline": "Sales metrics, live"` |

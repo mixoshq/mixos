@@ -1,4 +1,5 @@
 {
+  "$schema": "https://mixos.org/schemas/theme/v1.json",
   "name": "MixOS Dark",
   "description": "Slate and cyan on a dark ground, drawn from the MixOS brand guidelines v1.0.",
   "tagline": "Slate and cyan on a dark ground",
