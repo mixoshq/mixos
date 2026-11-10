@@ -6,42 +6,42 @@
       "describes": "app.json",
       "version": 1,
       "url": "https://mixos.org/schemas/app/v1.json",
-      "since": "unreleased"
+      "since": "0.7.0"
     },
     {
       "file": "connector",
       "describes": "connector.json",
       "version": 1,
       "url": "https://mixos.org/schemas/connector/v1.json",
-      "since": "unreleased"
+      "since": "0.7.0"
     },
     {
       "file": "extension-renames",
       "describes": "extension-renames.json",
       "version": 1,
       "url": "https://mixos.org/schemas/extension-renames/v1.json",
-      "since": "unreleased"
+      "since": "0.7.0"
     },
     {
       "file": "registry-install",
       "describes": ".registry.json",
       "version": 1,
       "url": "https://mixos.org/schemas/registry-install/v1.json",
-      "since": "unreleased"
+      "since": "0.7.0"
     },
     {
       "file": "release-notes",
       "describes": "release-notes.json",
       "version": 1,
       "url": "https://mixos.org/schemas/release-notes/v1.json",
-      "since": "unreleased"
+      "since": "0.7.0"
     },
     {
       "file": "theme",
       "describes": "theme.json",
       "version": 1,
       "url": "https://mixos.org/schemas/theme/v1.json",
-      "since": "unreleased"
+      "since": "0.7.0"
     }
   ]
 }
