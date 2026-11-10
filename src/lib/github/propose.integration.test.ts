@@ -114,7 +114,7 @@ const FIXTURES: Record<string, Fixture> = {
   "e2e-files": {
     kind: "app",
     entries: files({
-      "app.json": JSON.stringify({ name: HOSTILE_NAME, description: "Files." }),
+      "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: HOSTILE_NAME, description: "Files." }),
       "README.md": "# Files\r\nWith CRLF, a BOM-less é, and \u2028.\n",
       "api/items/route.ts": ROUTE,
       "api/[id]/route.ts": ROUTE,
@@ -132,7 +132,7 @@ const FIXTURES: Record<string, Fixture> = {
         version: "1.3.0",
         releasedAt: WHEN["1.3.0"],
         entries: files({
-          "app.json": JSON.stringify({ name: HOSTILE_NAME, description: "Files 1.3.", egress: ["api.example.com"] }),
+          "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: HOSTILE_NAME, description: "Files 1.3.", egress: ["api.example.com"] }),
           "api/items/route.ts": `${ROUTE}// 1.3\n`,
           "migrations/001_init.sql": "create table if not exists items (id uuid primary key);\n",
           "migrations/002_index.sql": "create index if not exists items_id on items (id);\n",
@@ -142,41 +142,41 @@ const FIXTURES: Record<string, Fixture> = {
         }),
         manifest: { name: HOSTILE_NAME, permissions: [{ scope: "network:api.example.com", reason: "Reads items @everyone" }] },
       },
-      { version: "1.2.1", releasedAt: WHEN["1.2.1"], entries: files({ "app.json": '{"name":"Files 1.2.1"}\n' }), manifest: { yanked: true, yankedReason: "Broken @maintainer" } },
-      { version: "1.1.0", releasedAt: WHEN["1.1.0"], entries: files({ "app.json": '{"name":"Files 1.1"}\n' }) },
+      { version: "1.2.1", releasedAt: WHEN["1.2.1"], entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Files 1.2.1"}\n' }), manifest: { yanked: true, yankedReason: "Broken @maintainer" } },
+      { version: "1.1.0", releasedAt: WHEN["1.1.0"], entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Files 1.1"}\n' }) },
     ],
   },
   "e2e-conn": {
     kind: "connector",
-    entries: files({ "connector.json": '{"name":"e2e-conn","displayName":"Conn","version":"1.2.0"}\n', "index.ts": "export default {};\n" }),
+    entries: files({ "connector.json": '{"$schema":"https://mixos.org/schemas/connector/v1.json","name":"e2e-conn","displayName":"Conn","version":"1.2.0"}\n', "index.ts": "export default {};\n" }),
     more: [
       {
         version: "1.2.1",
         releasedAt: WHEN["1.2.1"],
-        entries: files({ "connector.json": '{"name":"e2e-conn","displayName":"Conn 1.2.1","version":"1.2.1"}\n', "index.ts": "export default { v: 2 };\n" }),
+        entries: files({ "connector.json": '{"$schema":"https://mixos.org/schemas/connector/v1.json","name":"e2e-conn","displayName":"Conn 1.2.1","version":"1.2.1"}\n', "index.ts": "export default { v: 2 };\n" }),
         manifest: { yanked: true, yankedReason: "Leaks keys" },
       },
     ],
   },
-  "e2e-board": { kind: "app", entries: files({ "app.json": '{"name":"Board"}\n' }) },
+  "e2e-board": { kind: "app", entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Board"}\n' }) },
   "e2e-yanked": {
     kind: "app",
-    entries: files({ "app.json": '{"name":"Yanked"}\n' }),
+    entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Yanked"}\n' }),
     manifest: { yanked: true, yankedReason: "Broken, see @maintainer #99\n```\n@everyone" },
   },
-  "e2e-future": { kind: "app", entries: files({ "app.json": '{"name":"Future"}\n' }), manifest: { requiresMixOS: "99.0.0" } },
-  "e2e-tampered": { kind: "app", entries: files({ "app.json": '{"name":"Tampered"}\n' }), tampered: true },
+  "e2e-future": { kind: "app", entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Future"}\n' }), manifest: { requiresMixOS: "99.0.0" } },
+  "e2e-tampered": { kind: "app", entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Tampered"}\n' }), tampered: true },
   "e2e-paper": {
     kind: "theme",
     entries: files({
-      "theme.json": JSON.stringify({ name: "Paper", description: "A theme." }),
+      "theme.json": JSON.stringify({ $schema: "https://mixos.org/schemas/theme/v1.json", name: "Paper", description: "A theme." }),
       "theme.css": ":root { --background: #fff; }\n",
     }),
     more: [
       {
         version: "1.1.0",
         releasedAt: WHEN["1.1.0"],
-        entries: files({ "theme.json": JSON.stringify({ name: "Paper 1.1", description: "An earlier theme." }), "theme.css": ":root { --background: #eee; }\n" }),
+        entries: files({ "theme.json": JSON.stringify({ $schema: "https://mixos.org/schemas/theme/v1.json", name: "Paper 1.1", description: "An earlier theme." }), "theme.css": ":root { --background: #eee; }\n" }),
       },
     ],
   },
@@ -324,7 +324,7 @@ describe("proposing an install as a pull request", { skip }, () => {
       ".github/workflows/danger.yml": ours(".github/workflows/danger.yml"),
       "render.yaml": ours("render.yaml"),
       "vercel.json": ours("vercel.json"),
-      "apps/wall-e/app.json": '{"name":"Wall-E"}\n',
+      "apps/wall-e/app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Wall-E"}\n',
     });
     const { app, pem } = fake.createApp("acme", "MixOS Test", { contents: "write", pull_requests: "write", metadata: "read", checks: "read", statuses: "read" });
     const installation = fake.install(app.id, { selection: "selected", repositories: ["acme/mixos"] });
@@ -523,7 +523,7 @@ describe("proposing an install as a pull request", { skip }, () => {
     const before = posts().length;
     const again = await propose("e2e-files");
     assert.equal(!again.ok && again.code, "branch-exists", JSON.stringify(again));
-    fake.push(501, "main", { "apps/E2E-Board/app.json": '{"name":"Board"}\n' });
+    fake.push(501, "main", { "apps/E2E-Board/app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Board"}\n' });
     const folder = await propose("e2e-board");
     assert.equal(!folder.ok && folder.code, "folder-exists", JSON.stringify(folder));
     fake.push(501, "main", { "apps/E2E-Board/app.json": null });
@@ -673,7 +673,7 @@ describe("proposing an install as a pull request", { skip }, () => {
     view = await p.readProposals(ADMIN, "app", new Date(now.getTime() + 11 * 60 * 1000));
     assert.equal(files().ci.state, "none", "only skipped runs: nothing checked it");
 
-    fake.push(501, "mixos/install/app-e2e-files", { "apps/e2e-files/app.json": '{"name":"Changed"}\n' }, "someone-else");
+    fake.push(501, "mixos/install/app-e2e-files", { "apps/e2e-files/app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Changed"}\n' }, "someone-else");
     view = await p.readProposals(ADMIN, "app", now);
     assert.equal(files().changed, true);
     assert.equal(files().unrecorded, false);

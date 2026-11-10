@@ -1,4 +1,5 @@
 {
+  "$schema": "https://mixos.org/schemas/connector/v1.json",
   "name": "_template",
   "displayName": "Template Connector",
   "version": "1.0.0",

@@ -207,7 +207,7 @@ The rule that resolves it: **sample the fill when the fills are distinguishable 
 
 The tokens above all carry a **judgement** — success, warning, destructive. A lot of colour in an app doesn't: chart series, category chips, column accents, lane markers. Colour there says *"this is a different one"*, not *"this one is bad"*.
 
-For that, use the categorical ramp — six hues that each clear AA as text on the page background, and step to lighter values in `mixos-dark` so a series keeps its identity across themes:
+For that, use the categorical ramp — six hues that each clear AA as text on the page background, and step to lighter values in MixOS Dark so a series keeps its identity across themes:
 
 ```tsx
 const TILE_TINTS = [
@@ -217,9 +217,9 @@ const TILE_TINTS = [
 ];
 ```
 
-**Don't tint past 8% if the text on it is the same token.** This snippet said `/15` until the contrast rule was written and measured it: under `mixos`, `text-cat-N` on `bg-cat-N/15` passes for four of the six hues and **fails for `cat-3` (4.42:1) and `cat-6` (4.09:1)**. Which is the worst possible failure mode for a ramp meant to be assigned by index — whether a category fails depends on its position, so a list that grows from two items to three breaks without anyone touching the styling.
+**Don't tint past 8% if the text on it is the same token.** This snippet said `/15` until the contrast rule was written and measured it: under MixOS, `text-cat-N` on `bg-cat-N/15` passes for four of the six hues and **fails for `cat-3` (4.42:1) and `cat-6` (4.09:1)**. Which is the worst possible failure mode for a ramp meant to be assigned by index — whether a category fails depends on its position, so a list that grows from two items to three breaks without anyone touching the styling.
 
-The headroom under `mixos`, measured, is the maximum alpha at which `text-cat-N` still clears 4.5:1 on `bg-cat-N/alpha` (`mixos-dark` has more for every hue):
+The headroom under MixOS, measured, is the maximum alpha at which `text-cat-N` still clears 4.5:1 on `bg-cat-N/alpha` (MixOS Dark has more for every hue):
 
 | | cat-1 | cat-2 | cat-3 | cat-4 | cat-5 | cat-6 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -245,18 +245,18 @@ Rules of thumb:
 
 ### A dark look is a different theme — and it is not your job either way
 
-There is no light/dark switch. A theme declares **one** palette, an admin picks which theme the install runs, and the platform ships two: `mixos` (light, the default) and `mixos-dark`. Each is verified on its own — ~24 contrast pairs, build fails on any shortfall.
+There is no light/dark switch. A theme declares **one** palette, an admin picks which theme the install runs, and the platform ships two: MixOS (`mixos-4dea07f5`, light, the default) and MixOS Dark (`mixos-dark-d666638f`). Each is verified on its own — ~24 contrast pairs, build fails on any shortfall.
 
 > **There is no `dark:` variant to write.** Colour lives in the active theme's tokens, and nowhere else.
 
-This is what makes an app survive a repaint it never coded for. `bg-card` resolves to `#ffffff` under `mixos` and `#1e293b` under `mixos-dark` without the app knowing either value, so a page written once is correct under both — and under the next theme somebody authors. A `dark:` variant hard-codes a second answer in a place the contrast gate cannot see, and it would be wrong the moment a third theme appears.
+This is what makes an app survive a repaint it never coded for. `bg-card` resolves to `#ffffff` under MixOS and `#1e293b` under MixOS Dark without the app knowing either value, so a page written once is correct under both — and under the next theme somebody authors. A `dark:` variant hard-codes a second answer in a place the contrast gate cannot see, and it would be wrong the moment a third theme appears.
 
 It is lint-enforced for `apps/**` **and `src/**`**. The platform exempted itself from this rule while no dark palette was reachable, and by the time one was its own chrome had accumulated ~120 raw palette utilities and 13 `dark:` variants — a `<pre>` with a background but no ink, headings inheriting UA-default black at 1.05:1 on a near-black page. That cleanup is [`docs/plans/20260826_1959-dark-mode-legibility.md`](../plans/20260826_1959-dark-mode-legibility.md), and the fence now covers both trees.
 
 **Two things you inherit for free, so don't re-implement them:**
 
 - **The page ground and the default ink.** `body` carries `background-color: var(--background)` and `color: var(--foreground)`. Anything that just renders text is already correct under every theme; setting a colour is for when you mean something other than "body text".
-- **The surface ladder.** `--background`, `--muted` (recessed: content areas, wells, stripes), `--card` (raised: panels, widgets) and `--accent` (hover) are four rungs a theme should keep apart, so that a form control on `bg-background` reads as a control inside a `bg-card` panel without an app doing anything. The theme build doesn't check this: `mixos` paints `--background` and `--card` the same white and `--muted` and `--accent` the same slate, and leaves borders to separate them, while `mixos-dark` has four distinct rungs.
+- **The surface ladder.** `--background`, `--muted` (recessed: content areas, wells, stripes), `--card` (raised: panels, widgets) and `--accent` (hover) are four rungs a theme should keep apart, so that a form control on `bg-background` reads as a control inside a `bg-card` panel without an app doing anything. The theme build doesn't check this: MixOS paints `--background` and `--card` the same white and `--muted` and `--accent` the same slate, and leaves borders to separate them, while MixOS Dark has four distinct rungs.
 
 ## Empty, error & not-connected states
 

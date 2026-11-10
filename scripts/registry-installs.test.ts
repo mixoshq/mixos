@@ -39,7 +39,7 @@ after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 let n = 0;
 
 const file = (p: string, data: string): TarEntry => ({ path: p, mode: 0o644, data: Buffer.from(data) });
-const FILES = [file("app.json", '{"name":"Files"}\n'), file("README.md", "# Files\n")];
+const FILES = [file("app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Files"}\n'), file("README.md", "# Files\n")];
 
 function record(fields: Partial<InstallRecord> = {}, entries: TarEntry[] = FILES): InstallRecord {
   return {
@@ -234,7 +234,7 @@ describe("a record in a folder changes nothing else", () => {
     const apps = path.join(tmp, `apps-${n++}`);
     for (const [name, withRecord] of [["acme", true], ["plain", false]] as const) {
       fs.mkdirSync(path.join(apps, name), { recursive: true });
-      fs.writeFileSync(path.join(apps, name, "app.json"), JSON.stringify({ name: "Acme" }));
+      fs.writeFileSync(path.join(apps, name, "app.json"), JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Acme" }));
       fs.writeFileSync(path.join(apps, name, "README.md"), "# Acme\n");
       if (withRecord) fs.writeFileSync(path.join(apps, name, INSTALL_RECORD_FILE), RECORD_TEXT("app", name));
     }
@@ -268,7 +268,7 @@ describe("a record in a folder changes nothing else", () => {
 
     const app = path.join(tmp, `stage-${n++}`, "acme");
     fs.mkdirSync(app, { recursive: true });
-    fs.writeFileSync(path.join(app, "app.json"), JSON.stringify({ name: "Acme" }));
+    fs.writeFileSync(path.join(app, "app.json"), JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Acme" }));
     fs.writeFileSync(path.join(app, INSTALL_RECORD_FILE), RECORD_TEXT("app", "acme"));
     assert.deepEqual(await checkStaged("app", app, registered), { problems: [], deferred: [] });
 

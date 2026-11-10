@@ -24,7 +24,7 @@ import type { TarEntry } from "./tar";
 const file = (path: string, data = "export {};\n"): TarEntry => ({ path, mode: 0o644, data: Buffer.from(data) });
 
 /** A package that passes: a valid manifest and one route. */
-const CLEAN = [file("app.json", '{"name":"Acme"}\n'), file("api/report/route.ts")];
+const CLEAN = [file("app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}\n'), file("api/report/route.ts")];
 
 /** Run preflight on CLEAN plus `paths`, returning the refusal (or null when it passes). */
 function refusal(...paths: string[]): InstallError | null {

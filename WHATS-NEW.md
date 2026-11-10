@@ -10,6 +10,25 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-11-10
+
+- **Every extension JSON file says which shape it is.** `app.json`,
+  `connector.json`, `theme.json`, `release-notes.json` and `.registry.json`
+  start with a `$schema` URL, such as
+  `"$schema": "https://mixos.org/schemas/app/v1.json"`, and the build refuses
+  a file without it, saying what to add. `release-notes.json` is now an
+  object, `{ "$schema", "notes": [...] }`. Editors complete and check the
+  files from it. `npm run schemas` writes the schemas into `docs/schemas/`,
+  and mixos.org serves them. See
+  [`$schema`](docs/apps/architecture.md#schema-which-shape-a-file-is).
+- **`npm run rename -- <kind>/<slug>` renames an extension and keeps its
+  data.** It moves the folder, rewrites what names the old slug, and records
+  the rename in `extension-renames.json`. The release step then moves every
+  instance's grants, settings, widgets, keys, tables, credentials and applied
+  theme to the new slug. Slugs listed on mixos.org end in an id, and `--to`
+  takes the one it minted. Wall·E and the built-in themes have theirs:
+  `wall-e-345e113c`, `mixos-4dea07f5` and `mixos-dark-d666638f`.
+
 ## 2026-11-08
 
 - **MixOS Launcher, a Mac app.** It has a window listing every copy of MixOS on

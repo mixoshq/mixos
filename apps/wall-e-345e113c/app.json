@@ -1,4 +1,5 @@
 {
+  "$schema": "https://mixos.org/schemas/app/v1.json",
   "name": "Wall·E",
   "description": "A dashboard widget with a different inspirational line from WALL·E every hour.",
   "tagline": "A different line from WALL·E every hour",
@@ -35,5 +36,5 @@
       "component": "widgets/quote-of-the-day.tsx"
     }
   ],
-  "lastUpdated": "2026-10-26T02:02:23.637Z"
+  "lastUpdated": "2026-11-10T06:48:59.926Z"
 }

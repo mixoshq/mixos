@@ -12,9 +12,9 @@
  */
 
 export const CORE_EXTENSIONS = {
-  apps: ["_template", "wall-e"],
+  apps: ["_template", "wall-e-345e113c"],
   connectors: ["_template", "_template-oauth"],
-  themes: ["_template", "mixos", "mixos-dark"],
+  themes: ["_template", "mixos-4dea07f5", "mixos-dark-d666638f"],
 } as const satisfies Record<string, readonly string[]>;
 
 type Kind = keyof typeof CORE_EXTENSIONS;

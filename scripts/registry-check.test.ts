@@ -188,6 +188,7 @@ const PROVIDER = registeredApp("provider", {
 });
 const CONSUMER_FILES = {
   "app.json": JSON.stringify({
+    $schema: "https://mixos.org/schemas/app/v1.json",
     name: "Consumer",
     consumes: [{ app: "provider", service: "totals" }],
     listensTo: [{ app: "provider", hook: "updated" }],
@@ -223,6 +224,7 @@ describe("--check, run as an install runs it", () => {
     // is imported. It also reaches its own files through `@apps/<own slug>/`.
     dirs.goodApp = stage("acme", {
       "app.json": JSON.stringify({
+        $schema: "https://mixos.org/schemas/app/v1.json",
         name: "Acme",
         description: "A staged app.",
         widgets: [{ name: "Hello", description: "Says hello", component: "widgets/hello.tsx" }],
@@ -247,6 +249,7 @@ describe("--check, run as an install runs it", () => {
     // scan refuses it, and nothing runs it.
     dirs.fsApp = stage("grabby", {
       "app.json": JSON.stringify({
+        $schema: "https://mixos.org/schemas/app/v1.json",
         name: "Grabby",
         widgets: [{ name: "W", description: "A widget", component: "widgets/w.tsx" }],
       }),
@@ -261,13 +264,13 @@ describe("--check, run as an install runs it", () => {
         `export {};\n`,
     });
 
-    dirs.badApp = stage("broken", { "app.json": JSON.stringify({ name: "Broken", sidebar: true }) });
+    dirs.badApp = stage("broken", { "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Broken", sidebar: true }) });
 
     // Routes whose source says what the build will make of them, and one whose
     // options it cannot read. Each says so if it is ever imported.
     const route = (name: string, rel: string, body: string) =>
       stage(name, {
-        "app.json": JSON.stringify({ name, roles: [{ key: "viewer", label: "Viewer" }] }),
+        "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name, roles: [{ key: "viewer", label: "Viewer" }] }),
         [rel]:
           `import { z } from "zod";\nimport { defineRoute } from "@/lib/apps/route";\n` +
           `console.log("${IMPORTED} ${rel}");\n${body}`,
@@ -307,7 +310,7 @@ describe("--check, run as an install runs it", () => {
     // Refused, and named in what the check prints: a line of its output is
     // then exactly a verdict.
     dirs.echo = stage("echo", {
-      "app.json": JSON.stringify({ name: "Echo" }),
+      "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Echo" }),
       [`x\n${FAKE_VERDICT}\ny.ts`]: `export const f = () => fetch("https://example.com");\n`,
     });
 
@@ -485,43 +488,43 @@ describe("checkStaged", () => {
     const cases: [string, Record<string, string>, RegExp][] = [
       [
         "a .tsx route",
-        { "app.json": '{"name":"X"}', "api/items/route.tsx": "export {};\n" },
+        { "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X"}', "api/items/route.tsx": "export {};\n" },
         /^apps\/x\/api\/items\/route\.tsx: API routes must be \.ts/,
       ],
       [
         "a route in a directory the scan does not read",
-        { "app.json": '{"name":"X"}', "api/.hidden/route.ts": "export {};\n" },
+        { "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X"}', "api/.hidden/route.ts": "export {};\n" },
         /^apps\/x\/api\/\.hidden\/route\.ts is in a directory the containment scan does not read/,
       ],
       [
         "a migration statement an app may not run",
         {
-          "app.json": '{"name":"X","database":true}',
+          "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X","database":true}',
           "migrations/0001_init.sql": "create function f() returns int as $$ select 1 $$ language sql;\n",
         },
         /^apps\/x\/migrations\/0001_init\.sql/,
       ],
       [
         "migrations without a database",
-        { "app.json": '{"name":"X"}', "migrations/0001_init.sql": "create table t (id int);\n" },
+        { "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X"}', "migrations/0001_init.sql": "create table t (id int);\n" },
         /^apps\/x\/migrations\/ holds 1 SQL file\(s\), but app\.json does not set "database": true/,
       ],
       [
         "another app's hook fired",
-        { "app.json": '{"name":"X"}', "hooks.ts": 'export default (h: { doAction(n: string): void }) => h.doAction("other:thing");\n' },
+        { "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X"}', "hooks.ts": 'export default (h: { doAction(n: string): void }) => h.doAction("other:thing");\n' },
         /^apps\/x\/hooks\.ts:1 — fires "other:thing", a hook of "other"/,
       ],
       [
         "an entry point the scan does not read",
         {
-          "app.json": JSON.stringify({ name: "X", widgets: [{ name: "W", description: "A widget", component: "assets/w.tsx" }] }),
+          "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "X", widgets: [{ name: "W", description: "A widget", component: "assets/w.tsx" }] }),
           "assets/w.tsx": "export default () => null;\n",
         },
         /^apps\/x\/assets\/w\.tsx: the platform would load it, but the containment scan does not read it/,
       ],
       [
         "a schedule with no handler",
-        { "app.json": JSON.stringify({ name: "X", schedules: [{ name: "nightly", everyMinutes: 60 }] }) },
+        { "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "X", schedules: [{ name: "nightly", everyMinutes: 60 }] }) },
         /^apps\/x\/app\.json: schedules\[\]\.name "nightly" has no handler on disk/,
       ],
       ["no manifest", { "README.md": "# X\n" }, /^apps\/x has no app\.json\./],
@@ -538,23 +541,25 @@ describe("checkStaged", () => {
   });
 
   test("a folder name that cannot be a slug is refused", async () => {
-    const { problems } = await checkStaged("app", stage("Not_A-Slug", { "app.json": '{"name":"X"}' }), none());
+    const { problems } = await checkStaged("app", stage("Not_A-Slug", { "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X"}' }), none());
     assert.match(problems[0], /^apps\/Not_A-Slug: /);
   });
 
   test("a slug a platform page has is refused", async () => {
-    const { problems } = await checkStaged("app", stage("release-notes", { "app.json": '{"name":"X"}' }), none());
+    const { problems } = await checkStaged("app", stage("release-notes", { "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X"}' }), none());
     assert.match(problems[0], /^apps\/release-notes: "release-notes" is reserved: \/apps\/release-notes is a page/);
   });
 
   test("release notes are checked as each kind is staged, and a good file is accepted", async () => {
-    const good = JSON.stringify([{ date: "2026-08-28", note: "First release." }]);
-    const long = JSON.stringify([{ date: "2026-08-28", note: "x".repeat(301) }]);
+    const notes = (list: unknown[]) =>
+      JSON.stringify({ $schema: "https://mixos.org/schemas/release-notes/v1.json", notes: list });
+    const good = notes([{ date: "2026-08-28", note: "First release." }]);
+    const long = notes([{ date: "2026-08-28", note: "x".repeat(301) }]);
 
-    const app = (notes: string) => stage("x", { "app.json": '{"name":"X"}', "release-notes.json": notes });
+    const app = (notes: string) => stage("x", { "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X"}', "release-notes.json": notes });
     assert.deepEqual((await checkStaged("app", app(good), none())).problems, []);
     const [appProblem] = (await checkStaged("app", app(long), none())).problems;
-    assert.match(appProblem, /^apps\/x\/release-notes\.json failed validation[\s\S]*0\.note: is 301 characters/);
+    assert.match(appProblem, /^apps\/x\/release-notes\.json failed validation[\s\S]*notes\.0\.note: is 301 characters/);
 
     const connector = (notes: string) => {
       const dir = stageConnector("crm");
@@ -578,7 +583,7 @@ describe("checkStaged", () => {
   test("a route is read from its source: a bare handler is refused, and options it cannot read wait for registration", async () => {
     const bare = await checkStaged(
       "app",
-      stage("x", { "app.json": '{"name":"X"}', "api/index/route.ts": "export async function GET() {}\n" }),
+      stage("x", { "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X"}', "api/index/route.ts": "export async function GET() {}\n" }),
       none(),
     );
     assert.deepEqual(bare, { problems: [bareHandlerProblem("x", "", "GET")], deferred: [] });
@@ -586,7 +591,7 @@ describe("checkStaged", () => {
     const opaque = await checkStaged(
       "app",
       stage("x", {
-        "app.json": '{"name":"X"}',
+        "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X"}',
         "api/index/route.ts":
           'import { defineRoute } from "@/lib/apps/route";\nimport { options } from "../../lib/options";\n' +
           "export const GET = defineRoute(options);\n",
@@ -606,7 +611,7 @@ describe("checkStaged", () => {
     const { problems, deferred } = await checkStaged(
       "app",
       stage("x", {
-        "app.json": '{"name":"X"}',
+        "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"X"}',
         "widgets.ts": "export default {};\n",
         "api/index/route.ts": "export const GET = async () => new Response();\n",
       }),
@@ -643,13 +648,14 @@ describe("checkStaged", () => {
     // Registered under the same slug with a different service: judged as the
     // staged copy, which consumes nothing.
     const stale = registeredApp("acme", { consumes: [{ app: "gone", service: "x" }] });
-    const { problems } = await checkStaged("app", stage("acme", { "app.json": '{"name":"Acme"}' }), registered([stale]));
+    const { problems } = await checkStaged("app", stage("acme", { "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}' }), registered([stale]));
     assert.deepEqual(problems, []);
   });
 
   test("a scheduled job on a registered user-scoped connector is refused", async () => {
     const app = stage("digest", {
       "app.json": JSON.stringify({
+        $schema: "https://mixos.org/schemas/app/v1.json",
         name: "Digest",
         connectors: [{ name: "my-mail", version: "1.0.0" }],
         schedules: [{ name: "daily", everyMinutes: 60 }],
@@ -674,7 +680,7 @@ describe("checkStaged", () => {
 
   test("an app built against a newer connector than the one installed is refused, naming the update", async () => {
     const app = stage("ledger", {
-      "app.json": JSON.stringify({ name: "Ledger", connectors: [{ name: "crm", version: "1.2.0" }] }),
+      "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Ledger", connectors: [{ name: "crm", version: "1.2.0" }] }),
     });
     const { problems } = await checkStaged("app", app, registered([], [registeredConnector("crm", { version: "1.1.4" })]));
     assert.equal(problems.length, 1);
@@ -687,7 +693,7 @@ describe("checkStaged", () => {
 
   test("an app built against an older major version than the one installed is refused", async () => {
     const app = stage("ledger", {
-      "app.json": JSON.stringify({ name: "Ledger", connectors: [{ name: "crm", version: "1.2.0" }] }),
+      "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Ledger", connectors: [{ name: "crm", version: "1.2.0" }] }),
     });
     const { problems } = await checkStaged("app", app, registered([], [registeredConnector("crm", { version: "2.0.0" })]));
     assert.match(problems[0], /2\.0\.0 is a new major version, which may remove or change what the app calls\./);
@@ -695,7 +701,7 @@ describe("checkStaged", () => {
 
   test("an app asking to change data in a connector with no write method is refused", async () => {
     const app = stage("ledger", {
-      "app.json": JSON.stringify({ name: "Ledger", connectors: [{ name: "crm", version: "1.0.0", access: "write" }] }),
+      "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Ledger", connectors: [{ name: "crm", version: "1.0.0", access: "write" }] }),
     });
     const reads = registeredConnector("crm", { telemetry: [{ method: "listDeals", operation: "GET /deals" }] });
     const { problems } = await checkStaged("app", app, registered([], [reads]));
@@ -751,11 +757,11 @@ describe("the scans skip dot-prefixed folders", () => {
     t.mock.method(console, "warn", () => {});
     const apps = path.join(tmp, `apps-${n++}`);
     write(apps, {
-      "acme/app.json": '{"name":"Acme"}',
+      "acme/app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}',
       "acme/README.md": "# Acme\n",
-      ".installing-ghost/app.json": '{"name":"Ghost"}',
-      ".backup-acme/app.json": '{"name":"Acme, before"}',
-      "_template/app.json": '{"name":"Template"}',
+      ".installing-ghost/app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Ghost"}',
+      ".backup-acme/app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme, before"}',
+      "_template/app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Template"}',
     });
     const manifests = await scanApps(apps, { emit: false });
     assert.deepEqual(manifests.map((m) => m.slug), ["acme"]);

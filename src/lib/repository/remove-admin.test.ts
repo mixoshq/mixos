@@ -133,7 +133,7 @@ const exists = (rel: string) => fs.existsSync(path.join(root, rel));
 
 describe("both actions require an admin before anything else", () => {
   test("they are refused, and nothing is read, locked, changed or audited", async () => {
-    write("apps/acme/app.json", '{"name":"Acme"}');
+    write("apps/acme/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}');
     let built = 0;
     const ctx = context({ admin: NOT_ADMIN, builtDeployment: () => (built++, false) });
     await assert.rejects(previewForButton({ kind: "app", slug: "acme" }, ctx), /Admin access required/);
@@ -172,7 +172,7 @@ describe("a built deployment refuses, as information", () => {
   });
 
   test("the removal is refused before the locks, and the refusal is audited as the button's", async () => {
-    write("apps/acme/app.json", '{"name":"Acme"}');
+    write("apps/acme/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}');
     const outcome = await removeFromButton({ kind: "app", slug: "acme" }, context({ builtDeployment: () => true }));
     assert.equal(!outcome.ok && outcome.tone, "info");
     assert.equal(lockStatements, 0);
@@ -192,10 +192,11 @@ describe("a built deployment refuses, as information", () => {
 
 describe("the preview", () => {
   test("names what goes, where it came from, what depends on it, and the command", async () => {
-    write("connectors/probe/connector.json", '{"name":"probe","displayName":"Probe"}');
+    write("connectors/probe/connector.json", '{"$schema":"https://mixos.org/schemas/connector/v1.json","name":"probe","displayName":"Probe"}');
     write(
       "connectors/probe/.registry.json",
       JSON.stringify({
+        $schema: "https://mixos.org/schemas/registry-install/v1.json",
         source: "https://mixos.org",
         kind: "connector",
         slug: "probe",
@@ -208,8 +209,8 @@ describe("the preview", () => {
         requiresMixOS: null,
       }),
     );
-    write("apps/mailer/app.json", '{"name":"Mailer","connectors":[{"name":"probe","version":"1.0.0"}]}');
-    write("apps/digest/app.json", '{"name":"Digest","optionalConnectors":[{"name":"probe","version":"1.0.0"}]}');
+    write("apps/mailer/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Mailer","connectors":[{"name":"probe","version":"1.0.0"}]}');
+    write("apps/digest/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Digest","optionalConnectors":[{"name":"probe","version":"1.0.0"}]}');
     const outcome = await previewForButton({ kind: "connector", slug: "probe" }, context());
     assert.equal(outcome.ok, true);
     if (!outcome.ok) return;
@@ -236,7 +237,7 @@ describe("the preview", () => {
 
 describe("removing", () => {
   test("calls through to removal under both locks, audits the admin with via: button, and hands back the commit", async () => {
-    write("apps/acme/app.json", '{"name":"Acme"}');
+    write("apps/acme/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}');
     const outcome = await removeFromButton({ kind: "app", slug: "acme" }, context());
     assert.equal(outcome.ok, true);
     if (!outcome.ok) return;
@@ -255,8 +256,8 @@ describe("removing", () => {
   });
 
   test("a theme revalidates the layout too, since the applied one may be the one that went", async () => {
-    write("themes/aurora/theme.json", '{"name":"Aurora"}');
-    write("themes/dusk/theme.json", '{"name":"Dusk"}');
+    write("themes/aurora/theme.json", '{"$schema":"https://mixos.org/schemas/theme/v1.json","name":"Aurora"}');
+    write("themes/dusk/theme.json", '{"$schema":"https://mixos.org/schemas/theme/v1.json","name":"Dusk"}');
     storedTheme = "dusk";
     const outcome = await removeFromButton({ kind: "theme", slug: "dusk" }, context({ servesWithoutRebuild: () => false }));
     assert.equal(outcome.ok, true);
@@ -267,7 +268,7 @@ describe("removing", () => {
   });
 
   test("a refusal is a value the dialog shows, and nothing changes", async () => {
-    write("themes/aurora/theme.json", '{"name":"Aurora"}');
+    write("themes/aurora/theme.json", '{"$schema":"https://mixos.org/schemas/theme/v1.json","name":"Aurora"}');
     const outcome = await removeFromButton({ kind: "theme", slug: "aurora" }, context());
     assert.equal(outcome.ok, false);
     assert.equal(!outcome.ok && outcome.code, "last-theme");
@@ -278,7 +279,7 @@ describe("removing", () => {
   });
 
   test("another administrator holding a lock reads as that, with Try again", async () => {
-    write("apps/acme/app.json", '{"name":"Acme"}');
+    write("apps/acme/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}');
     rowLockTaken = true;
     assert.deepEqual(await removeFromButton({ kind: "app", slug: "acme" }, context()), {
       ok: false,
@@ -341,7 +342,7 @@ describe("Remove code and delete this checkout's data", () => {
   }
 
   test("deletes the data once the code is removed, naming the admin, and says what went", async () => {
-    write("apps/acme/app.json", '{"name":"Acme"}');
+    write("apps/acme/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}');
     const data = deleting();
     const outcome = await removeFromButton(
       { kind: "app", slug: "acme", deleteData: true, typedSlug: " acme " },
@@ -356,7 +357,7 @@ describe("Remove code and delete this checkout's data", () => {
   });
 
   test("a refusal keeps the data, and the removal stands", async () => {
-    write("connectors/probe/connector.json", '{"name":"probe","displayName":"Probe"}');
+    write("connectors/probe/connector.json", '{"$schema":"https://mixos.org/schemas/connector/v1.json","name":"probe","displayName":"Probe"}');
     const refused: DataDeleteOutcome = {
       ok: false,
       code: "carried-elsewhere",
@@ -376,7 +377,7 @@ describe("Remove code and delete this checkout's data", () => {
   });
 
   test("a deletion that throws is a kept-data result, never a failed removal", async () => {
-    write("apps/acme/app.json", '{"name":"Acme"}');
+    write("apps/acme/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}');
     const error = console.error;
     console.error = () => {};
     try {
@@ -399,9 +400,9 @@ describe("Remove code and delete this checkout's data", () => {
   });
 
   test("without the name typed, or for a theme, nothing is removed and nothing deleted", async () => {
-    write("apps/acme/app.json", '{"name":"Acme"}');
-    write("themes/aurora/theme.json", '{"name":"Aurora"}');
-    write("themes/dusk/theme.json", '{"name":"Dusk"}');
+    write("apps/acme/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}');
+    write("themes/aurora/theme.json", '{"$schema":"https://mixos.org/schemas/theme/v1.json","name":"Aurora"}');
+    write("themes/dusk/theme.json", '{"$schema":"https://mixos.org/schemas/theme/v1.json","name":"Dusk"}');
     const data = deleting();
     for (const [input, code] of [
       [{ kind: "app", slug: "acme", deleteData: true }, "not-confirmed"],
@@ -421,7 +422,7 @@ describe("Remove code and delete this checkout's data", () => {
   });
 
   test("keeping the data never asks to delete it", async () => {
-    write("apps/acme/app.json", '{"name":"Acme"}');
+    write("apps/acme/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}');
     const data = deleting();
     const outcome = await removeFromButton({ kind: "app", slug: "acme", typedSlug: "acme" }, context({ deleteData: data.deleteData }));
     assert.equal(outcome.ok && outcome.result.data, null);
@@ -429,11 +430,11 @@ describe("Remove code and delete this checkout's data", () => {
   });
 
   test("the preview asks what the database keeps only for an app or a connector that can be removed", async () => {
-    write("apps/acme/app.json", '{"name":"Acme"}');
-    write("connectors/probe/connector.json", '{"name":"probe","displayName":"Probe"}');
-    write("apps/mailer/app.json", '{"name":"Mailer","connectors":[{"name":"probe","version":"1.0.0"}]}');
-    write("themes/aurora/theme.json", '{"name":"Aurora"}');
-    write("themes/dusk/theme.json", '{"name":"Dusk"}');
+    write("apps/acme/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}');
+    write("connectors/probe/connector.json", '{"$schema":"https://mixos.org/schemas/connector/v1.json","name":"probe","displayName":"Probe"}');
+    write("apps/mailer/app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Mailer","connectors":[{"name":"probe","version":"1.0.0"}]}');
+    write("themes/aurora/theme.json", '{"$schema":"https://mixos.org/schemas/theme/v1.json","name":"Aurora"}');
+    write("themes/dusk/theme.json", '{"$schema":"https://mixos.org/schemas/theme/v1.json","name":"Dusk"}');
     const asked: string[] = [];
     const previewData = async (kind: "app" | "connector", slug: string) => {
       asked.push(`${kind}/${slug}`);

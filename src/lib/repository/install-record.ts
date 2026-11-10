@@ -59,6 +59,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
+import { schemaProblem, schemaUrl } from "../extensions/schema-urls";
 import { filesHash } from "./content-hash";
 import type { TarEntry } from "./tar";
 import {
@@ -157,6 +158,17 @@ export const InstallRecordSchema = z.strictObject({
 });
 export type InstallRecord = z.infer<typeof InstallRecordSchema>;
 
+/** The URL that says which shape a record is (src/lib/extensions/schema-urls.ts). */
+export const INSTALL_RECORD_SCHEMA = schemaUrl("registry-install");
+
+/**
+ * `.registry.json` as it is on disk: the record, with `$schema` first, which
+ * says which shape it is. Install writes it; nothing else does.
+ */
+export const InstallRecordFileSchema = InstallRecordSchema.extend({
+  $schema: z.literal(INSTALL_RECORD_SCHEMA),
+});
+
 /**
  * One extension in this build installed from a Registry, as the generator
  * writes it to `src/generated/registry-installs.ts`: its record, less the
@@ -182,7 +194,8 @@ export interface RegistryInstall {
 /** A record as file text: validated, its keys in one order, two-space indent. */
 export function serializeInstallRecord(record: InstallRecord): string {
   const r = InstallRecordSchema.parse(record);
-  const ordered: InstallRecord = {
+  const ordered: InstallRecord & { $schema: string } = {
+    $schema: INSTALL_RECORD_SCHEMA,
     source: r.source,
     kind: r.kind,
     slug: r.slug,
@@ -210,13 +223,17 @@ export function parseInstallRecord(text: string): { ok: true; record: InstallRec
   } catch {
     return { ok: false, reason: "it is not JSON" };
   }
-  const parsed = InstallRecordSchema.safeParse(value);
+  const shape = schemaProblem("registry-install", (value as { $schema?: unknown } | null)?.$schema, "it");
+  if (shape) return { ok: false, reason: shape };
+  const parsed = InstallRecordFileSchema.safeParse(value);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const where = issue?.path.join(".");
     return { ok: false, reason: `${where ? `${where}: ` : ""}${issue?.message ?? "not an install record"}` };
   }
-  return { ok: true, record: parsed.data };
+  const { $schema: _shape, ...record } = parsed.data;
+  void _shape;
+  return { ok: true, record };
 }
 
 export type RecordRead =

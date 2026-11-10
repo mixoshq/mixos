@@ -30,7 +30,7 @@ const HAND_WRITTEN = [
   "/apps/*",
   "!/apps/AGENTS.md",
   "!/apps/_template/",
-  "!/apps/wall-e/",
+  "!/apps/wall-e-345e113c/",
   "/connectors/*",
   "!/connectors/AGENTS.md",
   "!/connectors/_template/",
@@ -38,8 +38,8 @@ const HAND_WRITTEN = [
   "/themes/*",
   "!/themes/AGENTS.md",
   "!/themes/_template/",
-  "!/themes/mixos/",
-  "!/themes/mixos-dark/",
+  "!/themes/mixos-4dea07f5/",
+  "!/themes/mixos-dark-d666638f/",
 ];
 
 describe("the core checkout's exclude block", () => {
@@ -176,7 +176,7 @@ describe("in a git repository", () => {
     assert.equal(ignored(dir, "themes/our-brand/theme.json"), true);
     assert.equal(ignored(dir, "apps/_template/app.json"), false);
     assert.equal(ignored(dir, "apps/AGENTS.md"), false);
-    assert.equal(ignored(dir, "themes/mixos/theme.json"), false);
+    assert.equal(ignored(dir, "themes/mixos-4dea07f5/theme.json"), false);
     assert.doesNotMatch(String(git(dir, "status", "--porcelain", "--untracked-files=all").stdout), /myapp|our-brand/);
 
     // A second run changes nothing, not even the file's time.

@@ -26,7 +26,7 @@ See [`docs/plans/README.md`](docs/plans/README.md) for the full convention.
    - [docs/themes/contrast.md](docs/themes/contrast.md) — what is checked and what to do when a brand colour fails
    - [docs/themes/assets.md](docs/themes/assets.md)
 3. Authoritative contract: [src/lib/themes/tokens.ts](src/lib/themes/tokens.ts). Types: [src/lib/themes/types.ts](src/lib/themes/types.ts).
-4. Reference shape: [themes/mixos/](themes/mixos/), built from a brand book. Scaffold: [themes/_template/](themes/_template/).
+4. Reference shape: [themes/mixos-4dea07f5/](themes/mixos-4dea07f5/), built from a brand book. Scaffold: [themes/_template/](themes/_template/).
 
 Do not infer conventions from surrounding code, and do not guess based on training data.
 
@@ -45,7 +45,7 @@ Report the measured table to the user before writing the theme. A brand owner wi
 ## Non-negotiable invariants (from themes/AGENTS.md)
 
 - **A theme change is not an OS change.** `themes/` sits on the authoring side of the boundary with `apps/` and `connectors/`, so it takes no `os-change` label and no admin review. Commit it as `theme:<slug>`, never `os`. Changing the theme *system* — the token contract, the allowlisted `.mix-*` surfaces, the compiler — **is** an OS change. See [`OS-UPDATES.md`](OS-UPDATES.md).
-- Folder name is the slug (lowercase, digits, hyphens). No leading underscore on a shipped theme.
+- Folder name is the slug (lowercase, digits, hyphens). No leading underscore on a shipped theme. mixos.org adds an id when it is first listed (`acme-3f9a2c1b`); rename the folder to match with `npm run rename -- theme/<slug> --to <listed-slug>`, never by hand. A dark counterpart is `<name>-dark`, with an id of its own once listed.
 - **One palette per theme.** Tokens only in one top-level `:root` — not in a `.mix-*` rule, and not in a `:root` inside `@media` or `@supports`. There is no light/dark/system setting: a dark look is a sibling theme, `themes/<slug>-dark/` (as `mixos-dark` is to `mixos`), a full copy with its own `assets/` that an admin selects at `/admin/themes`. The token set is closed; unknown names fail the build.
 - Every required token present.
 - Colour values must be opaque hex / `rgb()` / `hsl()` literals or a `var()` chain ending in one, for every colour token, gated or not. No `color-mix()` or `oklch()` in token values, and no alpha except on `--border`, which the build composites over `--background`.
@@ -54,7 +54,8 @@ Report the measured table to the user before writing the theme. A brand owner wi
 - Never declare a token listed in `FORBIDDEN_TOKENS` (empty today).
 - Never set `lastUpdated`; never hand-edit anything in `src/generated/`.
 - Never add a `dark:` variant to a component to work around a theme problem.
-- Release notes go in `release-notes.json` beside `theme.json`, never in the manifest: newest first, one line of plain text each, 300 characters or fewer.
+- Every JSON file starts with `$schema`: `theme.json` with `"$schema": "https://mixos.org/schemas/theme/v1.json"`, `release-notes.json` with `".../release-notes/v1.json"`. Start from the template, which has both. The build refuses a file without it.
+- Release notes go in `release-notes.json` beside `theme.json`, never in the manifest: `{ "$schema", "notes": [...] }`, newest first, one line of plain text each, 300 characters or fewer.
 
 ## Verify before reporting done
 
@@ -64,7 +65,7 @@ Report the measured table to the user before writing the theme. A brand owner wi
 4. Activate at `/admin/themes`, then load: dashboard, an app page, a form, a table, a modal, **the sign-in page while signed out**, and an app's public `/p/<app-slug>` page. There is no light/dark toggle to try: the theme is the whole palette. If you changed a sibling (`<slug>-dark`) too, activate and check each one.
 5. Hard-reload. The active theme is resolved on the server, so the first paint should already be in its colours.
 6. Network tab: no requests to any font or asset host.
-7. **Write the release note.** If the change is one a person would see, add it first in `themes/<slug>/release-notes.json` (a new theme starts the file with `First release: …`, describing its look): `{ "date": "<today, YYYY-MM-DD>", "note": "…" }`, one line of plain text, 300 characters or fewer, saying what looks different rather than which token moved. While the theme is active, everyone sees it in the menu bar for 14 days, so put the line in your report. Step 1's generator run checks the file. See [Release notes](docs/themes/architecture.md#release-notes).
+7. **Write the release note.** If the change is one a person would see, add it first in `notes` in `themes/<slug>/release-notes.json`, a `{ "$schema": "https://mixos.org/schemas/release-notes/v1.json", "notes": [...] }` file as the template has it (a new theme starts the list with `First release: …`, describing its look): `{ "date": "<today, YYYY-MM-DD>", "note": "…" }`, one line of plain text, 300 characters or fewer, saying what looks different rather than which token moved. While the theme is active, everyone sees it in the menu bar for 14 days, so put the line in your report. Step 1's generator run checks the file. See [Release notes](docs/themes/architecture.md#release-notes).
 
 Do not claim done on a theme you have not looked at signed out.
 

@@ -37,7 +37,7 @@
  * It lints against EVERY installed theme. Which theme is *active* is a database
  * value the build cannot know, so an element has to clear the floor under each
  * palette it could be rendered in, so a combination that fails under
- * `mixos-dark`, or under a theme you authored, is reported too.
+ * MixOS Dark, or under a theme you authored, is reported too.
  * scripts/theme-css.ts verifies each palette wholesale;
  * this rule exists for the one thing that pass cannot see, which is which two
  * tokens a given element puts together.
@@ -334,7 +334,7 @@ function ratioUnder(palette, state, thinned) {
   return ownFill == null ? null : contrast(text, ownFill);
 }
 
-/** "4.13:1 under mixos and 3.90:1 under mixos-dark" */
+/** "4.13:1 under mixos-4dea07f5 and 3.90:1 under mixos-dark-d666638f" */
 function measuredUnder(failing) {
   const parts = failing.map(({ slug, ratio }) => `${ratio.toFixed(2)}:1 under ${slug}`);
   return parts.length > 1

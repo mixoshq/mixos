@@ -769,8 +769,8 @@ describe("allowed", () => {
     );
   });
 
-  test("apps/_template, which every scaffolded app starts from, and wall-e", () => {
-    for (const app of ["_template", "wall-e"]) {
+  test("apps/_template, which every scaffolded app starts from, and Wall·E", () => {
+    for (const app of ["_template", "wall-e-345e113c"]) {
       const dir = path.join(ROOT, "apps", app);
       assert.deepEqual(lines(scanAppContainment(dir)), [], `apps/${app} should be clean`);
     }

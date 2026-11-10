@@ -6,10 +6,16 @@
  * Reading one `release-notes.json`: an extension's, beside its manifest, or
  * MixOS's own, at the root of the repository (src/lib/release-notes/types.ts).
  *
- *   [
- *     { "date": "2026-10-20", "version": "1.1.0", "note": "Reads attachments too." },
- *     { "date": "2026-08-28", "note": "First release: ..." }
- *   ]
+ *   {
+ *     "$schema": "https://mixos.org/schemas/release-notes/v1.json",
+ *     "notes": [
+ *       { "date": "2026-10-20", "version": "1.1.0", "note": "Reads attachments too." },
+ *       { "date": "2026-08-28", "note": "First release: ..." }
+ *     ]
+ *   }
+ *
+ * An object, not the list alone, so there is somewhere to say which shape it is
+ * (`$schema`, src/lib/extensions/schema-urls.ts).
  *
  * The registry generator reads it for every extension it checks, a Registry
  * install's `--check` included, so a file that breaks a rule is refused before
@@ -36,6 +42,7 @@ import path from "node:path";
 import { z } from "zod";
 import { FatalManifestError } from "./manifest-errors";
 import { formatZodError } from "./manifest-schemas";
+import { schemaProblem, schemaUrl } from "../src/lib/extensions/schema-urls";
 import {
   RELEASE_NOTES_FILE,
   RELEASE_NOTES_MAX_BYTES,
@@ -90,7 +97,11 @@ const entrySchema = z.strictObject({
   note: noteSchema,
 });
 
-export const ReleaseNotesFileSchema = z.array(entrySchema);
+export const ReleaseNotesFileSchema = z.strictObject({
+  /** Which shape the file is: src/lib/extensions/schema-urls.ts. */
+  $schema: z.literal(schemaUrl("release-notes")),
+  notes: z.array(entrySchema),
+});
 
 /** `date` plus `days`, both `YYYY-MM-DD` in UTC. */
 function addDays(date: string, days: number): string {
@@ -134,28 +145,39 @@ export function readReleaseNotes(dir: string, where: string, today: Date = new D
     );
   }
 
+  // The list on its own is the shape before `$schema`: say what it is now,
+  // rather than that a list has no "$schema".
+  if (Array.isArray(raw)) {
+    throw new FatalManifestError(
+      `${where} is a list of notes. It is an object now: { "$schema": "${schemaUrl("release-notes")}", "notes": [ …the list… ] }.`,
+    );
+  }
+  const shape = schemaProblem("release-notes", (raw as { $schema?: unknown } | null)?.$schema, where);
+  if (shape) throw new FatalManifestError(shape);
+
   const parsed = ReleaseNotesFileSchema.safeParse(raw);
   if (!parsed.success) {
     throw new FatalManifestError(
       `${where} failed validation (each note is { "date", "version"?, "note" }):\n${formatZodError(parsed.error)}`,
     );
   }
+  const notes = parsed.data.notes;
 
   const latest = addDays(today.toISOString().slice(0, 10), 1);
   const problems: string[] = [];
   const seen = new Map<string, number>();
-  parsed.data.forEach((entry, i) => {
+  notes.forEach((entry, i) => {
     if (entry.date > latest) {
-      problems.push(`  - ${i}.date: ${entry.date} is after today; a note is dated the day its change shipped`);
+      problems.push(`  - notes.${i}.date: ${entry.date} is after today; a note is dated the day its change shipped`);
     }
-    const previous = parsed.data[i - 1];
+    const previous = notes[i - 1];
     if (previous && entry.date > previous.date) {
-      problems.push(`  - ${i}.date: ${entry.date} comes after ${previous.date}; list the newest note first`);
+      problems.push(`  - notes.${i}.date: ${entry.date} comes after ${previous.date}; list the newest note first`);
     }
     const key = `${entry.date}\n${entry.note}`;
     const first = seen.get(key);
     if (first !== undefined) {
-      problems.push(`  - ${i}: the same note as ${first}, on the same day`);
+      problems.push(`  - notes.${i}: the same note as notes.${first}, on the same day`);
     } else {
       seen.set(key, i);
     }
@@ -164,7 +186,7 @@ export function readReleaseNotes(dir: string, where: string, today: Date = new D
     throw new FatalManifestError(`${where} failed validation:\n${problems.join("\n")}`);
   }
 
-  return parsed.data.map((entry) => ({
+  return notes.map((entry) => ({
     date: entry.date,
     version: entry.version ?? null,
     note: entry.note,

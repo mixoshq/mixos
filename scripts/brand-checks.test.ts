@@ -170,7 +170,7 @@ test("app.json logos must sit directly in branding/", () => {
   assert.equal(parsed.success, false);
 });
 
-const themeBase = { name: "Acme", description: "A theme for the tests." };
+const themeBase = { $schema: "https://mixos.org/schemas/theme/v1.json", name: "Acme", description: "A theme for the tests." };
 
 test("theme.json refuses a brand name over 40 characters or on two lines", () => {
   for (const name of ["x".repeat(41), "Acme\nWorkspace", " Acme"]) {

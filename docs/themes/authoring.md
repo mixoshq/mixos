@@ -36,7 +36,7 @@ Two things change more than authors expect:
 
 **On a dark ground a status colour gets lighter and its foreground flips dark.** `--destructive: #dc2626` with a near-white label is correct on white and wrong on slate; there it is `#f87171` with a near-black label.
 
-**The surface ladder needs real steps.** `--background`, `--muted`, `--card` and `--accent` are four rungs, and on a dark ground it is easy to land three of them on the same slate — at which point a card does not separate from the content area behind it and a form control does not separate from the card it sits in. [`themes/mixos-dark/theme.css`](../../themes/mixos-dark/theme.css) is a worked example of both, including why its `--muted` is *deeper* than its `--background`.
+**The surface ladder needs real steps.** `--background`, `--muted`, `--card` and `--accent` are four rungs, and on a dark ground it is easy to land three of them on the same slate — at which point a card does not separate from the content area behind it and a form control does not separate from the card it sits in. [`themes/mixos-dark-d666638f/theme.css`](../../themes/mixos-dark-d666638f/theme.css) is a worked example of both, including why its `--muted` is *deeper* than its `--background`.
 
 ## 5. Style surfaces, if you need to
 
@@ -96,7 +96,7 @@ This is the pattern to reach for whenever a brand colour fails. It is not a comp
 
 ### The dark theme substitutes too
 
-A dark ground moves the substitution to the other end of the ramp; it does not remove it. On `mixos-dark`'s slate, published cyan is 4.36:1 and violet 3.13:1, both short of AA. So `--primary` takes brand cyan-400 (8.33:1) and `--cat-2` a lighter violet, `#a78bfa`, just as `mixos` steps `--primary` down to cyan-700 on white. Measure every candidate on the ground it will sit on.
+A dark ground moves the substitution to the other end of the ramp; it does not remove it. On MixOS Dark's slate, published cyan is 4.36:1 and violet 3.13:1, both short of AA. So `--primary` takes brand cyan-400 (8.33:1) and `--cat-2` a lighter violet, `#a78bfa`, just as MixOS steps `--primary` down to cyan-700 on white. Measure every candidate on the ground it will sit on.
 
 ### Map type by role, not by name
 

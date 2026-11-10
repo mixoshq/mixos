@@ -179,8 +179,8 @@ A theme is a folder under `themes/<slug>/` holding a `theme.json` of design
 tokens plus its own logo, icons, and fonts. Every app renders through the active
 theme, so a single switch restyles the whole system — apps never hard-code
 colour. Contrast is checked, not assumed. Start from [`themes/_template/`](themes/_template/)
-and compare against the shipped [`mixos`](themes/mixos/) and
-[`mixos-dark`](themes/mixos-dark/).
+and compare against the shipped [`mixos-4dea07f5`](themes/mixos-4dea07f5/) and
+[`mixos-dark-d666638f`](themes/mixos-dark-d666638f/).
 
 Deep dives live in [`docs/themes/`](docs/themes/): [architecture](docs/themes/architecture.md),
 [tokens](docs/themes/tokens.md), [authoring](docs/themes/authoring.md),

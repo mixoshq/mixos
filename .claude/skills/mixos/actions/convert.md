@@ -180,7 +180,7 @@ Approved. Now follow [`/mixos app`](.claude/skills/mixos/actions/app.md) — eve
 4. **Update the parity checklist in the plan file as you go**, not at the end. A row moves to `done` when its behaviour works in the browser, not when its file exists.
 5. **When the source contradicts a platform invariant, the invariant wins** — and you note the behaviour change in the plan. If the difference is user-visible (a permission that widens, a notification that no longer sends, a field that changes type), **stop and ask**. Silent behaviour changes are how a conversion loses trust.
 6. **When the source is ambiguous, ask — don't invent.** "This endpoint's role check is `user.level >= 2` and I can't find what level 2 means. Which app role should gate it?" is a good question. Guessing at a permission boundary is not.
-7. **Start the release notes.** `release-notes.json` beside `app.json`, its one entry the first release: what the app does in MixOS, for the people who will use it, in one line of 300 characters or fewer. Each later phase that changes what they see adds a line at the top. See [Release notes](docs/apps/architecture.md#release-notes-release-notesjson).
+7. **Start the release notes.** `release-notes.json` beside `app.json`, `{ "$schema": "https://mixos.org/schemas/release-notes/v1.json", "notes": [...] }` as the template has it, its one note the first release: what the app does in MixOS, for the people who will use it, in one line of 300 characters or fewer. Each later phase that changes what they see adds a line at the top. See [Release notes](docs/apps/architecture.md#release-notes-release-notesjson).
 
 Delete any legacy source you staged inside the repo before reporting done.
 
