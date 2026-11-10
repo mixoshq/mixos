@@ -21,6 +21,13 @@ just pulled.
   files from it. `npm run schemas` writes the schemas into `docs/schemas/`,
   and mixos.org serves them. See
   [`$schema`](docs/apps/architecture.md#schema-which-shape-a-file-is).
+- **`npm run rename -- <kind>/<slug>` renames an extension and keeps its
+  data.** It moves the folder, rewrites what names the old slug, and records
+  the rename in `extension-renames.json`. The release step then moves every
+  instance's grants, settings, widgets, keys, tables, credentials and applied
+  theme to the new slug. Slugs listed on mixos.org end in an id, and `--to`
+  takes the one it minted. Wall·E and the built-in themes have theirs:
+  `wall-e-345e113c`, `mixos-4dea07f5` and `mixos-dark-d666638f`.
 
 ## 2026-11-08
 

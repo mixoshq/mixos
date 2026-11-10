@@ -28,6 +28,7 @@ export const SCHEMA_FILES = {
   theme: { describes: "theme.json", version: 1 },
   "release-notes": { describes: "release-notes.json", version: 1 },
   "registry-install": { describes: ".registry.json", version: 1 },
+  "extension-renames": { describes: "extension-renames.json", version: 1 },
 } as const satisfies Record<string, { describes: string; version: number }>;
 
 export type SchemaFile = keyof typeof SCHEMA_FILES;

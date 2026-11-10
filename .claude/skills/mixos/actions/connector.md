@@ -139,7 +139,7 @@ Read [registry-ux.md](docs/connectors/registry-ux.md) first. In short:
 
 - A connector mirrors its provider: every operation on the resources it touches, one method each with its `operation`, returning what the provider returns (`z.looseObject`, nothing converted lossily, field lists as optional parameters). Never a method shaped for one app.
 - `version` (`X.Y.Z`) is required. Within a major version only add.
-- Folder name === `name` in `connector.json` (lowercase, hyphens). No leading underscore on shipped connectors.
+- Folder name === `name` in `connector.json` (lowercase, hyphens). No leading underscore on shipped connectors. mixos.org lists a new connector under its name with an id after it (`my-service-3f9a2c1b`), and releases it only once `name` says the same: save the listing as a draft, then `npm run rename -- connector/<name> --to <listed-name>`, which sets `name` and the folder, and register the new OAuth redirect URI and webhook URL with the provider. Never rename one by hand.
 - Connectors are server-side only. Never import one from client code.
 - Credentials flow through `initialize(credentials)` only — no env vars, no hardcoded secrets, no fallbacks. `credentialFields[].key` must match what `initialize()` reads.
 - Stateless: no caching across requests.

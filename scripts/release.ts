@@ -6,10 +6,11 @@
 // code takes traffic, in the one order that works.
 //
 //   1. The platform schema, supabase/migrations/   (scripts/platform-migrations.ts)
-//   2. The app registry mirror and app migrations  (scripts/app-migrations.ts)
-//   3. Where each connector and theme came from    (scripts/sync-identities.ts)
-//   4. What this build carries                     (scripts/record-build.ts)
-//   5. The first admin, only if it does not exist  (scripts/admin-seed.ts)
+//   2. Renamed extensions' data, to the new slugs  (scripts/sync-renames.ts)
+//   3. The app registry mirror and app migrations  (scripts/app-migrations.ts)
+//   4. Where each connector and theme came from    (scripts/sync-identities.ts)
+//   5. What this build carries                     (scripts/record-build.ts)
+//   6. The first admin, only if it does not exist  (scripts/admin-seed.ts)
 //
 // Step 5 runs only when INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD are both
 // set, and never touches an account that already exists. Step 2 marks apps that
@@ -72,6 +73,7 @@ import { migrateAppSchemas } from "./app-migrations";
 import { migratePlatform } from "./platform-migrations";
 import { recordAndReportBuild } from "./record-build";
 import { syncAndReportIdentities } from "./sync-identities";
+import { syncAndReportRenames } from "./sync-renames";
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -140,6 +142,9 @@ async function main() {
         ? `  up to date (${platform.alreadyApplied} migration(s) already applied)`
         : `  applied ${platform.applied.length}, ${platform.alreadyApplied} already applied`,
     );
+
+    console.log("");
+    await syncAndReportRenames(sql);
 
     console.log("");
     await migrateAppSchemas(sql);
