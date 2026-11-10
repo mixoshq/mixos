@@ -19,6 +19,7 @@ import { migrateAppSchemas } from "./app-migrations";
 import { loadEnv } from "./load-env";
 import { recordAndReportBuild } from "./record-build";
 import { syncAndReportIdentities } from "./sync-identities";
+import { syncAndReportRenames } from "./sync-renames";
 
 /**
  * Minimal .env loader — reads KEY=VALUE pairs from .env.local (then .env)
@@ -30,6 +31,8 @@ loadEnv();
 async function main() {
   const sql = createPgClient({ max: 1 });
   try {
+    await syncAndReportRenames(sql);
+    console.log("");
     await migrateAppSchemas(sql);
     console.log("");
     await syncAndReportIdentities(sql);

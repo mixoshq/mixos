@@ -163,6 +163,7 @@ import {
   type InstallManifest,
 } from "./types";
 import { installDisabledMessage, installEnabled } from "./policy";
+import { schemaProblem } from "../extensions/schema-urls";
 import {
   RawAppManifestSchema,
   RawConnectorManifestSchema,
@@ -754,6 +755,12 @@ export function preflight(kind: ExtensionKind, slug: string, entries: TarEntry[]
       "invalid-package",
     );
   }
+
+  // Which shape it is, before any field: a release written for a newer MixOS,
+  // or one from before manifests said, is told that rather than every field
+  // that doesn't fit (src/lib/extensions/schema-urls.ts).
+  const shape = schemaProblem(kind, (parsed as { $schema?: unknown } | null)?.$schema, manifestName);
+  if (shape) throw new InstallError(shape, "invalid-package");
 
   const schema =
     kind === "app"

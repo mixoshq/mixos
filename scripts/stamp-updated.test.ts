@@ -17,7 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { filesHash } from "../src/lib/repository/content-hash";
 import { INSTALL_RECORD_FILE, serializeInstallRecord } from "../src/lib/repository/install-record";
-import { hasInstallRecord, planStamps } from "./stamp-updated";
+import { hasInstallRecord, planStamps, withStamp } from "./stamp-updated";
 
 const dirs = (m: Map<string, string[]>) => [...m.keys()].sort();
 
@@ -177,5 +177,22 @@ describe("an extension installed from a Registry", () => {
     assert.equal(hasInstallRecord("apps/files", checkout("files", { kind: "app", slug: "other" })), false);
     assert.equal(hasInstallRecord("apps/files", checkout("files", { kind: "connector", slug: "files" })), false);
     assert.equal(hasInstallRecord("src/lib", checkout("files", { kind: "app", slug: "files" })), false);
+  });
+});
+
+describe("what a stamp writes", () => {
+  const at = "2026-11-10T00:00:00.000Z";
+
+  test("a manifest with no $schema gets one, first, and its date last", () => {
+    const out = JSON.parse(withStamp('{"name":"Acme","icon":"box"}', at, "apps"));
+    assert.deepEqual(Object.keys(out), ["$schema", "name", "icon", "lastUpdated"]);
+    assert.equal(out.$schema, "https://mixos.org/schemas/app/v1.json");
+    assert.equal(JSON.parse(withStamp('{"name":"Dusk"}', at, "themes")).$schema, "https://mixos.org/schemas/theme/v1.json");
+  });
+
+  test("a manifest's own $schema is never changed, whatever it says", () => {
+    const out = JSON.parse(withStamp('{"$schema":"https://mixos.org/schemas/app/v2.json","name":"Acme"}', at, "apps"));
+    assert.equal(out.$schema, "https://mixos.org/schemas/app/v2.json");
+    assert.equal(out.lastUpdated, at);
   });
 });

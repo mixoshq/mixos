@@ -139,7 +139,7 @@ Read [registry-ux.md](docs/connectors/registry-ux.md) first. In short:
 
 - A connector mirrors its provider: every operation on the resources it touches, one method each with its `operation`, returning what the provider returns (`z.looseObject`, nothing converted lossily, field lists as optional parameters). Never a method shaped for one app.
 - `version` (`X.Y.Z`) is required. Within a major version only add.
-- Folder name === `name` in `connector.json` (lowercase, hyphens). No leading underscore on shipped connectors.
+- Folder name === `name` in `connector.json` (lowercase, hyphens). No leading underscore on shipped connectors. mixos.org lists a new connector under its name with an id after it (`my-service-3f9a2c1b`), and releases it only once `name` says the same: save the listing as a draft, then `npm run rename -- connector/<name> --to <listed-name>`, which sets `name` and the folder, and register the new OAuth redirect URI and webhook URL with the provider. Never rename one by hand.
 - Connectors are server-side only. Never import one from client code.
 - Credentials flow through `initialize(credentials)` only — no env vars, no hardcoded secrets, no fallbacks. `credentialFields[].key` must match what `initialize()` reads.
 - Stateless: no caching across requests.
@@ -147,7 +147,8 @@ Read [registry-ux.md](docs/connectors/registry-ux.md) first. In short:
 - Never set `lastUpdated` in `connector.json`; never hand-edit `src/generated/connector-registry.ts`.
 - **Every public method on the class must be declared in `telemetry`**, with its `operation` and `mutates: true` on anything that changes state upstream. The build rejects an undeclared one: the registry reports what a connector can do from that list, so a method missing from it is one an admin is never told about. It is also all an app can call.
 - A scope only the write methods need is `"requested": "write"`, asked for only once an admin allows changes.
-- Release notes go in `release-notes.json` beside `connector.json`, never in the manifest: newest first, one line of plain text each, 300 characters or fewer, with the `version` each shipped as.
+- Every JSON file starts with `$schema`: `connector.json` with `"$schema": "https://mixos.org/schemas/connector/v1.json"`, `release-notes.json` with `".../release-notes/v1.json"`. Start from the template, which has both. The build refuses a file without it.
+- Release notes go in `release-notes.json` beside `connector.json`, never in the manifest: `{ "$schema", "notes": [...] }`, newest first, one line of plain text each, 300 characters or fewer, with the `version` each shipped as.
 
 ## Verify before reporting done
 
@@ -158,7 +159,7 @@ Read [registry-ux.md](docs/connectors/registry-ux.md) first. In short:
 5. `npx tsx scripts/check-scopes.ts <name>` — proves `auth.scopesUrl` parses. **Read the output.** "14 scopes parsed" is not the test; whether the descriptions are English sentences and the read/write split is right is the test. A requested scope the page never documents is flagged — that is usually a typo in `auth.scopes`.
 6. Dev server → Administration → Connector Registry. Confirm it renders, save real credentials, and exercise it from a test app API route. For write methods, call one while the connector is read-only (it is refused), then allow changes, connect again if it uses OAuth, and call it again. Do not claim "done" without actually calling it.
 7. **Walk the wizard as an admin would**, from an unconfigured state. Each step's instructions should be followable without leaving the dialog, and each tick should appear only after the platform actually verified something.
-8. **Write the release note.** For each new version, add its entry first in `connectors/<name>/release-notes.json` (a new connector starts the file with `First release: …`): `{ "date": "<today, YYYY-MM-DD>", "version": "<connector.json's version>", "note": "…" }`, one line of plain text, 300 characters or fewer, written for an admin rather than a developer. Say what the connector can now do and anything they must do: **Allow changes** for a new write, connecting again for a new scope. Put the line in your report for the user to read, and run step 1 again: the generator checks the file. See [Release notes](docs/connectors/architecture.md#release-notes).
+8. **Write the release note.** For each new version, add its entry first in `notes` in `connectors/<name>/release-notes.json`, a `{ "$schema": "https://mixos.org/schemas/release-notes/v1.json", "notes": [...] }` file as the template has it (a new connector starts the list with `First release: …`): `{ "date": "<today, YYYY-MM-DD>", "version": "<connector.json's version>", "note": "…" }`, one line of plain text, 300 characters or fewer, written for an admin rather than a developer. Say what the connector can now do and anything they must do: **Allow changes** for a new write, connecting again for a new scope. Put the line in your report for the user to read, and run step 1 again: the generator checks the file. See [Release notes](docs/connectors/architecture.md#release-notes).
 
 ## User request
 

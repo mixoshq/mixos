@@ -1,4 +1,5 @@
 {
+  "$schema": "https://mixos.org/schemas/theme/v1.json",
   "name": "MixOS",
   "description": "The default MixOS theme. Slate and cyan on a light ground, drawn from the MixOS brand guidelines v1.0.",
   "tagline": "The default MixOS light theme",
@@ -15,7 +16,7 @@
     }
   ],
   "license": "MPL-2.0",
-  "themeUrl": "https://github.com/mixoshq/mixos/tree/main/themes/mixos",
+  "themeUrl": "https://github.com/mixoshq/mixos/tree/main/themes/mixos-4dea07f5",
   "themeSupportUrl": "https://github.com/mixoshq/mixos/issues",
   "authors": [
     {
@@ -54,5 +55,5 @@
   },
   "surfaces": [],
   "escapes": [],
-  "lastUpdated": "2026-10-26T02:02:26.956Z"
+  "lastUpdated": "2026-11-10T06:48:59.926Z"
 }

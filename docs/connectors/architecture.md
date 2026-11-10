@@ -83,6 +83,7 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 
 | Field | Required | Description | Example |
 | --- | --- | --- | --- |
+| `$schema` | ✅ | Which shape the manifest is, and so which MixOS reads it: `https://mixos.org/schemas/connector/v1.json`, written first. The build refuses a manifest without it, or with a version this MixOS doesn't read. See [`$schema`](../apps/architecture.md#schema-which-shape-a-file-is). | `"$schema": "https://mixos.org/schemas/connector/v1.json"` |
 | `name` | ✅ | Unique identifier for the connector. Used in app.json and internally. Should be lowercase with hyphens. | `"name": "my-service"` |
 | `displayName` | ✅ | Human-readable name shown in the Connector Registry admin page. | `"displayName": "My Service"` |
 | `version` | ✅ | This release, as three numbers. Apps name the version they were built against, and any later release with the same major version satisfies them. See [Versions](#versions). | `"version": "1.2.0"` |
@@ -283,13 +284,16 @@ icon in the menu bar of every install where the connector is on, and App
 Manager's Release Notes page keeps all of them. The file is optional.
 
 ```json
-[
-  { "date": "2026-10-20", "version": "1.1.0", "note": "Apps can read attachments too. Nothing to set up: the scope it needs is one the connector already has." },
-  { "date": "2026-08-28", "version": "1.0.0", "note": "First release: read-only access to one shared mailbox." }
-]
+{
+  "$schema": "https://mixos.org/schemas/release-notes/v1.json",
+  "notes": [
+    { "date": "2026-10-20", "version": "1.1.0", "note": "Apps can read attachments too. Nothing to set up: the scope it needs is one the connector already has." },
+    { "date": "2026-08-28", "version": "1.0.0", "note": "First release: read-only access to one shared mailbox." }
+  ]
+}
 ```
 
-Each note is `{ "date", "version"?, "note" }`: the day the release shipped as
+The file is `{ "$schema", "notes" }`, and each note is `{ "date", "version"?, "note" }`: the day the release shipped as
 `YYYY-MM-DD`, no later than tomorrow; the `version` from `connector.json` it
 shipped as; and one line of plain text, 300 characters or fewer. Newest first,
 and no note twice on one day. The build checks the file, and so does a Registry

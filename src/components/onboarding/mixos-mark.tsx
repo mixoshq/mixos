@@ -10,7 +10,7 @@ import { useId } from "react";
  * MixOS's mark as strokes, so it can draw itself on: the end of the welcome
  * tour (./installed.tsx) plays it once.
  *
- * TRACED, NOT DESIGNED. The mark exists as a PNG (themes/mixos/assets/
+ * TRACED, NOT DESIGNED. The mark exists as a PNG (themes/mixos-4dea07f5/assets/
  * logo.png, 256×244); this is that image measured and rebuilt in its own
  * coordinates — the overlap is 94%, the rest the PNG's soft edges, and the
  * colours within 5/255. So it stands for that file and no other: a theme or
@@ -146,8 +146,8 @@ const CUTS_B = A_OVER.map((p) => cut(p, [S, S])).join("");
 
 /** The mark's own file, as both built-in themes ship it. */
 const MIXOS_MARK_SRCS = new Set([
-  "/themes/mixos/logo.png",
-  "/themes/mixos-dark/logo.png",
+  "/themes/mixos-4dea07f5/logo.png",
+  "/themes/mixos-dark-d666638f/logo.png",
 ]);
 
 /** Whether `src` is MixOS's mark, the one these strokes were traced from. */

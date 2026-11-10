@@ -39,8 +39,10 @@
     "migrate:apps": "tsx scripts/migrate.ts",
     "seed-admin": "tsx scripts/seed-admin.ts",
     "stamp": "tsx scripts/stamp-updated.ts",
+    "schemas": "tsx scripts/json-schemas.ts",
     "register": "node scripts/check-node.mjs && tsx scripts/register.ts",
-    "remove": "node scripts/check-node.mjs && tsx scripts/remove.ts"
+    "remove": "node scripts/check-node.mjs && tsx scripts/remove.ts",
+    "rename": "node scripts/check-node.mjs && tsx scripts/rename.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

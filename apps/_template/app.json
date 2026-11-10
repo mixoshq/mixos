@@ -1,4 +1,5 @@
 {
+  "$schema": "https://mixos.org/schemas/app/v1.json",
   "name": "Hello MixOS",
   "description": "A sample app demonstrating the plugin architecture: one widget, one MCP tool, and a manifest carrying the fields most apps need.",
   "tagline": "A starter app showing the plugin architecture in place",
@@ -35,7 +36,7 @@
     {
       "name": "hello",
       "description": "Greets the connected user by name. Returns { message, askedBy }.",
-      "hint": "Only useful as an example \u2014 remove this when you add real tools.",
+      "hint": "Only useful as an example — remove this when you add real tools.",
       "sources": [
         "mixos"
       ],
