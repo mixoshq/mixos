@@ -36,6 +36,7 @@ import {
   RemixEntrySchema,
   formatZodError,
 } from "./manifest-schemas";
+import { schemaProblem } from "../src/lib/extensions/schema-urls";
 import { normalizeRemixKeywords, type RemixIndexEntry } from "../src/lib/apps/remix";
 import {
   connectorEntryNames,
@@ -1178,9 +1179,10 @@ function readTheme(dir: string, slug: string): ThemeText | null {
   const manifestPath = path.join(dir, "theme.json");
   if (!fs.existsSync(manifestPath)) return null;
 
-  const parsed = RawThemeManifestSchema.safeParse(
-    JSON.parse(fs.readFileSync(manifestPath, "utf-8")),
-  );
+  const themeJson = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  const themeShape = schemaProblem("theme", themeJson?.$schema, `themes/${slug}/theme.json`);
+  if (themeShape) throw new ThemeError(themeShape);
+  const parsed = RawThemeManifestSchema.safeParse(themeJson);
   if (!parsed.success) {
     throw new ThemeError(
       `themes/${slug}/theme.json failed validation:\n${formatZodError(parsed.error)}`,
@@ -1471,7 +1473,11 @@ async function readAppText(
   // keys, and the defaultRole↔roles cross-check. A violation aborts the
   // whole build (FatalManifestError) — a malformed manifest is a developer
   // error that must fail loudly, not silently drop the app. Config fields a
-  // `widgets.ts` adds are held to the same schema in loadAppCode().
+  // `widgets.ts` adds are held to the same schema in loadAppCode(). Its
+  // `$schema` first, so a manifest of another shape is told that, not every
+  // field that doesn't fit.
+  const appShape = schemaProblem("app", (raw as { $schema?: unknown } | null)?.$schema, `apps/${slug}/app.json`);
+  if (appShape) throw new FatalManifestError(appShape);
   const parsed = RawAppManifestSchema.safeParse(raw);
   if (!parsed.success) {
     throw new FatalManifestError(
@@ -1861,6 +1867,9 @@ function readConnector(connectorDir: string, name: string): ConnectorManifestOut
 
   // Schema-validate the manifest shape (types, required fields, unknown
   // keys, credential-field types). Hard-fails the build on any violation.
+  // Its `$schema` first, so a manifest of another shape is told that.
+  const connectorShape = schemaProblem("connector", rawJson?.$schema, "connector.json");
+  if (connectorShape) throw new Error(connectorShape);
   const parsed = RawConnectorManifestSchema.safeParse(rawJson);
   if (!parsed.success) {
     throw new Error(

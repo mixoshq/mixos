@@ -150,7 +150,7 @@ function connectorTree(name: string): TarEntry[] {
       else {
         const rel = path.relative(dir, full).split(path.sep).join("/");
         let data = fs.readFileSync(full);
-        if (rel === "connector.json") data = Buffer.from(JSON.stringify({ ...JSON.parse(data.toString()), name }, null, 2));
+        if (rel === "connector.json") data = Buffer.from(JSON.stringify({ $schema: "https://mixos.org/schemas/connector/v1.json", ...JSON.parse(data.toString()), name }, null, 2));
         out.push({ path: rel, mode: 0o644, data });
       }
     }
@@ -169,18 +169,18 @@ const ROUTE =
   "});\n";
 
 const FIXTURES: Record<string, { kind: Kind; entries: TarEntry[]; manifest?: Record<string, unknown> }> = {
-  acme: { kind: "app", entries: files({ "app.json": '{"name":"Acme","description":"A test app."}\n', "api/items/route.ts": ROUTE }) },
+  acme: { kind: "app", entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme","description":"A test app."}\n', "api/items/route.ts": ROUTE }) },
   // A release whose version the record can't hold: refused before downloading.
   undotted: {
     kind: "app",
-    entries: files({ "app.json": '{"name":"Undotted"}\n' }),
+    entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Undotted"}\n' }),
     manifest: { version: "1.2 beta" },
   },
   // A package that ships its own install record: pre-flight refuses it.
   forged: {
     kind: "app",
     entries: files({
-      "app.json": '{"name":"Forged"}\n',
+      "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Forged"}\n',
       ".registry.json": '{"source":"https://mixos.org","note":"trust me"}\n',
     }),
   },
@@ -190,7 +190,7 @@ const FIXTURES: Record<string, { kind: Kind; entries: TarEntry[]; manifest?: Rec
   ignores: {
     kind: "app",
     entries: files({
-      "app.json": '{"name":"Ignores"}\n',
+      "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Ignores"}\n',
       "api/items/route.ts": ROUTE,
       ".gitignore": "node_modules/\n*.log\n",
       "lib/.gitattributes": "*.ts -diff\n",
@@ -202,7 +202,7 @@ const FIXTURES: Record<string, { kind: Kind; entries: TarEntry[]; manifest?: Rec
   "git-dir": {
     kind: "app",
     entries: files({
-      "app.json": '{"name":"Git dir"}\n',
+      "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Git dir"}\n',
       ".gitignore": "dist/\n",
       "vendor/.git/config": "[core]\n",
       "lib/.registry.json": "{}\n",
@@ -211,7 +211,7 @@ const FIXTURES: Record<string, { kind: Kind; entries: TarEntry[]; manifest?: Rec
   // A bare handler: the check refuses it.
   bare: {
     kind: "app",
-    entries: files({ "app.json": '{"name":"Bare"}\n', "api/x/route.ts": "export async function GET() {\n  return new Response('x');\n}\n" }),
+    entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Bare"}\n', "api/x/route.ts": "export async function GET() {\n  return new Response('x');\n}\n" }),
   },
 };
 

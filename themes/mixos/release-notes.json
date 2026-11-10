@@ -1,6 +1,9 @@
-[
-  {
-    "date": "2026-08-28",
-    "note": "First release: the default MixOS look. White panels on a light gray backdrop under a dark slate menu bar, with deep cyan buttons and accents, in Plus Jakarta Sans headings, Inter text and JetBrains Mono code."
-  }
-]
+{
+  "$schema": "https://mixos.org/schemas/release-notes/v1.json",
+  "notes": [
+    {
+      "date": "2026-08-28",
+      "note": "First release: the default MixOS look. White panels on a light gray backdrop under a dark slate menu bar, with deep cyan buttons and accents, in Plus Jakarta Sans headings, Inter text and JetBrains Mono code."
+    }
+  ]
+}

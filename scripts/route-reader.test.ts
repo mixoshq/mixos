@@ -63,7 +63,7 @@ const RAW_ROUTE = `handler: async () => new Response("x")`;
 
 /** `app.json`, declaring the role "viewer", and `fields`. */
 function manifest(fields: Record<string, unknown> = {}): string {
-  return JSON.stringify({ name: "Probe", roles: [{ key: "viewer", label: "Viewer" }], ...fields });
+  return JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Probe", roles: [{ key: "viewer", label: "Viewer" }], ...fields });
 }
 
 /** An app whose `api/items/route.ts` is `route`, with any other files. */
@@ -171,7 +171,7 @@ describe("an undeclared role is refused by both, naming the role", () => {
 
   test("in an app that declares no roles at all", async (t) => {
     const files = {
-      "app.json": JSON.stringify({ name: "Probe" }),
+      "app.json": JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Probe" }),
       [ITEMS]: `${HEAD}export const POST = defineRoute({ roles: ["admin"], ${JSON_ROUTE} });\n`,
     };
     const expected = undeclaredRoleProblems(SLUG, "items", "POST", ["admin"], []);

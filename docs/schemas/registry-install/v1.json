@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mixos.org/schemas/registry-install/v1.json",
+  "title": ".registry.json",
+  "description": "The record a Registry install writes into an extension's folder, .registry.json. Written by MixOS, never by hand.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://mixos.org/schemas/registry-install/v1.json",
+      "description": "This file's shape, and the version of it."
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "app",
+        "connector",
+        "theme"
+      ]
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 48,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string"
+    },
+    "gitTag": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "commitSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "contentHash": {
+      "type": "string",
+      "pattern": "^sha256-[A-Za-z0-9+/]{43}=$"
+    },
+    "filesHash": {
+      "type": "string",
+      "pattern": "^sha256-[A-Za-z0-9+/]{43}=$"
+    },
+    "repository": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,100}$"
+        },
+        "subpath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "owner",
+        "name",
+        "subpath"
+      ],
+      "additionalProperties": false
+    },
+    "requiresMixOS": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[\\x21-\\x7e](?:[\\x20-\\x7e]{0,62}[\\x21-\\x7e])?$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "$schema",
+    "source",
+    "kind",
+    "slug",
+    "version",
+    "gitTag",
+    "commitSha",
+    "contentHash",
+    "filesHash",
+    "repository",
+    "requiresMixOS"
+  ]
+}

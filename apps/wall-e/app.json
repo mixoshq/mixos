@@ -1,4 +1,5 @@
 {
+  "$schema": "https://mixos.org/schemas/app/v1.json",
   "name": "Wall·E",
   "description": "A dashboard widget with a different inspirational line from WALL·E every hour.",
   "tagline": "A different line from WALL·E every hour",

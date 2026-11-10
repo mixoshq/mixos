@@ -17,6 +17,7 @@ import {
   sanitizeBrandName,
 } from "../src/lib/branding/types";
 import { APP_SLUG_PATTERN } from "../src/lib/apps/app-identifiers";
+import { schemaUrl } from "../src/lib/extensions/schema-urls";
 import { CONNECTOR_VERSION_PATTERN } from "../src/lib/connectors/requirements";
 import {
   REMIX_KEYWORDS_MAX,
@@ -899,6 +900,13 @@ const connectorEntrySchema = z.strictObject({
 
 export const RawAppManifestSchema = z
   .strictObject({
+    /**
+     * Which shape this file is, and so which MixOS reads it: the URL of its
+     * JSON Schema on mixos.org (src/lib/extensions/schema-urls.ts). Required,
+     * and read at exactly this version; the generator says what to do about
+     * any other before it looks at a field.
+     */
+    $schema: z.literal(schemaUrl("app")),
     name: z.string().min(1),
     /**
      * ISO 8601 date-time, stamped by scripts/stamp-updated.ts from
@@ -1429,6 +1437,13 @@ const connectorIconSchema = z
 
 export const RawConnectorManifestSchema = z
   .strictObject({
+    /**
+     * Which shape this file is, and so which MixOS reads it: the URL of its
+     * JSON Schema on mixos.org (src/lib/extensions/schema-urls.ts). Required,
+     * and read at exactly this version; the generator says what to do about
+     * any other before it looks at a field.
+     */
+    $schema: z.literal(schemaUrl("connector")),
     name: z.string().min(1),
     displayName: z.string().min(1),
     /**
@@ -1677,6 +1692,13 @@ const themeEscapeSchema = z.strictObject({
 });
 
 export const RawThemeManifestSchema = z.strictObject({
+  /**
+   * Which shape this file is, and so which MixOS reads it: the URL of its
+   * JSON Schema on mixos.org (src/lib/extensions/schema-urls.ts). Required,
+   * and read at exactly this version; the generator says what to do about
+   * any other before it looks at a field.
+   */
+  $schema: z.literal(schemaUrl("theme")),
   name: z.string().min(1),
   description: z.string().min(1),
   /**

@@ -179,6 +179,14 @@ npm run lint
   before going on: "What breaks" in
   [docs/hosting/after-you-install/upgrading.md](../../../../docs/hosting/after-you-install/upgrading.md#what-breaks)
   lists the usual ones. A fix is a commit on this branch.
+- **A file without `$schema`.** From the release that introduced them, every
+  `app.json`, `connector.json`, `theme.json` and `release-notes.json` starts
+  with a `$schema` URL, and the generator refuses one without it, saying what
+  to add. For the user's own extensions, add it as the message says; a
+  `release-notes.json` that is a bare list becomes
+  `{ "$schema": "https://mixos.org/schemas/release-notes/v1.json", "notes": [ …the list… ] }`.
+  Never edit an extension installed from a Registry (it has a `.registry.json`):
+  a release of it with `$schema` comes from its publisher.
 
 ## 6. Hand over to /mixos deploy
 

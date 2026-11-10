@@ -729,6 +729,7 @@ Release: v0.2.0, a minor release since v0.1.0          (or: the first release)
 Branch: release/v0.2.0  (new, from main)
 Commit: chore(os): release v0.2.0
   package.json, package-lock.json, CHANGELOG.md         (the first release: CHANGELOG.md)
+  docs/schemas/index.json                               (only when a schema is new in this release)
 
 The notes:
 
@@ -772,14 +773,17 @@ git status --porcelain
 `--write` refuses a version that is not above `package.json`'s, is already
 tagged, or already has a section; print its error and stop. `git status
 --porcelain` must list `package.json`, `package-lock.json` and
-`CHANGELOG.md`, and nothing else. The first release lists `CHANGELOG.md`
+`CHANGELOG.md`, and nothing else, except `docs/schemas/index.json` when a
+stable release is the first to read a schema: `--write` records the version
+as that schema's `since`, which mixos.org reads to set the minimum MixOS
+version of releases that use it. The first release lists `CHANGELOG.md`
 alone, since `package.json` already holds its version.
 
 Apply any rewording the person asked for in V3. Then commit as in step 5,
 with the session's trailer, and push:
 
 ```bash
-git add package.json package-lock.json CHANGELOG.md
+git add package.json package-lock.json CHANGELOG.md   # and docs/schemas/index.json when listed
 git commit -m "$(cat <<'MSG'
 chore(os): release v0.2.0
 

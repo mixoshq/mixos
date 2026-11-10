@@ -21,12 +21,20 @@ after(() => fs.rmSync(root, { recursive: true, force: true }));
 const TODAY = new Date("2026-10-25T15:00:00Z");
 let folders = 0;
 
-/** A folder holding `contents` as its release-notes.json: JSON for a value, as it is for a string. */
+const SCHEMA = "https://mixos.org/schemas/release-notes/v1.json";
+
+/**
+ * A folder holding `contents` as its release-notes.json: a list of notes in the
+ * file's shape, any other value as JSON, and a string as it is.
+ */
 function folder(contents?: unknown): string {
   const dir = path.join(root, `ext-${folders++}`);
   fs.mkdirSync(dir);
   if (contents !== undefined) {
-    const text = typeof contents === "string" ? contents : JSON.stringify(contents);
+    const text =
+      typeof contents === "string"
+        ? contents
+        : JSON.stringify(Array.isArray(contents) ? { $schema: SCHEMA, notes: contents } : contents);
     fs.writeFileSync(path.join(dir, "release-notes.json"), text);
   }
   return dir;
@@ -116,7 +124,7 @@ test("newest first, and no note twice on one day", () => {
       { date: "2026-10-20", note: "Twice." },
       { date: "2026-10-20", note: "Twice." },
     ]),
-    /1: the same note as 0, on the same day/,
+    /notes\.1: the same note as notes\.0, on the same day/,
   );
   // The same words on another day are another note.
   assert.equal(
@@ -128,8 +136,19 @@ test("newest first, and no note twice on one day", () => {
   );
 });
 
-test("the shape is a list of { date, version?, note }, and nothing else", () => {
-  assert.match(refusal({ notes: [] }), /failed validation/);
+test("the shape is { $schema, notes: [{ date, version?, note }] }, and nothing else", () => {
+  assert.deepEqual(read({ $schema: SCHEMA, notes: [] }), []);
+  assert.match(
+    refusal(JSON.stringify([{ date: "2026-10-01", note: "The list on its own." }])),
+    /is a list of notes\. It is an object now: \{ "\$schema": "https:\/\/mixos\.org\/schemas\/release-notes\/v1\.json", "notes"/,
+  );
+  assert.match(refusal({ notes: [] }), /has no "\$schema"/);
+  assert.match(
+    refusal({ $schema: "https://mixos.org/schemas/release-notes/v2.json", notes: [] }),
+    /is version 2 of release-notes\.json, and this MixOS reads version 1\. It needs a newer MixOS/,
+  );
+  assert.match(refusal({ $schema: "https://mixos.org/schemas/app/v1.json", notes: [] }), /is the schema of app\.json/);
+  assert.match(refusal({ $schema: SCHEMA, notes: [], title: "An extra key." }), /Unrecognized key/);
   assert.match(refusal([{ date: "2026-10-01", note: "x", title: "An extra key." }]), /Unrecognized key/);
   assert.match(refusal([{ date: "2026-10-01" }]), /0\.note/);
   assert.match(refusal("[{"), /is not valid JSON/);
