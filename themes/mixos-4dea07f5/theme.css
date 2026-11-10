@@ -15,7 +15,7 @@
  *
  * This theme is the platform DEFAULT. It is also light-only, and that is not a
  * limitation — a theme declares exactly one palette. The dark look ships beside
- * it as its own selectable theme, `themes/mixos-dark/`, where the brand is
+ * it as its own selectable theme, `themes/mixos-dark-d666638f/`, where the brand is
  * materially stronger: every accent clears AA at its published value there, so
  * `--primary` can be brand cyan-400 rather than the cyan-700 this theme steps
  * down to. See docs/plans/20260826_2041-single-palette-themes.md.

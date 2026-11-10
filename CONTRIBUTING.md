@@ -111,7 +111,7 @@ plain Markdown on GitHub:
 ## Pull requests
 
 - **Commit messages** follow `type(scope): summary` — for example
-  `feat(os): …`, `fix(deps): …`, `docs(os): …`, `feat(wall-e): …`. Scope is
+  `feat(os): …`, `fix(deps): …`, `docs(os): …`, `feat(wall-e-345e113c): …`. Scope is
   `os` for the platform, or the slug of the app, connector or theme.
   Breaking changes add `!`: `feat(os)!: …`. A release takes its version
   number and its notes from these (see [Releases](README.md#releases)), so

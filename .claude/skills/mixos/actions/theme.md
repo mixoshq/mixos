@@ -26,7 +26,7 @@ See [`docs/plans/README.md`](docs/plans/README.md) for the full convention.
    - [docs/themes/contrast.md](docs/themes/contrast.md) — what is checked and what to do when a brand colour fails
    - [docs/themes/assets.md](docs/themes/assets.md)
 3. Authoritative contract: [src/lib/themes/tokens.ts](src/lib/themes/tokens.ts). Types: [src/lib/themes/types.ts](src/lib/themes/types.ts).
-4. Reference shape: [themes/mixos/](themes/mixos/), built from a brand book. Scaffold: [themes/_template/](themes/_template/).
+4. Reference shape: [themes/mixos-4dea07f5/](themes/mixos-4dea07f5/), built from a brand book. Scaffold: [themes/_template/](themes/_template/).
 
 Do not infer conventions from surrounding code, and do not guess based on training data.
 

@@ -103,7 +103,7 @@ Every installed theme is bundled. Switching the active one is a row in `platform
 
 One theme is active for the entire install, chosen by an admin at `/admin/themes`. There is no per-user override, and that is a deliberate simplification rather than a missing feature: the sign-in page, the public `/p/` app pages, and the favicon all have to render correctly with no current user to read a preference from.
 
-**There is no mode axis.** A theme declares exactly one palette, so the theme slug is the whole appearance decision — `mixos` is light, `mixos-dark` is dark, and an admin picks one.
+**There is no mode axis.** A theme declares exactly one palette, so the theme slug is the whole appearance decision — MixOS (`mixos-4dea07f5`) is light, MixOS Dark (`mixos-dark-d666638f`) is dark, and an admin picks one.
 
 One axis keeps a class of bug out. There is one answer to "which colours am I looking at", so two can't disagree; every palette is one an admin selected and someone has looked at, rather than a block nobody chose; and the active theme is a server value, so `data-theme` is correct in the first byte of HTML with nothing to resolve on the client before first paint. See [`docs/plans/20260826_2041-single-palette-themes.md`](../plans/20260826_2041-single-palette-themes.md).
 

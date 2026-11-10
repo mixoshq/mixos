@@ -32,7 +32,7 @@ const PALETTE_MESSAGE =
 const OPAQUE_FILL_MESSAGE =
   "An opaque bg-white / bg-black is a theme surface in disguise. Use bg-card, bg-background, or bg-muted. Alpha over a known ground (bg-white/10, bg-black/70) is fine and is not flagged.";
 const DARK_VARIANT_MESSAGE =
-  "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (mixos / mixos-dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.";
+  "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (MixOS / MixOS Dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.";
 
 /**
  * The colour fence, as `no-restricted-syntax` selectors. Why each one exists
@@ -122,8 +122,8 @@ const eslintConfig = defineConfig([
   //    text-warning / text-destructive / text-muted-foreground instead.
   //
   // 2. THERE IS NO `dark:` VARIANT TO WRITE. A theme declares ONE palette, and
-  //    a dark look is a different theme an admin selects — `mixos` and
-  //    `mixos-dark` are two themes, not two modes of one. So a `dark:` variant
+  //    a dark look is a different theme an admin selects — MixOS and
+  //    MixOS Dark are two themes, not two modes of one. So a `dark:` variant
   //    is not "the wrong place to fork colour", it is a fork with nothing on the
   //    other side: it hard-codes a second answer somewhere the contrast gate
   //    cannot see, and it is wrong the moment a third theme appears.

@@ -10,7 +10,7 @@
  *
  * A theme is a single palette. There is no light/dark switch inside a theme —
  * a dark look is a SECOND THEME that an admin selects at /admin/themes, which
- * is how `themes/mixos` and `themes/mixos-dark` relate. A palette with a dark
+ * is how `themes/mixos-4dea07f5` and `themes/mixos-dark-d666638f` relate. A palette with a dark
  * variant splits into two theme folders.
  *
  * Every colour must be an opaque hex, rgb() or hsl() literal, or a var()
@@ -104,7 +104,7 @@
  * expect: on a dark ground a status colour gets LIGHTER and its foreground
  * flips DARK, and the surface ladder needs real steps between --background,
  * --muted, --card and --accent or a control cannot be told apart from the panel
- * it sits in. themes/mixos-dark/theme.css is a worked example of both.
+ * it sits in. themes/mixos-dark-d666638f/theme.css is a worked example of both.
  */
 
 /*

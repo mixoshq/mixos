@@ -49,7 +49,7 @@ export interface Screenshot {
    * author recognises: it is what a build error names, and what they edit.
    */
   file: string;
-  /** Resolved public URL, e.g. `/screenshots/apps/wall-e/dashboard.png`. */
+  /** Resolved public URL, e.g. `/screenshots/apps/wall-e-345e113c/dashboard.png`. */
   url: string;
   /**
    * `null` when the author supplied none — which is not the same as `""`.

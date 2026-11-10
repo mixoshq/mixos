@@ -5,7 +5,7 @@ Everything a theme ships beyond CSS lives in `themes/<slug>/assets/` and is copi
 ```css
 src: url("fonts/inter-variable.woff2") format("woff2-variations");
 /* becomes */
-src: url("/themes/mixos/fonts/inter-variable.woff2") format("woff2-variations");
+src: url("/themes/mixos-4dea07f5/fonts/inter-variable.woff2") format("woff2-variations");
 ```
 
 ## No external hosts

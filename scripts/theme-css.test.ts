@@ -112,7 +112,7 @@ test("the fixture palette compiles", () => {
 });
 
 test("both bundled themes compile with their own manifests", () => {
-  for (const slug of ["mixos", "mixos-dark"]) {
+  for (const slug of ["mixos-4dea07f5", "mixos-dark-d666638f"]) {
     const dir = path.resolve(__dirname, "../themes", slug);
     const manifest = RawThemeManifestSchema.parse(
       JSON.parse(fs.readFileSync(path.join(dir, "theme.json"), "utf-8")),

@@ -1,22 +1,22 @@
 {
   "$schema": "https://mixos.org/schemas/theme/v1.json",
-  "name": "MixOS Dark",
-  "description": "Slate and cyan on a dark ground, drawn from the MixOS brand guidelines v1.0.",
-  "tagline": "Slate and cyan on a dark ground",
+  "name": "MixOS",
+  "description": "The default MixOS theme. Slate and cyan on a light ground, drawn from the MixOS brand guidelines v1.0.",
+  "tagline": "The default MixOS light theme",
   "keywords": [
-    "dark",
+    "light",
     "default",
     "brand"
   ],
   "screenshots": [
     {
       "file": "screenshots/menu-bar-and-widget.png",
-      "alt": "The MixOS menu bar over a dashboard widget in the dark palette.",
+      "alt": "The MixOS menu bar over a dashboard widget in the light palette.",
       "caption": "Menu bar and a dashboard widget"
     }
   ],
   "license": "MPL-2.0",
-  "themeUrl": "https://github.com/mixoshq/mixos/tree/main/themes/mixos-dark",
+  "themeUrl": "https://github.com/mixoshq/mixos/tree/main/themes/mixos-4dea07f5",
   "themeSupportUrl": "https://github.com/mixoshq/mixos/issues",
   "authors": [
     {
@@ -55,5 +55,5 @@
   },
   "surfaces": [],
   "escapes": [],
-  "lastUpdated": "2026-10-26T02:02:26.956Z"
+  "lastUpdated": "2026-11-10T06:48:59.926Z"
 }
