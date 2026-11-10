@@ -88,16 +88,16 @@ describe("applying a theme", { skip }, () => {
   });
 
   test("applying a theme sets it for everyone and is recorded as theme.apply", async () => {
-    await themes.setActiveTheme("mixos-dark", actor);
+    await themes.setActiveTheme("mixos-dark-d666638f", actor);
 
     const [setting] = await sql`select value from public.platform_settings where key = 'theme'`;
-    assert.equal(setting?.value, "mixos-dark");
-    assert.deepEqual(await audited("mixos-dark"), [
+    assert.equal(setting?.value, "mixos-dark-d666638f");
+    assert.deepEqual(await audited("mixos-dark-d666638f"), [
       {
         actor_id: actor.id,
         actor_email: actor.email,
         target_type: "theme",
-        target_id: "mixos-dark",
+        target_id: "mixos-dark-d666638f",
         details: {},
       },
     ]);
@@ -106,7 +106,7 @@ describe("applying a theme", { skip }, () => {
   test("a theme that is not installed is refused, and nothing is recorded", async () => {
     await assert.rejects(themes.setActiveTheme("no-such-theme", actor), /Unknown theme/);
     const [setting] = await sql`select value from public.platform_settings where key = 'theme'`;
-    assert.equal(setting?.value, "mixos-dark");
+    assert.equal(setting?.value, "mixos-dark-d666638f");
     assert.deepEqual(await audited("no-such-theme"), []);
   });
 });

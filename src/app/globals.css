@@ -72,7 +72,7 @@
 /* The page ground and the default ink, straight from the token contract.
    These two declarations are the difference between `--background` /
    `--foreground` being live and being inert: `<body>` carries `mix-app-shell`,
-   but that is an OPTIONAL theme surface (themes/mixos and _template both ship
+   but that is an OPTIONAL theme surface (themes/mixos-4dea07f5 and _template both ship
    `"surfaces": []`), so nothing else in the stack sets them. Without this,
    every element that inherits its colour — a heading, a `<pre>`, a `<th>` —
    falls back to the UA default black, which reads as correct on a white page

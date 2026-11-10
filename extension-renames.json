@@ -1,0 +1,23 @@
+{
+  "$schema": "https://mixos.org/schemas/extension-renames/v1.json",
+  "renames": [
+    {
+      "kind": "app",
+      "from": "wall-e",
+      "to": "wall-e-345e113c",
+      "date": "2026-11-10"
+    },
+    {
+      "kind": "theme",
+      "from": "mixos",
+      "to": "mixos-4dea07f5",
+      "date": "2026-11-10"
+    },
+    {
+      "kind": "theme",
+      "from": "mixos-dark",
+      "to": "mixos-dark-d666638f",
+      "date": "2026-11-10"
+    }
+  ]
+}

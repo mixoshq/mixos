@@ -51,7 +51,7 @@ Three responses, in order of preference.
 
 **1. Split the literal from the role.** Keep the published value in a `--brand-*` token, where it is legal for large text, numerals, rules and chart marks — every place a brand book actually uses it — and give the semantic role the next step down the brand's own ramp. MixOS keeps `--brand-cyan: #0284c7` and sets `--primary: #0369a1` (cyan-700, 5.93:1), a colour already in the published palette. Nobody perceives this as off-brand, because it is not.
 
-**2. Check the dark counterpart.** A colour that fails on white can pass at its published value on a dark ground, and the other way round. Published teal is 3.74:1 on white but 4.77:1 on `mixos-dark`'s slate; violet is 5.70:1 on white but 3.13:1 on slate. Cyan fails on both (4.10:1 and 4.36:1), so each theme takes a step from its own end of the ramp: `mixos` steps `--primary` down to cyan-700, and `mixos-dark` up to cyan-400 at 8.33:1. Each theme is measured on its own ground, which is the point.
+**2. Check the dark counterpart.** A colour that fails on white can pass at its published value on a dark ground, and the other way round. Published teal is 3.74:1 on white but 4.77:1 on MixOS Dark's slate; violet is 5.70:1 on white but 3.13:1 on slate. Cyan fails on both (4.10:1 and 4.36:1), so each theme takes a step from its own end of the ramp: MixOS steps `--primary` down to cyan-700, and MixOS Dark up to cyan-400 at 8.33:1. Each theme is measured on its own ground, which is the point.
 
 **3. Escape it, visibly.** If the value genuinely cannot move — a legal requirement, a locked-down brand — name the exact pair in `theme.json`:
 

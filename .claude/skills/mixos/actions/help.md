@@ -121,7 +121,7 @@ Work out the shape, in plain terms:
 - **If what they want is how MixOS looks** — their brand's colours, logo or fonts,
   or a darker look — that's a **theme**, not an app. Start with what exists:
   **Admin > Themes** switches between the installed themes (MixOS comes with
-  `mixos`, a light one, and `mixos-dark`), and **Browse Themes** there lists more
+  MixOS, a light one, and MixOS Dark), and **Browse Themes** there lists more
   from the Registry. For their own brand, Claude builds one with `/mixos theme`,
   from a brand book if they have one (`docs/themes/authoring.md`). A theme changes
   the look of every app for everyone, so an admin switches it on; it can't apply

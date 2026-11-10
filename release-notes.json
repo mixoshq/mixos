@@ -2,6 +2,10 @@
   "$schema": "https://mixos.org/schemas/release-notes/v1.json",
   "notes": [
     {
+      "date": "2026-11-10",
+      "note": "Wall·E and the MixOS and MixOS Dark themes have new names that end in a short id, so they can't clash with someone else's extension. Wall·E keeps its place on your dashboard and the theme you picked stays applied; Wall·E's page is now /apps/wall-e-345e113c."
+    },
+    {
       "date": "2026-10-25",
       "note": "My MCP Connections has a tab each for Claude, ChatGPT and Copilot: copy the URL, open the client in one click, or expand Manual instructions for the steps. Until a client is connected, that's all the page shows."
     },
