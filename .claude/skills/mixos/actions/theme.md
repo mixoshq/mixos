@@ -45,7 +45,7 @@ Report the measured table to the user before writing the theme. A brand owner wi
 ## Non-negotiable invariants (from themes/AGENTS.md)
 
 - **A theme change is not an OS change.** `themes/` sits on the authoring side of the boundary with `apps/` and `connectors/`, so it takes no `os-change` label and no admin review. Commit it as `theme:<slug>`, never `os`. Changing the theme *system* — the token contract, the allowlisted `.mix-*` surfaces, the compiler — **is** an OS change. See [`OS-UPDATES.md`](OS-UPDATES.md).
-- Folder name is the slug (lowercase, digits, hyphens). No leading underscore on a shipped theme.
+- Folder name is the slug (lowercase, digits, hyphens). No leading underscore on a shipped theme. mixos.org adds an id when it is first listed (`acme-3f9a2c1b`); rename the folder to match with `npm run rename -- theme/<slug> --to <listed-slug>`, never by hand. A dark counterpart is `<name>-dark`, with an id of its own once listed.
 - **One palette per theme.** Tokens only in one top-level `:root` — not in a `.mix-*` rule, and not in a `:root` inside `@media` or `@supports`. There is no light/dark/system setting: a dark look is a sibling theme, `themes/<slug>-dark/` (as `mixos-dark` is to `mixos`), a full copy with its own `assets/` that an admin selects at `/admin/themes`. The token set is closed; unknown names fail the build.
 - Every required token present.
 - Colour values must be opaque hex / `rgb()` / `hsl()` literals or a `var()` chain ending in one, for every colour token, gated or not. No `color-mix()` or `oklch()` in token values, and no alpha except on `--border`, which the build composites over `--background`.

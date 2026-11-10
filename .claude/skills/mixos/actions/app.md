@@ -44,7 +44,7 @@ Do not infer conventions from surrounding code alone, and do not guess based on 
 
 ## Non-negotiable invariants (from apps/AGENTS.md)
 
-- Folder name === slug. No separate `slug` field in `app.json`. No leading underscore on shipped apps.
+- Folder name === slug. No separate `slug` field in `app.json`. No leading underscore on shipped apps. A new app keeps the plain name it is created with; mixos.org adds an id when it is first listed (`sales-tracker-3f9a2c1b`), and the folder is renamed to match with `npm run rename -- app/<slug> --to <listed-slug>`. Never rename an app's folder by hand: `npm run rename` records it so every instance's data follows.
 - Widgets and client pages must NEVER import connectors, `context`, or server modules. They call the app's own API routes via `createAppClient(appSlug)`.
 - App code imports its own files, the platform modules on the published list, and `react`, `zod`, `lucide-react`, `next/link`, `next/navigation` and `next/font/*`. Nothing else, no Node built-ins, and no `require` or computed `import()`: the build skips an app that tries (see [What an app can import](docs/apps/architecture.md#what-an-app-can-import)). What a platform module would have done comes from `context`, behind a manifest declaration. Types may come from anywhere.
 - A server page calls `callAppRoute("<this app's slug>", …)` with its own slug written as a string, and nothing imported from outside the app is written to. Both are build errors otherwise.

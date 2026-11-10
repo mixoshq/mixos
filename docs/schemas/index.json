@@ -16,6 +16,13 @@
       "since": "unreleased"
     },
     {
+      "file": "extension-renames",
+      "describes": "extension-renames.json",
+      "version": 1,
+      "url": "https://mixos.org/schemas/extension-renames/v1.json",
+      "since": "unreleased"
+    },
+    {
       "file": "registry-install",
       "describes": ".registry.json",
       "version": 1,

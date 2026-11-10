@@ -31,6 +31,7 @@ import { z } from "zod";
 import { SCHEMA_FILES, SCHEMA_FILE_NAMES, schemaUrl, type SchemaFile } from "../src/lib/extensions/schema-urls";
 import { InstallRecordFileSchema } from "../src/lib/repository/install-record";
 import { RawAppManifestSchema, RawConnectorManifestSchema, RawThemeManifestSchema } from "./manifest-schemas";
+import { ExtensionRenamesFileSchema } from "./extension-renames";
 import { ReleaseNotesFileSchema } from "./release-notes";
 import { UNRELEASED } from "./release-prep";
 
@@ -47,6 +48,8 @@ const DESCRIPTION: Record<SchemaFile, string> = {
     "An extension's release notes, release-notes.json beside its manifest: one line each, newest first.",
   "registry-install":
     "The record a Registry install writes into an extension's folder, .registry.json. Written by MixOS, never by hand.",
+  "extension-renames":
+    "The rename ledger at the root of a MixOS checkout, extension-renames.json: each extension renamed there, so every instance's data follows it. Written by `npm run rename`.",
 };
 
 /** The Zod schema of each file, as it is at its current version. */
@@ -62,6 +65,8 @@ function zodSchemaOf(file: SchemaFile): z.ZodType {
       return ReleaseNotesFileSchema;
     case "registry-install":
       return InstallRecordFileSchema;
+    case "extension-renames":
+      return ExtensionRenamesFileSchema;
   }
 }
 

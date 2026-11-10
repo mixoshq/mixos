@@ -188,6 +188,30 @@ npm run lint
   Never edit an extension installed from a Registry (it has a `.registry.json`):
   a release of it with `$schema` comes from its publisher.
 
+### Offer ids to the user's own extensions
+
+Slugs published to mixos.org end in an id (`sales-tracker-3f9a2c1b`), so two
+people's extensions of the same name can be installed side by side. List the
+user's own extensions whose folder name has no id: under `apps/`,
+`connectors/` and `themes/`, not starting with `_` or `.`, with no
+`.registry.json`, and not ending in `-` and eight hex characters. If there are
+none, say nothing. Otherwise ask, one extension at a time, whether to rename
+it now. Never rename one without a yes, and never one installed from a
+Registry.
+
+- If it is already listed on mixos.org, its listing's slug is the name to
+  take: `npm run rename -- <kind>/<slug> --to <listed-slug>`. Otherwise
+  `npm run rename -- <kind>/<slug>` mints one.
+- Before asking about a **connector**, say that its OAuth redirect URI and
+  webhook URL contain its name, so after the rename they have to be registered
+  again in the provider's console, and its users connect again only if that
+  isn't done before the deploy.
+- Show the command's output: the rewrites it made and the mentions it left
+  for a person. Fix the leftovers that are references, not history, and run
+  `npx tsx scripts/generate-project-registry.ts` again. Each rename is a commit
+  on this branch with `extension-renames.json`, from which the release step
+  moves each instance's data to the new slug.
+
 ## 6. Hand over to /mixos deploy
 
 Follow `.claude/skills/mixos/actions/deploy.md` from its step 1. The branch is
