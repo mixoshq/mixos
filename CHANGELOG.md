@@ -8,6 +8,25 @@ tests and internal changes, and is the notes of its GitHub Release.
 Releases are made with `/mixos deploy release`; see the Release section of
 [.claude/skills/mixos/actions/deploy.md](.claude/skills/mixos/actions/deploy.md).
 
+## v0.7.0 (2026-11-10)
+
+Changes since v0.6.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.7.0/WHATS-NEW.md).
+
+### Breaking changes
+
+- **os:** every extension JSON file names its shape with $schema (77ccce01)
+
+  app.json, connector.json, theme.json,
+  release-notes.json and .registry.json must start with
+  "$schema": "https://mixos.org/schemas/\<file\>/v1.json", and
+  release-notes.json is an object, { "$schema", "notes": \[...\] }. The
+  build refuses a file without it and says what to add.
+
+### Features
+
+- **os:** Wall·E and the built-in themes get ids (a46386f3)
+- **os:** npm run rename, and the release step carries an extension's data to its new slug (9ad74876)
+
 ## v0.6.0 (2026-11-08)
 
 Changes since v0.5.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.6.0/WHATS-NEW.md).
