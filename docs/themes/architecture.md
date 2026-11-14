@@ -25,7 +25,8 @@ themes/
 | Field | Required | Description | Example |
 | --- | --- | --- | --- |
 | `$schema` | ✅ | Which shape the manifest is, and so which MixOS reads it: `https://mixos.org/schemas/theme/v1.json`, written first. The build refuses a manifest without it, or with a version this MixOS doesn't read. See [`$schema`](../apps/architecture.md#schema-which-shape-a-file-is). | `"$schema": "https://mixos.org/schemas/theme/v1.json"` |
-| `name` | ✅ | Display name. The folder name is the slug; this is what a person reads. | `"name": "MixOS Dark"` |
+| `registryId` | ✅ | The theme's slug: its folder, its `data-theme` value and its Registry listing are named after it. A lowercase name, a hyphen and an 8-character hex id, minted once by `npm run new -- theme <name>` (or `npm run rename`). The build refuses a theme whose folder isn't named after it. | `"registryId": "mixos-dark-d666638f"` |
+| `name` | ✅ | Display name. `registryId` is the slug; this is what a person reads. | `"name": "MixOS Dark"` |
 | `description` | ✅ | What the theme looks like and who it is for. | `"description": "Slate and cyan on a dark ground."` |
 | `tagline` |  | One line for a listing card on mixos.org — the version that fits beside the icon in a grid. Max 100 characters, single line. Where it is absent, `description` is used instead; setting only one of the two is the normal case. | `"tagline": "Slate and cyan on a dark ground"` |
 | `keywords` |  | Search and browse terms for the catalogue. Lowercase words, separated by single spaces or hyphens; max 10, no duplicates. Lowercase is enforced because a facet list dedupes on the exact string — `Gmail` next to `gmail` renders as two filters for one idea and splits the results between them. | `"keywords": ["dark", "brand"]` |

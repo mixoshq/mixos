@@ -9,7 +9,7 @@ The list is required, not opt-in: **every public method on the class must be in 
 ```json
 // connector.json
 {
-  "name": "my-service",
+  "registryId": "my-service-3f9a2c1b",
   "telemetry": [
     { "method": "enrichPerson",  "operation": "POST /people/enrich",    "description": "Enriched a person record" },
     { "method": "enrichCompany", "operation": "POST /companies/enrich", "description": "Enriched a company record" },
@@ -33,7 +33,7 @@ The reason: apps never touch a connector directly — they reach it through the 
 flowchart TD
     ROUTE["app API route"] --> PROXY
 
-    PROXY["context.connectors['my-service'].enrichPerson(…)<br/>the platform proxy"]
+    PROXY["context.connectors['my-service-3f9a2c1b'].enrichPerson(…)<br/>the platform proxy"]
 
     PROXY --> CALL["calls your connector method<br/>unchanged"]
     PROXY --> ROW["records one telemetry_events row<br/>source_type: 'connector'"]

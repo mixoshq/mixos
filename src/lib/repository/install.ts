@@ -777,15 +777,14 @@ export function preflight(kind: ExtensionKind, slug: string, entries: TarEntry[]
     );
   }
 
-  // The identifier the extension will be known by on this instance comes from
-  // the DIRECTORY name, which comes from the repository's slug. A manifest
-  // naming something else would install one thing under another thing's name.
-  const declared = (parsed as Record<string, unknown>)[
-    kind === "connector" ? "name" : "slug"
-  ];
-  if (typeof declared === "string" && declared !== slug) {
+  // The identifier the extension will be known by on this instance is the
+  // DIRECTORY it lands in, named after the repository's slug, and its folder
+  // must be named after its own registryId. A manifest naming something else
+  // would install one thing under another thing's name.
+  const declared = result.data.registryId;
+  if (declared !== slug) {
     throw new InstallError(
-      `${manifestName} declares "${declared}", but the repository lists this as "${slug}". ` +
+      `${manifestName} says it is "${declared}", but the repository lists this as "${slug}". ` +
         `Registering it would install it under a name its own manifest disagrees with.`,
       "invalid-package",
     );

@@ -23,6 +23,7 @@ import {
   type InstallRecord,
 } from "../src/lib/repository/install-record";
 import type { TarEntry } from "../src/lib/repository/tar";
+import { withRegistryId } from "../src/lib/extensions/slug-id";
 import {
   checkInstalledFloors,
   checkStaged,
@@ -228,34 +229,42 @@ describe("a record in a folder changes nothing else", () => {
   const RECORD_TEXT = (kind: InstallRecord["kind"], slug: string) =>
     serializeInstallRecord(record({ kind, slug, contentHash: filesHash([]), filesHash: filesHash([]) }));
 
+  /** A copy of the `_template` of `dir` at `to`, its registryId set to the folder it is in. */
+  const copyTemplate = (dir: "connectors" | "themes", to: string) => {
+    fs.cpSync(path.join(ROOT, dir, "_template"), to, { recursive: true });
+    const manifest = path.join(to, dir === "connectors" ? "connector.json" : "theme.json");
+    fs.writeFileSync(manifest, JSON.stringify(withRegistryId(JSON.parse(fs.readFileSync(manifest, "utf8")), path.basename(to))));
+  };
+
   test("the scans read the same extension with it as without", async (t) => {
     t.mock.method(console, "log", () => {});
     t.mock.method(console, "warn", () => {});
     const apps = path.join(tmp, `apps-${n++}`);
-    for (const [name, withRecord] of [["acme", true], ["plain", false]] as const) {
+    for (const [name, withRecord] of [["acme-3f9a2c1b", true], ["plain-5d6e7f80", false]] as const) {
       fs.mkdirSync(path.join(apps, name), { recursive: true });
-      fs.writeFileSync(path.join(apps, name, "app.json"), JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Acme" }));
+      fs.writeFileSync(
+        path.join(apps, name, "app.json"),
+        JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", registryId: name, name: "Acme" }),
+      );
       fs.writeFileSync(path.join(apps, name, "README.md"), "# Acme\n");
       if (withRecord) fs.writeFileSync(path.join(apps, name, INSTALL_RECORD_FILE), RECORD_TEXT("app", name));
     }
     const scanned = await scanApps(apps, { emit: false });
-    const acme = scanned.find((m) => m.slug === "acme");
-    const plain = scanned.find((m) => m.slug === "plain");
+    const acme = scanned.find((m) => m.slug === "acme-3f9a2c1b");
+    const plain = scanned.find((m) => m.slug === "plain-5d6e7f80");
     assert.ok(acme && plain);
-    assert.deepEqual({ ...acme, slug: "plain" }, plain);
+    assert.deepEqual({ ...acme, slug: "plain-5d6e7f80" }, plain);
 
     const connectors = path.join(tmp, `connectors-${n++}`);
-    fs.cpSync(path.join(ROOT, "connectors", "_template"), path.join(connectors, "probe-conn"), { recursive: true });
-    const manifest = path.join(connectors, "probe-conn", "connector.json");
-    fs.writeFileSync(manifest, JSON.stringify({ ...JSON.parse(fs.readFileSync(manifest, "utf8")), name: "probe-conn" }));
+    copyTemplate("connectors", path.join(connectors, "probe-conn-1a2b3c4d"));
     const before = await scanConnectors(connectors, { emit: false });
-    fs.writeFileSync(path.join(connectors, "probe-conn", INSTALL_RECORD_FILE), RECORD_TEXT("connector", "probe-conn"));
+    fs.writeFileSync(path.join(connectors, "probe-conn-1a2b3c4d", INSTALL_RECORD_FILE), RECORD_TEXT("connector", "probe-conn-1a2b3c4d"));
     assert.deepEqual(await scanConnectors(connectors, { emit: false }), before);
 
     const themes = path.join(tmp, `themes-${n++}`);
-    fs.cpSync(path.join(ROOT, "themes", "_template"), path.join(themes, "probe-theme"), { recursive: true });
+    copyTemplate("themes", path.join(themes, "probe-theme-9e8d7c6b"));
     const beforeThemes = await scanThemes(themes, { emit: false });
-    fs.writeFileSync(path.join(themes, "probe-theme", INSTALL_RECORD_FILE), RECORD_TEXT("theme", "probe-theme"));
+    fs.writeFileSync(path.join(themes, "probe-theme-9e8d7c6b", INSTALL_RECORD_FILE), RECORD_TEXT("theme", "probe-theme-9e8d7c6b"));
     assert.deepEqual(await scanThemes(themes, { emit: false }), beforeThemes);
   });
 
@@ -266,22 +275,23 @@ describe("a record in a folder changes nothing else", () => {
     fs.writeFileSync(path.join(registry, "connector-registry.ts"), "export const connectorRegistry = [];\n");
     const registered = readRegistered(registry);
 
-    const app = path.join(tmp, `stage-${n++}`, "acme");
+    const app = path.join(tmp, `stage-${n++}`, "acme-3f9a2c1b");
     fs.mkdirSync(app, { recursive: true });
-    fs.writeFileSync(path.join(app, "app.json"), JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Acme" }));
-    fs.writeFileSync(path.join(app, INSTALL_RECORD_FILE), RECORD_TEXT("app", "acme"));
+    fs.writeFileSync(
+      path.join(app, "app.json"),
+      JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", registryId: "acme-3f9a2c1b", name: "Acme" }),
+    );
+    fs.writeFileSync(path.join(app, INSTALL_RECORD_FILE), RECORD_TEXT("app", "acme-3f9a2c1b"));
     assert.deepEqual(await checkStaged("app", app, registered), { problems: [], deferred: [] });
 
-    const connector = path.join(tmp, `stage-${n++}`, "probe-conn");
-    fs.cpSync(path.join(ROOT, "connectors", "_template"), connector, { recursive: true });
-    const manifest = path.join(connector, "connector.json");
-    fs.writeFileSync(manifest, JSON.stringify({ ...JSON.parse(fs.readFileSync(manifest, "utf8")), name: "probe-conn" }));
-    fs.writeFileSync(path.join(connector, INSTALL_RECORD_FILE), RECORD_TEXT("connector", "probe-conn"));
+    const connector = path.join(tmp, `stage-${n++}`, "probe-conn-1a2b3c4d");
+    copyTemplate("connectors", connector);
+    fs.writeFileSync(path.join(connector, INSTALL_RECORD_FILE), RECORD_TEXT("connector", "probe-conn-1a2b3c4d"));
     assert.deepEqual(await checkStaged("connector", connector, registered), { problems: [], deferred: [] });
 
-    const theme = path.join(tmp, `stage-${n++}`, "probe-theme");
-    fs.cpSync(path.join(ROOT, "themes", "_template"), theme, { recursive: true });
-    fs.writeFileSync(path.join(theme, INSTALL_RECORD_FILE), RECORD_TEXT("theme", "probe-theme"));
+    const theme = path.join(tmp, `stage-${n++}`, "probe-theme-9e8d7c6b");
+    copyTemplate("themes", theme);
+    fs.writeFileSync(path.join(theme, INSTALL_RECORD_FILE), RECORD_TEXT("theme", "probe-theme-9e8d7c6b"));
     assert.deepEqual(await checkStaged("theme", theme, registered), { problems: [], deferred: [] });
   });
 });

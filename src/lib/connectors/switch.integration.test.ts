@@ -73,10 +73,11 @@ async function quietly<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-const manifestOf = (name: string) =>
-  JSON.parse(
-    fs.readFileSync(path.join(REPO, "connectors", name, "connector.json"), "utf8"),
-  ) as ConnectorManifest;
+/** Its registry entry, named after its folder as the generator names it. */
+const manifestOf = (name: string): ConnectorManifest => ({
+  ...(JSON.parse(fs.readFileSync(path.join(REPO, "connectors", name, "connector.json"), "utf8")) as ConnectorManifest),
+  name,
+});
 
 /** The connector methods the tests call, as an app would cast them. */
 type Keyed = BaseConnector & {

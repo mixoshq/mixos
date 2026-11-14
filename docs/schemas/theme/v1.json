@@ -11,6 +11,12 @@
       "const": "https://mixos.org/schemas/theme/v1.json",
       "description": "This file's shape, and the version of it."
     },
+    "registryId": {
+      "type": "string",
+      "maxLength": 48,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{8}$",
+      "description": "The install name: the extension's folder, URL, database schema and Registry listing are named after it. Minted once, by `npm run new` or `npm run rename`, and never changed."
+    },
     "name": {
       "type": "string",
       "minLength": 1
@@ -231,6 +237,7 @@
   },
   "required": [
     "$schema",
+    "registryId",
     "name",
     "description"
   ]

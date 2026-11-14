@@ -4,7 +4,8 @@
 
 /**
  * Stamp `lastUpdated` on every app/connector manifest the current commit touches,
- * and `$schema` on one that has none.
+ * `$schema` on one that has none, and `registryId` on one that has none when
+ * its folder already ends in an id.
  *
  *   npx tsx scripts/stamp-updated.ts              # stamp what's staged, re-stage it
  *   npx tsx scripts/stamp-updated.ts --dry-run    # report, write nothing
@@ -47,6 +48,7 @@ import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
 import { schemaUrl } from "../src/lib/extensions/schema-urls";
+import { hasSlugId, withRegistryId } from "../src/lib/extensions/slug-id";
 import { readInstallRecord, recordMismatch } from "../src/lib/repository/install-record";
 
 const ROOT = path.resolve(__dirname, "..");
@@ -359,14 +361,23 @@ const MANIFEST_SCHEMA: Record<string, string> = {
  *  A manifest with no `$schema` gets one, first, at the version this MixOS
  *  writes: the build refuses a manifest without it. One that has one keeps it,
  *  whatever it says; moving a file to another version is a change of its
- *  shape, not a stamp. Two-space indent matches every other manifest in the
- *  repo. */
-export function withStamp(raw: string, at: string, root: string): string {
+ *  shape, not a stamp.
+ *
+ *  A manifest with no `registryId` in a folder that already ends in an id gets
+ *  that folder's name: the build requires one, and the folder can only be named
+ *  after it. A folder without an id gets nothing, because an id is minted once,
+ *  by `npm run rename`, not guessed here; the build says so. Two-space indent
+ *  matches every other manifest in the repo. */
+export function withStamp(raw: string, at: string, root: string, folder: string): string {
   const obj = JSON.parse(raw) as Record<string, unknown>;
   const schema = MANIFEST_SCHEMA[root];
   const shaped = schema && !("$schema" in obj) ? { $schema: schema, ...obj } : obj;
-  return JSON.stringify({ ...shaped, lastUpdated: at }, null, 2) + "\n";
+  const named = !("registryId" in shaped) && hasSlugId(folder) ? withRegistryId(shaped, folder) : shaped;
+  return JSON.stringify({ ...named, lastUpdated: at }, null, 2) + "\n";
 }
+
+/** The extension folder a manifest is in: `careers-83462f9f` for apps/careers-83462f9f/app.json. */
+const folderOf = (manifestRel: string): string => path.basename(path.dirname(manifestRel));
 
 /** The index's blob for a path, or null when the path isn't tracked yet. */
 function stagedBlob(manifestRel: string): string | null {
@@ -402,12 +413,12 @@ function stampStaged(target: Target, at: string): boolean {
   // Untracked (a brand-new manifest not yet added): nothing in the index to
   // stamp, so the working tree IS the content, and `git add` is the way in.
   if (staged === null) {
-    fs.writeFileSync(abs, withStamp(fs.readFileSync(abs, "utf-8"), at, target.root), "utf-8");
+    fs.writeFileSync(abs, withStamp(fs.readFileSync(abs, "utf-8"), at, target.root, folderOf(target.manifestRel)), "utf-8");
     git(["add", "--", target.manifestRel]);
     return false;
   }
 
-  const next = withStamp(staged, at, target.root);
+  const next = withStamp(staged, at, target.root, folderOf(target.manifestRel));
 
   // Write the stamped blob into the index directly. `update-index --cacheinfo`
   // reuses the path's existing mode so an executable bit or symlink entry is not
@@ -489,7 +500,7 @@ function main(): void {
         if (stampStaged(target, now)) preservedWip.push(target.manifestRel);
       } else {
         const abs = path.join(ROOT, target.manifestRel);
-        fs.writeFileSync(abs, withStamp(fs.readFileSync(abs, "utf-8"), now, target.root), "utf-8");
+        fs.writeFileSync(abs, withStamp(fs.readFileSync(abs, "utf-8"), now, target.root, folderOf(target.manifestRel)), "utf-8");
       }
     }
     stamped.push(target.manifestRel);

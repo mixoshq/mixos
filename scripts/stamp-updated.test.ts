@@ -184,15 +184,38 @@ describe("what a stamp writes", () => {
   const at = "2026-11-10T00:00:00.000Z";
 
   test("a manifest with no $schema gets one, first, and its date last", () => {
-    const out = JSON.parse(withStamp('{"name":"Acme","icon":"box"}', at, "apps"));
-    assert.deepEqual(Object.keys(out), ["$schema", "name", "icon", "lastUpdated"]);
+    const out = JSON.parse(withStamp('{"registryId":"acme-3f9a2c1b","name":"Acme","icon":"box"}', at, "apps", "acme-3f9a2c1b"));
+    assert.deepEqual(Object.keys(out), ["$schema", "registryId", "name", "icon", "lastUpdated"]);
     assert.equal(out.$schema, "https://mixos.org/schemas/app/v1.json");
-    assert.equal(JSON.parse(withStamp('{"name":"Dusk"}', at, "themes")).$schema, "https://mixos.org/schemas/theme/v1.json");
+    assert.equal(
+      JSON.parse(withStamp('{"name":"Dusk"}', at, "themes", "dusk-3f9a2c1b")).$schema,
+      "https://mixos.org/schemas/theme/v1.json",
+    );
   });
 
   test("a manifest's own $schema is never changed, whatever it says", () => {
-    const out = JSON.parse(withStamp('{"$schema":"https://mixos.org/schemas/app/v2.json","name":"Acme"}', at, "apps"));
+    const out = JSON.parse(
+      withStamp('{"$schema":"https://mixos.org/schemas/app/v2.json","name":"Acme"}', at, "apps", "acme-3f9a2c1b"),
+    );
     assert.equal(out.$schema, "https://mixos.org/schemas/app/v2.json");
     assert.equal(out.lastUpdated, at);
+  });
+
+  test("a manifest with no registryId, in a folder that ends in an id, is given the folder's name after $schema", () => {
+    const out = JSON.parse(withStamp('{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}', at, "apps", "acme-3f9a2c1b"));
+    assert.deepEqual(Object.keys(out), ["$schema", "registryId", "name", "lastUpdated"]);
+    assert.equal(out.registryId, "acme-3f9a2c1b");
+  });
+
+  test("a folder with no id gets no registryId: an id is minted, never guessed", () => {
+    const out = JSON.parse(withStamp('{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}', at, "apps", "acme"));
+    assert.equal("registryId" in out, false);
+  });
+
+  test("a manifest's own registryId is never changed, even when its folder disagrees", () => {
+    const out = JSON.parse(
+      withStamp('{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"acme-11111111"}', at, "apps", "acme-3f9a2c1b"),
+    );
+    assert.equal(out.registryId, "acme-11111111");
   });
 });

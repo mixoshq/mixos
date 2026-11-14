@@ -14,7 +14,7 @@ A connector may be registered but not yet configured by an admin. Always check `
 
 ```ts
 // inside a defineRoute handler
-const myService = context.connectors["my-service"] as MyServiceConnector | undefined;
+const myService = context.connectors["my-service-3f9a2c1b"] as MyServiceConnector | undefined;
 
 if (!myService?.configured) {
   // Connector exists but admin hasn't entered credentials yet: answers 503
@@ -26,7 +26,7 @@ const items = await myService.listItems();
 ```
 
 `AppError` comes from `@/lib/apps/route`, and `MyServiceConnector` is a type
-import from `@connectors/my-service`. See [Usage in Apps](usage-in-apps.md) for
+import from `@connectors/my-service-3f9a2c1b`. See [Usage in Apps](usage-in-apps.md) for
 the whole route.
 
 ## Updating Credentials

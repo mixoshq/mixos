@@ -10,7 +10,7 @@ A theme repaints every app in the install at once. It is the most constrained of
 
 For anything beyond a token re-tone, **write a build plan to `themes/<slug>/plans/YYYYMMDD_HHMM-<plan-name>.md`** before editing — the plan lives **inside the theme it describes**. Cover: **Context**, **Decisions** (anything locked with the user), **Structure** (`theme.json`, `theme.css`, assets), and **Verification**.
 
-- **Creating a new theme?** Make `themes/<slug>/plans/` as the first thing you write, before `theme.json`.
+- **Creating a new theme?** Run `npm run new -- theme <name> --plan` first: it mints the id and makes `themes/<name>-<id>/plans/`, for the plan, before `theme.json`. Then `npm run new -- theme <name>-<id>` fills it from the template.
 - **Read the existing plans in that folder first.** A theme repaints every app in the install at once, so a re-tone that contradicts a locked decision has the widest blast radius of any change in the repo.
 - **Changing the theme *system*** — the token contract, the allowlisted `.mix-*` surfaces, the generator — is a *platform* plan and goes to `docs/plans/` instead.
 
@@ -45,7 +45,7 @@ Report the measured table to the user before writing the theme. A brand owner wi
 ## Non-negotiable invariants (from themes/AGENTS.md)
 
 - **A theme change is not an OS change.** `themes/` sits on the authoring side of the boundary with `apps/` and `connectors/`, so it takes no `os-change` label and no admin review. Commit it as `theme:<slug>`, never `os`. Changing the theme *system* — the token contract, the allowlisted `.mix-*` surfaces, the compiler — **is** an OS change. See [`OS-UPDATES.md`](OS-UPDATES.md).
-- Folder name is the slug (lowercase, digits, hyphens). No leading underscore on a shipped theme. mixos.org adds an id when it is first listed (`acme-3f9a2c1b`); rename the folder to match with `npm run rename -- theme/<slug> --to <listed-slug>`, never by hand. A dark counterpart is `<name>-dark`, with an id of its own once listed.
+- `registryId` in `theme.json` is the slug, and the folder is named after it (`themes/acme-3f9a2c1b/`). Create a theme with `npm run new -- theme <name>`, which mints the id, names the folder and writes `registryId`; the build refuses a folder and `registryId` that differ. No leading underscore on a shipped theme. mixos.org lists the theme under its `registryId` and never mints one. Rename only with `npm run rename -- theme/<slug>`, never by hand. A dark counterpart is `npm run new -- theme <name>-dark`, with an id of its own.
 - **One palette per theme.** Tokens only in one top-level `:root` — not in a `.mix-*` rule, and not in a `:root` inside `@media` or `@supports`. There is no light/dark/system setting: a dark look is a sibling theme, `themes/<slug>-dark/` (as `mixos-dark` is to `mixos`), a full copy with its own `assets/` that an admin selects at `/admin/themes`. The token set is closed; unknown names fail the build.
 - Every required token present.
 - Colour values must be opaque hex / `rgb()` / `hsl()` literals or a `var()` chain ending in one, for every colour token, gated or not. No `color-mix()` or `oklch()` in token values, and no alpha except on `--border`, which the build composites over `--background`.
