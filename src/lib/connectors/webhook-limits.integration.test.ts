@@ -145,11 +145,13 @@ describe("webhook body cap and per-IP limit", { skip }, () => {
     (globalThis as { __pg?: Sql }).__pg = recording(postgres(u.toString(), { max: 8, onnotice: () => {} }));
     p = await loadPlatform();
 
-    p.connectorRegistry.push(
-      JSON.parse(
+    // Named after its folder, as the generator names a registry entry.
+    p.connectorRegistry.push({
+      ...(JSON.parse(
         fs.readFileSync(path.join(REPO, "connectors", NAME, "connector.json"), "utf8"),
-      ) as ConnectorManifest,
-    );
+      ) as ConnectorManifest),
+      name: NAME,
+    });
     const [user] = await sql`
       insert into public.users (email, display_name, is_admin)
       values (${`hooks-${run}@mixos.test`}, 'Admin', true) returning id
