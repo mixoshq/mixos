@@ -8,6 +8,19 @@ tests and internal changes, and is the notes of its GitHub Release.
 Releases are made with `/mixos deploy release`; see the Release section of
 [.claude/skills/mixos/actions/deploy.md](.claude/skills/mixos/actions/deploy.md).
 
+## v0.8.0 (2026-11-14)
+
+Changes since v0.7.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.8.0/WHATS-NEW.md).
+
+### Breaking changes
+
+- **os:** an extension names itself as registryId, and its folder after it (79a6f75)
+
+  app.json, connector.json and theme.json require
+  "registryId", equal to the extension's folder, and connector.json's
+  "name" is now "registryId". Create extensions with `npm run new`; give an
+  existing one an id with `npm run rename -- <kind>/<folder>`.
+
 ## v0.7.0 (2026-11-10)
 
 Changes since v0.6.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.7.0/WHATS-NEW.md).
