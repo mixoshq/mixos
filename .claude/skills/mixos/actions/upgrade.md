@@ -187,21 +187,30 @@ npm run lint
   `{ "$schema": "https://mixos.org/schemas/release-notes/v1.json", "notes": [ …the list… ] }`.
   Never edit an extension installed from a Registry (it has a `.registry.json`):
   a release of it with `$schema` comes from its publisher.
+- **A manifest without `registryId`.** From the release that introduced it,
+  every `app.json`, `connector.json` and `theme.json` names its own slug as
+  `registryId`, its folder must be named after it, and the generator refuses
+  one without it. For the user's own extension in a folder that already ends
+  in an id, add `"registryId": "<folder>"` right after `$schema` (the
+  pre-commit hook does the same); a `connector.json`'s `name` becomes
+  `registryId`. One whose folder has no id needs one minted: see the next
+  section. Never edit an extension installed from a Registry.
 
-### Offer ids to the user's own extensions
+### Give ids to the user's own extensions
 
-Slugs published to mixos.org end in an id (`sales-tracker-3f9a2c1b`), so two
-people's extensions of the same name can be installed side by side. List the
-user's own extensions whose folder name has no id: under `apps/`,
-`connectors/` and `themes/`, not starting with `_` or `.`, with no
-`.registry.json`, and not ending in `-` and eight hex characters. If there are
-none, say nothing. Otherwise ask, one extension at a time, whether to rename
-it now. Never rename one without a yes, and never one installed from a
-Registry.
+Every extension's slug ends in an id (`sales-tracker-3f9a2c1b`), written in its
+manifest as `registryId`, so two people's extensions of the same name can be
+installed side by side; the build refuses one without. List the user's own
+extensions whose folder name has no id: under `apps/`, `connectors/` and
+`themes/`, not starting with `_` or `.`, with no `.registry.json`, and not
+ending in `-` and eight hex characters. If there are none, say nothing.
+Otherwise each needs a rename before the build passes: ask, one extension at a
+time, and never rename one without a yes, nor one installed from a Registry.
 
 - If it is already listed on mixos.org, its listing's slug is the name to
   take: `npm run rename -- <kind>/<slug> --to <listed-slug>`. Otherwise
-  `npm run rename -- <kind>/<slug>` mints one.
+  `npm run rename -- <kind>/<slug>` mints one. Either way it writes
+  `registryId`.
 - Before asking about a **connector**, say that its OAuth redirect URI and
   webhook URL contain its name, so after the rename they have to be registered
   again in the provider's console, and its users connect again only if that

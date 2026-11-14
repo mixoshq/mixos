@@ -23,6 +23,12 @@
  * A schema that has been released never changes: a new shape is a new version,
  * written beside it. This writes the current version of each file, and keeps
  * whatever else is already there.
+ *
+ * The one exception so far: app, connector and theme v1 gained a required
+ * `registryId` after 0.7.0, in place, while no extension had been published
+ * (docs/plans/20261114_0947-registry-id.md). Their `since` went back to
+ * "unreleased" by hand, because buildIndex() keeps an existing one, so the
+ * release that reads the new shape stamps itself as their first reader.
  */
 
 import fs from "node:fs";

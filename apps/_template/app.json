@@ -1,5 +1,6 @@
 {
   "$schema": "https://mixos.org/schemas/app/v1.json",
+  "registryId": "template-00000000",
   "name": "Hello MixOS",
   "description": "A sample app demonstrating the plugin architecture: one widget, one MCP tool, and a manifest carrying the fields most apps need.",
   "tagline": "A starter app showing the plugin architecture in place",

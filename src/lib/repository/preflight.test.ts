@@ -7,7 +7,8 @@
  * land on disk would not be what its source shows. Each refusal comes before
  * anything is written, as `invalid-package`, naming the paths in its detail.
  * And leaveOut(): the `.gitignore` and `.gitattributes` install leaves out
- * instead, which the rules skip.
+ * instead, which the rules skip. And the name check: a manifest whose
+ * `registryId` is not the slug it is listed under is refused too.
  *
  * mixos.org's publish check follows pathProblems(), and its tests follow
  * these, so a case here that changes is one to change there.
@@ -15,6 +16,8 @@
 
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { InstallError, leaveOut, pathProblems, preflight } from "./install";
 import { leftOutLine } from "./left-out";
 import type { TarEntry } from "./tar";
@@ -23,13 +26,20 @@ import type { TarEntry } from "./tar";
 
 const file = (path: string, data = "export {};\n"): TarEntry => ({ path, mode: 0o644, data: Buffer.from(data) });
 
+/** The listing slug every package here is installed under, and the registryId CLEAN's manifest gives. */
+const SLUG = "acme-3f9a2c1b";
+
+/** An app.json naming itself `registryId`. */
+const appJson = (registryId: string) =>
+  file("app.json", `{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"${registryId}","name":"Acme"}\n`);
+
 /** A package that passes: a valid manifest and one route. */
-const CLEAN = [file("app.json", '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme"}\n'), file("api/report/route.ts")];
+const CLEAN = [appJson(SLUG), file("api/report/route.ts")];
 
 /** Run preflight on CLEAN plus `paths`, returning the refusal (or null when it passes). */
 function refusal(...paths: string[]): InstallError | null {
   try {
-    preflight("app", "acme", [...CLEAN, ...paths.map((p) => file(p))]);
+    preflight("app", SLUG, [...CLEAN, ...paths.map((p) => file(p))]);
     return null;
   } catch (err) {
     assert.ok(err instanceof InstallError, `expected an InstallError, got ${String(err)}`);
@@ -217,6 +227,49 @@ describe(".gitignore and .gitattributes, which install leaves out", () => {
   });
 });
 
+// ── the name a manifest gives itself ────────────────────────────────────────
+
+describe("a manifest whose registryId is not the listing's slug", () => {
+  test("is refused, naming both", () => {
+    let err: unknown;
+    try {
+      preflight("app", SLUG, [appJson("acme-9d04e7a2"), file("api/report/route.ts")]);
+    } catch (e) {
+      err = e;
+    }
+    assert.ok(err instanceof InstallError, `expected an InstallError, got ${String(err)}`);
+    assert.equal(err.code, "invalid-package");
+    assert.equal(
+      err.message,
+      'app.json says it is "acme-9d04e7a2", but the repository lists this as "acme-3f9a2c1b". ' +
+        "Registering it would install it under a name its own manifest disagrees with.",
+    );
+  });
+
+  // Each kind's template, with an id of its own: a connector names itself by
+  // registryId too, where it once had `name`.
+  for (const [kind, manifestName, dir] of [
+    ["connector", "connector.json", "connectors"],
+    ["theme", "theme.json", "themes"],
+  ] as const) {
+    test(`a ${kind} too`, () => {
+      const template = JSON.parse(fs.readFileSync(path.join(process.cwd(), dir, "_template", manifestName), "utf8"));
+      const manifest = (registryId: string) => file(manifestName, JSON.stringify({ ...template, registryId }));
+      // The same manifest under its own slug passes, so it is the name that is refused.
+      assert.doesNotThrow(() => preflight(kind, "probe-5b1e0c3d", [manifest("probe-5b1e0c3d")]));
+      assert.throws(
+        () => preflight(kind, "probe-5b1e0c3d", [manifest("probe-7a2f9e41")]),
+        (err: unknown) =>
+          err instanceof InstallError &&
+          err.code === "invalid-package" &&
+          err.message.startsWith(
+            `${manifestName} says it is "probe-7a2f9e41", but the repository lists this as "probe-5b1e0c3d".`,
+          ),
+      );
+    });
+  }
+});
+
 // ── order and shape ─────────────────────────────────────────────────────────
 
 test("the path rules come before the manifest, and every problem is listed at once", () => {
@@ -224,7 +277,7 @@ test("the path rules come before the manifest, and every problem is listed at on
   try {
     // No manifest at all: the path problems are what is reported. The
     // .gitignore is left out, so it isn't one of them.
-    preflight("app", "acme", [
+    preflight("app", SLUG, [
       file("API/x.ts"),
       file("api/x.ts"),
       file(".git/config"),

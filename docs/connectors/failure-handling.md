@@ -39,14 +39,14 @@ Let it propagate. A `defineRoute` handler does not catch a `ConnectorError`:
 ```ts
 import { z } from "zod";
 import { defineRoute } from "@/lib/apps/route";
-import type MyServiceConnector from "@connectors/my-service";
+import type MyServiceConnector from "@connectors/my-service-3f9a2c1b";
 
 const Item = z.object({ id: z.string(), name: z.string() });
 
 export const GET = defineRoute({
   output: z.object({ items: z.array(Item) }),
   handler: async (context) => {
-    const myService = context.connectors["my-service"] as MyServiceConnector;
+    const myService = context.connectors["my-service-3f9a2c1b"] as MyServiceConnector;
     return { items: await myService.listItems() };
   },
 });

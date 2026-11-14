@@ -37,7 +37,7 @@ import {
   formatZodError,
 } from "./manifest-schemas";
 import { schemaProblem } from "../src/lib/extensions/schema-urls";
-import { compareSlugs } from "../src/lib/extensions/slug-id";
+import { compareSlugs, registryIdProblem } from "../src/lib/extensions/slug-id";
 import { readRenames, renameProblems, type ExtensionRename } from "./extension-renames";
 import { normalizeRemixKeywords, type RemixIndexEntry } from "../src/lib/apps/remix";
 import {
@@ -330,6 +330,24 @@ function readAppJson(appDir: string): Record<string, unknown> | null {
 
   // Anything but an object is the schema's to refuse, as it always was.
   return JSON.parse(fs.readFileSync(jsonPath, "utf-8")) as Record<string, unknown>;
+}
+
+/**
+ * Whether an app's folder is named after its `registryId`, read from its
+ * app.json alone, so it can be asked before containment. A folder renamed by
+ * hand would otherwise reach containment first, which reports the app's calls
+ * to its own slug as calls to another app. Null without a manifest, or with a
+ * `registryId` that isn't a string: the schema says so in readAppText().
+ */
+function appFolderNameProblem(appDir: string, folder: string): string | null {
+  let raw: Record<string, unknown> | null;
+  try {
+    raw = readAppJson(appDir);
+  } catch {
+    return null;
+  }
+  const declared = raw?.registryId;
+  return typeof declared === "string" ? registryIdProblem("app", `apps/${folder}/app.json`, declared, folder) : null;
 }
 
 /**
@@ -1193,6 +1211,11 @@ function readTheme(dir: string, slug: string): ThemeText | null {
   }
   const r = parsed.data;
 
+  // Named after its registryId, so no two themes share a slug, and so not a
+  // `data-theme` value either.
+  const themeId = registryIdProblem("theme", `themes/${slug}/theme.json`, r.registryId, slug);
+  if (themeId) throw new ThemeError(themeId);
+
   const compiled = compileTheme({
     slug,
     dir,
@@ -1490,6 +1513,11 @@ async function readAppText(
   }
   const r = parsed.data;
 
+  // Named after its registryId, so no two apps on an instance share a slug,
+  // and so a schema, a role or a URL.
+  const appId = registryIdProblem("app", `apps/${slug}/app.json`, r.registryId, slug);
+  if (appId) throw new FatalManifestError(appId);
+
   // A remix comes from another installed app (docs/apps/remix.md). An entry
   // naming this app as its own source records something that didn't happen.
   for (const [i, entry] of (r.remixedFrom ?? []).entries()) {
@@ -1700,6 +1728,10 @@ async function scanApps(
 
     const appDir = path.join(appsDir, entry.name);
 
+    // Its name before its code: read from app.json, which imports nothing.
+    const misnamed = appFolderNameProblem(appDir, entry.name);
+    if (misnamed) throw new FatalManifestError(misnamed);
+
     // Containment runs FIRST, before anything imports the app's code:
     // loadAppCode() imports widgets.ts and every route.ts, and an import runs
     // the module's top level. A finding skips the app rather than aborting
@@ -1882,12 +1914,12 @@ function readConnector(connectorDir: string, name: string): ConnectorManifestOut
   }
   const raw = parsed.data;
 
-  // Folder name is the source of truth for the connector name (invariant).
-  if (raw.name !== name) {
-    throw new Error(
-      `connector.json "name" ("${raw.name}") must match the folder name ("${name}").`,
-    );
-  }
+  // Named after its registryId, which is also the name apps reach it by
+  // (invariant 1), so no two connectors share one.
+  // As this function's other messages are: the scan and the install check say
+  // which connector before it.
+  const connectorId = registryIdProblem("connector", "connector.json", raw.registryId, name);
+  if (connectorId) throw new Error(connectorId);
 
   // Icon: proven to exist, and to be a square >= 512x512 PNG/WebP or an SVG
   // with a viewBox, before anything references it, then copied out with the
@@ -1907,7 +1939,7 @@ function readConnector(connectorDir: string, name: string): ConnectorManifestOut
   readReleaseNotes(connectorDir, RELEASE_NOTES_FILE);
 
   return {
-    name: raw.name,
+    name,
     displayName: raw.displayName,
     version: raw.version,
     // Stored as the URL the browser will request, not the authoring path,

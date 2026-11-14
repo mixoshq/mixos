@@ -7,7 +7,7 @@
  * data follows.
  *
  *   npm run rename -- app/wall-e                        # mints an id: wall-e-3f9a2c1b
- *   npm run rename -- app/wall-e --to wall-e-3f9a2c1b   # the slug mixos.org minted for it
+ *   npm run rename -- app/wall-e --to wall-e-3f9a2c1b   # a slug it already has, e.g. its listing's
  *   npm run rename -- theme/mixos-dark --dry-run        # say what it would do
  *
  * A slug is an extension's name everywhere, so a folder renamed by hand is a
@@ -16,9 +16,10 @@
  * rename the other way:
  *
  *   1. moves the folder to the new slug;
- *   2. rewrites what it can recognise as naming the old one: an app's own
- *      `callAppRoute("<slug>"…)`, `createAppClient<"<slug>">`, `createAppClient("<slug>")`
- *      and `@apps/<slug>/` imports; a connector's `name`; and in the other local
+ *   2. rewrites what it can recognise as naming the old one: its own manifest's
+ *      `registryId`; an app's own `callAppRoute("<slug>"…)`,
+ *      `createAppClient<"<slug>">`, `createAppClient("<slug>")` and `@apps/<slug>/`
+ *      imports; and in the other local
  *      apps, the manifest fields that name it (`consumes`, `listensTo`,
  *      `provides`/`emits` consumers, `connectors`, `optionalConnectors`, MCP
  *      `sources`) and `context.services.request("<slug>"…)`,
@@ -34,9 +35,9 @@
  * an installed extension: its slug is its publisher's, and its install record
  * names it. Delete its `.registry.json` to make it your own first.
  *
- * The new slug ends in an id (src/lib/extensions/slug-id.ts). mixos.org mints
- * one the first time an extension is listed; pass it as `--to` so your copy has
- * the name an install gets.
+ * The new slug ends in an id (src/lib/extensions/slug-id.ts), minted here, or
+ * the one you pass as `--to`, and becomes the manifest's `registryId`: the name
+ * mixos.org lists the extension under, and the folder an install lands in.
  *
  * Writes files only; it commits nothing. Run `npm run registry` after it, and
  * commit the result.
@@ -44,7 +45,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { hasSlugId, withSlugId } from "../src/lib/extensions/slug-id";
+import { MANIFEST_FILE, hasSlugId, withRegistryId, withSlugId } from "../src/lib/extensions/slug-id";
 import { INSTALL_RECORD_FILE } from "../src/lib/repository/install-record";
 import {
   RENAMES_FILE,
@@ -275,14 +276,12 @@ export function renameExtension(opts: RenameOptions): RenameReport {
       note(file, text, count);
     }
   }
-  if (kind === "connector") {
-    const file = path.join(fromDir, "connector.json");
+  // Its own name, which its folder is named after.
+  {
+    const file = path.join(fromDir, MANIFEST_FILE[kind]);
     if (fs.existsSync(file)) {
       const manifest = JSON.parse(fs.readFileSync(file, "utf-8")) as Record<string, unknown>;
-      if (manifest.name === slug) {
-        manifest.name = to;
-        note(file, `${JSON.stringify(manifest, null, 2)}\n`, 1);
-      }
+      note(file, `${JSON.stringify(withRegistryId(manifest, to), null, 2)}\n`, 1);
     }
   }
   if (kind !== "theme") {

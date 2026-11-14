@@ -24,7 +24,7 @@ abstract testConnection(): Promise<ConnectorTestResult>;
 ## A complete connector
 
 ```ts
-// connectors/my-service/index.ts
+// connectors/my-service-3f9a2c1b/index.ts
 import { z } from "zod";
 import { HttpConnector } from "@/lib/connectors/http-connector";
 import type { ConnectorTestResult } from "@/lib/connectors/types";
@@ -34,7 +34,7 @@ const Item = z.looseObject({ id: z.string(), name: z.string() });
 type Item = z.infer<typeof Item>;
 
 export default class MyServiceConnector extends HttpConnector {
-  readonly name = "my-service";
+  readonly name = "my-service-3f9a2c1b";
 
   async testConnection(): Promise<ConnectorTestResult> {
     const me = await this.request<{ name?: string }>("/me");
@@ -173,7 +173,7 @@ anywhere else fails as `unexpected_response`.
 
 ## Best practices
 
-- Keep `name` identical to the folder name and the manifest `name`.
+- Keep `readonly name` identical to the folder name and the manifest's `registryId`.
 - Cover every operation on each resource the connector touches, not just the
   ones the app in front of you calls. One method per operation, named as the
   provider names it. Let the app layer compose them.

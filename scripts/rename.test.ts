@@ -81,6 +81,12 @@ describe("renaming an app", () => {
     assert.ok(fs.existsSync(path.join(root, "apps", report.to, "app.json")));
   });
 
+  test("gives its manifest the new slug as its registryId, right after $schema", () => {
+    const manifest = JSON.parse(read(root, `apps/${report.to}/app.json`));
+    assert.equal(manifest.registryId, report.to);
+    assert.deepEqual(Object.keys(manifest), ["$schema", "registryId", "name"]);
+  });
+
   test("rewrites the app's own slug in its code", () => {
     const page = read(root, `apps/${report.to}/pages/Main.tsx`);
     assert.match(page, new RegExp(`callAppRoute\\("${report.to}", "GET /quote"`));
@@ -110,7 +116,7 @@ describe("renaming an app", () => {
 
 describe("renaming a connector", () => {
   const root = checkout({
-    "connectors/crm/connector.json": json({ $schema: "https://mixos.org/schemas/connector/v1.json", name: "crm" }),
+    "connectors/crm/connector.json": json({ $schema: "https://mixos.org/schemas/connector/v1.json", displayName: "CRM" }),
     "apps/ledger/app.json": json({
       $schema: APP,
       name: "Ledger",
@@ -121,9 +127,9 @@ describe("renaming a connector", () => {
   });
   const report = renameExtension({ root, kind: "connector", slug: "crm", to: "crm-0000beef", today: "2026-11-10" });
 
-  test("takes the slug it is given, and its name follows", () => {
+  test("takes the slug it is given, and its registryId follows", () => {
     assert.equal(report.to, "crm-0000beef");
-    assert.equal(JSON.parse(read(root, "connectors/crm-0000beef/connector.json")).name, "crm-0000beef");
+    assert.equal(JSON.parse(read(root, "connectors/crm-0000beef/connector.json")).registryId, "crm-0000beef");
   });
 
   test("the apps that use it name it by its new name, in their manifests and their code", () => {

@@ -6,14 +6,14 @@
       "describes": "app.json",
       "version": 1,
       "url": "https://mixos.org/schemas/app/v1.json",
-      "since": "0.7.0"
+      "since": "unreleased"
     },
     {
       "file": "connector",
       "describes": "connector.json",
       "version": 1,
       "url": "https://mixos.org/schemas/connector/v1.json",
-      "since": "0.7.0"
+      "since": "unreleased"
     },
     {
       "file": "extension-renames",
@@ -41,7 +41,7 @@
       "describes": "theme.json",
       "version": 1,
       "url": "https://mixos.org/schemas/theme/v1.json",
-      "since": "0.7.0"
+      "since": "unreleased"
     }
   ]
 }
