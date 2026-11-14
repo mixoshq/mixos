@@ -18,6 +18,7 @@ import {
 } from "../src/lib/branding/types";
 import { APP_SLUG_PATTERN } from "../src/lib/apps/app-identifiers";
 import { schemaUrl } from "../src/lib/extensions/schema-urls";
+import { REGISTRY_ID_MAX_LENGTH, REGISTRY_ID_PATTERN } from "../src/lib/extensions/slug-id";
 import { CONNECTOR_VERSION_PATTERN } from "../src/lib/connectors/requirements";
 import {
   REMIX_KEYWORDS_MAX,
@@ -32,9 +33,13 @@ import {
  * and `connectors/<name>/connector.json`.
  *
  * These validate what a developer writes, NOT the fully-derived registry
- * entry: fields the generator fills in from the filesystem (`slug`,
- * `hasPages`, `hookCounts`, `hooks`, widget `id`) are deliberately absent, so a
- * manifest that tries to set them fails the build.
+ * entry: fields the generator fills in from the filesystem (`hasPages`,
+ * `hookCounts`, `hooks`, widget `id`) are deliberately absent, so a manifest
+ * that tries to set them fails the build.
+ *
+ * The slug is not one of them. Each manifest names its own, as `registryId`,
+ * and the generator checks that its folder is named after it
+ * (src/lib/extensions/slug-id.ts, `registryIdProblem`).
  *
  * `lastUpdated` is the exception. It lives in the manifest as an ISO 8601
  * date-time and is stamped by scripts/stamp-updated.ts at commit
@@ -46,6 +51,22 @@ import {
  * TypeScript types still live in `src/lib/apps/types.ts` and
  * `src/lib/connectors/types.ts`; keep these schemas in step with them.
  */
+
+/**
+ * An extension's install name, minted when it is created: its folder, URL,
+ * database schema and Registry listing are all named after it.
+ */
+const registryIdSchema = z
+  .string()
+  .max(REGISTRY_ID_MAX_LENGTH)
+  .regex(
+    REGISTRY_ID_PATTERN,
+    'must be the install name: a lowercase name, a hyphen and an 8-character hex id, e.g. "sales-tracker-3f9a2c1b"',
+  )
+  .describe(
+    "The install name: the extension's folder, URL, database schema and Registry listing are named after it. " +
+      "Minted once, by `npm run new` or `npm run rename`, and never changed.",
+  );
 
 const authorSchema = z.strictObject({
   name: z.string().min(1),
@@ -907,6 +928,7 @@ export const RawAppManifestSchema = z
      * any other before it looks at a field.
      */
     $schema: z.literal(schemaUrl("app")),
+    registryId: registryIdSchema,
     name: z.string().min(1),
     /**
      * ISO 8601 date-time, stamped by scripts/stamp-updated.ts from
@@ -1444,7 +1466,8 @@ export const RawConnectorManifestSchema = z
      * any other before it looks at a field.
      */
     $schema: z.literal(schemaUrl("connector")),
-    name: z.string().min(1),
+    /** Also what apps name it by, in `connectors`, `sync`, `mcp` and `context.connectors`. */
+    registryId: registryIdSchema,
     displayName: z.string().min(1),
     /**
      * This release of the connector, `X.Y.Z`. Apps name the version they were
@@ -1699,6 +1722,7 @@ export const RawThemeManifestSchema = z.strictObject({
    * any other before it looks at a field.
    */
   $schema: z.literal(schemaUrl("theme")),
+  registryId: registryIdSchema,
   name: z.string().min(1),
   description: z.string().min(1),
   /**

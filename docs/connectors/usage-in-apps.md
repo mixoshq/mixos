@@ -9,7 +9,7 @@ To use a connector in your app, add an entry for it to the `connectors` array in
 {
   "name": "My App",
   "connectors": [
-    { "name": "my-service", "version": "1.2.0" },
+    { "name": "my-service-3f9a2c1b", "version": "1.2.0" },
     { "name": "monday", "version": "3.0.1", "access": "write" }
   ]
 }
@@ -39,7 +39,7 @@ Connectors are available on `context.connectors` in your app's API route handler
 // apps/my-app/api/items/route.ts
 import { z } from "zod";
 import { AppError, defineRoute } from "@/lib/apps/route";
-import type MyServiceConnector from "@connectors/my-service";
+import type MyServiceConnector from "@connectors/my-service-3f9a2c1b";
 
 const Item = z.object({ id: z.string(), name: z.string() });
 
@@ -47,7 +47,7 @@ export const GET = defineRoute({
   output: z.object({ items: z.array(Item) }),
   handler: async (context) => {
     // Typed as the base connector; name the class to call its methods.
-    const myService = context.connectors["my-service"] as MyServiceConnector | undefined;
+    const myService = context.connectors["my-service-3f9a2c1b"] as MyServiceConnector | undefined;
 
     if (!myService?.configured) {
       throw AppError.unavailable("My Service is not configured. Ask an admin to set it up.");

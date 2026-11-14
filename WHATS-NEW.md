@@ -10,6 +10,23 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-11-14
+
+- **Every extension names itself, as `registryId`, and its folder is named
+  after it.** `app.json`, `connector.json` and `theme.json` say
+  `"registryId": "sales-tracker-3f9a2c1b"`: the install name, a name and an
+  8-character id. The build refuses an extension whose folder and `registryId`
+  differ, and an install refuses a release whose `registryId` isn't the slug it
+  is listed under. A connector's `name` is now its `registryId`. mixos.org
+  lists an extension under its `registryId` instead of minting one, so the id
+  your code was written against is the one it is published under.
+- **`npm run new -- <app|connector|theme> <name>` creates an extension**, from
+  its template, with its id minted, its folder named and `registryId` written.
+  `--plan` makes just `<kind>/<name>-<id>/plans/` for a plan written first.
+  `npm run rename` now writes `registryId` too, and the pre-commit hook adds it
+  to a manifest whose folder already ends in an id. See
+  [`docs/plans/20261114_0947-registry-id.md`](docs/plans/20261114_0947-registry-id.md).
+
 ## 2026-11-10
 
 - **Every extension JSON file says which shape it is.** `app.json`,

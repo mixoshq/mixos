@@ -1,6 +1,6 @@
 {
   "$schema": "https://mixos.org/schemas/connector/v1.json",
-  "name": "_template",
+  "registryId": "template-00000000",
   "displayName": "Template Connector",
   "version": "1.0.0",
   "icon": "assets/icon.svg",

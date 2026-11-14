@@ -86,6 +86,7 @@ The manifest declares your app's metadata, widgets, and dependencies. Every app 
 ```json
 {
   "$schema": "https://mixos.org/schemas/app/v1.json",
+  "registryId": "my-app-3f9a2c1b",
   "name": "My App",
   "description": "A brief description of what this app does",
   "tagline": "The one-line version, for a listing card",
@@ -155,6 +156,7 @@ the URL of its JSON Schema on mixos.org:
 | Field | Required | Description | Example |
 | --- | --- | --- | --- |
 | `$schema` | ✅ | Which shape the manifest is, and so which MixOS reads it: `https://mixos.org/schemas/app/v1.json`, written first. See [`$schema`](#schema-which-shape-a-file-is). | `"$schema": "https://mixos.org/schemas/app/v1.json"` |
+| `registryId` | ✅ | The app's slug: its folder, URLs, database schema and role, and its Registry listing are named after it. A lowercase name, a hyphen and an 8-character hex id, minted once by `npm run new -- app <name>` (or `npm run rename`), and never changed. The build refuses an app whose folder isn't named after it; a Registry install refuses a release whose `registryId` isn't the slug it is listed under. | `"registryId": "sales-dashboard-3f9a2c1b"` |
 | `name` | ✅ | Display name shown in the App Manager, the Apps admin page, and the header dropdown. | `"name": "Sales Dashboard"` |
 | `description` |  | Brief summary of what the app does. Shown in the App Manager and the Apps admin page. | `"description": "Real-time sales metrics and pipeline overview"` |
 | `tagline` |  | The one-line version of `description`, for surfaces with room for a sentence and not a paragraph — a listing card, a tile subtitle. Max 100 characters, single line. Where it is absent, `description` is used instead; setting only one of the two is the normal case. | `"tagline": "Sales metrics, live"` |

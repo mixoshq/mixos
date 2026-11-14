@@ -8,7 +8,7 @@ You are creating or modifying an app under `apps/`.
 
 For anything beyond a trivial one-line tweak, **write a build plan to `apps/<slug>/plans/YYYYMMDD_HHMM-<plan-name>.md`** before editing code — the plan lives **inside the app it describes**, so it travels with the code. Cover: **Context** (why this change), **Decisions** (anything locked with the user), **Structure** (the file-level changes — manifest, migrations, routes, pages/widgets), and **Verification** (how you'll prove it works). Get it reviewed when the change is non-trivial.
 
-- **Creating a new app?** Make `apps/<slug>/plans/` as the first thing you write, before `app.json`. It is legitimate for the folder to hold only a plan until the build starts.
+- **Creating a new app?** Run `npm run new -- app <name> --plan` first: it mints the app's id and makes `apps/<name>-<id>/plans/`, for the plan, before `app.json`. It is legitimate for the folder to hold only a plan until the build starts; then `npm run new -- app <name>-<id>` fills it from the template.
 - **Read the existing plans in that folder first** when modifying an app. They record decisions already locked with the user; contradicting one silently is how a change loses trust.
 - **Changing the platform, not the app?** (`src/`, `scripts/`, `eslint.config.mjs`, the build.) That is a *platform* plan and goes to `docs/plans/` instead.
 
@@ -44,12 +44,12 @@ Do not infer conventions from surrounding code alone, and do not guess based on 
 
 ## Non-negotiable invariants (from apps/AGENTS.md)
 
-- Folder name === slug. No separate `slug` field in `app.json`. No leading underscore on shipped apps. A new app keeps the plain name it is created with; mixos.org adds an id when it is first listed (`sales-tracker-3f9a2c1b`), and the folder is renamed to match with `npm run rename -- app/<slug> --to <listed-slug>`. Never rename an app's folder by hand: `npm run rename` records it so every instance's data follows.
+- `registryId` in `app.json` is the slug, and the folder is named after it (`apps/sales-tracker-3f9a2c1b/`). Create an app with `npm run new -- app <name>`, which mints the id, names the folder and writes `registryId` before any code names the app; the build refuses a folder and `registryId` that differ. No leading underscore on shipped apps. mixos.org lists the app under its `registryId` and never mints one. Never rename an app's folder by hand: `npm run rename` rewrites `registryId` and records the rename so every instance's data follows.
 - Widgets and client pages must NEVER import connectors, `context`, or server modules. They call the app's own API routes via `createAppClient(appSlug)`.
 - App code imports its own files, the platform modules on the published list, and `react`, `zod`, `lucide-react`, `next/link`, `next/navigation` and `next/font/*`. Nothing else, no Node built-ins, and no `require` or computed `import()`: the build skips an app that tries (see [What an app can import](docs/apps/architecture.md#what-an-app-can-import)). What a platform module would have done comes from `context`, behind a manifest declaration. Types may come from anywhere.
 - A server page calls `callAppRoute("<this app's slug>", …)` with its own slug written as a string, and nothing imported from outside the app is written to. Both are build errors otherwise.
 - Never hand-edit `src/generated/app-registry.ts`.
-- Do not set `slug`, `hasPages`, or `hookCounts` in `app.json` — the registry fills these in. `lastUpdated` is stamped automatically by the pre-commit hook, not written by hand.
+- Do not set `hasPages` or `hookCounts` in `app.json` — the registry fills these in. `lastUpdated` is stamped automatically by the pre-commit hook, not written by hand.
 - `icon` must be a lowercase hyphenated Lucide name (e.g. `bar-chart`).
 - Widget `id` is derived from the component filename — renaming breaks saved dashboards.
 - Scoped-DB tables: each app has its own schema (`app_<slug>`, needs `"database": true`); write bare names in migrations and queries. Migrations are checked before they run: no triggers, functions, `DO`, grants, `SET`, or anything outside the app's schema (list `updatedAt` columns in `app.json` instead of writing a trigger). See `docs/apps/database.md`.

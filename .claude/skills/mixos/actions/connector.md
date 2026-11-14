@@ -10,7 +10,7 @@ For anything beyond a trivial one-line tweak, **write a build plan to `connector
 
 **Changing an existing connector:** say which kind of change it is. A new operation, an optional parameter or a new field in a result is a new **minor** version. Removing or renaming a method, changing what one takes or returns, or making a read into a write is a new **major** version, and every app that names the old one must be checked against it. A bug fix that changes neither is a **patch**. Set `version` in `connector.json` accordingly. An app's request alone is never a reason to reshape a method.
 
-- **Creating a new connector?** Make `connectors/<slug>/plans/` as the first thing you write, before `connector.json`.
+- **Creating a new connector?** Run `npm run new -- connector <name> --plan` first: it mints the id and makes `connectors/<name>-<id>/plans/`, for the plan, before `connector.json`. Then `npm run new -- connector <name>-<id>` (with `--oauth` for the OAuth template) fills it.
 - **Read the existing plans in that folder first** when modifying a connector — especially the auth strategy and failure-mapping decisions, which are the expensive ones to get wrong twice.
 - **Changing the connector base layer** (`src/lib/connectors/`, the retry/backoff/auth machinery shared by every connector) is a *platform* plan and goes to `docs/plans/` instead.
 
@@ -139,7 +139,7 @@ Read [registry-ux.md](docs/connectors/registry-ux.md) first. In short:
 
 - A connector mirrors its provider: every operation on the resources it touches, one method each with its `operation`, returning what the provider returns (`z.looseObject`, nothing converted lossily, field lists as optional parameters). Never a method shaped for one app.
 - `version` (`X.Y.Z`) is required. Within a major version only add.
-- Folder name === `name` in `connector.json` (lowercase, hyphens). No leading underscore on shipped connectors. mixos.org lists a new connector under its name with an id after it (`my-service-3f9a2c1b`), and releases it only once `name` says the same: save the listing as a draft, then `npm run rename -- connector/<name> --to <listed-name>`, which sets `name` and the folder, and register the new OAuth redirect URI and webhook URL with the provider. Never rename one by hand.
+- `registryId` in `connector.json` is the connector's name, and the folder is named after it (`connectors/my-service-3f9a2c1b/`); apps name it by its `registryId`. Create one with `npm run new -- connector <name>` (`--oauth` for OAuth), which mints the id, names the folder and writes `registryId`; the build refuses a folder and `registryId` that differ. No leading underscore on shipped connectors. mixos.org lists the connector under its `registryId` and never mints one. Never rename one by hand: `npm run rename -- connector/<name>` rewrites `registryId`, and the new OAuth redirect URI and webhook URL then need registering with the provider.
 - Connectors are server-side only. Never import one from client code.
 - Credentials flow through `initialize(credentials)` only — no env vars, no hardcoded secrets, no fallbacks. `credentialFields[].key` must match what `initialize()` reads.
 - Stateless: no caching across requests.

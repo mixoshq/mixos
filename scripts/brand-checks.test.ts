@@ -151,9 +151,11 @@ test("logos without a logo hook to select them fail the build", () => {
 
 // ── manifest schemas ────────────────────────────────────────────────────────
 
+const appBase = { $schema: "https://mixos.org/schemas/app/v1.json", registryId: "acme-3f9a2c1b", name: "Acme" };
+
 test("app.json refuses an unknown brand hook and a placeholder reason", () => {
   const parsed = RawAppManifestSchema.safeParse({
-    name: "Acme",
+    ...appBase,
     branding: { hooks: ["brand-name", "favicon"], reason: "rebrand" },
   });
   assert.equal(parsed.success, false);
@@ -164,13 +166,22 @@ test("app.json refuses an unknown brand hook and a placeholder reason", () => {
 
 test("app.json logos must sit directly in branding/", () => {
   const parsed = RawAppManifestSchema.safeParse({
-    name: "Acme",
+    ...appBase,
     branding: { hooks: ["login-logo"], reason, logos: ["assets/mark.png"] },
   });
   assert.equal(parsed.success, false);
+  assert.deepEqual(
+    parsed.error!.issues.map((i) => i.path.join(".")),
+    ["branding.logos.0"],
+  );
 });
 
-const themeBase = { $schema: "https://mixos.org/schemas/theme/v1.json", name: "Acme", description: "A theme for the tests." };
+const themeBase = {
+  $schema: "https://mixos.org/schemas/theme/v1.json",
+  registryId: "acme-3f9a2c1b",
+  name: "Acme",
+  description: "A theme for the tests.",
+};
 
 test("theme.json refuses a brand name over 40 characters or on two lines", () => {
   for (const name of ["x".repeat(41), "Acme\nWorkspace", " Acme"]) {

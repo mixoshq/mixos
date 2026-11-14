@@ -31,7 +31,7 @@ const queries: string[] = [];
 const install = () => import("./install");
 
 const ENTRIES: TarEntry[] = [
-  { path: "app.json", mode: 0o755, data: Buffer.from('{"slug":"acme"}\n') },
+  { path: "app.json", mode: 0o755, data: Buffer.from('{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"acme-3f9a2c1b","name":"Acme"}\n') },
   { path: "api/items/route.ts", mode: 0o644, data: Buffer.from("export {};\n") },
 ];
 
@@ -63,7 +63,7 @@ after(async () => {
 test("a built deployment is refused before the register lock is asked for", async () => {
   const { installExtension, InstallError } = await install();
   await assert.rejects(
-    installExtension("app", "acme"),
+    installExtension("app", "acme-3f9a2c1b"),
     (err: unknown) => err instanceof InstallError && err.code === "unsupported-environment",
   );
   assert.deepEqual(queries, []);
@@ -73,7 +73,7 @@ test("a built deployment is refused before the register lock is asked for", asyn
 
 const SIDECAR = async () => ({
   kind: "app" as const,
-  slug: "acme",
+  slug: "acme-3f9a2c1b",
   yankedAccepted: false,
   installedAt: new Date().toISOString(),
   installedBy: "admin@example.com",
@@ -86,20 +86,20 @@ test("with the locks held, an app is staged under .mixos/staging/, then moves to
   const root = await emptyDir();
   const held = lease();
 
-  const staged = await stageTree(stagingLocation(root, "app", "acme").dir, ENTRIES, held);
+  const staged = await stageTree(stagingLocation(root, "app", "acme-3f9a2c1b").dir, ENTRIES, held);
   // Staged where nothing that builds the checkout looks, in a folder named for
   // the slug, so the check can read it as the extension's own folder.
-  assert.equal(staged, path.join(root, ".mixos", "staging", "apps", "acme"));
+  assert.equal(staged, path.join(root, ".mixos", "staging", "apps", "acme-3f9a2c1b"));
   assert.deepEqual(await fs.readdir(root), [".mixos"]);
 
-  const where = pendingLocation(root, "app", "acme");
+  const where = pendingLocation(root, "app", "acme-3f9a2c1b");
   const sidecar = await SIDECAR();
   await placePending(staged, where, sidecar, held);
 
   // Once before writing, once before the move.
   assert.equal(held.checks, 2);
   assert.deepEqual(await fs.readdir(path.join(root, ".mixos", "staging", "apps")), []);
-  assert.deepEqual((await fs.readdir(path.join(root, ".mixos", "pending", "apps"))).sort(), ["acme", "acme.json"]);
+  assert.deepEqual((await fs.readdir(path.join(root, ".mixos", "pending", "apps"))).sort(), ["acme-3f9a2c1b", "acme-3f9a2c1b.json"]);
   assert.deepEqual(readSidecar(where.sidecar), { state: "ok", sidecar });
   const manifest = await fs.stat(path.join(where.folder, "app.json"));
   assert.equal(manifest.mode & 0o111, 0);
@@ -114,13 +114,13 @@ test("a theme is staged the same way, and lands in its folder in one rename", as
   const { stagingLocation } = await import("./pending");
   const root = await emptyDir();
   const held = lease();
-  const dir = path.join(root, "themes", "aurora");
+  const dir = path.join(root, "themes", "aurora-6d2b9f17");
   await fs.mkdir(path.dirname(dir));
 
-  const staged = await stageTree(stagingLocation(root, "theme", "aurora").dir, ENTRIES, held);
+  const staged = await stageTree(stagingLocation(root, "theme", "aurora-6d2b9f17").dir, ENTRIES, held);
   await placeTree(staged, dir, held);
   assert.equal(held.checks, 2);
-  assert.deepEqual(await fs.readdir(path.join(root, "themes")), ["aurora"]);
+  assert.deepEqual(await fs.readdir(path.join(root, "themes")), ["aurora-6d2b9f17"]);
   assert.deepEqual(await fs.readdir(path.join(root, ".mixos", "staging", "themes")), []);
 });
 
@@ -128,7 +128,7 @@ test("a lease lost before writing leaves the disk as it was, leftovers included"
   const { stageTree, InstallError } = await install();
   const { stagingLocation } = await import("./pending");
   const root = await emptyDir();
-  const staging = stagingLocation(root, "app", "acme").dir;
+  const staging = stagingLocation(root, "app", "acme-3f9a2c1b").dir;
   // What an earlier run left behind. An install clears it before writing, but
   // only while the locks are its own.
   await fs.mkdir(staging, { recursive: true });
@@ -150,9 +150,9 @@ test("a lease lost before the move to pending moves nothing and cleans nothing u
   const root = await emptyDir();
   const lost = lease([2]);
 
-  const staged = await stageTree(stagingLocation(root, "app", "acme").dir, ENTRIES, lost);
+  const staged = await stageTree(stagingLocation(root, "app", "acme-3f9a2c1b").dir, ENTRIES, lost);
   await assert.rejects(
-    placePending(staged, pendingLocation(root, "app", "acme"), await SIDECAR(), lost),
+    placePending(staged, pendingLocation(root, "app", "acme-3f9a2c1b"), await SIDECAR(), lost),
     (err: unknown) =>
       err instanceof InstallError &&
       err.code === "lock-lost" &&
@@ -174,9 +174,9 @@ test("a lease that cannot be confirmed stops it the same way, without the databa
     },
   };
 
-  const staged = await stageTree(stagingLocation(root, "theme", "acme").dir, ENTRIES, unconfirmed);
+  const staged = await stageTree(stagingLocation(root, "theme", "acme-3f9a2c1b").dir, ENTRIES, unconfirmed);
   await assert.rejects(
-    placeTree(staged, path.join(root, "acme"), unconfirmed),
+    placeTree(staged, path.join(root, "acme-3f9a2c1b"), unconfirmed),
     (err: unknown) =>
       err instanceof InstallError &&
       err.code === "lock-unconfirmed" &&
@@ -198,7 +198,7 @@ test("a checkout lock broken while it ran stops it the same way, and says which 
     },
   };
   await assert.rejects(
-    stageTree(stagingLocation(root, "app", "acme").dir, ENTRIES, broken),
+    stageTree(stagingLocation(root, "app", "acme-3f9a2c1b").dir, ENTRIES, broken),
     (err: unknown) =>
       err instanceof InstallError &&
       err.code === "lock-lost" &&

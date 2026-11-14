@@ -152,7 +152,7 @@ Write to `apps/<slug>/plans/YYYYMMDD_HHMM-convert-<slug>.md` per [`docs/plans/RE
 
 Then **stop.** Present a short summary in chat — the slug, the inventory counts, the phase-1 slice, the blocking gaps, and any question you need answered — and **wait for approval.**
 
-**Phase 1 creates `apps/<slug>/plans/` and nothing else.** The plan file goes there so it lives beside the app it describes, and an app folder holding only a plan is a legitimate state — the registry reports it as *planned, not yet built* and skips it. Write **no** `app.json`, no migrations, no routes, no pages, no widgets until the plan is approved.
+**Phase 1 creates `apps/<slug>/plans/` and nothing else**, with `npm run new -- app <name> --plan`, which mints the app's id: `<slug>` is `<name>-<id>` from here on. The plan file goes there so it lives beside the app it describes, and an app folder holding only a plan is a legitimate state — the registry reports it as *planned, not yet built* and skips it. Write **no** `app.json`, no migrations, no routes, no pages, no widgets until the plan is approved.
 
 ---
 
@@ -174,7 +174,7 @@ Use alongside the universal table. These are the mappings that differ by source 
 
 Approved. Now follow [`/mixos app`](.claude/skills/mixos/actions/app.md) — every rule in it applies, including all of [apps/AGENTS.md](apps/AGENTS.md). Conversion-specific order of operations:
 
-1. **`app.json` first.** Copy [`apps/_template/`](apps/_template/) as the starting shape. Folder name is the slug — no `slug` field, no `hasPages`, no `hookCounts`, no hand-written `lastUpdated`. `icon` is a lowercase-hyphenated Lucide name.
+1. **`app.json` first.** `npm run new -- app <slug>` fills the planned folder from [`apps/_template/`](apps/_template/), keeping the plan, with `registryId` already the slug — no `hasPages`, no `hookCounts`, no hand-written `lastUpdated`. `icon` is a lowercase-hyphenated Lucide name.
 2. **Migrations next**, then `npm run migrate:apps`. Get the schema right before anything reads from it.
 3. **Routes**, then **pages and widgets** — in that order, so the UI is built against a route that actually returns data.
 4. **Update the parity checklist in the plan file as you go**, not at the end. A row moves to `done` when its behaviour works in the browser, not when its file exists.

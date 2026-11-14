@@ -5,10 +5,10 @@ Start to finish, including the case this abstraction was built for: turning a br
 ## 1. Scaffold
 
 ```bash
-cp -r themes/_template themes/my-theme
+npm run new -- theme my-theme
 ```
 
-The folder name is the slug. It ends up in a CSS attribute selector, so lowercase letters, digits and hyphens only. Fill in `name` and `description` in `theme.json` — the description is what an admin reads in the picker, so write it for them, not for you.
+It copies `themes/_template` to `themes/my-theme-<id>/`, minting the id, and sets `registryId` in `theme.json` to match: that is the theme's slug, and it ends up in a CSS attribute selector. Fill in `name` and `description` in `theme.json` — the description is what an admin reads in the picker, so write it for them, not for you.
 
 ## 2. Set the tokens
 
