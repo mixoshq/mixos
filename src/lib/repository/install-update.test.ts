@@ -182,8 +182,9 @@ const ROUTE =
   "  handler: async () => ({ ok: true }),\n" +
   "});\n";
 
-const app = (manifest: Record<string, unknown>, extra: Record<string, string> = {}): TarEntry[] =>
-  files({ "app.json": `${JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", ...manifest }, null, 2)}\n`, "api/items/route.ts": ROUTE, ...extra });
+/** An app release whose manifest names it `registryId`. */
+const app = (registryId: string, manifest: Record<string, unknown>, extra: Record<string, string> = {}): TarEntry[] =>
+  files({ "app.json": `${JSON.stringify({ $schema: "https://mixos.org/schemas/app/v1.json", registryId, ...manifest }, null, 2)}\n`, "api/items/route.ts": ROUTE, ...extra });
 
 interface ReleaseFixture {
   /** Dotted, or null for a website release, named by its commit. */
@@ -195,10 +196,12 @@ interface ReleaseFixture {
 }
 
 const BOARD_1_2 = app(
+  "board-4c7e1a92",
   { name: "Board", description: "A board.", egress: ["api.example.com"], database: true },
   { "migrations/0001_items.sql": "create table items (id bigint primary key);\n", "README.md": "# Board\n" },
 );
 const BOARD_1_3 = app(
+  "board-4c7e1a92",
   {
     name: "Board",
     description: "A board.",
@@ -213,10 +216,12 @@ const BOARD_1_3 = app(
   },
 );
 const NOTES_OLD = app(
+  "notes-b83f0d61",
   { name: "Notes", description: "Notes.", database: true },
   { "migrations/0001_notes.sql": "create table notes (id bigint primary key);\n" },
 );
 const NOTES_NEW = app(
+  "notes-b83f0d61",
   { name: "Notes", description: "Notes.", database: true },
   {
     "migrations/0001_notes.sql": "create table notes (id bigint primary key);\n",
@@ -225,7 +230,7 @@ const NOTES_NEW = app(
 );
 
 const theme = (css: string, extra: Record<string, string> = {}): TarEntry[] =>
-  files({ "theme.json": `${JSON.stringify({ $schema: "https://mixos.org/schemas/theme/v1.json", name: "Dusk", description: "A dark theme." }, null, 2)}\n`, "theme.css": css, ...extra });
+  files({ "theme.json": `${JSON.stringify({ $schema: "https://mixos.org/schemas/theme/v1.json", registryId: "dusk-e15a7c3f", name: "Dusk", description: "A dark theme." }, null, 2)}\n`, "theme.css": css, ...extra });
 const DUSK_1_0 = theme(":root { --background: #101010; }\n", { "assets/old.woff2": "old font\n" });
 const DUSK_1_1 = theme(":root { --background: #121212; }\n");
 
@@ -233,7 +238,7 @@ const READS = { scope: "network:api.example.com", reason: "Reads items." };
 type Kind = "app" | "theme";
 const SEGMENT: Record<string, Kind> = { apps: "app", themes: "theme" };
 const LISTINGS: Record<string, { kind?: Kind; latest: number; releases: ReleaseFixture[] }> = {
-  dusk: {
+  "dusk-e15a7c3f": {
     kind: "theme",
     latest: 0,
     releases: [
@@ -241,7 +246,7 @@ const LISTINGS: Record<string, { kind?: Kind; latest: number; releases: ReleaseF
       { version: "1.0.0", releasedAt: "2026-10-01T12:00:00Z", entries: DUSK_1_0 },
     ],
   },
-  board: {
+  "board-4c7e1a92": {
     latest: 1,
     releases: [
       { version: "1.4.0", releasedAt: "2026-10-10T12:00:00Z", entries: BOARD_1_3, yankedReason: "Corrupts boards.", permissions: [READS] },
@@ -254,7 +259,7 @@ const LISTINGS: Record<string, { kind?: Kind; latest: number; releases: ReleaseF
       { version: "1.2.0", releasedAt: "2026-10-01T12:00:00Z", entries: BOARD_1_2, permissions: [READS] },
     ],
   },
-  notes: {
+  "notes-b83f0d61": {
     latest: 0,
     releases: [
       { version: null, releasedAt: "2026-10-09T12:00:00Z", entries: NOTES_NEW },
@@ -316,7 +321,7 @@ before(async () => {
       const kind = SEGMENT[segment];
       if (!releases || kind !== (LISTINGS[slug].kind ?? "app")) return Response.json({ error: "not found" }, { status: 404 });
       const latest = releases[LISTINGS[slug].latest];
-      const name = slug === "board" ? "Board" : slug === "dusk" ? "Dusk" : "Notes";
+      const name = slug === "board-4c7e1a92" ? "Board" : slug === "dusk-e15a7c3f" ? "Dusk" : "Notes";
       if (install === "install") {
         const r = url.searchParams.get("version") ? releases.find((x) => x.version === url.searchParams.get("version")) : latest;
         if (!r) return Response.json({ error: "unknown version" }, { status: 404 });
@@ -369,9 +374,9 @@ before(async () => {
 
   // In place, as install and Register leave them: board 1.2.0, notes at its
   // newer website release, and the theme dusk at 1.0.0.
-  place("board", release("board", "1.2.0"));
-  place("notes", published.get("notes")![0]);
-  place("dusk", release("dusk", "1.0.0"), CATALOGUE, "theme");
+  place("board-4c7e1a92", release("board-4c7e1a92", "1.2.0"));
+  place("notes-b83f0d61", published.get("notes-b83f0d61")![0]);
+  place("dusk-e15a7c3f", release("dusk-e15a7c3f", "1.0.0"), CATALOGUE, "theme");
 });
 
 /** Write a release into apps/<slug>/ or themes/<slug>/ with its install record, as Register and install leave it. */
@@ -407,7 +412,7 @@ function clearPending(slug: string): void {
 
 const install = () => import("./install");
 const ADMIN: AdminActor = { id: "11111111-2222-3333-4444-555555555555", email: "admin@example.com" };
-const BOARD_README = path.join(root, "apps/board/README.md");
+const BOARD_README = path.join(root, "apps/board-4c7e1a92/README.md");
 
 // ── install's update mode ───────────────────────────────────────────────────
 
@@ -416,13 +421,13 @@ describe("an update", { concurrency: false }, () => {
     const { installExtension } = await install();
     const { folderFilesHash } = await import("./install-record");
     const { pendingLocation, readSidecar } = await import("./pending");
-    const before = folderFilesHash(path.join(root, "apps/board"));
-    const from = release("board", "1.2.0");
+    const before = folderFilesHash(path.join(root, "apps/board-4c7e1a92"));
+    const from = release("board-4c7e1a92", "1.2.0");
 
-    const result = await installExtension("app", "board", { version: "1.3.0", installedBy: ADMIN.email, update: {} });
+    const result = await installExtension("app", "board-4c7e1a92", { version: "1.3.0", installedBy: ADMIN.email, update: {} });
 
     assert.equal(result.pending, true);
-    assert.equal(result.installPath, ".mixos/pending/apps/board");
+    assert.equal(result.installPath, ".mixos/pending/apps/board-4c7e1a92");
     assert.equal(result.version, "1.3.0");
     const replaces = {
       version: "1.2.0",
@@ -436,15 +441,15 @@ describe("an update", { concurrency: false }, () => {
     assert.deepEqual(result.replaces, replaces);
     assert.equal(
       result.nextStep,
-      "Downloaded 1.3.0 to .mixos/pending/apps/board/, where nothing runs it yet, and apps/board still holds 1.2.0. " +
-        "Review it and register it: Review and register in Admin > Apps, or `npm run register -- app/board` in this " +
-        "checkout. That moves apps/board aside, puts 1.3.0 in its place and runs its code for the first time, and " +
+      "Downloaded 1.3.0 to .mixos/pending/apps/board-4c7e1a92/, where nothing runs it yet, and apps/board-4c7e1a92 still holds 1.2.0. " +
+        "Review it and register it: Review and register in Admin > Apps, or `npm run register -- app/board-4c7e1a92` in this " +
+        "checkout. That moves apps/board-4c7e1a92 aside, puts 1.3.0 in its place and runs its code for the first time, and " +
         "puts 1.2.0 back if the registry generator refuses it.",
     );
 
     // The folder in place, untouched; the new release, with its record, in pending.
-    assert.equal(folderFilesHash(path.join(root, "apps/board")), before);
-    const where = pendingLocation(root, "app", "board");
+    assert.equal(folderFilesHash(path.join(root, "apps/board-4c7e1a92")), before);
+    const where = pendingLocation(root, "app", "board-4c7e1a92");
     assert.equal(fs.readFileSync(path.join(where.folder, "migrations/0002_tags.sql"), "utf8").startsWith("create"), true);
     assert.equal(JSON.parse(fs.readFileSync(path.join(where.folder, ".registry.json"), "utf8")).version, "1.3.0");
     const sidecar = readSidecar(where.sidecar);
@@ -459,29 +464,29 @@ describe("an update", { concurrency: false }, () => {
     const { listPendingInstalls } = await import("./pending");
     fs.writeFileSync(BOARD_README, "# Board, edited after the update was prepared\n");
     try {
-      const before = folderFilesHash(path.join(root, "apps/board"));
+      const before = folderFilesHash(path.join(root, "apps/board-4c7e1a92"));
       await assert.rejects(
-        registerPending("app", "board", { actor: { id: null, email: "cli:tester@test-host" }, via: "cli", notice: () => {} }),
+        registerPending("app", "board-4c7e1a92", { actor: { id: null, email: "cli:tester@test-host" }, via: "cli", notice: () => {} }),
         (err: unknown) =>
           err instanceof RegisterError &&
           err.code === "folder-changed" &&
           err.message ===
-            ".mixos/pending/apps/board/ was not registered: nothing was moved. apps/board has changed since this " +
+            ".mixos/pending/apps/board-4c7e1a92/ was not registered: nothing was moved. apps/board-4c7e1a92 has changed since this " +
               "update was prepared, so registering it would discard changes nobody reviewed. Discard the update with " +
-              "`npm run register -- app/board --discard` and prepare it again.",
+              "`npm run register -- app/board-4c7e1a92 --discard` and prepare it again.",
       );
-      assert.equal(folderFilesHash(path.join(root, "apps/board")), before);
-      assert.equal(exists(".mixos/pending/apps/board/app.json"), true);
+      assert.equal(folderFilesHash(path.join(root, "apps/board-4c7e1a92")), before);
+      assert.equal(exists(".mixos/pending/apps/board-4c7e1a92/app.json"), true);
       assert.equal(exists(".mixos/backup"), false);
       assert.deepEqual(runs(), []);
       const [row] = rows("app.register.rejected");
       assert.equal(row.details.reason, "folder-changed");
       assert.deepEqual(row.details.update, {
-        from: { version: "1.2.0", commitSha: release("board", "1.2.0").commitSha },
-        to: { version: "1.3.0", commitSha: release("board", "1.3.0").commitSha },
+        from: { version: "1.2.0", commitSha: release("board-4c7e1a92", "1.2.0").commitSha },
+        to: { version: "1.3.0", commitSha: release("board-4c7e1a92", "1.3.0").commitSha },
       });
       // The pending list says so before anyone asks.
-      assert.match(listPendingInstalls(root).find((p) => p.slug === "board")?.problem ?? "", /has changed since this update was prepared/);
+      assert.match(listPendingInstalls(root).find((p) => p.slug === "board-4c7e1a92")?.problem ?? "", /has changed since this update was prepared/);
     } finally {
       fs.writeFileSync(BOARD_README, "# Board\n");
     }
@@ -491,21 +496,21 @@ describe("an update", { concurrency: false }, () => {
     const { listPendingInstalls } = await import("./pending");
     const { reviewPendingInstall } = await import("./review");
     const { reviewPendingUpdate } = await import("./update");
-    const listed = listPendingInstalls(root).find((p) => p.slug === "board");
+    const listed = listPendingInstalls(root).find((p) => p.slug === "board-4c7e1a92");
     assert.equal(listed?.problem, null);
     assert.equal(listed?.sidecar?.replaces?.version, "1.2.0");
-    const review = reviewPendingInstall(root, "app", "board");
+    const review = reviewPendingInstall(root, "app", "board-4c7e1a92");
     assert.equal(review.problem, null);
     assert.equal(review.replaces?.version, "1.2.0");
 
     const before = downloads.length;
-    const update = reviewPendingUpdate(root, "app", "board", review.replaces!);
+    const update = reviewPendingUpdate(root, "app", "board-4c7e1a92", review.replaces!);
     assert.equal(downloads.length, before, "nothing is downloaded to review it");
-    const from = release("board", "1.2.0");
-    const to = release("board", "1.3.0");
-    assert.equal(update?.path, "apps/board");
+    const from = release("board-4c7e1a92", "1.2.0");
+    const to = release("board-4c7e1a92", "1.3.0");
+    assert.equal(update?.path, "apps/board-4c7e1a92");
     assert.deepEqual([update?.from.version, update?.to.version, update?.direction], ["1.2.0", "1.3.0", "newer"]);
-    assert.equal(update?.compareUrl, `https://github.com/mixoshq/board/compare/${from.commitSha}...${to.commitSha}`);
+    assert.equal(update?.compareUrl, `https://github.com/mixoshq/board-4c7e1a92/compare/${from.commitSha}...${to.commitSha}`);
     assert.equal(update?.otherRepository, null);
     assert.deepEqual(update?.declarations, [
       { label: "Egress", added: ["files.example.com"], removed: [] },
@@ -521,12 +526,12 @@ describe("an update", { concurrency: false }, () => {
   test("an install of the same slug is still refused, as is a second update while one waits", async () => {
     const { installExtension, InstallError } = await install();
     await assert.rejects(
-      installExtension("app", "board"),
-      (err: unknown) => err instanceof InstallError && err.code === "already-installed" && /apps\/board already exists/.test(err.message),
+      installExtension("app", "board-4c7e1a92"),
+      (err: unknown) => err instanceof InstallError && err.code === "already-installed" && /apps\/board-4c7e1a92 already exists/.test(err.message),
     );
     await assert.rejects(
-      installExtension("app", "board", { version: "1.3.0", update: {} }),
-      (err: unknown) => err instanceof InstallError && err.code === "already-installed" && /waiting in \.mixos\/pending\/apps\/board\//.test(err.message),
+      installExtension("app", "board-4c7e1a92", { version: "1.3.0", update: {} }),
+      (err: unknown) => err instanceof InstallError && err.code === "already-installed" && /waiting in \.mixos\/pending\/apps\/board-4c7e1a92\//.test(err.message),
     );
   });
 
@@ -534,17 +539,17 @@ describe("an update", { concurrency: false }, () => {
     const { registerPending, RegisterError } = await import("./register");
     const { folderFilesHash } = await import("./install-record");
     const { readSidecar } = await import("./pending");
-    const before = folderFilesHash(path.join(root, "apps/board"));
-    refuse("board");
+    const before = folderFilesHash(path.join(root, "apps/board-4c7e1a92"));
+    refuse("board-4c7e1a92");
     try {
       await assert.rejects(
-        registerPending("app", "board", { actor: { id: null, email: "cli:tester@test-host" }, via: "cli", notice: () => {} }),
+        registerPending("app", "board-4c7e1a92", { actor: { id: null, email: "cli:tester@test-host" }, via: "cli", notice: () => {} }),
         (err: unknown) =>
           err instanceof RegisterError &&
           err.code === "rejected-by-registry" &&
           err.message ===
-            "The registry generator left board 1.3.0 out once it loaded its code, so 1.2.0 was put back in " +
-              "apps/board, and 1.3.0 waits in .mixos/pending/apps/board/ again. The output below says why.",
+            "The registry generator left board-4c7e1a92 1.3.0 out once it loaded its code, so 1.2.0 was put back in " +
+              "apps/board-4c7e1a92, and 1.3.0 waits in .mixos/pending/apps/board-4c7e1a92/ again. The output below says why.",
       );
     } finally {
       fs.rmSync(path.join(root, "refuse.json"));
@@ -552,12 +557,12 @@ describe("an update", { concurrency: false }, () => {
     // While it ran: 1.3.0 in place and 1.2.0 in the backup. Then the run that
     // put the registry back, with 1.2.0 in place again.
     const [during, after] = runs();
-    assert.deepEqual([during.apps.board, during[".mixos/backup/apps"].board, during[".mixos/pending/apps"]], ["1.3.0", "1.2.0", {}]);
-    assert.deepEqual([after.apps.board, after[".mixos/backup/apps"], after[".mixos/pending/apps"].board], ["1.2.0", {}, "1.3.0"]);
-    assert.equal(folderFilesHash(path.join(root, "apps/board")), before);
-    assert.equal(exists(".mixos/backup/apps/board"), false);
-    assert.equal(exists(".mixos/backup/apps/board.json"), false);
-    const sidecar = readSidecar(path.join(root, ".mixos/pending/apps/board.json"));
+    assert.deepEqual([during.apps["board-4c7e1a92"], during[".mixos/backup/apps"]["board-4c7e1a92"], during[".mixos/pending/apps"]], ["1.3.0", "1.2.0", {}]);
+    assert.deepEqual([after.apps["board-4c7e1a92"], after[".mixos/backup/apps"], after[".mixos/pending/apps"]["board-4c7e1a92"]], ["1.2.0", {}, "1.3.0"]);
+    assert.equal(folderFilesHash(path.join(root, "apps/board-4c7e1a92")), before);
+    assert.equal(exists(".mixos/backup/apps/board-4c7e1a92"), false);
+    assert.equal(exists(".mixos/backup/apps/board-4c7e1a92.json"), false);
+    const sidecar = readSidecar(path.join(root, ".mixos/pending/apps/board-4c7e1a92.json"));
     assert.equal(sidecar.state === "ok" && sidecar.sidecar.register, undefined);
     assert.equal(sidecar.state === "ok" && sidecar.sidecar.replaces?.version, "1.2.0");
     assert.equal(rows("app.register.rejected").at(-1)?.details.reason, "rejected-by-registry");
@@ -566,13 +571,13 @@ describe("an update", { concurrency: false }, () => {
 
   test("Discard clears it and keeps the folder in place, and its row says what it would have replaced", async () => {
     const { discardPending } = await import("./register");
-    const result = await discardPending("app", "board", { actor: ADMIN, via: "button", notice: () => {} });
-    assert.equal(result.pendingPath, ".mixos/pending/apps/board");
-    assert.equal(exists(".mixos/pending/apps/board"), false);
-    assert.equal(exists(".mixos/pending/apps/board.json"), false);
-    assert.equal(exists("apps/board/app.json"), true);
+    const result = await discardPending("app", "board-4c7e1a92", { actor: ADMIN, via: "button", notice: () => {} });
+    assert.equal(result.pendingPath, ".mixos/pending/apps/board-4c7e1a92");
+    assert.equal(exists(".mixos/pending/apps/board-4c7e1a92"), false);
+    assert.equal(exists(".mixos/pending/apps/board-4c7e1a92.json"), false);
+    assert.equal(exists("apps/board-4c7e1a92/app.json"), true);
     const [row] = rows("app.discard");
-    assert.deepEqual(row.details.replaces, { version: "1.2.0", commitSha: release("board", "1.2.0").commitSha });
+    assert.deepEqual(row.details.replaces, { version: "1.2.0", commitSha: release("board-4c7e1a92", "1.2.0").commitSha });
   });
 
   test("local edits are found from the files hash, with nothing downloaded, and have to be discarded", async () => {
@@ -581,17 +586,17 @@ describe("an update", { concurrency: false }, () => {
     try {
       const before = downloads.length;
       await assert.rejects(
-        installExtension("app", "board", { version: "1.3.0", update: {} }),
+        installExtension("app", "board-4c7e1a92", { version: "1.3.0", update: {} }),
         (err: unknown) =>
           err instanceof InstallError &&
           err.code === "local-changes" &&
           err.message ===
-            "apps/board has changed since 1.2.0 was installed: its files no longer match its install record. " +
+            "apps/board-4c7e1a92 has changed since 1.2.0 was installed: its files no longer match its install record. " +
               "An update replaces them, so it has to be told to discard those changes.",
       );
       assert.equal(downloads.length, before, "nothing is downloaded to find local edits");
 
-      const result = await installExtension("app", "board", {
+      const result = await installExtension("app", "board-4c7e1a92", {
         version: "1.3.0",
         update: { discardLocalChanges: true },
       });
@@ -600,46 +605,46 @@ describe("an update", { concurrency: false }, () => {
       // Discarding is Register's to do: the edit is still there.
       assert.equal(fs.readFileSync(BOARD_README, "utf8"), "# Board, edited here\n");
     } finally {
-      clearPending("board");
+      clearPending("board-4c7e1a92");
       fs.writeFileSync(BOARD_README, "# Board\n");
     }
   });
 
   test("a downgrade between website releases is told by their dates, and needs Install an older release", async () => {
     const { installExtension, InstallError } = await install();
-    const [installed, older] = published.get("notes")!;
+    const [installed, older] = published.get("notes-b83f0d61")!;
     const before = downloads.length;
     await assert.rejects(
-      installExtension("app", "notes", { version: older.version, update: {} }),
+      installExtension("app", "notes-b83f0d61", { version: older.version, update: {} }),
       (err: unknown) =>
         err instanceof InstallError &&
         err.code === "older-release" &&
         err.message ===
-          `${older.version} is older than ${installed.version}, which apps/notes runs. Installing an older ` +
+          `${older.version} is older than ${installed.version}, which apps/notes-b83f0d61 runs. Installing an older ` +
             "release has to be chosen explicitly.",
     );
     assert.equal(downloads.length, before, "refused before anything is downloaded");
-    const result = await installExtension("app", "notes", { version: older.version, update: { allowOlder: true } });
+    const result = await installExtension("app", "notes-b83f0d61", { version: older.version, update: { allowOlder: true } });
     assert.equal(result.replaces?.direction, "older");
     assert.equal(result.replaces?.version, installed.version);
-    clearPending("notes");
+    clearPending("notes-b83f0d61");
   });
 
   test("a withdrawn release is refused unless accepted", async () => {
     const { installExtension, InstallError } = await install();
     await assert.rejects(
-      installExtension("app", "board", { version: "1.4.0", update: {} }),
+      installExtension("app", "board-4c7e1a92", { version: "1.4.0", update: {} }),
       (err: unknown) => err instanceof InstallError && err.code === "yanked" && /Corrupts boards\./.test(err.message),
     );
-    const result = await installExtension("app", "board", { version: "1.4.0", allowYanked: true, update: {} });
+    const result = await installExtension("app", "board-4c7e1a92", { version: "1.4.0", allowYanked: true, update: {} });
     assert.equal(result.replaces?.direction, "newer");
-    clearPending("board");
+    clearPending("board-4c7e1a92");
   });
 
   test("what the admin reviewed is pinned: the release and the folder", async () => {
     const { installExtension, InstallError } = await install();
-    const from = release("board", "1.2.0");
-    const to = release("board", "1.3.0");
+    const from = release("board-4c7e1a92", "1.2.0");
+    const to = release("board-4c7e1a92", "1.3.0");
     const reviewed = {
       installedCommit: from.commitSha,
       installedFilesHash: filesHash(from.entries),
@@ -648,29 +653,29 @@ describe("an update", { concurrency: false }, () => {
       targetContentHash: to.contentHash,
     };
     await assert.rejects(
-      installExtension("app", "board", { version: "1.3.0", update: { reviewed: { ...reviewed, targetCommit: "f".repeat(40) } } }),
+      installExtension("app", "board-4c7e1a92", { version: "1.3.0", update: { reviewed: { ...reviewed, targetCommit: "f".repeat(40) } } }),
       (err: unknown) =>
         err instanceof InstallError && err.code === "changed-meanwhile" && /now lists another commit or checksum for 1\.3\.0/.test(err.message),
     );
     await assert.rejects(
-      installExtension("app", "board", { version: "1.3.0", update: { reviewed: { ...reviewed, folderHash: null } } }),
+      installExtension("app", "board-4c7e1a92", { version: "1.3.0", update: { reviewed: { ...reviewed, folderHash: null } } }),
       (err: unknown) =>
-        err instanceof InstallError && err.code === "changed-meanwhile" && /apps\/board changed since you reviewed/.test(err.message),
+        err instanceof InstallError && err.code === "changed-meanwhile" && /apps\/board-4c7e1a92 changed since you reviewed/.test(err.message),
     );
-    assert.equal(exists(".mixos/pending/apps/board"), false);
-    const result = await installExtension("app", "board", { version: "1.3.0", update: { reviewed } });
+    assert.equal(exists(".mixos/pending/apps/board-4c7e1a92"), false);
+    const result = await installExtension("app", "board-4c7e1a92", { version: "1.3.0", update: { reviewed } });
     assert.equal(result.commitSha, to.commitSha);
-    clearPending("board");
+    clearPending("board-4c7e1a92");
   });
 
   test("the release in place, unchanged, is nothing to update", async () => {
     const { installExtension, InstallError } = await install();
     await assert.rejects(
-      installExtension("app", "board", { version: "1.2.0", update: {} }),
+      installExtension("app", "board-4c7e1a92", { version: "1.2.0", update: {} }),
       (err: unknown) =>
         err instanceof InstallError &&
         err.code === "already-current" &&
-        err.message === "apps/board already runs 1.2.0, and its files match it, so there is nothing to update.",
+        err.message === "apps/board-4c7e1a92 already runs 1.2.0, and its files match it, so there is nothing to update.",
     );
   });
 
@@ -680,30 +685,30 @@ describe("an update", { concurrency: false }, () => {
       err instanceof InstallError && err.code === "not-updatable" && pattern.test(err.message);
 
     // A local extension, with no install record.
-    fs.mkdirSync(path.join(root, "apps/local-app"), { recursive: true });
-    fs.writeFileSync(path.join(root, "apps/local-app/app.json"), '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Local"}\n');
+    fs.mkdirSync(path.join(root, "apps/local-app-1a6f3c8d"), { recursive: true });
+    fs.writeFileSync(path.join(root, "apps/local-app-1a6f3c8d/app.json"), '{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"local-app-1a6f3c8d","name":"Local"}\n');
     await assert.rejects(
-      installExtension("app", "local-app", { update: {} }),
-      refused(/^apps\/local-app has no install record \(apps\/local-app\/\.registry\.json\), so it is a local extension/),
+      installExtension("app", "local-app-1a6f3c8d", { update: {} }),
+      refused(/^apps\/local-app-1a6f3c8d has no install record \(apps\/local-app-1a6f3c8d\/\.registry\.json\), so it is a local extension/),
     );
     // One installed from another catalogue.
-    place("staged", release("board", "1.2.0"), "https://staging.mixos.example");
+    place("staged-92d4b6e0", release("board-4c7e1a92", "1.2.0"), "https://staging.mixos.example");
     await assert.rejects(
-      installExtension("app", "staged", { update: {} }),
-      refused(/^apps\/staged was installed from staging\.mixos\.example, and this instance installs from 127\.0\.0\.1:9/),
+      installExtension("app", "staged-92d4b6e0", { update: {} }),
+      refused(/^apps\/staged-92d4b6e0 was installed from staging\.mixos\.example, and this instance installs from 127\.0\.0\.1:9/),
     );
     // Nothing in place.
-    await assert.rejects(installExtension("app", "absent", { update: {} }), refused(/^Nothing named absent is in apps\//));
-    await assert.rejects(installExtension("theme", "absent", { update: {} }), refused(/^Nothing named absent is in themes\//));
+    await assert.rejects(installExtension("app", "absent-7e0b5d24", { update: {} }), refused(/^Nothing named absent-7e0b5d24 is in apps\//));
+    await assert.rejects(installExtension("theme", "absent-7e0b5d24", { update: {} }), refused(/^Nothing named absent-7e0b5d24 is in themes\//));
     // A folder no files hash covers: a link in it.
-    fs.symlinkSync("/etc/hosts", path.join(root, "apps/board/hosts.ts"));
+    fs.symlinkSync("/etc/hosts", path.join(root, "apps/board-4c7e1a92/hosts.ts"));
     try {
       await assert.rejects(
-        installExtension("app", "board", { version: "1.3.0", update: { discardLocalChanges: true } }),
-        refused(/^apps\/board holds something no files hash covers \(hosts\.ts is a symbolic link, which install never writes\), so an update couldn't tell later whether the folder changed\./),
+        installExtension("app", "board-4c7e1a92", { version: "1.3.0", update: { discardLocalChanges: true } }),
+        refused(/^apps\/board-4c7e1a92 holds something no files hash covers \(hosts\.ts is a symbolic link, which install never writes\), so an update couldn't tell later whether the folder changed\./),
       );
     } finally {
-      fs.rmSync(path.join(root, "apps/board/hosts.ts"));
+      fs.rmSync(path.join(root, "apps/board-4c7e1a92/hosts.ts"));
     }
     assert.equal(exists(".mixos/lock"), false);
   });
@@ -712,38 +717,38 @@ describe("an update", { concurrency: false }, () => {
     const { installExtension } = await install();
     const { registerPending } = await import("./register");
     const { readInstallRecord } = await import("./install-record");
-    const from = release("board", "1.2.0");
-    const to = release("board", "1.3.0");
-    await installExtension("app", "board", { version: "1.3.0", installedBy: ADMIN.email, update: {} });
+    const from = release("board-4c7e1a92", "1.2.0");
+    const to = release("board-4c7e1a92", "1.3.0");
+    await installExtension("app", "board-4c7e1a92", { version: "1.3.0", installedBy: ADMIN.email, update: {} });
 
-    const result = await registerPending("app", "board", { actor: ADMIN, via: "button", notice: () => {} });
+    const result = await registerPending("app", "board-4c7e1a92", { actor: ADMIN, via: "button", notice: () => {} });
 
     // While the generator ran: 1.3.0 in place, 1.2.0 in the backup.
     const [during] = runs();
-    assert.deepEqual([during.apps.board, during[".mixos/backup/apps"].board], ["1.3.0", "1.2.0"]);
+    assert.deepEqual([during.apps["board-4c7e1a92"], during[".mixos/backup/apps"]["board-4c7e1a92"]], ["1.3.0", "1.2.0"]);
     // After: 1.3.0 and its record, and nothing left behind.
-    const record = readInstallRecord(path.join(root, "apps/board"));
+    const record = readInstallRecord(path.join(root, "apps/board-4c7e1a92"));
     assert.equal(record.state === "ok" && record.record.commitSha, to.commitSha);
-    assert.equal(read("apps/board/migrations/0002_tags.sql"), "create table tags (id bigint primary key);\n");
-    for (const left of [".mixos/backup/apps/board", ".mixos/backup/apps/board.json", ".mixos/pending/apps/board", ".mixos/pending/apps/board.json", ".mixos/lock"]) {
+    assert.equal(read("apps/board-4c7e1a92/migrations/0002_tags.sql"), "create table tags (id bigint primary key);\n");
+    for (const left of [".mixos/backup/apps/board-4c7e1a92", ".mixos/backup/apps/board-4c7e1a92.json", ".mixos/pending/apps/board-4c7e1a92", ".mixos/pending/apps/board-4c7e1a92.json", ".mixos/lock"]) {
       assert.equal(exists(left), false, left);
     }
-    assert.match(read("src/generated/app-registry.ts"), /"slug": "board"/);
+    assert.match(read("src/generated/app-registry.ts"), /"slug": "board-4c7e1a92"/);
 
     assert.deepEqual(result.update?.from, { version: "1.2.0", gitTag: "v1.2.0", commitSha: from.commitSha });
     assert.deepEqual(result.update?.migrationsAdded, ["0002_tags.sql"]);
     assert.equal(
       result.nextStep,
-      "Updated apps/board from 1.2.0 to 1.3.0: the registry generator loaded the new code and accepted it, and the " +
+      "Updated apps/board-4c7e1a92 from 1.2.0 to 1.3.0: the registry generator loaded the new code and accepted it, and the " +
         "backup of 1.2.0 was deleted. Its activation, grants and settings carry over: they belong to its slug, in the " +
         "database. Run `npm run migrate:apps` in this checkout to apply its 1 new migration, which can't be undone. If " +
         "`npm run dev` is running, restart it: until it does, it can keep serving the code it compiled from 1.2.0.",
     );
     // The hand-back: the change to the folder, both releases in the message, and how to roll it back.
     const { handBack } = result;
-    assert.equal(handBack.commitMessage.split("\n")[0], "feat(board): update app board from 1.2.0 to 1.3.0");
+    assert.equal(handBack.commitMessage.split("\n")[0], "feat(board-4c7e1a92): update app board-4c7e1a92 from 1.2.0 to 1.3.0");
     assert.match(handBack.commitMessage, new RegExp(`^Registry-Replaces-Commit: ${from.commitSha}$`, "m"));
-    assert.match(handBack.commands, /^git switch -c update-app-board\ngit add apps\/board\n/);
+    assert.match(handBack.commands, /^git switch -c update-app-board-4c7e1a92\ngit add apps\/board-4c7e1a92\n/);
     assert.deepEqual(handBack.update?.changes.added, ["migrations/0002_tags.sql"]);
     assert.match(
       handBack.update?.rollback ?? "",
@@ -763,7 +768,7 @@ describe("an update", { concurrency: false }, () => {
     });
 
     // As it was, for what follows.
-    place("board", from);
+    place("board-4c7e1a92", from);
     fs.rmSync(path.join(root, "runs.log"));
   });
 });
@@ -780,11 +785,11 @@ describe("the update dialog", { concurrency: false }, () => {
 
   test("the overview lists the releases newest first, with which way each goes, and starts on the current one", async () => {
     const { overviewForButton } = await import("./update-admin");
-    const outcome = await overviewForButton({ kind: "app", slug: "board" }, ctx);
+    const outcome = await overviewForButton({ kind: "app", slug: "board-4c7e1a92" }, ctx);
     assert.equal(outcome.ok, true);
     const o = outcome.ok ? outcome.overview : null;
     assert.equal(o?.name, "Board");
-    assert.equal(o?.path, "apps/board");
+    assert.equal(o?.path, "apps/board-4c7e1a92");
     assert.equal(o?.host, "127.0.0.1:9");
     assert.deepEqual(o?.local, { state: "none" });
     assert.deepEqual(
@@ -796,22 +801,22 @@ describe("the update dialog", { concurrency: false }, () => {
       ],
     );
     assert.equal(o?.installed.releasedAt, "2026-10-01T12:00:00.000Z");
-    assert.match(o?.installed.sourceUrl ?? "", /^https:\/\/github\.com\/mixoshq\/board\/tree\/[0-9a-f]{40}$/);
+    assert.match(o?.installed.sourceUrl ?? "", /^https:\/\/github\.com\/mixoshq\/board-4c7e1a92\/tree\/[0-9a-f]{40}$/);
     assert.equal(o?.suggested, "1.3.0");
   });
 
   test("local edits are named against the installed release, which is downloaded and verified to do it", async () => {
     const { overviewForButton } = await import("./update-admin");
-    const from = release("board", "1.2.0");
+    const from = release("board-4c7e1a92", "1.2.0");
     fs.writeFileSync(BOARD_README, "# Board, edited here\n");
-    fs.writeFileSync(path.join(root, "apps/board/api/items/extra.ts"), "export const extra = 1;\n");
-    fs.writeFileSync(path.join(root, "apps/board/.gitignore"), "*.log\n");
-    const manifest = path.join(root, "apps/board/app.json");
+    fs.writeFileSync(path.join(root, "apps/board-4c7e1a92/api/items/extra.ts"), "export const extra = 1;\n");
+    fs.writeFileSync(path.join(root, "apps/board-4c7e1a92/.gitignore"), "*.log\n");
+    const manifest = path.join(root, "apps/board-4c7e1a92/app.json");
     const original = fs.readFileSync(manifest, "utf8");
     fs.writeFileSync(manifest, JSON.stringify({ ...JSON.parse(original), lastUpdated: "2026-10-11T09:00:00.000Z" }));
     try {
       const before = downloads.length;
-      const outcome = await overviewForButton({ kind: "app", slug: "board" }, ctx);
+      const outcome = await overviewForButton({ kind: "app", slug: "board-4c7e1a92" }, ctx);
       assert.deepEqual(downloads.slice(before), [from.archivePath]);
       const local = outcome.ok ? outcome.overview.local : null;
       assert.equal(local?.state, "listed");
@@ -822,7 +827,7 @@ describe("the update dialog", { concurrency: false }, () => {
 
       // When GitHub no longer serves it, the folder differs and the files aren't named.
       withheld.add(from.archivePath);
-      const unserved = await overviewForButton({ kind: "app", slug: "board" }, ctx);
+      const unserved = await overviewForButton({ kind: "app", slug: "board-4c7e1a92" }, ctx);
       assert.deepEqual(unserved.ok && unserved.overview.local, {
         state: "unlisted",
         reason: `GitHub didn't serve 1.2.0 at commit ${from.commitSha.slice(0, 12)}, so the files that changed can't be named.`,
@@ -830,17 +835,17 @@ describe("the update dialog", { concurrency: false }, () => {
     } finally {
       withheld.clear();
       fs.writeFileSync(BOARD_README, "# Board\n");
-      fs.rmSync(path.join(root, "apps/board/api/items/extra.ts"));
-      fs.rmSync(path.join(root, "apps/board/.gitignore"));
+      fs.rmSync(path.join(root, "apps/board-4c7e1a92/api/items/extra.ts"));
+      fs.rmSync(path.join(root, "apps/board-4c7e1a92/.gitignore"));
       fs.writeFileSync(manifest, original);
     }
   });
 
   test("the comparison shows the permissions, declarations and migrations that change, and a compare link", async () => {
     const { compareForButton } = await import("./update-admin");
-    const from = release("board", "1.2.0");
-    const to = release("board", "1.3.0");
-    const outcome = await compareForButton({ kind: "app", slug: "board", version: "1.3.0" }, ctx);
+    const from = release("board-4c7e1a92", "1.2.0");
+    const to = release("board-4c7e1a92", "1.3.0");
+    const outcome = await compareForButton({ kind: "app", slug: "board-4c7e1a92", version: "1.3.0" }, ctx);
     assert.equal(outcome.ok, true);
     const c = outcome.ok ? outcome.comparison : null;
     assert.equal(c?.direction, "newer");
@@ -851,7 +856,7 @@ describe("the update dialog", { concurrency: false }, () => {
       "2026-10-08T12:00:00.000Z",
       "v1.3.0",
     ]);
-    assert.equal(c?.compareUrl, `https://github.com/mixoshq/board/compare/${from.commitSha}...${to.commitSha}`);
+    assert.equal(c?.compareUrl, `https://github.com/mixoshq/board-4c7e1a92/compare/${from.commitSha}...${to.commitSha}`);
     assert.equal(c?.otherRepository, null);
     assert.deepEqual(c?.claims, {
       state: "ok",
@@ -878,16 +883,16 @@ describe("the update dialog", { concurrency: false }, () => {
 
   test("a download that doesn't match its checksum is named as such, for the release and for the installed one", async () => {
     const { compareForButton, overviewForButton } = await import("./update-admin");
-    const from = release("board", "1.2.0");
-    const to = release("board", "1.3.0");
+    const from = release("board-4c7e1a92", "1.2.0");
+    const to = release("board-4c7e1a92", "1.3.0");
     const [served, installed] = [to.archive, from.archive];
     to.archive = from.archive;
     from.archive = served;
     fs.writeFileSync(BOARD_README, "# Board, edited here\n");
     try {
-      const compared = await compareForButton({ kind: "app", slug: "board", version: "1.3.0" }, ctx);
+      const compared = await compareForButton({ kind: "app", slug: "board-4c7e1a92", version: "1.3.0" }, ctx);
       assert.deepEqual(compared.ok === false && [compared.code, compared.tone], ["checksum", "danger"]);
-      const overview = await overviewForButton({ kind: "app", slug: "board" }, ctx);
+      const overview = await overviewForButton({ kind: "app", slug: "board-4c7e1a92" }, ctx);
       assert.deepEqual(overview.ok && overview.overview.local, {
         state: "unlisted",
         reason: "What GitHub serves for 1.2.0 no longer matches what was installed, so the files that changed can't be named.",
@@ -901,56 +906,56 @@ describe("the update dialog", { concurrency: false }, () => {
 
   test("a downgrade's comparison names the migrations the older release lacks, and links from older to newer", async () => {
     const { compareForButton } = await import("./update-admin");
-    const [installed, older] = published.get("notes")!;
-    const outcome = await compareForButton({ kind: "app", slug: "notes", version: older.version }, ctx);
+    const [installed, older] = published.get("notes-b83f0d61")!;
+    const outcome = await compareForButton({ kind: "app", slug: "notes-b83f0d61", version: older.version }, ctx);
     const c = outcome.ok ? outcome.comparison : null;
     assert.equal(c?.direction, "older");
     assert.deepEqual(c?.migrations, { added: [], changed: [], lacking: ["0002_pins.sql"] });
     assert.equal(c?.needs.allowOlder, true);
-    assert.equal(c?.compareUrl, `https://github.com/mixoshq/notes/compare/${older.commitSha}...${installed.commitSha}`);
+    assert.equal(c?.compareUrl, `https://github.com/mixoshq/notes-b83f0d61/compare/${older.commitSha}...${installed.commitSha}`);
     // Website releases have no tag.
     assert.deepEqual([c?.from.gitTag, c?.to.gitTag], [null, null]);
   });
 
   test("a withdrawn release's comparison says so; the release in place is nothing to update", async () => {
     const { compareForButton } = await import("./update-admin");
-    const withdrawn = await compareForButton({ kind: "app", slug: "board", version: "1.4.0" }, ctx);
+    const withdrawn = await compareForButton({ kind: "app", slug: "board-4c7e1a92", version: "1.4.0" }, ctx);
     assert.deepEqual(withdrawn.ok && [withdrawn.comparison.to.yanked, withdrawn.comparison.to.yankedReason, withdrawn.comparison.needs.allowYanked], [
       true,
       "Corrupts boards.",
       true,
     ]);
-    const same = await compareForButton({ kind: "app", slug: "board", version: "1.2.0" }, ctx);
-    assert.equal(same.ok && same.comparison.blocker, "apps/board already runs 1.2.0, and its files match it, so there is nothing to update.");
+    const same = await compareForButton({ kind: "app", slug: "board-4c7e1a92", version: "1.2.0" }, ctx);
+    assert.equal(same.ok && same.comparison.blocker, "apps/board-4c7e1a92 already runs 1.2.0, and its files match it, so there is nothing to update.");
     assert.equal(same.ok && same.comparison.compareUrl, null);
   });
 
   test("the update is audited with from, to, which way and whether local changes were discarded", async () => {
     const { compareForButton, updateFromButton } = await import("./update-admin");
-    const [installed, older] = published.get("notes")!;
-    const compared = await compareForButton({ kind: "app", slug: "notes", version: older.version }, ctx);
+    const [installed, older] = published.get("notes-b83f0d61")!;
+    const compared = await compareForButton({ kind: "app", slug: "notes-b83f0d61", version: older.version }, ctx);
     assert.equal(compared.ok, true);
     if (!compared.ok) return;
 
     // Without "Install an older release": refused, and audited.
     const refused = await updateFromButton(
-      { kind: "app", slug: "notes", version: older.version, reviewed: compared.comparison.reviewed },
+      { kind: "app", slug: "notes-b83f0d61", version: older.version, reviewed: compared.comparison.reviewed },
       ctx,
     );
     assert.deepEqual(refused.ok === false && [refused.code, refused.tone], ["older-release", "warning"]);
     const [rejected] = rows("app.update.rejected");
     assert.deepEqual(
       [rejected.target_id, rejected.details.reason, rejected.details.version, rejected.details.via],
-      ["notes", "older-release", older.version, "button"],
+      ["notes-b83f0d61", "older-release", older.version, "button"],
     );
 
     const outcome = await updateFromButton(
-      { kind: "app", slug: "notes", version: older.version, allowOlder: true, reviewed: compared.comparison.reviewed },
+      { kind: "app", slug: "notes-b83f0d61", version: older.version, allowOlder: true, reviewed: compared.comparison.reviewed },
       ctx,
     );
     assert.equal(outcome.ok, true);
     assert.deepEqual(outcome.ok && [outcome.result.pendingPath, outcome.result.direction, outcome.result.from.version], [
-      ".mixos/pending/apps/notes",
+      ".mixos/pending/apps/notes-b83f0d61",
       "older",
       installed.version,
     ]);
@@ -972,27 +977,27 @@ describe("the update dialog", { concurrency: false }, () => {
         row.details.pendingPath,
         row.details.via,
       ],
-      [older.version, older.commitSha, "older", false, ".mixos/pending/apps/notes", "button"],
+      [older.version, older.commitSha, "older", false, ".mixos/pending/apps/notes-b83f0d61", "button"],
     );
-    clearPending("notes");
+    clearPending("notes-b83f0d61");
   });
 
   test("a built deployment is told how updating works, and the refusal is audited", async () => {
     const { overviewForButton, updateFromButton } = await import("./update-admin");
     const { BUILT_DEPLOYMENT_UPDATE_NOTICE } = await import("../platform/build");
     const built = { ...ctx, builtDeployment: () => true };
-    assert.deepEqual(await overviewForButton({ kind: "app", slug: "board" }, built), {
+    assert.deepEqual(await overviewForButton({ kind: "app", slug: "board-4c7e1a92" }, built), {
       ok: false,
       code: "unsupported-environment",
       message: BUILT_DEPLOYMENT_UPDATE_NOTICE,
       tone: "info",
     });
     const before = rows("app.update.rejected").length;
-    const to = release("board", "1.3.0");
+    const to = release("board-4c7e1a92", "1.3.0");
     const outcome = await updateFromButton(
       {
         kind: "app",
-        slug: "board",
+        slug: "board-4c7e1a92",
         version: "1.3.0",
         reviewed: {
           installedCommit: to.commitSha,
@@ -1006,22 +1011,22 @@ describe("the update dialog", { concurrency: false }, () => {
     );
     assert.equal(outcome.ok === false && outcome.code, "unsupported-environment");
     assert.equal(rows("app.update.rejected").length, before + 1);
-    assert.equal(exists(".mixos/pending/apps/board"), false);
+    assert.equal(exists(".mixos/pending/apps/board-4c7e1a92"), false);
   });
 
   test("each action requires an admin first, and refuses what isn't a release of an extension", async () => {
     const { compareForButton, overviewForButton, updateFromButton } = await import("./update-admin");
     const notAdmin = { ...ctx, admin: async () => Promise.reject(new Error("Forbidden")) };
-    await assert.rejects(overviewForButton({ kind: "app", slug: "board" }, notAdmin), /Forbidden/);
-    await assert.rejects(compareForButton({ kind: "app", slug: "board", version: "1.3.0" }, notAdmin), /Forbidden/);
-    await assert.rejects(updateFromButton({ kind: "app", slug: "board", version: "1.3.0" }, notAdmin), /Forbidden/);
+    await assert.rejects(overviewForButton({ kind: "app", slug: "board-4c7e1a92" }, notAdmin), /Forbidden/);
+    await assert.rejects(compareForButton({ kind: "app", slug: "board-4c7e1a92", version: "1.3.0" }, notAdmin), /Forbidden/);
+    await assert.rejects(updateFromButton({ kind: "app", slug: "board-4c7e1a92", version: "1.3.0" }, notAdmin), /Forbidden/);
     for (const input of [
-      { kind: "app", slug: "../board" },
-      { kind: "plugin", slug: "board" },
+      { kind: "app", slug: "../board-4c7e1a92" },
+      { kind: "plugin", slug: "board-4c7e1a92" },
     ]) {
       assert.equal((await overviewForButton(input, ctx)).ok, false);
     }
-    const bad = await compareForButton({ kind: "app", slug: "board", version: "1.3.0 && rm" }, ctx);
+    const bad = await compareForButton({ kind: "app", slug: "board-4c7e1a92", version: "1.3.0 && rm" }, ctx);
     assert.equal(bad.ok === false && bad.code, "not-updatable");
   });
 });
@@ -1037,13 +1042,13 @@ describe("a theme's update", { concurrency: false }, () => {
 
   test("the dialog compares it as an app's, with nothing a theme declares to enforce, and no migrations", async () => {
     const { overviewForButton, compareForButton } = await import("./update-admin");
-    const overview = await overviewForButton({ kind: "theme", slug: "dusk" }, ctx);
+    const overview = await overviewForButton({ kind: "theme", slug: "dusk-e15a7c3f" }, ctx);
     assert.deepEqual(overview.ok && [overview.overview.path, overview.overview.name, overview.overview.suggested], [
-      "themes/dusk",
+      "themes/dusk-e15a7c3f",
       "Dusk",
       "1.1.0",
     ]);
-    const compared = await compareForButton({ kind: "theme", slug: "dusk", version: "1.1.0" }, ctx);
+    const compared = await compareForButton({ kind: "theme", slug: "dusk-e15a7c3f", version: "1.1.0" }, ctx);
     assert.equal(compared.ok, true);
     const c = compared.ok ? compared.comparison : null;
     assert.deepEqual([c?.kind, c?.direction, c?.declarations, c?.migrations], [
@@ -1057,25 +1062,25 @@ describe("a theme's update", { concurrency: false }, () => {
   test("one the generator refuses is deleted, and the theme in place put back", async () => {
     const { installExtension, InstallError } = await install();
     const { folderFilesHash } = await import("./install-record");
-    const before = folderFilesHash(path.join(root, "themes/dusk"));
-    refuse("dusk");
+    const before = folderFilesHash(path.join(root, "themes/dusk-e15a7c3f"));
+    refuse("dusk-e15a7c3f");
     try {
       await assert.rejects(
-        installExtension("theme", "dusk", { version: "1.1.0", update: {} }),
+        installExtension("theme", "dusk-e15a7c3f", { version: "1.1.0", update: {} }),
         (err: unknown) =>
           err instanceof InstallError &&
           err.code === "rejected-by-registry" &&
           err.message ===
-            "dusk 1.1.0 passed this instance's registry check, but the registry generator left it out, so 1.0.0 " +
-              "was put back in themes/dusk.",
+            "dusk-e15a7c3f 1.1.0 passed this instance's registry check, but the registry generator left it out, so 1.0.0 " +
+              "was put back in themes/dusk-e15a7c3f.",
       );
     } finally {
       fs.rmSync(path.join(root, "refuse.json"));
     }
     const [during] = runs();
-    assert.deepEqual([during.themes.dusk, during[".mixos/backup/themes"].dusk], ["1.1.0", "1.0.0"]);
-    assert.equal(folderFilesHash(path.join(root, "themes/dusk")), before);
-    for (const left of [".mixos/backup/themes/dusk", ".mixos/backup/themes/dusk.json", ".mixos/staging/themes/dusk", ".mixos/lock"]) {
+    assert.deepEqual([during.themes["dusk-e15a7c3f"], during[".mixos/backup/themes"]["dusk-e15a7c3f"]], ["1.1.0", "1.0.0"]);
+    assert.equal(folderFilesHash(path.join(root, "themes/dusk-e15a7c3f")), before);
+    for (const left of [".mixos/backup/themes/dusk-e15a7c3f", ".mixos/backup/themes/dusk-e15a7c3f.json", ".mixos/staging/themes/dusk-e15a7c3f", ".mixos/lock"]) {
       assert.equal(exists(left), false, left);
     }
     fs.rmSync(path.join(root, "runs.log"));
@@ -1083,39 +1088,39 @@ describe("a theme's update", { concurrency: false }, () => {
 
   test("is put in place as it installs, with the backup deleted once the generator accepts it, and audited", async () => {
     const { updateFromButton, compareForButton } = await import("./update-admin");
-    const compared = await compareForButton({ kind: "theme", slug: "dusk", version: "1.1.0" }, ctx);
+    const compared = await compareForButton({ kind: "theme", slug: "dusk-e15a7c3f", version: "1.1.0" }, ctx);
     assert.equal(compared.ok, true);
     if (!compared.ok) return;
     const outcome = await updateFromButton(
-      { kind: "theme", slug: "dusk", version: "1.1.0", reviewed: compared.comparison.reviewed },
+      { kind: "theme", slug: "dusk-e15a7c3f", version: "1.1.0", reviewed: compared.comparison.reviewed },
       ctx,
     );
     assert.equal(outcome.ok, true);
     if (!outcome.ok) return;
 
     const [during] = runs();
-    assert.deepEqual([during.themes.dusk, during[".mixos/backup/themes"].dusk], ["1.1.0", "1.0.0"]);
-    assert.equal(read("themes/dusk/theme.css"), ":root { --background: #121212; }\n");
-    assert.equal(exists("themes/dusk/assets/old.woff2"), false);
-    assert.equal(JSON.parse(read("themes/dusk/.registry.json")).version, "1.1.0");
-    for (const left of [".mixos/backup/themes/dusk", ".mixos/backup/themes/dusk.json", ".mixos/staging/themes/dusk", ".mixos/lock"]) {
+    assert.deepEqual([during.themes["dusk-e15a7c3f"], during[".mixos/backup/themes"]["dusk-e15a7c3f"]], ["1.1.0", "1.0.0"]);
+    assert.equal(read("themes/dusk-e15a7c3f/theme.css"), ":root { --background: #121212; }\n");
+    assert.equal(exists("themes/dusk-e15a7c3f/assets/old.woff2"), false);
+    assert.equal(JSON.parse(read("themes/dusk-e15a7c3f/.registry.json")).version, "1.1.0");
+    for (const left of [".mixos/backup/themes/dusk-e15a7c3f", ".mixos/backup/themes/dusk-e15a7c3f.json", ".mixos/staging/themes/dusk-e15a7c3f", ".mixos/lock"]) {
       assert.equal(exists(left), false, left);
     }
 
     const r = outcome.result;
-    assert.deepEqual([r.kind, r.path, r.pendingPath, r.from.version, r.to.version], ["theme", "themes/dusk", null, "1.0.0", "1.1.0"]);
+    assert.deepEqual([r.kind, r.path, r.pendingPath, r.from.version, r.to.version], ["theme", "themes/dusk-e15a7c3f", null, "1.0.0", "1.1.0"]);
     assert.match(
       r.nextStep,
-      /^Updated themes\/dusk from 1\.0\.0 to 1\.1\.0: the registry generator accepted it, and the backup of 1\.0\.0 was deleted\./,
+      /^Updated themes\/dusk-e15a7c3f from 1\.0\.0 to 1\.1\.0: the registry generator accepted it, and the backup of 1\.0\.0 was deleted\./,
     );
-    assert.equal(r.handBack?.commitMessage.split("\n")[0], "feat(dusk): update theme dusk from 1.0.0 to 1.1.0");
+    assert.equal(r.handBack?.commitMessage.split("\n")[0], "feat(dusk-e15a7c3f): update theme dusk-e15a7c3f from 1.0.0 to 1.1.0");
     assert.deepEqual(r.handBack?.update?.changes.removed, ["assets/old.woff2"]);
     assert.doesNotMatch(r.handBack?.update?.rollback ?? "", /migration/);
 
     const row = rows("theme.update").at(-1)!;
     assert.deepEqual(
       [row.details.installPath, row.details.swapped, row.details.registryValidated, row.details.pendingPath, row.details.direction],
-      ["themes/dusk", true, true, undefined, "newer"],
+      ["themes/dusk-e15a7c3f", true, true, undefined, "newer"],
     );
   });
 });

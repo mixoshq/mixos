@@ -1,7 +1,8 @@
 {
   "$schema": "https://mixos.org/schemas/theme/v1.json",
+  "registryId": "template-00000000",
   "name": "Template",
-  "description": "Copy this folder to themes/<your-slug>/ and edit. The folder name becomes the slug — it appears in a CSS attribute selector, so use lowercase letters, digits and hyphens.",
+  "description": "Create a theme with `npm run new -- theme <name>`, which copies this folder to themes/<name>-<id>/ and sets registryId to match. The folder is the theme's slug and appears in a CSS attribute selector.",
   "tagline": "One line about the theme, for a listing card",
   "keywords": [
     "starter"

@@ -143,7 +143,12 @@ test("a source can't be its own target", () => {
 
 test("a well-formed entry passes the manifest schema", () => {
   const root = checkout();
-  const parsed = RawAppManifestSchema.safeParse({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Deals", remixedFrom: [entryFor(root)] });
+  const parsed = RawAppManifestSchema.safeParse({
+    $schema: "https://mixos.org/schemas/app/v1.json",
+    registryId: "deals-3f9a2c1b",
+    name: "Deals",
+    remixedFrom: [entryFor(root)],
+  });
   assert.equal(parsed.success, true, parsed.success ? "" : JSON.stringify(parsed.error.issues));
 });
 

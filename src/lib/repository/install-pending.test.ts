@@ -139,8 +139,8 @@ function tarball(top: string, entries: TarEntry[]): Buffer {
 const files = (spec: Record<string, string>): TarEntry[] =>
   Object.entries(spec).map(([p, d]) => ({ path: p, mode: 0o644, data: Buffer.from(d) }));
 
-/** The connector template, renamed. */
-function connectorTree(name: string): TarEntry[] {
+/** The connector template, as `registryId`. */
+function connectorTree(registryId: string): TarEntry[] {
   const out: TarEntry[] = [];
   const dir = path.join(REPO, "connectors", "_template");
   const walk = (at: string) => {
@@ -150,7 +150,7 @@ function connectorTree(name: string): TarEntry[] {
       else {
         const rel = path.relative(dir, full).split(path.sep).join("/");
         let data = fs.readFileSync(full);
-        if (rel === "connector.json") data = Buffer.from(JSON.stringify({ $schema: "https://mixos.org/schemas/connector/v1.json", ...JSON.parse(data.toString()), name }, null, 2));
+        if (rel === "connector.json") data = Buffer.from(JSON.stringify({ ...JSON.parse(data.toString()), registryId }, null, 2));
         out.push({ path: rel, mode: 0o644, data });
       }
     }
@@ -169,28 +169,28 @@ const ROUTE =
   "});\n";
 
 const FIXTURES: Record<string, { kind: Kind; entries: TarEntry[]; manifest?: Record<string, unknown> }> = {
-  acme: { kind: "app", entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Acme","description":"A test app."}\n', "api/items/route.ts": ROUTE }) },
+  "acme-3f9a2c1b": { kind: "app", entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"acme-3f9a2c1b","name":"Acme","description":"A test app."}\n', "api/items/route.ts": ROUTE }) },
   // A release whose version the record can't hold: refused before downloading.
-  undotted: {
+  "undotted-8b41d0e6": {
     kind: "app",
-    entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Undotted"}\n' }),
+    entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"undotted-8b41d0e6","name":"Undotted"}\n' }),
     manifest: { version: "1.2 beta" },
   },
   // A package that ships its own install record: pre-flight refuses it.
-  forged: {
+  "forged-c7e29a14": {
     kind: "app",
     entries: files({
-      "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Forged"}\n',
+      "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"forged-c7e29a14","name":"Forged"}\n',
       ".registry.json": '{"source":"https://mixos.org","note":"trust me"}\n',
     }),
   },
-  "probe-conn": { kind: "connector", entries: connectorTree("probe-conn") },
+  "probe-conn-2d6f8a90": { kind: "connector", entries: connectorTree("probe-conn-2d6f8a90") },
   // A .gitignore at the root, a nested .gitattributes and a .GitIgnore in
   // another case: install leaves all three out.
-  ignores: {
+  "ignores-5e03b7c2": {
     kind: "app",
     entries: files({
-      "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Ignores"}\n',
+      "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"ignores-5e03b7c2","name":"Ignores"}\n',
       "api/items/route.ts": ROUTE,
       ".gitignore": "node_modules/\n*.log\n",
       "lib/.gitattributes": "*.ts -diff\n",
@@ -199,19 +199,19 @@ const FIXTURES: Record<string, { kind: Kind; entries: TarEntry[]; manifest?: Rec
     }),
   },
   // A .git folder and a .registry.json beside a .gitignore: still refused.
-  "git-dir": {
+  "git-dir-a19c4f57": {
     kind: "app",
     entries: files({
-      "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Git dir"}\n',
+      "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"git-dir-a19c4f57","name":"Git dir"}\n',
       ".gitignore": "dist/\n",
       "vendor/.git/config": "[core]\n",
       "lib/.registry.json": "{}\n",
     }),
   },
   // A bare handler: the check refuses it.
-  bare: {
+  "bare-0f8e6d3a": {
     kind: "app",
-    entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","name":"Bare"}\n', "api/x/route.ts": "export async function GET() {\n  return new Response('x');\n}\n" }),
+    entries: files({ "app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"bare-0f8e6d3a","name":"Bare"}\n', "api/x/route.ts": "export async function GET() {\n  return new Response('x');\n}\n" }),
   },
 };
 
@@ -280,30 +280,30 @@ describe("an install from the Registry", { concurrency: false }, () => {
     const { filesHash, hashFileTree } = await import("./content-hash");
     const started = Date.now();
 
-    const result = await installExtension("app", "acme", { installedBy: "admin@example.com" });
+    const result = await installExtension("app", "acme-3f9a2c1b", { installedBy: "admin@example.com" });
 
     assert.equal(result.pending, true);
-    assert.equal(result.installPath, ".mixos/pending/apps/acme");
+    assert.equal(result.installPath, ".mixos/pending/apps/acme-3f9a2c1b");
     assert.equal(result.registry, null);
     assert.equal(result.handBack, null);
-    assert.match(result.nextStep, /npm run register -- app\/acme/);
-    assert.equal(exists("apps/acme"), false, "an app must not land in apps/ at install");
+    assert.match(result.nextStep, /npm run register -- app\/acme-3f9a2c1b/);
+    assert.equal(exists("apps/acme-3f9a2c1b"), false, "an app must not land in apps/ at install");
 
     // The record: what was verified, and where it came from, from the
     // catalogue's answer and the download URL that was verified.
-    const where = pendingLocation(root, "app", "acme");
-    const entries = FIXTURES.acme.entries;
-    const release = releases.get("/api/v1/apps/acme/install")!.manifest as { commitSha: string };
+    const where = pendingLocation(root, "app", "acme-3f9a2c1b");
+    const entries = FIXTURES["acme-3f9a2c1b"].entries;
+    const release = releases.get("/api/v1/apps/acme-3f9a2c1b/install")!.manifest as { commitSha: string };
     const record = {
       source: "http://127.0.0.1:9",
       kind: "app",
-      slug: "acme",
+      slug: "acme-3f9a2c1b",
       version: "1.2.0",
       gitTag: "v1.2.0",
       commitSha: release.commitSha,
       contentHash: hashFileTree(entries),
       filesHash: filesHash(entries),
-      repository: { owner: "mixoshq", name: "acme", subpath: null },
+      repository: { owner: "mixoshq", name: "acme-3f9a2c1b", subpath: null },
       requiresMixOS: "0.0.1",
     };
     assert.deepEqual(readInstallRecord(where.folder), { state: "ok", record });
@@ -317,7 +317,7 @@ describe("an install from the Registry", { concurrency: false }, () => {
       { ...sidecar, installedAt: undefined },
       {
         kind: "app",
-        slug: "acme",
+        slug: "acme-3f9a2c1b",
         yankedAccepted: false,
         installedAt: undefined,
         installedBy: "admin@example.com",
@@ -351,26 +351,26 @@ describe("an install from the Registry", { concurrency: false }, () => {
     const { installExtension, InstallError } = await install();
     const before = downloads;
     await assert.rejects(
-      installExtension("app", "acme"),
+      installExtension("app", "acme-3f9a2c1b"),
       (err: unknown) =>
         err instanceof InstallError &&
         err.code === "already-installed" &&
-        /waiting in \.mixos\/pending\/apps\/acme\//.test(err.message) &&
+        /waiting in \.mixos\/pending\/apps\/acme-3f9a2c1b\//.test(err.message) &&
         /Register or discard it in Admin > Apps/.test(err.message) &&
-        /npm run register -- app\/acme --discard/.test(err.message),
+        /npm run register -- app\/acme-3f9a2c1b --discard/.test(err.message),
     );
     assert.equal(downloads, before);
   });
 
   test("puts a connector in pending too", async () => {
     const { installExtension } = await install();
-    const result = await installExtension("connector", "probe-conn", { installedBy: "admin@example.com" });
+    const result = await installExtension("connector", "probe-conn-2d6f8a90", { installedBy: "admin@example.com" });
     assert.equal(result.pending, true);
-    assert.equal(result.installPath, ".mixos/pending/connectors/probe-conn");
-    assert.equal(exists("connectors/probe-conn"), false);
-    assert.equal(exists(".mixos/pending/connectors/probe-conn/connector.json"), true);
-    assert.equal(exists(".mixos/pending/connectors/probe-conn/.registry.json"), true);
-    assert.equal(exists(".mixos/pending/connectors/probe-conn.json"), true);
+    assert.equal(result.installPath, ".mixos/pending/connectors/probe-conn-2d6f8a90");
+    assert.equal(exists("connectors/probe-conn-2d6f8a90"), false);
+    assert.equal(exists(".mixos/pending/connectors/probe-conn-2d6f8a90/connector.json"), true);
+    assert.equal(exists(".mixos/pending/connectors/probe-conn-2d6f8a90/.registry.json"), true);
+    assert.equal(exists(".mixos/pending/connectors/probe-conn-2d6f8a90.json"), true);
     assert.equal(result.record.kind, "connector");
   });
 
@@ -380,8 +380,8 @@ describe("an install from the Registry", { concurrency: false }, () => {
     const { folderFilesHash, readInstallRecord } = await import("./install-record");
     const { filesHash, hashFileTree } = await import("./content-hash");
 
-    const result = await installExtension("app", "ignores", { installedBy: "admin@example.com" });
-    const where = pendingLocation(root, "app", "ignores");
+    const result = await installExtension("app", "ignores-5e03b7c2", { installedBy: "admin@example.com" });
+    const where = pendingLocation(root, "app", "ignores-5e03b7c2");
 
     // None of the three is written, nor assets/, which held only one of them.
     assert.deepEqual(filesIn(where.folder), [".registry.json", "api/items/route.ts", "app.json", "lib/util.ts"]);
@@ -392,7 +392,7 @@ describe("an install from the Registry", { concurrency: false }, () => {
     // The content hash is the package's as published, the three included, and
     // it was verified before they were left out. The files hash is over what
     // was written, which is what the folder recomputes.
-    const all = FIXTURES.ignores.entries;
+    const all = FIXTURES["ignores-5e03b7c2"].entries;
     const written = all.filter((e) => !/(^|\/)\.git(ignore|attributes)$/i.test(e.path));
     assert.equal(written.length, 3);
     const read = readInstallRecord(where.folder);
@@ -415,26 +415,26 @@ describe("an install from the Registry", { concurrency: false }, () => {
     const { scanRegistryInstalls } = await import("../../../scripts/generate-project-registry");
 
     // What install left in pending, moved as it is into the other checkout.
-    const from = pendingLocation(root, "app", "ignores");
-    const to = pendingLocation(aside, "app", "ignores");
+    const from = pendingLocation(root, "app", "ignores-5e03b7c2");
+    const to = pendingLocation(aside, "app", "ignores-5e03b7c2");
     fs.mkdirSync(path.dirname(to.folder), { recursive: true });
     fs.cpSync(from.folder, to.folder, { recursive: true });
     fs.copyFileSync(from.sidecar, to.sidecar);
 
-    const result = await registerPending("app", "ignores", {
+    const result = await registerPending("app", "ignores-5e03b7c2", {
       actor: { id: null, email: "cli:tester@test-host" },
       via: "cli",
       root: aside,
       generator: STAND_IN,
       notice: () => {},
     });
-    assert.equal(result.installPath, "apps/ignores");
+    assert.equal(result.installPath, "apps/ignores-5e03b7c2");
     assert.deepEqual(result.leftOut, { ".gitignore": 2, ".gitattributes": 1 });
-    const live = path.join(aside, "apps", "ignores");
+    const live = path.join(aside, "apps", "ignores-5e03b7c2");
     assert.deepEqual(filesIn(live), [".registry.json", "api/items/route.ts", "app.json", "lib/util.ts"]);
 
     // The generator's check, as it runs on every build.
-    const { installs, warnings } = scanRegistryInstalls([{ kind: "app", slug: "ignores", dir: live }]);
+    const { installs, warnings } = scanRegistryInstalls([{ kind: "app", slug: "ignores-5e03b7c2", dir: live }]);
     assert.equal(installs.length, 1);
     assert.equal(installs[0].modified, false);
     assert.deepEqual(
@@ -446,7 +446,7 @@ describe("an install from the Registry", { concurrency: false }, () => {
   test("a .git and a .registry.json are still refused beside a .gitignore, with nothing written", async () => {
     const { installExtension, InstallError } = await install();
     await assert.rejects(
-      installExtension("app", "git-dir"),
+      installExtension("app", "git-dir-a19c4f57"),
       (err: unknown) =>
         err instanceof InstallError &&
         err.code === "invalid-package" &&
@@ -454,8 +454,8 @@ describe("an install from the Registry", { concurrency: false }, () => {
         /^"lib\/\.registry\.json" is named like the install record/m.test(err.detail ?? "") &&
         (err.detail ?? "").split("\n").length === 2,
     );
-    assert.equal(exists(".mixos/pending/apps/git-dir"), false);
-    assert.equal(exists(".mixos/pending/apps/git-dir.json"), false);
+    assert.equal(exists(".mixos/pending/apps/git-dir-a19c4f57"), false);
+    assert.equal(exists(".mixos/pending/apps/git-dir-a19c4f57.json"), false);
     assert.deepEqual(fs.readdirSync(path.join(root, ".mixos", "staging", "apps")), []);
   });
 
@@ -463,49 +463,49 @@ describe("an install from the Registry", { concurrency: false }, () => {
     const { installExtension, InstallError } = await install();
     const before = downloads;
     await assert.rejects(
-      installExtension("app", "undotted"),
+      installExtension("app", "undotted-8b41d0e6"),
       (err: unknown) => err instanceof InstallError && err.code === "invalid-package" && /version: /.test(err.message),
     );
     assert.equal(downloads, before);
-    assert.equal(exists(".mixos/pending/apps/undotted"), false);
+    assert.equal(exists(".mixos/pending/apps/undotted-8b41d0e6"), false);
   });
 
   test("a package that ships its own .registry.json is refused by pre-flight, with nothing written", async () => {
     const { installExtension, InstallError } = await install();
     await assert.rejects(
-      installExtension("app", "forged"),
+      installExtension("app", "forged-c7e29a14"),
       (err: unknown) =>
         err instanceof InstallError && err.code === "invalid-package" && /named like the install record/.test(err.detail ?? ""),
     );
-    assert.equal(exists(".mixos/pending/apps/forged"), false);
+    assert.equal(exists(".mixos/pending/apps/forged-c7e29a14"), false);
     assert.deepEqual(fs.readdirSync(path.join(root, ".mixos", "staging", "apps")), []);
   });
 
   test("a package the check refuses leaves nothing in pending or staging", async () => {
     const { installExtension, InstallError } = await install();
     await assert.rejects(
-      installExtension("app", "bare"),
+      installExtension("app", "bare-0f8e6d3a"),
       (err: unknown) => err instanceof InstallError && err.code === "rejected-by-registry" && /api\/x\/route\.ts/.test(err.detail ?? ""),
     );
-    assert.equal(exists(".mixos/pending/apps/bare"), false);
-    assert.equal(exists(".mixos/pending/apps/bare.json"), false);
+    assert.equal(exists(".mixos/pending/apps/bare-0f8e6d3a"), false);
+    assert.equal(exists(".mixos/pending/apps/bare-0f8e6d3a.json"), false);
     assert.deepEqual(fs.readdirSync(path.join(root, ".mixos", "staging", "apps")), []);
-    assert.equal(exists("apps/bare"), false);
+    assert.equal(exists("apps/bare-0f8e6d3a"), false);
   });
 
   test("refuses a slug whose removal stopped midway, before downloading anything", async () => {
     const { installExtension, InstallError } = await install();
     const { backupLocation } = await import("./backup");
-    const where = backupLocation(root, "app", "probe-app");
+    const where = backupLocation(root, "app", "probe-app-6c2d8e10");
     fs.mkdirSync(where.folder, { recursive: true });
     const before = downloads;
     try {
       await assert.rejects(
-        installExtension("app", "probe-app"),
+        installExtension("app", "probe-app-6c2d8e10"),
         (err: unknown) =>
           err instanceof InstallError &&
           err.code === "already-installed" &&
-          /A removal of probe-app stopped before it finished, and left \.mixos\/backup\/apps\/probe-app\./.test(err.message) &&
+          /A removal of probe-app-6c2d8e10 stopped before it finished, and left \.mixos\/backup\/apps\/probe-app-6c2d8e10\./.test(err.message) &&
           /npm run remove -- --recover/.test(err.message),
       );
     } finally {
@@ -521,7 +521,7 @@ describe("an install from the Registry", { concurrency: false }, () => {
     const before = downloads;
     try {
       await assert.rejects(
-        installExtension("app", "acme"),
+        installExtension("app", "acme-3f9a2c1b"),
         (err: unknown) => err instanceof CheckoutLockHeldError && /locked by the registry generator/.test(err.message),
       );
     } finally {

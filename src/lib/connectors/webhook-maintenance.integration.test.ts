@@ -115,11 +115,13 @@ describe("the webhook route while the platform schema is behind", { skip }, () =
     p = await loadPlatform();
 
     // A connector that would serve this delivery if the schema were current.
-    p.connectorRegistry.push(
-      JSON.parse(
+    // Named after its folder, as the generator names a registry entry.
+    p.connectorRegistry.push({
+      ...(JSON.parse(
         fs.readFileSync(path.join(REPO, "connectors", NAME, "connector.json"), "utf8"),
-      ) as ConnectorManifest,
-    );
+      ) as ConnectorManifest),
+      name: NAME,
+    });
     const [user] = await sql`
       insert into public.users (email, display_name, is_admin)
       values (${`maint-${run}@mixos.test`}, 'Admin', true) returning id

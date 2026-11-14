@@ -1,5 +1,6 @@
 {
   "$schema": "https://mixos.org/schemas/theme/v1.json",
+  "registryId": "mixos-dark-d666638f",
   "name": "MixOS Dark",
   "description": "Slate and cyan on a dark ground, drawn from the MixOS brand guidelines v1.0.",
   "tagline": "Slate and cyan on a dark ground",
@@ -55,5 +56,5 @@
   },
   "surfaces": [],
   "escapes": [],
-  "lastUpdated": "2026-11-10T06:48:59.926Z"
+  "lastUpdated": "2026-11-14T16:13:14.996Z"
 }

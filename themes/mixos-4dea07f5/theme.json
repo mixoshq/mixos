@@ -1,5 +1,6 @@
 {
   "$schema": "https://mixos.org/schemas/theme/v1.json",
+  "registryId": "mixos-4dea07f5",
   "name": "MixOS",
   "description": "The default MixOS theme. Slate and cyan on a light ground, drawn from the MixOS brand guidelines v1.0.",
   "tagline": "The default MixOS light theme",
@@ -55,5 +56,5 @@
   },
   "surfaces": [],
   "escapes": [],
-  "lastUpdated": "2026-11-10T06:48:59.926Z"
+  "lastUpdated": "2026-11-14T16:13:14.996Z"
 }

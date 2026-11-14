@@ -5,13 +5,13 @@
 Each connector lives in its own directory under `/connectors` with two files: a manifest and an implementation class.
 
 ```
-connectors/my-service/
+connectors/my-service-3f9a2c1b/
   connector.json    # Metadata, credential fields, setup guide
   README.md         # Optional — long-form description for the catalogue listing
   release-notes.json # Optional — one line per change, for the people it reaches
   index.ts          # Implementation class
   assets/           # icon.png and anything else the manifest names.
-    icon.png        # Required. Square, >= 512x512. Copied to public/connector-assets/my-service/
+    icon.png        # Required. Square, >= 512x512. Copied to public/connector-assets/my-service-3f9a2c1b/
 ```
 
 **Templates:** any connector directory whose name starts with an underscore (e.g. `connectors/_template/`) is treated as a template and skipped by the registry. Use this for starter scaffolds you want to keep in the repo without exposing to admins.
@@ -46,7 +46,7 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 
 ```json
 {
-  "name": "my-service",
+  "registryId": "my-service-3f9a2c1b",
   "displayName": "My Service",
   "version": "1.0.0",
   "icon": "assets/icon.png",
@@ -84,7 +84,7 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 | Field | Required | Description | Example |
 | --- | --- | --- | --- |
 | `$schema` | ✅ | Which shape the manifest is, and so which MixOS reads it: `https://mixos.org/schemas/connector/v1.json`, written first. The build refuses a manifest without it, or with a version this MixOS doesn't read. See [`$schema`](../apps/architecture.md#schema-which-shape-a-file-is). | `"$schema": "https://mixos.org/schemas/connector/v1.json"` |
-| `name` | ✅ | Unique identifier for the connector. Used in app.json and internally. Should be lowercase with hyphens. | `"name": "my-service"` |
+| `registryId` | ✅ | The connector's name: its folder, and what apps name it by in `app.json` and `context.connectors`. A lowercase name, a hyphen and an 8-character hex id, minted once by `npm run new` or `npm run rename`. The build refuses a connector whose folder isn't named after it. | `"registryId": "my-service-3f9a2c1b"` |
 | `displayName` | ✅ | Human-readable name shown in the Connector Registry admin page. | `"displayName": "My Service"` |
 | `version` | ✅ | This release, as three numbers. Apps name the version they were built against, and any later release with the same major version satisfies them. See [Versions](#versions). | `"version": "1.2.0"` |
 | `icon` | ✅ | Path inside the connector's own `assets/` directory, **written out in full including the `assets/` prefix**, shown on its Connector Registry tile. A `.png` or `.webp` must be **square, at least 512x512**; an `.svg` must have a `viewBox`. The generator checks the file and aborts the build otherwise. | `"icon": "assets/icon.png"` |
@@ -333,7 +333,7 @@ Connectors follow a simple lifecycle:
 1. The connector is **registered** automatically when the platform scans the `/connectors` directory and finds a valid `connector.json`.
 2. An admin **configures credentials** in the Connector Registry admin page. Credentials are encrypted at rest using AES-256-GCM. If it has methods that change data, the admin also decides whether it may.
 3. An app declares each connector it uses in its `app.json`, with the version it was built against, and the build holds the two together. The platform **initializes** the connector with decrypted credentials and injects it into the app context.
-4. App API routes access the connector by its manifest name, `context.connectors["my-service"]`, and call its declared methods.
+4. App API routes access the connector by its manifest name, `context.connectors["my-service-3f9a2c1b"]`, and call its declared methods.
 
 ## Security Model
 

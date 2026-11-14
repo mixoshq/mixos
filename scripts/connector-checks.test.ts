@@ -116,11 +116,12 @@ test("a mutating method throws from an MCP tool context", async () => {
       ),
     ),
   );
-  const telemetry = validateConnectorTelemetry(manifest.telemetry, manifest.name);
+  const name = manifest.registryId;
+  const telemetry = validateConnectorTelemetry(manifest.telemetry, name);
 
   const sent: string[] = [];
   const template = {
-    name: "_template",
+    name,
     configured: true,
     initialize() {},
     async listItems() {
@@ -136,19 +137,17 @@ test("a mutating method throws from an MCP tool context", async () => {
   // What the MCP broker builds for a tool: the app's connectors, narrowed
   // against the generated registry.
   const ctx = {
-    connectors: readOnlyConnectors({ _template: template as BaseConnector }, [
-      { name: "_template", telemetry },
-    ]),
+    connectors: readOnlyConnectors({ [name]: template as BaseConnector }, [{ name, telemetry }]),
   };
   const tool = async (c: typeof ctx) => {
-    const t = c.connectors._template as unknown as typeof template;
+    const t = c.connectors[name] as unknown as typeof template;
     await t.listItems();
     return t.createItem();
   };
 
   await assert.rejects(tool(ctx), (err: unknown) => {
     assert.ok(err instanceof ReadOnlyError);
-    assert.match(err.message, /"_template\.createItem" changes data upstream/);
+    assert.match(err.message, /"template-00000000\.createItem" changes data upstream/);
     return true;
   });
   assert.deepEqual(sent, ["GET /items"]);

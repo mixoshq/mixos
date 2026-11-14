@@ -47,7 +47,7 @@ const messages = await slack.getMessages({ channel: "C0123456789" });
 Each connector has a directory under `/connectors` with a manifest, an implementation and an icon:
 
 ```
-connectors/my-service/
+connectors/my-service-3f9a2c1b/
   connector.json    # Metadata, credential fields, setup guide
   index.ts          # Implementation class
   assets/
@@ -62,7 +62,7 @@ Declares the connector's metadata, what credentials it needs, and how to get the
 
 ```json
 {
-  "name": "my-service",
+  "registryId": "my-service-3f9a2c1b",
   "displayName": "My Service",
   "version": "1.0.0",
   "icon": "assets/icon.svg",
@@ -92,7 +92,7 @@ Declares the connector's metadata, what credentials it needs, and how to get the
 
 | Field | Required | Description | Example |
 | --- | --- | --- | --- |
-| `name` | ✅ | Unique identifier for the connector, matching its folder name. Used in app.json and internally. | `"name": "my-service"` |
+| `registryId` | ✅ | The connector's name, matching its folder name: what app.json and `context.connectors` name it by. Minted once by `npm run new`. | `"registryId": "my-service-3f9a2c1b"` |
 | `displayName` | ✅ | Human-readable name shown in the Connector Registry. | `"displayName": "My Service"` |
 | `version` | ✅ | This release, `X.Y.Z`. Apps name the version they were built against. See [Versions](../connectors/architecture.md#versions). | `"version": "1.0.0"` |
 | `icon` | ✅ | The registry tile's icon, a path inside the connector's `assets/` written with that prefix. | `"icon": "assets/icon.svg"` |
@@ -113,12 +113,12 @@ The build fails on a connector missing any required field, and checks the icon's
 The `index.ts` file default-exports a class that extends `HttpConnector`, which applies the manifest's `auth` and `http` policy: authentication, timeouts, retries and typed errors. You write `testConnection()` and the methods apps call. The platform calls `initialize()` with decrypted credentials before the connector is passed to any app.
 
 ```ts
-// connectors/my-service/index.ts
+// connectors/my-service-3f9a2c1b/index.ts
 import { HttpConnector } from "@/lib/connectors/http-connector";
 import type { ConnectorTestResult } from "@/lib/connectors/types";
 
 export default class MyServiceConnector extends HttpConnector {
-  readonly name = "my-service";
+  readonly name = "my-service-3f9a2c1b";
 
   async testConnection(): Promise<ConnectorTestResult> {
     await this.request("/me");

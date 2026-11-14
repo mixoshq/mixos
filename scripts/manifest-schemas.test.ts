@@ -4,7 +4,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatZodError, RawAppManifestSchema, RawConnectorManifestSchema } from "./manifest-schemas";
+import {
+  formatZodError,
+  RawAppManifestSchema,
+  RawConnectorManifestSchema,
+  RawThemeManifestSchema,
+} from "./manifest-schemas";
 import { JOB_TIMEOUT_MS, MAX_SYNC_BUDGET_MS } from "../src/lib/apps/job-limits";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -19,7 +24,12 @@ const sync = (budgetMs = 200_000) => ({
 
 /** The problems the schema reports for `manifest`, one line each. */
 function problems(manifest: Record<string, unknown>): string {
-  const parsed = RawAppManifestSchema.safeParse({ $schema: "https://mixos.org/schemas/app/v1.json", name: "Calls", ...manifest });
+  const parsed = RawAppManifestSchema.safeParse({
+    $schema: "https://mixos.org/schemas/app/v1.json",
+    registryId: "calls-3f9a2c1b",
+    name: "Calls",
+    ...manifest,
+  });
   return parsed.success ? "" : formatZodError(parsed.error);
 }
 
@@ -84,28 +94,28 @@ test("distinct role keys pass, and a defaultRole still has to name one", () => {
 // ── connector entries ───────────────────────────────────────────────────────
 
 test("a connector entry names the connector and the version the app was built against", () => {
-  assert.equal(problems({ connectors: [{ name: "crm", version: "1.2.0" }] }), "");
-  assert.equal(problems({ connectors: [{ name: "crm", version: "1.2.0", access: "write" }] }), "");
-  assert.equal(problems({ optionalConnectors: [{ name: "slack", version: "0.4.1", access: "read" }] }), "");
-  assert.match(problems({ connectors: ["crm"] }), /connectors\.0: Invalid input: expected object, received string/);
-  assert.match(problems({ connectors: [{ name: "crm" }] }), /connectors\.0\.version:/);
+  assert.equal(problems({ connectors: [{ name: "crm-1a2b3c4d", version: "1.2.0" }] }), "");
+  assert.equal(problems({ connectors: [{ name: "crm-1a2b3c4d", version: "1.2.0", access: "write" }] }), "");
+  assert.equal(problems({ optionalConnectors: [{ name: "slack-5e6f7a8b", version: "0.4.1", access: "read" }] }), "");
+  assert.match(problems({ connectors: ["crm-1a2b3c4d"] }), /connectors\.0: Invalid input: expected object, received string/);
+  assert.match(problems({ connectors: [{ name: "crm-1a2b3c4d" }] }), /connectors\.0\.version:/);
   for (const version of ["^1.2.0", "v1.2.0", "1.2", "1.2.0-rc.1"]) {
-    assert.match(problems({ connectors: [{ name: "crm", version }] }), /a version is three numbers/, version);
+    assert.match(problems({ connectors: [{ name: "crm-1a2b3c4d", version }] }), /a version is three numbers/, version);
   }
-  assert.match(problems({ connectors: [{ name: "crm", version: "1.0.0", access: "admin" }] }), /connectors\.0\.access/);
+  assert.match(problems({ connectors: [{ name: "crm-1a2b3c4d", version: "1.0.0", access: "admin" }] }), /connectors\.0\.access/);
 });
 
 test("a connector is declared once across both lists", () => {
   assert.match(
     problems({
-      connectors: [{ name: "crm", version: "1.0.0" }],
-      optionalConnectors: [{ name: "crm", version: "1.0.0" }],
+      connectors: [{ name: "crm-1a2b3c4d", version: "1.0.0" }],
+      optionalConnectors: [{ name: "crm-1a2b3c4d", version: "1.0.0" }],
     }),
-    /optionalConnectors\.0\.name: "crm" is already listed/,
+    /optionalConnectors\.0\.name: "crm-1a2b3c4d" is already listed/,
   );
   assert.match(
-    problems({ connectors: [{ name: "crm", version: "1.0.0" }, { name: "crm", version: "2.0.0" }] }),
-    /connectors\.1\.name: "crm" is already listed/,
+    problems({ connectors: [{ name: "crm-1a2b3c4d", version: "1.0.0" }, { name: "crm-1a2b3c4d", version: "2.0.0" }] }),
+    /connectors\.1\.name: "crm-1a2b3c4d" is already listed/,
   );
 });
 
@@ -113,7 +123,7 @@ test("a connector is declared once across both lists", () => {
 
 const connector = (extra: Record<string, unknown> = {}) => ({
   $schema: "https://mixos.org/schemas/connector/v1.json",
-  name: "crm",
+  registryId: "crm-1a2b3c4d",
   displayName: "CRM",
   version: "1.0.0",
   telemetry: [{ method: "listDeals", operation: "GET /deals" }],
@@ -186,4 +196,45 @@ test("a scope requested once changes are allowed needs a method that changes dat
     connectorProblems(connector({ auth: { ...auth, scopes: [{ scope: "deals:read", requested: "yes" }] }, credentialFields })),
     /auth\.scopes\.0\.requested/,
   );
+});
+
+// ── registryId ──────────────────────────────────────────────────────────────
+
+const theme = (extra: Record<string, unknown> = {}) => ({
+  $schema: "https://mixos.org/schemas/theme/v1.json",
+  registryId: "acme-3f9a2c1b",
+  name: "Acme",
+  description: "Acme's colours and type.",
+  ...extra,
+});
+
+/** The problems the schema reports for an app manifest as given, one line each. */
+function appProblems(manifest: Record<string, unknown>): string {
+  const parsed = RawAppManifestSchema.safeParse(manifest);
+  return parsed.success ? "" : formatZodError(parsed.error);
+}
+
+/** The problems the schema reports for a theme manifest, one line each. */
+function themeProblems(manifest: Record<string, unknown>): string {
+  const parsed = RawThemeManifestSchema.safeParse(manifest);
+  return parsed.success ? "" : formatZodError(parsed.error);
+}
+
+test("every manifest names its registryId: a lowercase name, a hyphen and an 8-character hex id", () => {
+  const app = { $schema: "https://mixos.org/schemas/app/v1.json", registryId: "calls-3f9a2c1b", name: "Calls" };
+  const kinds = [
+    ["app", app, appProblems],
+    ["connector", connector(), connectorProblems],
+    ["theme", theme(), themeProblems],
+  ] as const;
+  for (const [kind, manifest, check] of kinds) {
+    assert.equal(check(manifest), "", kind);
+    const unnamed: Record<string, unknown> = { ...manifest };
+    delete unnamed.registryId;
+    assert.match(check(unnamed), /registryId: Invalid input: expected string, received undefined/, kind);
+    for (const registryId of ["acme", "Acme-3f9a2c1b", "acme-3F9A2C1B", "acme_3f9a2c1b", "3f9a2c1b"]) {
+      assert.match(check({ ...manifest, registryId }), /registryId: must be the install name/, `${kind} ${registryId}`);
+    }
+    assert.match(check({ ...manifest, registryId: `${"a".repeat(40)}-3f9a2c1b` }), /registryId: Too big: expected string to have <=48 characters/, kind);
+  }
 });
