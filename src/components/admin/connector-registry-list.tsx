@@ -303,9 +303,6 @@ export default function ConnectorRegistryList({
               onConfigure={() => openTile(connector.name)}
               onDisable={() => setConfirmingDisable(connector)}
               onEnable={() => enable(connector)}
-              onRemove={() =>
-                setRemoving({ kind: "connector", slug: connector.name, name: connector.displayName })
-              }
               switching={switching}
             />
           ))}
@@ -336,6 +333,12 @@ export default function ConnectorRegistryList({
           configureAction={configureAction}
           testAction={testAction}
           changesAction={changesAction}
+          // The Remove dialog replaces this one rather than stacking on it:
+          // two focus traps at once, and the setup of a connector that is going.
+          onRemove={() => {
+            setOpenName(null);
+            setRemoving({ kind: "connector", slug: openConnector.name, name: openConnector.displayName });
+          }}
         />
       )}
 
