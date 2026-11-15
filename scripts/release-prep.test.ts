@@ -16,9 +16,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  bumpFor,
   bumpVersion,
   changelogVersions,
   compareVersions,
+  compatibilityReasons,
   escapeMarkdown,
   formatVersion,
   insertSection,
@@ -110,14 +112,42 @@ describe("reading a commit", () => {
     assert.equal(c.note, "a theme fails the build.");
   });
 
-  test("an app-only commit is a patch; platform files make it a minor whatever its scope", () => {
-    assert.equal(minorBecause(toChange(raw("fix(wall-e): a quote", ["apps/wall-e/quotes.ts"]))), null);
-    assert.equal(minorBecause(toChange(raw("docs(os): a typo", ["README.md"]))), "scoped os");
+  test("a feature or a breaking change is a minor; anything else is a patch, whatever its scope or files", () => {
+    assert.equal(minorBecause(toChange(raw("feat(os): a Methods tab", ["src/components/x.tsx"]))), "a feature");
+    assert.equal(minorBecause(toChange(raw("feat(wall-e): a quote", ["apps/wall-e/quotes.ts"]))), "a feature");
+    assert.equal(minorBecause(toChange(raw("fix(os)!: refuse a bad manifest", ["scripts/x.ts"]))), "breaking");
     assert.equal(
-      minorBecause(toChange(raw("fix(wall-e): a quote", ["apps/wall-e/quotes.ts", "src/lib/x.ts"]))),
-      "changes src/lib/x.ts",
+      minorBecause(toChange(raw("refactor(os): split a file", ["src/lib/x.ts"], "BREAKING CHANGE: x moved."))),
+      "breaking",
     );
-    assert.equal(minorBecause(toChange(raw("feat(deals): a plan", ["docs/plans/20261010_0000-deals.md"]))), null);
+    // Every change to MixOS is os, so neither the scope nor platform files count.
+    assert.equal(minorBecause(toChange(raw("fix(os): a crash", ["src/lib/x.ts"]))), null);
+    assert.equal(minorBecause(toChange(raw("docs(os): a typo", ["README.md"]))), null);
+    assert.equal(minorBecause(toChange(raw("perf(os): a faster scan", ["scripts/x.ts"]))), null);
+    assert.equal(minorBecause(toChange(raw("welcome tour", ["src/components/tour.tsx"]))), null);
+  });
+
+  test("a platform migration added, or a manifest schema no release reads yet, makes a minor", () => {
+    const index = (since: string) =>
+      JSON.stringify({
+        schemas: [
+          { file: "app", version: 1, url: "https://mixos.org/schemas/app/v1.json", since: "0.8.0" },
+          { file: "connector", version: 1, url: "https://mixos.org/schemas/connector/v1.json", since },
+        ],
+      });
+    assert.deepEqual(compatibilityReasons([], index("0.8.0")), []);
+    assert.deepEqual(compatibilityReasons([], null), []);
+    assert.deepEqual(compatibilityReasons([], index("unreleased")), [
+      "is the first release to read https://mixos.org/schemas/connector/v1.json",
+    ]);
+    assert.deepEqual(
+      compatibilityReasons(["supabase/migrations/20261115000000_scopes.sql", "supabase/migrations/README.md"], index("0.8.0")),
+      ["adds the platform migration supabase/migrations/20261115000000_scopes.sql"],
+    );
+
+    const fix = toChange(raw("fix(os): a crash", ["src/lib/x.ts"]));
+    assert.equal(bumpFor([fix]), "patch");
+    assert.equal(bumpFor([fix], compatibilityReasons([], index("unreleased"))), "minor");
   });
 
   test("a subject that isn't a Conventional Commit is kept whole", () => {
@@ -284,17 +314,45 @@ describe("a release cycle", () => {
     assert.deepEqual(r.plan(), { kind: "nothing", since: "v0.1.0" });
   });
 
-  test("an app-only release is a patch; an os commit or a platform file makes it a minor", () => {
+  test("fixes alone are a patch, os or not; a feature makes it a minor", () => {
     const r = repository();
     r.tag("v0.1.0");
     r.commit("fix(wall-e): a quote", ["apps/wall-e/quotes.ts"]);
+    r.commit("fix(os): a crash", ["src/lib/x.ts"]);
+    r.commit("docs(os): a guide", ["docs/guide.md"]);
     const patch = next(r.plan());
     assert.deepEqual([patch.version, patch.bump, patch.reasons, patch.warnings], ["0.1.1", "patch", [], []]);
 
-    r.commit("feat(wall-e): reach into the platform", ["apps/wall-e/x.ts", "src/lib/x.ts"]);
+    const feat = r.commit("feat(os): a Methods tab", ["src/components/x.tsx"]);
     const minor = next(r.plan());
     assert.deepEqual([minor.version, minor.bump], ["0.2.0", "minor"]);
-    assert.match(minor.warnings.join("\n"), /scoped wall-e but changes src\/lib\/x\.ts, so it counts as os/);
+    assert.deepEqual(minor.reasons, [`1 feature: ${feat.slice(0, 7)}`]);
+  });
+
+  test("a platform migration added, or a schema marked unreleased, makes a minor whatever the commits say", () => {
+    const r = repository();
+    r.write("docs/schemas/index.json", JSON.stringify({ schemas: [{ url: "https://mixos.org/schemas/app/v1.json", since: "0.1.0" }] }));
+    r.commit("chore(os): the schema index", ["supabase/migrations/20260101000000_base.sql"]);
+    r.tag("v0.1.0");
+
+    r.commit("fix(os): a migration", ["supabase/migrations/20260201000000_fix.sql"]);
+    const migration = next(r.plan());
+    assert.deepEqual([migration.version, migration.reasons], [
+      "0.2.0",
+      ["it adds the platform migration supabase/migrations/20260201000000_fix.sql"],
+    ]);
+
+    const s = repository();
+    s.write("docs/schemas/index.json", JSON.stringify({ schemas: [{ url: "https://mixos.org/schemas/app/v1.json", since: "0.1.0" }] }));
+    s.commit("chore(os): the schema index");
+    s.tag("v0.1.0");
+    s.write("docs/schemas/index.json", JSON.stringify({ schemas: [{ url: "https://mixos.org/schemas/app/v1.json", since: "unreleased" }] }));
+    s.commit("fix(os): app v1 in place");
+    const schema = next(s.plan());
+    assert.deepEqual([schema.version, schema.reasons], [
+      "0.2.0",
+      ["it is the first release to read https://mixos.org/schemas/app/v1.json"],
+    ]);
   });
 
   test("on the release branch, before the merge, there is nothing to tag", () => {
