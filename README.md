@@ -317,9 +317,9 @@ works.
 A release of MixOS is an annotated tag on `main`, `vX.Y.Z`, with a
 [GitHub Release](https://github.com/mixoshq/mixos/releases) whose notes are
 its section of `CHANGELOG.md`: breaking changes first, then features and
-fixes. Until 1.0, a release with a breaking change or any change to the
-platform is a minor version (`v0.2.0` → `v0.3.0`), and any other release is a
-patch (`v0.3.0` → `v0.3.1`). Prereleases have a suffix, such as
+fixes. Until 1.0, a release with a breaking change, a new feature, a new
+platform migration or a new manifest schema is a minor version (`v0.2.0` →
+`v0.3.0`), and a release of fixes alone is a patch (`v0.3.0` → `v0.3.1`). Prereleases have a suffix, such as
 `v0.3.0-rc.1`, and GitHub marks them as prereleases.
 
 **To upgrade a deployment,** run `/mixos upgrade` in Claude Code, or merge the

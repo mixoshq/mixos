@@ -32,14 +32,22 @@
  *
  * ── THE VERSION ─────────────────────────────────────────────────────────────
  *
- * While MixOS is 0.x, a release is a minor version if any commit since the last
- * stable release is breaking (`!` or a `BREAKING CHANGE:` footer), is scoped
- * `os`, or changes a file outside apps/, connectors/ and themes/ (build plans
- * aside, as dangerfile.ts counts them). Otherwise it is a patch. A commit that
- * changes platform files under another scope counts as an `os` commit, and is
- * reported. The first release is the version package.json already holds. A
- * prerelease is the next version with `-rc.N` appended, N one more than the
- * highest already tagged.
+ * While MixOS is 0.x, a release is a minor version if, since the last stable
+ * release:
+ *
+ *   - a commit is breaking (`!` or a `BREAKING CHANGE:` footer), which stays a
+ *     minor until MixOS is 1.0;
+ *   - a commit is a feature (`feat`); or
+ *   - a deployment or an extension has something new to meet, which the files
+ *     say whatever the commits do: a platform migration was added under
+ *     supabase/migrations/, or a manifest schema in docs/schemas/index.json is
+ *     "unreleased", so this release is the first to read it.
+ *
+ * Otherwise it is a patch: fixes, performance, docs, refactors and the like.
+ * The scope doesn't count. Every change to MixOS is `os`, so it said nothing.
+ * The first release is the version package.json already holds. A prerelease is
+ * the next version with `-rc.N` appended, N one more than the highest already
+ * tagged.
  *
  * ── THE NOTES ───────────────────────────────────────────────────────────────
  *
@@ -59,6 +67,10 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { platformMigrations } from "./platform-migration-files";
+
+/** Where the platform's migrations are, relative to the checkout. */
+const MIGRATIONS_DIR = "supabase/migrations";
 
 /** The core repository. Release notes link into it at the release's own tag. */
 export const REPOSITORY = "https://github.com/mixoshq/mixos";
@@ -170,19 +182,12 @@ export interface Change {
   breaking: boolean;
   /** The text of the `BREAKING CHANGE:` footer, when there is one. */
   note: string | null;
-  /** Files it changes outside apps/, connectors/ and themes/, build plans aside. */
-  osFiles: string[];
 }
 
 const SUBJECT = /^([A-Za-z]+)(?:\(([^()]*)\))?(!)?: (.+)$/;
 const FOOTER = /^BREAKING[ -]CHANGE: ?/;
 // The trailers that follow a footer: Co-Authored-By:, Signed-off-by:, Refs: …
 const TRAILER = /^(?:[A-Za-z]+-[A-Za-z-]+|Refs|Closes|Fixes): /i;
-
-const EXTENSION_DIRS = ["apps/", "connectors/", "themes/"];
-/** A platform file, as dangerfile.ts counts one: build plans describe work and do none. */
-export const isOsFile = (file: string) =>
-  !EXTENSION_DIRS.some((dir) => file.startsWith(dir)) && !/^docs\/plans\/.+\.md$/i.test(file);
 
 export function toChange(c: RawCommit): Change {
   const m = SUBJECT.exec(c.subject.trim());
@@ -206,25 +211,38 @@ export function toChange(c: RawCommit): Change {
     summary: (m ? m[4] : c.subject).trim(),
     breaking: Boolean(m?.[3]) || start !== -1,
     note,
-    osFiles: c.files.filter(isOsFile),
   };
 }
 
 /** Why a change makes the release a minor one, or null when it doesn't. */
 export function minorBecause(c: Change): string | null {
   if (c.breaking) return "breaking";
-  if (c.scopes.includes("os")) return "scoped os";
-  if (c.osFiles.length > 0) return `changes ${listFiles(c.osFiles)}`;
+  if (c.type === "feat") return "a feature";
   return null;
 }
 
-/** Minor when any change is breaking, `os`, or touches platform files; patch otherwise. */
-export function bumpFor(changes: Change[]): Bump {
-  return changes.some((c) => minorBecause(c) !== null) ? "minor" : "patch";
+/**
+ * What a deployment or an extension has new to meet since the last release,
+ * read from the files rather than the commits, one line each: each platform
+ * migration added (`added`, paths under supabase/migrations/), and each
+ * manifest schema the index says is "unreleased" (`schemaIndex`, the text of
+ * docs/schemas/index.json), which this release will be the first to read.
+ */
+export function compatibilityReasons(added: readonly string[], schemaIndex: string | null): string[] {
+  const reasons = platformMigrations(added).map((m) => `adds the platform migration ${m.file}`);
+  if (schemaIndex !== null) {
+    const parsed = JSON.parse(schemaIndex) as { schemas?: { url?: string; since?: string }[] };
+    for (const s of parsed.schemas ?? []) {
+      if (s.since === UNRELEASED && s.url) reasons.push(`is the first release to read ${s.url}`);
+    }
+  }
+  return reasons;
 }
 
-const listFiles = (files: string[]) =>
-  files.length <= 2 ? files.join(", ") : `${files.slice(0, 2).join(", ")} and ${files.length - 2} more`;
+/** Minor when any change is breaking or a feature, or there is something new to meet; patch otherwise. */
+export function bumpFor(changes: Change[], compatibility: readonly string[] = []): Bump {
+  return compatibility.length > 0 || changes.some((c) => minorBecause(c) !== null) ? "minor" : "patch";
+}
 
 // ── Notes ───────────────────────────────────────────────────────────────────
 
@@ -560,9 +578,15 @@ export function planRelease(root: string, options: PlanOptions = {}): Plan {
     bump = "first";
   } else {
     const counted = readChanges(s.git, lastStable.name);
-    bump = bumpFor(counted);
+    const added = s
+      .git(["diff", "--name-only", "--diff-filter=A", `${lastStable.name}..HEAD`, "--", MIGRATIONS_DIR])
+      .split("\n")
+      .map((f) => f.trim())
+      .filter(Boolean);
+    const compatibility = compatibilityReasons(added, showFile(s.git, "HEAD", SCHEMA_INDEX));
+    bump = bumpFor(counted, compatibility);
     core = bumpVersion(lastStable.version, bump);
-    reasons.push(...minorReasons(counted));
+    reasons.push(...minorReasons(counted, compatibility));
     warnings.push(...labelWarnings(counted));
   }
 
@@ -612,14 +636,13 @@ export function planRelease(root: string, options: PlanOptions = {}): Plan {
   };
 }
 
-function minorReasons(changes: Change[]): string[] {
+function minorReasons(changes: Change[], compatibility: readonly string[]): string[] {
   const breaking = changes.filter((c) => c.breaking);
-  const os = changes.filter((c) => !c.breaking && c.scopes.includes("os"));
-  const files = changes.filter((c) => minorBecause(c)?.startsWith("changes "));
+  const features = changes.filter((c) => !c.breaking && c.type === "feat");
   return [
     ...(breaking.length ? [`${breaking.length} breaking: ${breaking.map((c) => c.short).join(", ")}`] : []),
-    ...(os.length ? [`${os.length} scoped os`] : []),
-    ...files.map((c) => `${c.short} ${minorBecause(c)} (${c.subject})`),
+    ...(features.length ? [`${count(features.length, "feature")}: ${features.map((c) => c.short).join(", ")}`] : []),
+    ...compatibility.map((r) => `it ${r}`),
   ];
 }
 
@@ -627,10 +650,10 @@ function labelWarnings(changes: Change[]): string[] {
   const out: string[] = [];
   for (const c of changes) {
     if (c.type === null) {
-      out.push(`${c.short} "${c.subject}" is not a Conventional Commit. It is listed under Other changes.`);
-    } else if (c.osFiles.length > 0 && !c.scopes.some((s) => s === "os" || s === "deps")) {
-      const scope = c.scopes.length ? `scoped ${c.scopes.join(", ")}` : "has no scope";
-      out.push(`${c.short} ${scope} but changes ${listFiles(c.osFiles)}, so it counts as os.`);
+      out.push(
+        `${c.short} "${c.subject}" is not a Conventional Commit. It is listed under Other changes, ` +
+          "and isn't counted as a feature: if it is one, pass a minor version to --write.",
+      );
     }
   }
   return out;
@@ -905,7 +928,11 @@ function printPlan(plan: Plan): void {
   if (plan.bump === "minor") {
     out.push("", "Minor, because:", ...plan.reasons.map((r) => `  - ${r}`));
   } else if (plan.bump === "patch") {
-    out.push("", `Patch: no commit since ${plan.from} is breaking, scoped os, or changes platform files.`);
+    out.push(
+      "",
+      `Patch: since ${plan.from}, no commit is breaking or a feature, no platform migration was added, ` +
+        "and no manifest schema is new.",
+    );
   }
   if (plan.warnings.length > 0) out.push("", "Check:", ...plan.warnings.map((w) => `  - ${w}`));
   out.push(
