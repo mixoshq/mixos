@@ -31,9 +31,15 @@
  * src/generated/extension-renames.ts, which the release step reads:
  *
  *  - every `from` is a slug the build doesn't carry, renamed once;
- *  - every `to` is in the build, or renamed again by a later entry, so a chain
- *    of renames is followed in order, and a cycle can't be written;
+ *  - no `to` is a slug an earlier entry renamed away, so a chain of renames is
+ *    followed in order, and a cycle can't be written;
  *  - every name is a slug of its kind.
+ *
+ * A `to` the build doesn't carry is an extension removed since it was renamed
+ * (`npm run remove`, or Remove in the admin). Its data moves to the new slug
+ * all the same and stays there, as a removed extension's data does, for a
+ * reinstall to find. Refusing it would make a renamed extension impossible to
+ * remove, as the generator runs without it before the removal is kept.
  *
  * Entries stay. A rename whose old slug holds nothing on an instance, a fresh
  * one or one that has moved it already, does nothing there.
@@ -129,9 +135,15 @@ export function renameProblems(renames: readonly ExtensionRename[], build: Build
           `Remove the folder, or the entry.`,
       );
     }
-    const later = renames.slice(i + 1).some((next) => next.kind === r.kind && next.from === r.to);
-    if (!build[r.kind].includes(r.to) && !later) {
-      problems.push(`${at}: the build carries no ${r.kind} ${r.to}, so there is nothing for its data to move to.`);
+    // The data would stop at `to`, having already left it; or, for a cycle,
+    // come back to a name it left. A `to` the build doesn't carry is fine: see
+    // the note at the top of this file.
+    const earlier = renames.slice(0, i).findIndex((prev) => prev.kind === r.kind && prev.from === r.to);
+    if (earlier !== -1) {
+      problems.push(
+        `${at}: renames.${earlier} renamed ${r.to} away before this entry, so its data would stop at ${r.to}. ` +
+          `A chain is listed in order, and doesn't come back to a slug it left.`,
+      );
     }
   });
   return problems;
