@@ -2782,8 +2782,9 @@ export function getTheme(slug: string): ThemeManifest {
   const remixes = writeRemixIndex(apps);
   console.log(`Generated remix index with ${remixes} remix(es)`);
 
-  // The rename ledger, against what this build carries: a rename's data can
-  // only move to an extension that is here (scripts/extension-renames.ts).
+  // The rename ledger, against what this build carries: a slug still here
+  // can't have been renamed away (scripts/extension-renames.ts). A rename's
+  // new slug may be gone, removed since.
   const renames = readRenames(CORE_DIR);
   const renameIssues = renameProblems(renames, {
     app: apps.map((a) => a.slug),
