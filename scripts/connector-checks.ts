@@ -23,11 +23,14 @@ import type { ConnectorTelemetryDefinition } from "../src/lib/connectors/types";
  *
  * `mutates` is carried with the rest. The app and MCP contexts read it from the
  * generated registry to refuse a write the caller may not make, so a list that
- * dropped it here would switch that check off without a sound. `operation` is
- * carried for the Connector Registry, which lists what the connector calls.
+ * dropped it here would switch that check off without a sound. `operation` and
+ * `scopes` are carried for the Connector Registry, whose Methods tab lists what
+ * each method calls and needs.
  */
 export function validateConnectorTelemetry(
-  raw: { method: string; operation: string; description?: string; mutates?: boolean }[] | undefined,
+  raw:
+    | { method: string; operation: string; description?: string; mutates?: boolean; scopes?: string[] }[]
+    | undefined,
   name: string,
 ): ConnectorTelemetryDefinition[] {
   if (!raw || raw.length === 0) return [];
@@ -45,7 +48,37 @@ export function validateConnectorTelemetry(
     operation: e.operation,
     ...(e.description != null ? { description: e.description } : {}),
     ...(e.mutates ? { mutates: true } : {}),
+    ...(e.scopes ? { scopes: e.scopes } : {}),
   }));
+}
+
+/**
+ * The reads that need a scope this connector asks for only once changes are
+ * allowed, as warnings, one per method.
+ *
+ * Not an error, because it can be the truth: some providers authorize a read
+ * only with their read-write scope (Google Sheets' data-filter and
+ * developer-metadata reads take `spreadsheets`, never `spreadsheets.readonly`).
+ * Refusing the declaration would only hide that the read fails on an install
+ * that is read-only, which is what the warning and the Methods tab say instead.
+ * The manifest's own check has already held each name to the catalogue.
+ */
+export function readsNeedingWriteScopes(
+  name: string,
+  telemetry: readonly ConnectorTelemetryDefinition[],
+  scopes: readonly { scope: string; requested: boolean | "write" }[] | undefined,
+): string[] {
+  const askedForWrites = new Set((scopes ?? []).filter((s) => s.requested === "write").map((s) => s.scope));
+  return telemetry
+    .filter((t) => !t.mutates)
+    .flatMap((t) => {
+      const needs = (t.scopes ?? []).filter((s) => askedForWrites.has(s));
+      if (needs.length === 0) return [];
+      return [
+        `connectors/${name}: "${t.method}" reads, but needs ${needs.join(", ")}, which this connector asks ` +
+          `for only once changes are allowed. On an install that is read-only the provider refuses it.`,
+      ];
+    });
 }
 
 /**

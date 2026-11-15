@@ -198,6 +198,57 @@ test("a scope requested once changes are allowed needs a method that changes dat
   );
 });
 
+test("the scopes a method needs are ones the connector requests, each named once", () => {
+  const auth = {
+    strategy: "oauth2_authorization_code",
+    authorizeUrl: "https://crm.example/authorize",
+    tokenUrl: "https://crm.example/token",
+    credentialKeys: ["clientId", "clientSecret"],
+    scopes: [
+      { scope: "deals:read", requested: true },
+      { scope: "deals:write", requested: "write" },
+      { scope: "admin", requested: false },
+    ],
+  };
+  const credentialFields = [
+    { key: "clientId", label: "Client ID", type: "text" },
+    { key: "clientSecret", label: "Client secret", type: "password" },
+  ];
+  const withMethods = (telemetry: unknown[]) => connectorProblems(connector({ auth, credentialFields, telemetry }));
+  const create = { method: "createDeal", operation: "POST /deals", mutates: true, scopes: ["deals:write"] };
+
+  assert.equal(withMethods([{ method: "listDeals", operation: "GET /deals", scopes: ["deals:read"] }, create]), "");
+  // Declaring them is optional, method by method.
+  assert.equal(withMethods([{ method: "listDeals", operation: "GET /deals" }, create]), "");
+  // A read needing a scope asked for only once changes are allowed can be the
+  // truth; the generator warns (connector-checks.test.ts), the schema doesn't.
+  assert.equal(withMethods([{ method: "searchDeals", operation: "POST /deals/search", scopes: ["deals:write"] }, create]), "");
+
+  assert.match(
+    withMethods([{ method: "listDeals", operation: "GET /deals", scopes: ["deals:raed"] }, create]),
+    /telemetry\.0\.scopes\.0: "listDeals" needs deals:raed, which is not in auth\.scopes/,
+  );
+  assert.match(
+    withMethods([{ method: "listDeals", operation: "GET /deals", scopes: ["admin"] }, create]),
+    /telemetry\.0\.scopes\.0: "listDeals" needs admin, which this connector never requests, so the method could never be called/,
+  );
+  assert.match(
+    withMethods([{ method: "listDeals", operation: "GET /deals", scopes: ["deals:read", "deals:read"] }, create]),
+    /telemetry\.0\.scopes\.1: "listDeals" names deals:read twice/,
+  );
+  assert.match(withMethods([{ method: "listDeals", operation: "GET /deals", scopes: [""] }, create]), /telemetry\.0\.scopes\.0/);
+});
+
+test("a connector that authenticates with nothing names no scopes on its methods", () => {
+  assert.equal(connectorProblems(connector({ auth: { strategy: "none" } })), "");
+  assert.match(
+    connectorProblems(
+      connector({ auth: { strategy: "none" }, telemetry: [{ method: "listDeals", operation: "GET /deals", scopes: ["deals:read"] }] }),
+    ),
+    /telemetry\.0\.scopes: "listDeals" names scopes, but auth\.strategy is "none"/,
+  );
+});
+
 // ── registryId ──────────────────────────────────────────────────────────────
 
 const theme = (extra: Record<string, unknown> = {}) => ({

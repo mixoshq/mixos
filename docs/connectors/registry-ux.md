@@ -40,7 +40,7 @@ be guessed and the provider rejects the flow without it.
 
 Read this before anything else, because it is smaller than it looks.
 
-**The dialog is identical for every connector.** Four tabs, in this order,
+**The dialog is identical for every connector.** Five tabs, in this order,
 always. An author does not design them, choose them, reorder them or add to
 them — the platform renders the same shell for Gmail and for a connector written
 next year.
@@ -49,18 +49,25 @@ next year.
 | --- | --- | --- |
 | **Details** | the credential row (configured, last verified), the admin switch, other apps' manifests | *nothing structural* |
 | **Configure** | the platform's save / authorize / verify steps, plus your provider-side steps | **`setup`** |
+| **Methods** | `telemetry`: each method, its operation and description, whether it changes data, and the scopes it needs with the grant's verdict on each | **`telemetry[].scopes`** |
 | **Scopes** | `auth.scopes`, checked against the grant, citing `auth.scopesUrl` | **`auth.scopesUrl`** |
 | **Usage Logs** | `telemetry_events` — the last 100 recorded calls | *nothing* |
 
-So there are exactly **two authored surfaces**:
+So there are exactly **three authored surfaces**:
 
 1. **`setup`** — the provider-side steps of the Configure wizard: what an admin
    does in someone else's console before they have anything to paste in.
 2. **`auth.scopesUrl`** — which page the permissions list is read from.
+3. **`telemetry[].scopes`** — which of the scopes you request each method needs,
+   read from the provider's reference for that operation. Where it says "one
+   of" several, name the one you request. The build holds each to `auth.scopes`,
+   and warns about a read that needs a scope requested only with `"write"`,
+   which fails on an install that is read-only. A method without it reads
+   "scopes not declared" on the Methods tab.
 
 Plus `icon` and `description`, which are content rather than design.
 
-Everything else on all four tabs is derived from data the platform already
+Everything else on all five tabs is derived from data the platform already
 holds. **Usage Logs takes no authoring at all** — declare your methods in
 `telemetry` (which invariant 16 requires anyway) and the log populates itself.
 **Details takes none either**: dependency counts come from other apps'
@@ -78,7 +85,7 @@ connection rather than to any one view of it, so it stays put while the tabs
 change beneath it. The header carries the icon, the display name and the
 `description`; the footer carries provenance — last updated, and the author.
 
-Tabs are **never filtered or disabled**: all four render for every connector,
+Tabs are **never filtered or disabled**: all five render for every connector,
 and one with nothing to show says why in words — a public API's Scopes tab, a
 log no app has written to yet. A disabled tab poses a question ("why can't I
 click that?") the tab bar has no room to answer.

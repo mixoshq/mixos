@@ -26,7 +26,9 @@ import { Provenance, RemoveAction } from "./provenance";
 import { useClientValue } from "@/lib/use-client-value";
 import type {
   ConnectorDocLink,
+  ConnectorScope,
   ConnectorSetupStep,
+  ConnectorTelemetryDefinition,
 } from "@/lib/connectors/types";
 import type { ConnectorConfigState } from "@/lib/connectors/status";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
@@ -39,7 +41,7 @@ import {
 } from "@/lib/connectors/write-policy";
 import type { ConnectorWithStatus } from "./connector-registry-list";
 
-type DialogTab = "details" | "configure" | "scopes" | "logs";
+type DialogTab = "details" | "configure" | "methods" | "scopes" | "logs";
 
 interface Props {
   connector: ConnectorWithStatus;
@@ -302,6 +304,179 @@ function ScopeStatusIcon({ verdict }: { verdict: ScopeVerdict }) {
   );
 }
 
+/**
+ * The one thing about a method an admin most needs to know before an app calls
+ * it, or null when nothing stands in its way. First match wins: a write that is
+ * off says so before anything about its scopes, since the platform refuses it
+ * before the provider is asked.
+ */
+function methodNote(
+  m: ConnectorTelemetryDefinition,
+  scopeOf: Map<string, ConnectorScope>,
+  verdictOf: (scope: string) => ScopeVerdict,
+  changesAllowed: boolean,
+): { tone: "neutral" | "warning" | "danger"; label: string; tip: string } | null {
+  if (m.mutates && !changesAllowed) {
+    return {
+      tone: "neutral",
+      label: "Off while read-only",
+      tip: "It changes data, and this connector is read-only, so it is refused before the provider is asked. An admin allows changes on the Configure tab.",
+    };
+  }
+  const scopes = m.scopes ?? [];
+  const forWrites = scopes.filter((s) => scopeOf.get(s)?.requested === "write");
+  if (!m.mutates && !changesAllowed && forWrites.length > 0) {
+    return {
+      tone: "warning",
+      label: "Works once changes are allowed",
+      tip: `It only reads, but the provider authorizes it only with ${forWrites.map(shortScopeId).join(", ")}, which this connector asks for once changes are allowed. Until then the provider refuses it.`,
+    };
+  }
+  const refused = scopes.filter((s) => verdictOf(s) === "refused");
+  if (refused.length > 0) {
+    return {
+      tone: "danger",
+      label: "Scope refused",
+      tip: `The provider didn't grant ${refused.map(shortScopeId).join(", ")}, so it fails. Connect again and approve every permission.`,
+    };
+  }
+  return null;
+}
+
+/**
+ * Every method an app can call, each with the scopes it needs and what the
+ * grant says about them: the Scopes tab's verdicts, joined to the calls they
+ * decide. An admin reads here which calls a refused scope breaks, and which
+ * scope a failing call was missing.
+ *
+ * A method whose manifest entry names no `scopes` says so rather than guessing
+ * from the catalogue: a read could need any of the read scopes, and a wrong
+ * answer here is worse than none.
+ */
+function MethodsPanel({
+  connector,
+  catalogue,
+  statusByScope,
+  changesAllowed,
+  authenticates,
+}: {
+  connector: ConnectorWithStatus;
+  catalogue: ConnectorScope[];
+  statusByScope: Map<string, string>;
+  changesAllowed: boolean;
+  authenticates: boolean;
+}) {
+  const scopeOf = new Map(catalogue.map((s) => [s.scope, s]));
+  /** The Scopes tab's verdict for one scope, on this install. */
+  const verdictOf = (scope: string): ScopeVerdict => {
+    const entry = scopeOf.get(scope);
+    if (!entry || !isScopeRequested(entry, changesAllowed)) return "unused";
+    return STATUS_TO_VERDICT[statusByScope.get(scope) ?? ""] ?? "unused";
+  };
+  const declaresScopes = connector.telemetry.some((m) => m.scopes !== undefined);
+
+  if (connector.telemetry.length === 0) {
+    return (
+      <div className="px-5 py-4">
+        <p className="text-sm text-muted-foreground">This connector declares no methods, so apps can call nothing through it.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 px-5 py-4">
+      {authenticates && declaresScopes && !connector.access.grantedKnown && (
+        <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground">
+          {connector.userScoped
+            ? "Each person holds their own grant, and you haven't connected your own account yet"
+            : "Nobody has connected this yet"}
+          , so whether the provider grants each scope below is unknown until someone does.
+        </p>
+      )}
+
+      {/* The Scopes tab's key, worded for a method: the same three icons. */}
+      {authenticates && declaresScopes && (
+        <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {[
+            {
+              verdict: "held" as const,
+              label: "Granted",
+              tip: "The provider granted it, so calls needing it can work.",
+            },
+            {
+              verdict: "refused" as const,
+              label: "Refused",
+              tip: "This connector asks for it and the provider didn't grant it. Calls needing it fail until someone connects again and approves it.",
+            },
+            {
+              verdict: "unused" as const,
+              label: "Unknown",
+              tip: "Not granted on this install: nobody has connected yet, or this connector asks for it only once changes are allowed.",
+            },
+          ].map((item) => (
+            <InfoTooltip key={item.verdict} tip={item.tip}>
+              <span className="inline-flex items-center gap-1">
+                <ScopeStatusIcon verdict={item.verdict} />
+                {item.label}
+              </span>
+            </InfoTooltip>
+          ))}
+        </div>
+      )}
+
+      {/* Striped as the Scopes tab is, for the same reason, and at the same
+          ceiling: `text-muted-foreground` on `bg-muted/60` is 4.51:1. */}
+      <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
+        {connector.telemetry.map((m, i) => {
+          const note = methodNote(m, scopeOf, verdictOf, changesAllowed);
+          return (
+            <li key={m.method} className={`px-3 py-2 ${i % 2 === 1 ? "bg-muted/60" : ""}`}>
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-mono text-sm text-foreground">{m.method}</span>
+                <span className="font-mono text-xs text-muted-foreground">{m.operation}</span>
+                {m.mutates && <StatusPill tone="warning">Changes data</StatusPill>}
+                {note && (
+                  <InfoTooltip tip={note.tip}>
+                    <StatusPill tone={note.tone}>{note.label}</StatusPill>
+                  </InfoTooltip>
+                )}
+              </span>
+              {m.description && (
+                <span className="mt-0.5 block text-xs text-muted-foreground">{m.description}</span>
+              )}
+              {authenticates && (
+                <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                  <span className="text-muted-foreground">Needs</span>
+                  {m.scopes === undefined ? (
+                    <span className="text-muted-foreground">scopes not declared</span>
+                  ) : m.scopes.length === 0 ? (
+                    <span className="text-muted-foreground">no scope</span>
+                  ) : (
+                    m.scopes.map((scope) => (
+                      <span key={scope} className="inline-flex items-center gap-1">
+                        <ScopeStatusIcon verdict={verdictOf(scope)} />
+                        <span className="font-mono text-foreground" title={scope}>
+                          {shortScopeId(scope)}
+                        </span>
+                      </span>
+                    ))
+                  )}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {!authenticates && (
+        <p className="text-xs text-muted-foreground">
+          This connector reaches a public API and authenticates with nothing, so its methods need no permissions.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** A note the manifest attaches to one step, shown at the control it concerns. */
 function StepNote({ children }: { children: ReactNode }) {
   return (
@@ -444,7 +619,6 @@ export default function ConnectorConfigureDialog({
   const [outcome, setOutcome] = useState<ConnectorTestOutcome | null>(null);
   const [copied, setCopied] = useState(false);
   const [showDependents, setShowDependents] = useState(false);
-  const [showMethods, setShowMethods] = useState(false);
   /**
    * Which step the admin has navigated to, or `undefined` to follow the
    * checklist — the first unfinished step. Clearing it after a successful
@@ -1026,6 +1200,7 @@ export default function ConnectorConfigureDialog({
   const tabs: Array<{ key: DialogTab; label: string }> = [
     { key: "details", label: "Details" },
     { key: "configure", label: "Configure" },
+    { key: "methods", label: "Methods" },
     { key: "scopes", label: "Scopes" },
     { key: "logs", label: "Usage Logs" },
   ];
@@ -1261,9 +1436,9 @@ export default function ConnectorConfigureDialog({
             )}
 
             {/* ── What apps can call ───────────────────────────────────────
-                The declared methods, each with the provider operation it
-                calls: everything an app can reach through this connector,
-                and the only things. */}
+                How many methods, and how many change data: everything an app
+                can reach through this connector, and the only things. Each one,
+                with the scopes it needs, is on the Methods tab. */}
             <section>
               <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                 What apps can call
@@ -1280,32 +1455,26 @@ export default function ConnectorConfigureDialog({
                   : ", none of which changes data."}
               </p>
               {connector.telemetry.length > 0 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setShowMethods((v) => !v)}
-                    aria-expanded={showMethods}
-                    className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary underline underline-offset-2 hover:no-underline"
-                  >
-                    {showMethods ? "Hide" : "Show"} methods
-                  </button>
-                  {showMethods && (
-                    <ul className="mt-2 space-y-1 text-sm">
-                      {connector.telemetry.map((m) => (
-                        <li key={m.method} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                          <span className="font-mono text-foreground">{m.method}</span>
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {m.operation}
-                          </span>
-                          {m.mutates && <StatusPill tone="warning">Changes data</StatusPill>}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
+                <button
+                  type="button"
+                  onClick={() => setTab("methods")}
+                  className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary underline underline-offset-2 hover:no-underline"
+                >
+                  Show methods
+                </button>
               )}
             </section>
           </div>
+        )}
+
+        {tab === "methods" && (
+          <MethodsPanel
+            connector={connector}
+            catalogue={catalogue}
+            statusByScope={statusByScope}
+            changesAllowed={changesAllowed}
+            authenticates={authenticates}
+          />
         )}
 
         {tab === "scopes" && (

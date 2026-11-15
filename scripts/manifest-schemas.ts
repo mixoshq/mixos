@@ -571,6 +571,19 @@ const connectorTelemetryEventSchema = z.strictObject({
    * writes is what buys the enforcement.
    */
   mutates: z.boolean().optional(),
+  /**
+   * The scopes this method needs, every one of them: each a `scope` in
+   * `auth.scopes` that the connector requests, which the manifest's own check
+   * holds to (RawConnectorManifestSchema). Where a provider's reference says a
+   * method takes "one of" several, this names the one this connector asks for
+   * and relies on.
+   *
+   * What joins the Scopes tab to the methods: an admin sees which calls a
+   * refused scope breaks, and which scope a failing call was missing. Optional,
+   * and not part of the contract an app is built against, so declaring it
+   * needs no new version (src/lib/connectors/requirements.ts).
+   */
+  scopes: z.array(z.string().min(1)).optional(),
 });
 
 const serviceDefinitionSchema = z.strictObject({
@@ -1618,6 +1631,53 @@ export const RawConnectorManifestSchema = z
         path: ["auth", "scopes"],
       });
     }
+
+    // The scopes a method names are ones this connector asks for. A name not
+    // in the catalogue is a typo, or a scope the refresh never documented; one
+    // the connector never requests would make the method uncallable. A read
+    // that needs a scope requested only once changes are allowed can be the
+    // truth, so it is the generator's warning, not an error here.
+    const catalogue = new Map((m.auth?.scopes ?? []).map((s) => [s.scope, s.requested]));
+    (m.telemetry ?? []).forEach((t, i) => {
+      if (!t.scopes) return;
+      if (strategy === "none" && t.scopes.length > 0) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            `"${t.method}" names scopes, but auth.strategy is "none": a connector that authenticates ` +
+            `with nothing has no permissions to need. Remove its scopes.`,
+          path: ["telemetry", i, "scopes"],
+        });
+        return;
+      }
+      const seen = new Set<string>();
+      t.scopes.forEach((scope, j) => {
+        const at = ["telemetry", i, "scopes", j];
+        if (seen.has(scope)) {
+          ctx.addIssue({ code: "custom", message: `"${t.method}" names ${scope} twice.`, path: at });
+          return;
+        }
+        seen.add(scope);
+        const requested = catalogue.get(scope);
+        if (requested === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            message:
+              `"${t.method}" needs ${scope}, which is not in auth.scopes. Name a scope from the catalogue ` +
+              `(npx tsx scripts/check-scopes.ts <name> --write writes it).`,
+            path: at,
+          });
+        } else if (requested === false) {
+          ctx.addIssue({
+            code: "custom",
+            message:
+              `"${t.method}" needs ${scope}, which this connector never requests, so the method could never ` +
+              `be called. Request it in auth.scopes: true for a read, "write" for a method that changes data.`,
+            path: at,
+          });
+        }
+      });
+    });
 
     // One method per provider operation: a second method for the same
     // operation is a variant, and a variant is an option on the first.

@@ -10,6 +10,18 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-11-15
+
+- **A connector's methods can name the scopes they need, and a Methods tab
+  shows them.** Each `telemetry` entry in `connector.json` takes an optional
+  `"scopes": [...]`, from those `auth.scopes` requests; the build refuses one
+  that isn't there or is never requested, and warns about a read that needs a
+  scope requested only with `"write"`, which fails while the connector is
+  read-only. The connector dialog's new **Methods** tab, where Show methods
+  was, lists each method with its scopes and whether the grant holds each.
+  Connector schema v1 gained the field in place. See
+  [`docs/plans/20261115_1111-connector-method-scopes.md`](docs/plans/20261115_1111-connector-method-scopes.md).
+
 ## 2026-11-14
 
 - **Every extension names itself, as `registryId`, and its folder is named
