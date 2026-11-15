@@ -41,7 +41,8 @@ yourself:
 
 - **Docker on Windows**: Docker Desktop, with its WSL integration turned on for
   the distribution your copy lives in. See [On Windows](#on-windows).
-- **VS Code extensions**: in the Extensions view (`Cmd+Shift+X` on macOS,
+- **VS Code extensions**, if you work in VS Code rather than the Claude app:
+  in the Extensions view (`Cmd+Shift+X` on macOS,
   `Ctrl+Shift+X` on Linux and Windows), install **Claude Code for VS Code** by
   Anthropic, and Prettier. Or from a terminal:
   `code --install-extension Anthropic.claude-code` and
@@ -60,20 +61,22 @@ rest.
 
 ## Quick start with `/mixos init`
 
-The easiest way to set up a development copy is to let Claude do it, in VS Code.
-You install VS Code and the Claude Code extension; Claude installs and starts
+The easiest way to set up a development copy is to let Claude do it, in the
+[Claude app](https://claude.com/download)'s **Code** tab, or in VS Code with the
+Claude Code extension. You install one of them; Claude installs and starts
 everything else.
 
 1. **Get the code**, with the prompt in
    [How to install](install.md#for-vibe-coders): Claude Code
    clones MixOS's newest release into `~/MixOS`. Or download the release's
-   `.zip`. Open the folder in VS Code. On macOS, if you're offered the command
-   line developer tools, choose **Install**: that's where `git` comes from. On
-   Linux, install `git` with your package manager if it's missing, such as
-   `sudo apt install git`.
-2. **Run `/mixos init`.** In the Claude Code panel, type `/mixos init` and press
-   Enter. Claude checks what your computer is missing (Node, Docker, the VS Code
-   extensions, and Homebrew on a Mac), shows you the list, and asks once before
+   `.zip`. Then start a session in the folder, in the Claude app, or open it in
+   VS Code. On macOS, if you're offered the command line developer tools,
+   choose **Install**: that's where `git` comes from. On Linux, install `git`
+   with your package manager if it's missing, such as `sudo apt install git`.
+2. **Run `/mixos init`.** In Claude Code, type `/mixos init` and press Enter.
+   Claude checks what your computer is missing (Node, Docker, Homebrew on a
+   Mac, and the VS Code extensions if you work in VS Code), shows you the list,
+   and asks once before
    installing anything. Then it starts MixOS and its database, applies every
    migration, and creates your admin login. It stops only when it needs you: to
    type your password, or to click through Docker the first time it opens. On
@@ -97,10 +100,12 @@ MixOS runs inside WSL 2, the Linux built into Windows.
 2. Install
    [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/).
    In its **Settings > Resources > WSL integration**, turn on **Ubuntu**.
-3. In VS Code, install the **WSL** extension by Microsoft, then run **WSL:
-   Connect to WSL** from the Command Palette.
+3. In the Claude app's **Code** tab, start each session in WSL: choose **WSL**,
+   then **Ubuntu**, in the environment selector under the prompt box. Or, in VS
+   Code, install the **WSL** extension by Microsoft, then run **WSL: Connect to
+   WSL** from the Command Palette.
 
-Do everything else in that WSL window, and keep your copy in your Linux home
+Do everything else in WSL, and keep your copy in your Linux home
 folder, not under `/mnt/c`, where it runs slowly and edits don't reload. Run
 `/mixos init` anywhere else on Windows and it walks you through setting WSL up
 first.
