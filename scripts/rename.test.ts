@@ -199,9 +199,26 @@ describe("the ledger, against the build", () => {
     assert.deepEqual(renameProblems([entry("mixos", "mixos-3f9a2c1b"), entry("wall-e", "wall-e-3f9a2c1b", "app")], build), []);
   });
 
-  test("a chain is followed in order, and needs its end in the build", () => {
+  test("a chain is followed in order", () => {
     assert.deepEqual(renameProblems([entry("dusk", "dusk-11111111"), entry("dusk-11111111", "dusk-22222222")], build), []);
-    assert.match(renameProblems([entry("dusk", "dusk-11111111")], build).join("\n"), /carries no theme dusk-11111111/);
+    assert.match(
+      renameProblems([entry("dusk-11111111", "dusk-22222222"), entry("dusk", "dusk-11111111")], build).join("\n"),
+      /renames\.0 renamed dusk-11111111 away before this entry/,
+    );
+  });
+
+  test("a chain that comes back to a slug it left is refused", () => {
+    assert.match(
+      renameProblems([entry("dusk", "dusk-11111111"), entry("dusk-11111111", "dusk")], build).join("\n"),
+      /renames\.0 renamed dusk away before this entry/,
+    );
+  });
+
+  // Removing an extension runs the generator without it before the removal is
+  // kept, so refusing this made a renamed extension impossible to remove.
+  test("a rename to an extension removed since is fine, its data waiting under the new slug", () => {
+    assert.deepEqual(renameProblems([entry("dusk", "dusk-11111111")], build), []);
+    assert.deepEqual(renameProblems([entry("inbox", "inbox-56b01172", "app")], build), []);
   });
 
   test("a slug renamed twice, kept in the build, or renamed to itself is refused", () => {
