@@ -12,9 +12,10 @@
 //                                                   or an install or registration that did
 //   npm run remove -- --break-lock                  show who holds the checkout lock, and ask
 //
-// Removing shows what it would do and asks first. Then it moves the folder to
-// .mixos/backup/, regenerates the registry without it, and deletes the backup,
-// or puts the folder back if the registry generator fails without it. It holds
+// Removing shows what it would do and asks first. Then it regenerates the
+// registry without it, its folder still in place, and once the registry
+// generator accepts that, moves the folder to .mixos/backup/ and deletes it. If
+// the generator fails without it, the folder never moves. It holds
 // the register lock in the database and the checkout lock (.mixos/lock) while
 // it works, and records an audit row as `cli:<os user>@<hostname>`. It hands
 // back the commit that deletes the folder; it never runs git to change

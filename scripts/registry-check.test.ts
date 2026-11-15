@@ -808,3 +808,39 @@ describe("the scans skip dot-prefixed folders", () => {
     assert.deepEqual(found.map((th) => th.slug), ["probe-theme-9e8d7c6b"]);
   });
 });
+
+// ── a removal's run leaves its extension out, folder and all ────────────────
+
+describe("the scans leave out the extension a removal names", () => {
+  // `--without <kind>/<slug>`: the folder is still there, and the scan reads
+  // past it, so the registry stops importing it before any of its files go.
+  test("apps", async (t) => {
+    t.mock.method(console, "log", () => {});
+    t.mock.method(console, "warn", () => {});
+    const apps = path.join(tmp, `apps-${n++}`);
+    write(apps, {
+      "acme-3f9a2c1b/app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"acme-3f9a2c1b","name":"Acme"}',
+      "acme-3f9a2c1b/README.md": "# Acme\n",
+      "board-4c7e1a92/app.json": '{"$schema":"https://mixos.org/schemas/app/v1.json","registryId":"board-4c7e1a92","name":"Board"}',
+      "board-4c7e1a92/README.md": "# Board\n",
+    });
+    const manifests = await scanApps(apps, { emit: false, leftOut: "acme-3f9a2c1b" });
+    assert.deepEqual(manifests.map((m) => m.slug), ["board-4c7e1a92"]);
+  });
+
+  test("connectors", async (t) => {
+    t.mock.method(console, "log", () => {});
+    const connectors = path.join(tmp, `connectors-${n++}`);
+    for (const name of ["probe-conn-1a2b3c4d", "other-conn-5e6f7a8b"]) template("connectors", "_template", connectors, name);
+    const manifests = await scanConnectors(connectors, { emit: false, leftOut: "probe-conn-1a2b3c4d" });
+    assert.deepEqual(manifests.map((c) => c.name), ["other-conn-5e6f7a8b"]);
+  });
+
+  test("themes", async (t) => {
+    t.mock.method(console, "log", () => {});
+    const themes = path.join(tmp, `themes-${n++}`);
+    for (const name of ["probe-theme-9e8d7c6b", "other-theme-0a1b2c3d"]) template("themes", "_template", themes, name);
+    const { themes: found } = await scanThemes(themes, { emit: false, leftOut: "probe-theme-9e8d7c6b" });
+    assert.deepEqual(found.map((th) => th.slug), ["other-theme-0a1b2c3d"]);
+  });
+});

@@ -40,13 +40,18 @@
  * gone stops there.
  *
  * 1. The checks again, under the locks.
- * 2. Its backup record (./backup.ts), then the folder renamed to
- *    `.mixos/backup/<kind dir>/<name>/`, out of the build.
- * 3. The registry generator, with `PATH` and `TMPDIR` as its environment.
- * 4. It failed, stopped, or still lists the extension: the folder is renamed
- *    back and the registry regenerated, so the checkout is as it was.
- *    Accepted: the record says so, and the backup and its record are deleted.
- *    A pending install of the same name is discarded with it.
+ * 2. Its backup record (./backup.ts).
+ * 3. The registry generator, with `PATH` and `TMPDIR` as its environment,
+ *    leaving the extension out (`--without`) while its folder is still in
+ *    place. So the registry stops importing it before any of its files go,
+ *    and a dev server watching the checkout never compiles an import of a
+ *    file that is missing, which it shows as a build error.
+ * 4. It failed, stopped, or still lists the extension: its record is cleared
+ *    and the registry regenerated with it, so the checkout is as it was.
+ *    Accepted: the folder is renamed to `.mixos/backup/<kind dir>/<name>/`,
+ *    out of the build, the record says it was accepted, and the backup and
+ *    its record are deleted. A pending install of the same name is discarded
+ *    with it.
  * 5. Audited: `<kind>.remove`, or `<kind>.remove.rejected` with the reason.
  *
  * The result hands back what to commit (./hand-back.ts): the files the commit
@@ -679,7 +684,7 @@ async function runRemove(
   const backup = backupLocation(root, kind, slug);
   const files = folderFiles(live.dir);
 
-  // 2. Its record, then the folder out of the build.
+  // 2. Its record, before anything changes.
   await fence(`Nothing was moved: ${live.rel} is where it was.`);
   const record: RemovalRecord = {
     operation: "remove",
@@ -691,46 +696,59 @@ async function runRemove(
     startedAt: new Date().toISOString(),
   };
   writeBackupRecord(backup.record, record);
+
+  // 3. The registry without it, while its folder is still in place. Moving
+  // the folder first left the registry importing its files, gone, until the
+  // run finished, and a dev server compiled that in between as a build error.
+  // A run that finishes and still lists it has gone wrong somewhere, and
+  // counts as a failure.
+  const run = await runRegistryGenerator({ ...generator, without: { kind, slug }, signal: options.signal });
+  const accepted = run.code === 0 && !(await listedInRegistry(kind, slug, options.root));
+
+  // Kept: its record cleared, then the registry again, with it, since the run
+  // that left it out may have rewritten it. That run has its own time limit
+  // and isn't stopped by a Ctrl-C: it is what leaves the checkout as it was.
+  const keep = async (): Promise<boolean> => {
+    fs.rmSync(backup.record, { force: true });
+    return (await runRegistryGenerator(generator)).code === 0;
+  };
+
+  if (!accepted) {
+    // 4. Its folder never moved.
+    await fence(
+      `${live.rel} is where it was, but the registry may not list it. Run \`npm run remove -- --recover\` to ` +
+        "regenerate it.",
+      run.output,
+      { finishing: true },
+    );
+    const restored = await keep();
+    throw notRemoved(plan, run, restored, options.signal?.aborted === true);
+  }
+
+  // 4. Accepted: now the folder out of the build, which nothing imports any
+  // more. The record says so only once it has moved, so recovery from a stop
+  // in between puts it back, where it was or from `.mixos/backup/`.
+  await fence(
+    `The registry no longer has ${slug}, but ${live.rel} is still in place. Run ` +
+      "`npm run remove -- --recover` to put it back in the registry, then remove it again.",
+    undefined,
+    { finishing: true },
+  );
   try {
     fs.mkdirSync(path.dirname(backup.folder), { recursive: true });
     fs.renameSync(live.dir, backup.folder);
   } catch (err) {
-    fs.rmSync(backup.record, { force: true });
+    const restored = await keep();
     throw new RemoveError(
-      `Could not move ${live.rel} out of the build: ${err instanceof Error ? err.message : String(err)}`,
+      `Could not move ${live.rel} out of the build, so it was kept: ${err instanceof Error ? err.message : String(err)}` +
+        (restored
+          ? ""
+          : " Regenerating the registry afterwards failed, so src/generated/ may not list it: run `npm run registry`."),
       "write-failed",
     );
   }
-
-  // 3. The registry without it. Its folder is gone, so a run that finishes
-  // and still lists it has gone wrong somewhere, and counts as a failure.
-  const run = await runRegistryGenerator({ ...generator, signal: options.signal });
-  const accepted = run.code === 0 && !(await listedInRegistry(kind, slug, options.root));
-
-  if (!accepted) {
-    // 4. Put back: the folder where it was, and its record cleared. Then the
-    // registry again, since the run that failed may have rewritten it. That
-    // run has its own time limit and isn't stopped by a Ctrl-C: it is what
-    // leaves the checkout as it was.
-    await fence(
-      `${live.rel} is in ${backup.rel}/, out of the build. Run \`npm run remove -- --recover\` to put it back.`,
-      run.output,
-      { finishing: true },
-    );
-    fs.renameSync(backup.folder, live.dir);
-    fs.rmSync(backup.record, { force: true });
-    const restored = await runRegistryGenerator(generator);
-    throw notRemoved(plan, run, restored.code === 0, options.signal?.aborted === true);
-  }
-
-  // 4. Accepted. From here the backup is only being deleted, and recovery
-  // finishes that rather than putting it back.
-  await fence(
-    `The registry no longer has ${slug}, but ${live.rel} waits in ${backup.rel}/. Run ` +
-      "`npm run remove -- --recover` to put it back, then remove it again.",
-    undefined,
-    { finishing: true },
-  );
+  // From here the backup is only being deleted, and recovery finishes that
+  // rather than putting it back.
   writeBackupRecord(backup.record, { ...record, accepted: true });
   fs.rmSync(backup.folder, { recursive: true, force: true });
   fs.rmSync(backup.record, { force: true });
@@ -778,24 +796,24 @@ function notRemoved(
     ? ""
     : " Regenerating the registry afterwards failed too, so src/generated/ may not list it: run `npm run registry`.";
   if (stopped) {
-    return new RemoveError(`Stopped before it finished. ${plan.path} was put back.${after}`, "stopped", run.output);
+    return new RemoveError(`Stopped before it finished. ${plan.path} was kept.${after}`, "stopped", run.output);
   }
   if (run.code === null) {
     return new RemoveError(
-      `The registry generator didn't finish without ${plan.path}, so it was put back.${after}`,
+      `The registry generator didn't finish without ${plan.path}, so it was kept.${after}`,
       "generator-failed",
       run.output,
     );
   }
   if (run.code !== 0) {
     return new RemoveError(
-      `The registry generator failed without ${plan.path}, so it was put back. The output below says why.${after}`,
+      `The registry generator failed without ${plan.path}, so it was kept. The output below says why.${after}`,
       "generator-failed",
       run.output,
     );
   }
   return new RemoveError(
-    `The registry still lists ${plan.slug} after the generator ran without its folder, so ${plan.path} was put back.${after}`,
+    `The registry still lists ${plan.slug} after the generator ran without it, so ${plan.path} was kept.${after}`,
     "generator-failed",
     run.output,
   );

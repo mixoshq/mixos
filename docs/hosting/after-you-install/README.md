@@ -320,8 +320,8 @@ it on each instance once the removal is deployed there; see
 data. An instance that applies a removed theme shows the first theme by name
 until an admin applies another.
 
-A removal that stops midway leaves the folder in `.mixos/backup/`, and
-`npm run remove -- --recover` puts it back.
+A removal that stops midway can leave the registry without the extension, or
+its folder in `.mixos/backup/`, and `npm run remove -- --recover` puts it back.
 
 ### When an app leaves the build
 
