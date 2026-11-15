@@ -743,13 +743,14 @@ How the version is worked out, for when the person asks:
 
 | Since the last stable release | Version | Example |
 | --- | --- | --- |
-| Any commit is breaking (`!` or `BREAKING CHANGE:`), is scoped `os`, or changes a file outside `apps/`, `connectors/` and `themes/` (build plans aside) | minor | `v0.1.3` → `v0.2.0` |
-| Anything else | patch | `v0.1.3` → `v0.1.4` |
+| Any commit is breaking (`!` or `BREAKING CHANGE:`) or a feature (`feat`), a platform migration was added under `supabase/migrations/`, or a manifest schema in `docs/schemas/index.json` is `unreleased` | minor | `v0.1.3` → `v0.2.0` |
+| Anything else: fixes, performance, docs, refactors | patch | `v0.1.3` → `v0.1.4` |
 | No stable release yet | `package.json`'s version | `v0.1.0` |
 | With `--pre` | one of the above, plus `-rc.N` | `v0.2.0-rc.1`, then `v0.2.0-rc.2` |
 
-Major stays 0 until MixOS is declared 1.0. A commit that changes platform
-files under another scope counts as `os`, and the helper says which. A
+Major stays 0 until MixOS is declared 1.0, so a breaking change is a minor.
+The scope doesn't count: every change to MixOS is `os`. A commit that isn't a
+Conventional Commit isn't counted as a feature, and the helper says so. A
 stable release's notes cover everything since the last stable release, and a
 prerelease's notes cover everything since the prerelease before it.
 

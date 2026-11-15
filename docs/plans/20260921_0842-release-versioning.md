@@ -65,15 +65,21 @@ suffix, so anything that lists new releases can leave them out by default.
    `src/lib/platform/version.ts` reads, on every host and in every checkout,
    and `MIXOS_RELEASE` is no longer read. One source can't drift from another,
    and `package.json` is in every build context.
-5. **Bump rule, 0.x scheme.** Since the last stable release: any breaking
-   commit (`!` or a `BREAKING CHANGE:` footer), any `os`-scoped commit, or any
-   commit that changes a file outside `apps/`, `connectors/` and `themes/`
-   (build plans aside, as Danger counts them) → minor; everything else →
-   patch. A commit that changes platform files under another scope counts as
-   `os`, and the helper names it. Major stays `0` until the platform is
-   declared 1.0; the rule past that is not decided, so the helper refuses
-   rather than guess. A maintainer may choose a higher version than the
-   rule's, never a lower one.
+5. **Bump rule, 0.x scheme** (revised 2026-11-15). Since the last stable
+   release: any breaking commit (`!` or a `BREAKING CHANGE:` footer), any
+   `feat` commit, an added platform migration (`supabase/migrations/`), or a
+   manifest schema whose `since` in `docs/schemas/index.json` is `unreleased`
+   → minor; everything else → patch. The last two are read from the files,
+   whatever the commits say, because they are what a deployment or an
+   extension has new to meet. Major stays `0` until the platform is declared
+   1.0, so a breaking change is a minor; the rule past that is not decided,
+   so the helper refuses rather than guess. A maintainer may choose a higher
+   version than the rule's, never a lower one.
+
+   It first made a release minor for any `os`-scoped commit or any change to
+   a platform file. Every change to MixOS is both, so every release was
+   minor, and a patch could never ship: a release of two bug fixes was
+   0.8.0 → 0.9.0. Scope and files no longer count.
 6. **The tag and the GitHub Release are a person's, after the merge.** From an
    up-to-date `main`, a person tags the commit the release PR put on `main`
    (its merge commit), `git tag -a vX.Y.Z -m "MixOS vX.Y.Z" <commit>`, pushes
