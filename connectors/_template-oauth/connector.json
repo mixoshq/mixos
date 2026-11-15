@@ -105,13 +105,15 @@
     {
       "method": "listThings",
       "operation": "GET /v1/things",
-      "description": "Listed things"
+      "description": "Listed things",
+      "scopes": ["things:read"]
     },
     {
       "method": "createThing",
       "operation": "POST /v1/things",
       "description": "Created a thing",
-      "mutates": true
+      "mutates": true,
+      "scopes": ["things:write"]
     }
   ]
 }
