@@ -43,22 +43,26 @@ const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mixos-remove-
 /**
  * The stand-in generator. While a file named `gate` is in the checkout it says
  * what it sees, in `waiting`, and waits; then it registers every folder in
- * apps/, connectors/ and themes/.
+ * apps/, connectors/ and themes/ but the one it is told to leave out,
+ * `--without <kind>/<slug>`.
  */
 const STAND_IN = path.join(tmp, "stand-in.mjs");
 fs.writeFileSync(
   STAND_IN,
   `import fs from "node:fs";
 const cell = new Int32Array(new SharedArrayBuffer(4));
-const list = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => !n.startsWith(".") && !n.endsWith(".json")) : []);
+const args = process.argv.slice(2);
+const without = args.includes("--without") ? args[args.indexOf("--without") + 1] : null;
+const list = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => !n.startsWith(".") && !n.endsWith(".json")).sort() : []);
+const listed = (dir) => list(dir).filter((name) => !(without && without.split("/")[0] + "s" === dir && without.split("/")[1] === name));
 if (fs.existsSync("gate")) {
-  fs.writeFileSync("waiting", JSON.stringify({ apps: list("apps"), backup: list(".mixos/backup/apps") }));
+  fs.writeFileSync("waiting", JSON.stringify({ apps: list("apps"), backup: list(".mixos/backup/apps"), without }));
   while (fs.existsSync("gate")) Atomics.wait(cell, 0, 0, 50);
 }
 fs.mkdirSync("src/generated", { recursive: true });
-fs.writeFileSync("src/generated/app-registry.ts", JSON.stringify(list("apps").map((slug) => ({ slug })), null, 2));
-fs.writeFileSync("src/generated/connector-registry.ts", JSON.stringify(list("connectors").map((name) => ({ name })), null, 2));
-fs.writeFileSync("src/generated/theme-registry.ts", JSON.stringify(list("themes").map((slug) => ({ slug })), null, 2));
+fs.writeFileSync("src/generated/app-registry.ts", JSON.stringify(listed("apps").map((slug) => ({ slug })), null, 2));
+fs.writeFileSync("src/generated/connector-registry.ts", JSON.stringify(listed("connectors").map((name) => ({ name })), null, 2));
+fs.writeFileSync("src/generated/theme-registry.ts", JSON.stringify(listed("themes").map((slug) => ({ slug })), null, 2));
 `,
 );
 
@@ -153,7 +157,7 @@ describe("npm run remove, against a real Postgres", { skip }, () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  test("a removal holds both locks while the generator runs, with the folder in backup, and releases both", async () => {
+  test("a removal holds both locks while the generator runs without it, its folder still in place, and releases both", async () => {
     write("apps/acme/app.json", '{"name":"Acme"}');
     write("apps/other/app.json", '{"name":"Other"}');
     fs.writeFileSync(path.join(root, "gate"), "");
@@ -165,7 +169,11 @@ describe("npm run remove, against a real Postgres", { skip }, () => {
       assert.ok(Date.now() < deadline, `the generator never started: ${t.err.join("\n")}`);
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, "waiting"), "utf8")), { apps: ["other"], backup: ["acme"] });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, "waiting"), "utf8")), {
+      apps: ["acme", "other"],
+      backup: [],
+      without: "app/acme",
+    });
     assert.equal(await registerLockRows(), 1, "the register lock is not held while the generator runs");
     const lock = JSON.parse(fs.readFileSync(path.join(root, ".mixos", "lock"), "utf8")) as { purpose: string; pid: number };
     assert.match(lock.purpose, /a removal of app\/acme \(npm run remove\)/);

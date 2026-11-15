@@ -45,11 +45,16 @@ let audit: { actor_id: unknown; actor_email: unknown; action: unknown; details: 
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mixos-remove-cli-")));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
+/** Registers every folder in apps/, connectors/ and themes/ but the one `--without <kind>/<slug>` names. */
 const STAND_IN = path.join(tmp, "stand-in.mjs");
 fs.writeFileSync(
   STAND_IN,
   `import fs from "node:fs";
-const list = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => !n.startsWith(".")) : []);
+const args = process.argv.slice(2);
+const without = args.includes("--without") ? args[args.indexOf("--without") + 1] : null;
+const list = (dir) =>
+  (fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => !n.startsWith(".")) : [])
+    .filter((name) => !(without && without.split("/")[0] + "s" === dir && without.split("/")[1] === name));
 fs.mkdirSync("src/generated", { recursive: true });
 fs.writeFileSync("src/generated/app-registry.ts", JSON.stringify(list("apps").map((slug) => ({ slug })), null, 2));
 fs.writeFileSync("src/generated/connector-registry.ts", JSON.stringify(list("connectors").map((name) => ({ name })), null, 2));

@@ -8,10 +8,10 @@
  * recovering from a removal that stopped midway.
  *
  * The stand-in checks the lock token it is handed against `.mixos/lock`,
- * records what it saw (the extension folders, and what waits in
- * `.mixos/backup/`), and "registers" every folder in apps/, connectors/ and
- * themes/ unless a test tells it otherwise, by writing the three generated
- * registry modules removal reads. The pool answers the register lock's
+ * records what it saw (the extension folders, what waits in `.mixos/backup/`,
+ * and the extension it was told to leave out, `--without`), and "registers"
+ * every other folder in apps/, connectors/ and themes/ unless a test tells it
+ * otherwise, by writing the three generated registry modules removal reads. The pool answers the register lock's
  * statements and the applied theme, and keeps the audit rows.
  * remove.integration.test.ts runs a removal against a real Postgres.
  */
@@ -26,6 +26,7 @@ import { readCheckoutLock, tryAcquireCheckoutLock } from "../platform/checkout-l
 import { backupLocation, readBackupRecord, writeBackupRecord, type RemovalRecord } from "./backup";
 import { ciSkipMarker } from "./hand-back";
 import { filesHash, hashFileTree } from "./content-hash";
+import { listedInRegistry } from "./install";
 import { INSTALL_RECORD_FILE, serializeInstallRecord, type InstallRecord } from "./install-record";
 import { pendingLocation, writeSidecar, type PendingKind } from "./pending";
 import { planRecovery, recoverCheckout, registerPending, describeRegisterFailure } from "./register";
@@ -95,7 +96,9 @@ after(() => fs.rmSync(tmp, { recursive: true, force: true }));
  * The stand-in generator. `behaviour.json` in the checkout steers it:
  * `exitFirst` (a code its first run stops with), `exit` (every run), `hangFirst`
  * (its first run never finishes), `alsoList` (names to keep listing per folder,
- * as if the folder were still there), `breakLock` (replace the lock file).
+ * as if the folder were still there), `breakLock` (replace the lock file),
+ * `blockBackup` (a folder under `.mixos/backup/`, say `apps/acme`, its first run
+ * fills, so the removal can't move the folder there).
  */
 const STAND_IN = path.join(tmp, "stand-in.mjs");
 fs.writeFileSync(
@@ -103,12 +106,14 @@ fs.writeFileSync(
   `import fs from "node:fs";
 const args = process.argv.slice(2);
 const token = args[args.indexOf("--lock-token") + 1];
+const without = args.includes("--without") ? args[args.indexOf("--without") + 1] : null;
 const lock = JSON.parse(fs.readFileSync(".mixos/lock", "utf8"));
 const behaviour = fs.existsSync("behaviour.json") ? JSON.parse(fs.readFileSync("behaviour.json", "utf8")) : {};
-const list = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => !n.startsWith(".") && !n.startsWith("_") && !n.endsWith(".json")) : []);
+const list = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => !n.startsWith(".") && !n.startsWith("_") && !n.endsWith(".json")).sort() : []);
 fs.appendFileSync("runs.log", JSON.stringify({
   at: Date.now(),
   tokenMatches: lock.token === token && lock.pid !== process.pid,
+  without,
   apps: list("apps"),
   connectors: list("connectors"),
   themes: list("themes"),
@@ -117,12 +122,18 @@ fs.appendFileSync("runs.log", JSON.stringify({
 }) + "\\n");
 const first = fs.readFileSync("runs.log", "utf8").trim().split("\\n").length === 1;
 if (behaviour.breakLock) fs.writeFileSync(".mixos/lock", JSON.stringify({ ...lock, token: "someone-else-0123456789" }));
+if (behaviour.blockBackup && first) {
+  fs.mkdirSync(".mixos/backup/" + behaviour.blockBackup, { recursive: true });
+  fs.writeFileSync(".mixos/backup/" + behaviour.blockBackup + "/in-the-way", "");
+}
 if (behaviour.exit) process.exit(behaviour.exit);
 if (behaviour.exitFirst && first) process.exit(behaviour.exitFirst);
 if (behaviour.hangFirst && first) setInterval(() => {}, 1000);
 else {
   const also = behaviour.alsoList ?? {};
-  const keep = (dir) => [...list(dir), ...(also[dir] ?? [])];
+  // "app/acme" leaves apps/acme out.
+  const left = (dir) => (without && without.split("/")[0] + "s" === dir ? without.split("/")[1] : null);
+  const keep = (dir) => [...list(dir).filter((name) => name !== left(dir)), ...(also[dir] ?? [])];
   fs.mkdirSync("src/generated", { recursive: true });
   fs.writeFileSync("src/generated/app-registry.ts", "export const appRegistry = " + JSON.stringify(keep("apps").map((slug) => ({ slug })), null, 2) + ";\\n");
   fs.writeFileSync("src/generated/connector-registry.ts", "export const connectorRegistry = " + JSON.stringify(keep("connectors").map((name) => ({ name })), null, 2) + ";\\n");
@@ -221,7 +232,7 @@ const failedWith = (code: string) => (err: unknown) => describeRemoveFailure(err
 // ── removing ────────────────────────────────────────────────────────────────
 
 describe("removing an extension's code", () => {
-  test("moves the folder out of the build while the generator runs, then deletes it, and audits it", async () => {
+  test("leaves it out of the registry while its folder is in place, then deletes the folder, and audits it", async () => {
     app("acme");
     app("other");
     const result = await removeExtension("app", "acme", options());
@@ -230,12 +241,14 @@ describe("removing an extension's code", () => {
     assert.equal(exists(".mixos/backup/apps/acme"), false);
     assert.equal(exists(".mixos/backup/apps/acme.json"), false);
     assert.equal(exists("apps/other/app.json"), true);
-    // One run, under the removal's own lock, with the folder in backup and out of apps/.
+    // One run, under the removal's own lock, leaving acme out while its folder
+    // was still in apps/: so the registry stopped importing it before it went.
     const [run, ...more] = runs();
     assert.deepEqual(more, []);
     assert.equal(run.tokenMatches, true);
-    assert.deepEqual(run.apps, ["other"]);
-    assert.deepEqual(run.backup.apps, ["acme"]);
+    assert.equal(run.without, "app/acme");
+    assert.deepEqual(run.apps, ["acme", "other"]);
+    assert.deepEqual(run.backup.apps, []);
     assert.deepEqual(run.env.filter((k: string) => k !== "PATH" && k !== "TMPDIR"), []);
     // No lock left behind, and the register lock held throughout.
     assert.equal(readCheckoutLock(root).exists, false);
@@ -314,9 +327,10 @@ describe("removing an extension's code", () => {
       [false, false, false, true],
     );
     assert.deepEqual(audit.map((r) => r.action), ["app.remove", "connector.remove", "theme.remove"]);
-    const [, connectorRun, themeRun] = runs();
-    assert.deepEqual(connectorRun.backup.connectors, ["probe"]);
-    assert.deepEqual(themeRun.backup.themes, ["dusk"]);
+    assert.deepEqual(
+      runs().map((run) => run.without),
+      ["app/my_app", "connector/probe", "theme/dusk"],
+    );
   });
 
   test("discards a pending install of the same name once the removal is accepted", async () => {
@@ -514,24 +528,42 @@ describe("warnings", () => {
 });
 
 describe("a removal the generator doesn't accept", () => {
-  test("is put back, its record cleared, and the registry regenerated", async () => {
+  test("is kept, its record cleared, and the registry regenerated", async () => {
     app("acme");
     behave({ exitFirst: 3 });
     await assert.rejects(removeExtension("app", "acme", options()), (err: unknown) =>
       err instanceof RemoveError &&
       err.code === "generator-failed" &&
-      /^The registry generator failed without apps\/acme, so it was put back\./.test(err.message) &&
+      /^The registry generator failed without apps\/acme, so it was kept\./.test(err.message) &&
       !/failed too/.test(err.message),
     );
     assert.equal(exists("apps/acme/app.json"), true);
     assert.equal(exists(".mixos/backup/apps/acme"), false);
     assert.equal(exists(".mixos/backup/apps/acme.json"), false);
-    // The removal's run, without it, then the one that restored the registry, with it.
+    // The removal's run, leaving it out, then the one that restored the
+    // registry, with it. Its folder never moved.
     const [first, second] = runs();
-    assert.deepEqual([first.apps, second.apps], [[], ["acme"]]);
+    assert.deepEqual([first.without, second.without], ["app/acme", null]);
+    assert.deepEqual([first.apps, second.apps], [["acme"], ["acme"]]);
     assert.equal(audit[0].action, "app.remove.rejected");
     assert.equal(audit[0].details.reason, "generator-failed");
-    assert.equal(audit[0].details.message, "The registry generator failed without apps/acme, so it was put back. The output below says why.");
+    assert.equal(audit[0].details.message, "The registry generator failed without apps/acme, so it was kept. The output below says why.");
+  });
+
+  test("a folder that can't be moved once the registry is without it is kept, and the registry regenerated", async () => {
+    app("acme");
+    behave({ blockBackup: "apps/acme" });
+    await assert.rejects(removeExtension("app", "acme", options()), (err: unknown) =>
+      err instanceof RemoveError &&
+      err.code === "write-failed" &&
+      /^Could not move apps\/acme out of the build, so it was kept: /.test(err.message) &&
+      !/Regenerating the registry afterwards failed/.test(err.message),
+    );
+    assert.equal(exists("apps/acme/app.json"), true);
+    assert.equal(exists(".mixos/backup/apps/acme.json"), false);
+    const [first, second] = runs();
+    assert.deepEqual([first.without, second.without], ["app/acme", null]);
+    assert.equal(await listedInRegistry("app", "acme", root), true);
   });
 
   test("says so when regenerating afterwards fails too", async () => {
@@ -547,7 +579,7 @@ describe("a removal the generator doesn't accept", () => {
     app("acme");
     behave({ alsoList: { apps: ["acme"] } });
     await assert.rejects(removeExtension("app", "acme", options()), (err: unknown) =>
-      err instanceof RemoveError && /^The registry still lists acme after the generator ran without its folder/.test(err.message),
+      err instanceof RemoveError && /^The registry still lists acme after the generator ran without it, so apps\/acme was kept\./.test(err.message),
     );
     assert.equal(exists("apps/acme/app.json"), true);
   });
@@ -561,16 +593,17 @@ describe("a removal the generator doesn't accept", () => {
     assert.equal(fs.existsSync(where.sidecar), true);
   });
 
-  test("stopped by Ctrl-C while the generator runs, it is put back all the same", async () => {
+  test("stopped by Ctrl-C while the generator runs, it is kept all the same", async () => {
     app("acme");
     behave({ hangFirst: true });
     const controller = new AbortController();
     const removing = removeExtension("app", "acme", options({ signal: controller.signal }));
     while (runs().length === 0) await new Promise((r) => setTimeout(r, 20));
-    assert.equal(exists(".mixos/backup/apps/acme/app.json"), true);
+    assert.equal(exists("apps/acme/app.json"), true);
+    assert.equal(exists(".mixos/backup/apps/acme"), false);
     controller.abort();
     await assert.rejects(removing, (err: unknown) =>
-      err instanceof RemoveError && err.code === "stopped" && /apps\/acme was put back\./.test(err.message),
+      err instanceof RemoveError && err.code === "stopped" && /apps\/acme was kept\./.test(err.message),
     );
     assert.equal(exists("apps/acme/app.json"), true);
     assert.equal(exists(".mixos/backup/apps/acme.json"), false);
@@ -581,19 +614,21 @@ describe("a removal the generator doesn't accept", () => {
 
   test("a removal that loses its lock stops where it is, and recovery puts it back", async () => {
     app("acme");
-    // The lock goes while the generator runs, so the removal can't record
-    // that the generator accepted it, nor delete the backup.
+    // The lock goes while the generator runs, so the removal can't move the
+    // folder out once the generator has accepted the registry without it.
     behave({ breakLock: true });
     await assert.rejects(removeExtension("app", "acme", options()), (err: unknown) =>
       err instanceof RemoveError &&
       err.code === "lock-lost" &&
-      /The registry no longer has acme, but apps\/acme waits in \.mixos\/backup\/apps\/acme\/\. Run `npm run remove -- --recover` to put it back, then remove it again\.$/.test(
+      /The registry no longer has acme, but apps\/acme is still in place\. Run `npm run remove -- --recover` to put it back in the registry, then remove it again\.$/.test(
         err.message,
       ),
     );
-    // Left as it was when the lock went: the folder in backup, with its record.
-    assert.equal(exists("apps/acme"), false);
-    assert.equal(exists(".mixos/backup/apps/acme/app.json"), true);
+    // Left as it was when the lock went: the folder in place, the registry
+    // without it, and its record.
+    assert.equal(exists("apps/acme/app.json"), true);
+    assert.equal(exists(".mixos/backup/apps/acme"), false);
+    assert.equal(await listedInRegistry("app", "acme", root), false);
     const read = readBackupRecord(backupLocation(root, "app", "acme").record);
     assert.equal(read.state === "ok" && read.record.accepted, undefined);
     // Removal, Register and install refuse the name until recovery has dealt with it.
@@ -603,13 +638,13 @@ describe("a removal the generator doesn't accept", () => {
     fs.rmSync(path.join(root, ".mixos", "lock"));
     fs.rmSync(path.join(root, "behaviour.json"));
     const result = await recoverCheckout({ ...options(), confirm: async () => true });
-    assert.deepEqual(result.acted.map((i) => [i.action, i.path]), [["restore-backup", ".mixos/backup/apps/acme"]]);
+    assert.deepEqual(result.acted.map((i) => [i.action, i.path]), [["clear-backup-record", ".mixos/backup/apps/acme"]]);
     assert.equal(result.regenerated?.ok, true);
     assert.equal(exists("apps/acme/app.json"), true);
-    assert.equal(exists(".mixos/backup/apps/acme"), false);
+    assert.equal(await listedInRegistry("app", "acme", root), true);
     assert.equal(exists(".mixos/backup/apps/acme.json"), false);
     const recovered = audit.find((r) => r.action === "app.remove.recover")!;
-    assert.deepEqual(recovered.details, { via: "cli", action: "restore-backup", path: ".mixos/backup/apps/acme" });
+    assert.deepEqual(recovered.details, { via: "cli", action: "clear-backup-record", path: ".mixos/backup/apps/acme" });
   });
 });
 

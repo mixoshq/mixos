@@ -160,11 +160,41 @@ describe("the full run and the checkout lock", () => {
 
   test("refuses arguments it doesn't know, without running", async () => {
     let ran = false;
-    for (const args of [["--lock"], ["--lock-token"], ["--lock-token", "a", "b"], ["--chek"]]) {
+    for (const args of [
+      ["--lock"],
+      ["--lock-token"],
+      ["--lock-token", "a", "b"],
+      ["--lock-token", "a", "--lock-token", "b"],
+      ["--chek"],
+      ["--without"],
+      ["--without", "acme"],
+      ["--without", "plugin/acme"],
+      ["--without", "app/../acme"],
+      ["--without", "app/.backup-acme"],
+      ["--without", "app/acme", "--without", "app/board"],
+    ]) {
       const { code } = await quietly(() => runFullGenerator(args, { root: checkout(), run: async () => void (ran = true) }));
       assert.equal(code, 2, args.join(" "));
     }
     assert.equal(ran, false);
+  });
+
+  test("hands the run the extension to leave out, with its parent's token or without", async () => {
+    const root = checkout();
+    const seen: unknown[] = [];
+    const run = async ({ without }: { without?: unknown }) => void seen.push(without);
+    const parent = tryAcquireCheckoutLock(root, "a removal of app/acme");
+    await quietly(() => runFullGenerator(["--lock-token", parent.token, "--without", "app/acme"], { root, run }));
+    await quietly(() => runFullGenerator(["--without", "connector/probe_1", "--lock-token", parent.token], { root, run }));
+    parent.release();
+    await quietly(() => runFullGenerator(["--without", "theme/dusk-e15a7c3f"], { root, run }));
+    await quietly(() => runFullGenerator([], { root, run }));
+    assert.deepEqual(seen, [
+      { kind: "app", slug: "acme" },
+      { kind: "connector", slug: "probe_1" },
+      { kind: "theme", slug: "dusk-e15a7c3f" },
+      undefined,
+    ]);
   });
 
   test("the script itself: a token no lock holds stops it before src/generated/ is touched", () => {
