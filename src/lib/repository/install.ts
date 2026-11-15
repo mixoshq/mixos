@@ -1200,6 +1200,12 @@ export interface RegenerateOptions {
    * lock its own caller holds.
    */
   lockToken: string;
+  /**
+   * An extension the run leaves out as if its folder were gone, `--without
+   * <kind>/<slug>`: a removal's, whose folder stays in place until the registry
+   * no longer imports it (./remove.ts).
+   */
+  without?: { kind: ExtensionKind; slug: string };
   /** Tests: the checkout to run in. Its `src/generated/` is the one read. */
   root?: string;
   /** Tests: a script in the generator's place. */
@@ -1282,6 +1288,7 @@ async function readRegistryModule(kind: ExtensionKind, root?: string): Promise<s
  */
 export function runRegistryGenerator({
   lockToken,
+  without,
   root,
   generator,
   signal,
@@ -1290,7 +1297,13 @@ export function runRegistryGenerator({
     process.execPath,
     // tsx's CLI entry, resolved from node_modules rather than via `npx`, which
     // would be free to go to the network for a package that is missing.
-    [TSX_CLI, generator ?? GENERATOR, "--lock-token", lockToken],
+    [
+      TSX_CLI,
+      generator ?? GENERATOR,
+      "--lock-token",
+      lockToken,
+      ...(without ? ["--without", `${without.kind}/${without.slug}`] : []),
+    ],
     root ?? PROJECT_ROOT,
     GENERATOR_TIMEOUT_MS,
     generatorEnv(),
