@@ -10,11 +10,13 @@ computer.
 
 <!-- icons prerequisites -->
 
-- **VS Code**: install [Visual Studio Code](https://code.visualstudio.com/).
-  Developers can use another IDE, or a terminal, as
-  [For developers](#for-developers) shows.
-- **The Claude Code extension**: in VS Code's Extensions view, search for
-  **Claude Code**, by Anthropic, and choose **Install**.
+- **The Claude app**: [download it](https://claude.com/download), for macOS,
+  Windows or Linux, and sign in. Claude Code is built in, as its **Code** tab.
+- **Or VS Code**, with the Claude Code extension, if you'd rather work in an
+  editor: install [Visual Studio Code](https://code.visualstudio.com/), then
+  search its Extensions view for **Claude Code**, by Anthropic, and choose
+  **Install**. Its terminal is where you run commands yourself. Developers can
+  use another IDE, as [For developers](#for-developers) shows.
 - **A GitHub account**, for the private repository that holds your copy of
   MixOS. [Sign up](https://github.com/signup) if you don't have one.
 - **A paid Claude plan**: Pro, Max, Team or Enterprise, or a Claude Console
@@ -24,8 +26,8 @@ computer.
   compares them.
 
 On Windows, MixOS runs in WSL. Set that up first, as
-[On Windows](development.md#on-windows) says, and work in a VS Code window
-connected to WSL.
+[On Windows](development.md#on-windows) says. Then start each session in WSL,
+in the Claude app, or work in a VS Code window connected to WSL.
 
 <!-- /icons -->
 
@@ -33,10 +35,13 @@ connected to WSL.
 
 ## For vibe-coders
 
-Claude downloads MixOS, installs what your computer is missing, and starts it.
+Claude downloads MixOS, installs what your computer is missing, and starts it,
+all in the Claude app.
 
-1. **Download MixOS.** Paste this into Claude Code, in the desktop app or the
-   terminal:
+1. **Open the Code tab** in the Claude app, and choose your home folder with the
+   project folder control under the prompt box. On Windows, first choose
+   **WSL**, then **Ubuntu**, in the environment selector beside it.
+2. **Download MixOS.** Paste this, and press **Enter**:
 
    ```prompt
    Download the newest release of MixOS with git: clone
@@ -52,18 +57,21 @@ Claude downloads MixOS, installs what your computer is missing, and starts it.
    unzip it in your home folder. `/mixos init` connects it to MixOS's history,
    so later releases merge in.
 
-2. **Open the folder in VS Code**: **File > Open Folder**, then `MixOS`, or the
-   folder you unzipped.
-3. **Sign in to Claude** in the Claude Code panel, which the Claude mark (✻) at
-   the top of the editor opens.
-4. **Run `/mixos init`** in the Claude Code panel. Claude installs what your
-   computer is missing, starts MixOS at
-   [http://localhost:3000](http://localhost:3000) and gives you its login. Then
-   it offers to put your copy in a private GitHub repository of your own.
+3. **Start a new session in the `MixOS` folder**, or the folder you unzipped,
+   with the same folder control.
+4. **Run `/mixos init`**. Claude installs what your computer is missing, starts
+   MixOS at [http://localhost:3000](http://localhost:3000) and gives you its
+   login. Then it offers to put your copy in a private GitHub repository of your
+   own.
+
+Working in VS Code instead? Paste the prompt into the Claude Code panel, which
+the Claude mark (✻) at the top of the editor opens, and sign in to Claude there
+if it asks. Then open the folder with **File > Open Folder**, and run
+`/mixos init` in the panel.
 
 ## For developers
 
-Clone MixOS yourself, open it in your IDE, and `/mixos init` does the rest.
+Clone MixOS yourself, open it in Claude Code, and `/mixos init` does the rest.
 
 1. **Clone the newest release**:
 
@@ -74,14 +82,22 @@ Clone MixOS yourself, open it in your IDE, and `/mixos init` does the rest.
    git branch --unset-upstream   # so a pull can't bring in unreleased work
    ```
 
-2. **Open the folder with Claude Code**, in your IDE:
+2. **Open the folder in Claude Code**:
 
 <!-- tabs ide -->
+
+#### The Claude app
+
+In the **Code** tab, choose the `MixOS` folder with the project folder control
+under the prompt box. On Windows, first choose **WSL**, then your distribution,
+in the environment selector beside it.
 
 #### VS Code
 
 **File > Open Folder**, then `MixOS`. The Claude mark (✻) at the top of the
-editor opens the Claude Code panel.
+editor opens the Claude Code panel. Running `claude` in VS Code's terminal works
+too, once the [Claude Code CLI](https://code.claude.com/docs/en/setup) is
+installed.
 
 #### Cursor
 

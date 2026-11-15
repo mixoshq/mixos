@@ -114,9 +114,9 @@ read [Securing your install](after-you-install/securing.md).
 
 ## On your computer
 
-[What you need](install.md#what-you-need), in How to install, lists the editor,
-Claude Code and the accounts to get first. Claude Code runs the guided `/mixos`
-commands, and MixOS itself doesn't need it.
+[What you need](install.md#what-you-need), in How to install, lists where to
+run Claude Code, the Claude app or VS Code, and the accounts to get first.
+Claude Code runs the guided `/mixos` commands, and MixOS itself doesn't need it.
 
 Your computer also needs these, to run MixOS or its commands, such as
 `npm run keys:generate`. `/mixos init` checks for them, and installs what's
