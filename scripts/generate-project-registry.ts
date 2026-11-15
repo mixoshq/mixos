@@ -93,6 +93,7 @@ import {
 } from "./route-contracts";
 import { readRoutesStatically } from "./route-reader";
 import {
+  readsNeedingWriteScopes,
   validateConnectorMethods,
   validateConnectorTelemetry,
   validateRegistryContract,
@@ -1948,11 +1949,13 @@ function readConnector(connectorDir: string, name: string): ConnectorManifestOut
   if (raw.icon) validateConnectorIcon(raw.icon, name, connectorDir);
   // Completeness of the capability list, which the Access tab presents as
   // exhaustive. Runs before the manifest is emitted so a gap cannot ship.
-  validateConnectorMethods(
-    name,
-    connectorDir,
-    validateConnectorTelemetry(raw.telemetry, name),
-  );
+  const telemetry = validateConnectorTelemetry(raw.telemetry, name);
+  validateConnectorMethods(name, connectorDir, telemetry);
+  // A read that works only once changes are allowed: true of some providers,
+  // so said rather than refused (readsNeedingWriteScopes).
+  for (const warning of readsNeedingWriteScopes(name, telemetry, raw.auth?.scopes)) {
+    console.warn(`  ${warning}`);
+  }
   // Read again by main() for what it accepts; checked here for --check too.
   readReleaseNotes(connectorDir, RELEASE_NOTES_FILE);
 

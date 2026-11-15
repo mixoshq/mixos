@@ -111,7 +111,7 @@ The manifest declares the connector's metadata and what credentials it needs. Th
 | `auth.scopesUrl` | ✅ (unless `strategy` is `none`) | The provider's scope reference page, which the registry's permission list is read from. See [Scopes](scopes.md). | `"scopesUrl": "https://docs.example.com/api/scopes"` |
 | `http` |  | Transport policy: base URL, timeouts, retry budget, pagination. Every value has a working default. | |
 | `webhook` |  | Inbound webhook verification. See [Webhooks](webhooks.md). | |
-| `telemetry` | ✅ | Every public method apps can call, as `{ method, operation, description?, mutates? }`: the provider `operation` it calls, and `"mutates": true` on one that changes data. The build fails on a public method that is missing, or two naming the same operation. It is the whole of what an app can call, and each is auto-instrumented. See [Telemetry](telemetry.md). | `{ "method": "getItem", "operation": "GET /items/{id}" }` |
+| `telemetry` | ✅ | Every public method apps can call, as `{ method, operation, description?, mutates?, scopes? }`: the provider `operation` it calls, `"mutates": true` on one that changes data, and the scopes from `auth.scopes` it needs, shown on the connector dialog's Methods tab. The build fails on a public method that is missing, or two naming the same operation. It is the whole of what an app can call, and each is auto-instrumented. See [Telemetry](telemetry.md). | `{ "method": "getItem", "operation": "GET /items/{id}" }` |
 
 ### Setup guidance and the icon
 

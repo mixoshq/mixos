@@ -297,8 +297,9 @@ repository counts as a different extension (see
 
 Removing an extension is a change to your repository, as installing one is:
 
-1. In a checkout of your repository, running `npm run dev`, press **Remove** on
-   its tile in Admin > Apps, Connectors or Themes, or run
+1. In a checkout of your repository, running `npm run dev`, press **Delete**
+   at the bottom of the app's **Details** or the connector's **Configure**
+   dialog, or on the theme's tile in Admin > Themes, or run
    `npm run remove -- <kind>/<slug>`. Either says first what goes and what stays.
    It's refused while an app depends on it (an app that requires the connector,
    or uses the app's services or hooks), and for the last theme.

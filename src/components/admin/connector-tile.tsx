@@ -5,19 +5,15 @@
 "use client";
 
 import Image from "next/image";
-import { Plug, Trash2 } from "lucide-react";
-import { Button, IconButton } from "@/components/ui/button";
+import { Plug } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status";
-import {
-  renderAuthors,
-  formatLastUpdated,
-  truncateWords,
-  TILE_DESCRIPTION_WORDS,
-} from "@/lib/apps/display";
+import { truncateWords, TILE_DESCRIPTION_WORDS } from "@/lib/apps/display";
 import type { ConnectorConfigState } from "@/lib/connectors/status";
 import type { ConnectorWithStatus } from "./connector-registry-list";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { TileFooter } from "./provenance";
 
 /**
  * One connector in the registry grid.
@@ -59,16 +55,14 @@ export default function ConnectorTile({
   onConfigure,
   onDisable,
   onEnable,
-  onRemove,
   switching,
 }: {
   connector: ConnectorWithStatus;
+  /** Opens the Configure dialog, whose footer also offers Remove. */
   onConfigure: () => void;
   /** Opens Disable's confirmation; nothing changes until it is confirmed. */
   onDisable: () => void;
   onEnable: () => void;
-  /** Opens the Remove dialog, which says what goes and what stays before it removes anything. */
-  onRemove: () => void;
   /** A Disable or Enable is in flight somewhere in the grid. */
   switching: boolean;
 }) {
@@ -151,20 +145,11 @@ export default function ConnectorTile({
         </div>
       )}
 
-      {/* mt-auto pins the action and the provenance row to the bottom, so
+      {/* mt-auto pins the actions and the provenance band to the bottom, so
           tiles of differing height still line their buttons up across the
-          row. */}
-      <div className="mt-auto flex items-center justify-between gap-3 pt-4">
-        {/* Where this connector's source lives — the same third provenance
-            fact the configure dialog puts beside its footer, in the same mono
-            treatment: the row below says when it changed and who changed it,
-            this says where to go to change it yourself. */}
-        <code
-          className="min-w-0 truncate font-mono text-xs text-muted-foreground"
-          title={`/connectors/${connector.name}/`}
-        >
-          /connectors/{connector.name}/
-        </code>
+          row. The path is in the Configure dialog's footer, as the app's is in
+          its Details dialog. */}
+      <div className="mt-auto flex items-center justify-end gap-3 pt-4">
         <div className="flex shrink-0 items-center gap-2">
           {/* The app tile's Activate and Deactivate, in the same weights:
               Enable is the primary action while the connector is off, and
@@ -186,36 +171,12 @@ export default function ConnectorTile({
           >
             Configure
           </Button>
-          {/* The app tile's Remove, in the same place and weight. */}
-          <IconButton
-            variant="ghost"
-            size="sm"
-            label={`Remove ${connector.displayName}`}
-            icon={<Trash2 className="h-4 w-4" aria-hidden />}
-            onClick={onRemove}
-          />
         </div>
       </div>
 
-      {/* Identical to the theme tile's footer, deliberately: an admin moving
-          between /admin/connectors and /admin/themes reads provenance in the
-          same place, in the same words. */}
-      <div className="mt-3 flex items-baseline justify-between gap-3 border-t border-border pt-3 text-[10px] leading-none text-muted-foreground">
-        <p className="min-w-0 truncate">
-          {connector.authors.length > 0 && (
-            <>
-              <strong className="font-semibold">Authored By</strong>{" "}
-              {renderAuthors(connector.authors)}
-            </>
-          )}
-        </p>
-        <p className="shrink-0">
-          <strong className="font-semibold">Updated</strong>{" "}
-          {/* Stamped by the pre-commit hook, so a connector edited but not yet
-              committed says so rather than showing a stale date. */}
-          {formatLastUpdated(connector.lastUpdated, "Not yet committed")}
-        </p>
-      </div>
+      {/* The Configure dialog's footer band, in the same words, as on the app
+          and theme tiles. */}
+      <TileFooter lastUpdated={connector.lastUpdated} authors={connector.authors} />
     </div>
   );
 }
