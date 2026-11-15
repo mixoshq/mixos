@@ -79,12 +79,19 @@ const pool = Object.assign(
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mixos-remove-admin-")));
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
-/** The stand-in generator: "registers" every folder in apps/, connectors/ and themes/. */
+/**
+ * The stand-in generator: "registers" every folder in apps/, connectors/ and
+ * themes/ but the one it is told to leave out, `--without <kind>/<slug>`.
+ */
 const STAND_IN = path.join(tmp, "stand-in.mjs");
 fs.writeFileSync(
   STAND_IN,
   `import fs from "node:fs";
-const list = (dir) => (fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => !n.startsWith(".")) : []);
+const args = process.argv.slice(2);
+const without = args.includes("--without") ? args[args.indexOf("--without") + 1] : null;
+const list = (dir) =>
+  (fs.existsSync(dir) ? fs.readdirSync(dir).filter((n) => !n.startsWith(".")) : [])
+    .filter((name) => !(without && without.split("/")[0] + "s" === dir && without.split("/")[1] === name));
 fs.mkdirSync("src/generated", { recursive: true });
 fs.writeFileSync("src/generated/app-registry.ts", "export const appRegistry = " + JSON.stringify(list("apps").map((slug) => ({ slug })), null, 2) + ";\\n");
 fs.writeFileSync("src/generated/connector-registry.ts", "export const connectorRegistry = " + JSON.stringify(list("connectors").map((name) => ({ name })), null, 2) + ";\\n");
