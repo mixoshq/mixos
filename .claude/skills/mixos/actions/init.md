@@ -2,7 +2,8 @@
 
 You are installing MixOS on someone's machine and booting it for the first
 time. The machine is **macOS**, **Linux**, or **Windows with WSL 2**; Claude is
-running in **VSCode**; and the person may not be a developer. The whole system —
+running in the **Claude app**'s Code tab or in **VS Code**; and the person may
+not be a developer. The whole system —
 app, Postgres, and the scheduler tick — runs locally in **Docker**; there is no
 cloud account to create and no secret to generate.
 
@@ -31,6 +32,16 @@ uname -s; [ -r /proc/sys/kernel/osrelease ] && cat /proc/sys/kernel/osrelease
 Each step below says where the platforms differ. Where it says nothing, the
 command is the same on all three.
 
+Then which app Claude is running in:
+
+```bash
+echo "$CLAUDE_CODE_ENTRYPOINT"
+```
+
+`claude-desktop` is the **Claude app**: skip everything marked **VS Code**, and
+never ask the person to install VS Code or its extensions. Anything else is VS
+Code, or a terminal: follow what is marked **VS Code**.
+
 ### Windows outside WSL
 
 Claude is running on Windows itself — Git Bash or PowerShell — and the local
@@ -50,6 +61,18 @@ do, so explain and hand it over:
 >    https://docs.docker.com/desktop/setup/install/windows-install/ and start
 >    it. In **Settings → Resources → WSL integration**, turn on **Ubuntu**, then
 >    click **Apply & restart**.
+In the **Claude app**, the last steps are:
+
+> 3. Start a new session, and in the environment selector under the prompt box,
+>    choose **WSL**, then **Ubuntu**. The session starts in your Linux home
+>    folder.
+> 4. Get MixOS again there — this time inside Linux — with the download prompt
+>    from https://mixos.org/docs/install. It saves MixOS in your Linux home
+>    folder (`/home/<you>/MixOS`), **not** anywhere under `/mnt/c`.
+> 5. Start another WSL session, in that folder, and run `/mixos init`.
+
+In **VS Code**:
+
 > 3. In VS Code, install the **WSL** extension (by Microsoft). Open the Command
 >    Palette (`Ctrl+Shift+P`) and run **WSL: Connect to WSL**.
 > 4. In that new window, get MixOS again — this time inside Linux. Open the
@@ -112,8 +135,8 @@ this platform.
 | `docker` group — **Linux** | `id -nG \| tr ' ' '\n' \| grep -qx docker` | Whether this user may use Docker without sudo. |
 | sudo — **Linux, WSL** | `sudo -n true 2>/dev/null` | Exit 0 means you may run sudo commands yourself. Anything else means sudo wants a password your shell cannot type — hand those commands to the person (see Step 3). |
 | Checkout location — **WSL** | `pwd` | Under `/mnt/` means the repository is on the Windows drive. It boots, but every file read is slow and edits do not hot-reload. Recommend cloning again under `~` before going further. |
-| VSCode CLI | `code --version` | If missing on **macOS**: Command Palette (`Cmd+Shift+P`) → **Shell Command: Install 'code' command in PATH**, then retry. On **Linux** it comes with VS Code's package, and in **WSL** with the WSL extension. If it is still missing, skip the extensions step and name the extensions for the person to install from the Extensions view. |
-| Extensions | `code --list-extensions` | Looking for `Anthropic.claude-code` and `esbenp.prettier-vscode`. |
+| VS Code CLI — **VS Code** | `code --version` | If missing on **macOS**: Command Palette (`Cmd+Shift+P`) → **Shell Command: Install 'code' command in PATH**, then retry. On **Linux** it comes with VS Code's package, and in **WSL** with the WSL extension. If it is still missing, skip the extensions step and name the extensions for the person to install from the Extensions view. |
+| Extensions — **VS Code** | `code --list-extensions` | Looking for `Anthropic.claude-code` and `esbenp.prettier-vscode`. |
 | GitHub CLI (optional) | `gh --version`, then `gh auth status` (exit 0: signed in) | Not needed to boot MixOS. Step 7 uses it to create their own private repository on GitHub, and `/mixos deploy` to open pull requests there, with a paste-ready link as its fallback. |
 
 Also check that ports **3000, 54321, 54322, and 54323** are free. On **macOS**:
@@ -156,7 +179,7 @@ for" each. On **macOS**, something like:
 > 2. **Node 24** — runs the build tools and the local database CLI.
 > 3. **Project dependencies** (`npm ci`) — about 90 seconds.
 > 4. **Docker Desktop** — runs MixOS and its database on your machine.
-> 5. **VSCode extensions** — Claude Code and Prettier.
+> 5. **VS Code extensions** — Claude Code and Prettier.
 
 On **Linux**:
 
@@ -166,7 +189,7 @@ On **Linux**:
 > 3. **Docker Engine** — runs MixOS and its database. This one needs
 >    administrator rights, so I'll give you one block to paste into the
 >    terminal, and it will ask for your password.
-> 4. **VSCode extensions** — Prettier.
+> 4. **VS Code extensions** — Prettier.
 
 On **WSL**, Docker is installed on the Windows side, by them:
 
@@ -174,9 +197,10 @@ On **WSL**, Docker is installed on the Windows side, by them:
 > 2. **Project dependencies** (`npm ci`) — about 90 seconds.
 > 3. **Docker Desktop for Windows** — runs MixOS and its database. You install
 >    this one in Windows; I'll tell you exactly what to click.
-> 4. **VSCode extensions** — Prettier.
+> 4. **VS Code extensions** — Prettier.
 
-On every platform, if `gh` is missing, add it as the last line, as optional:
+Leave the **VS Code extensions** line out in the Claude app. On every
+platform, if `gh` is missing, add it as the last line, as optional:
 
 > **GitHub CLI** (optional) — at the end, it puts your copy in a private
 > repository of your own on GitHub, which is what you deploy.
@@ -351,8 +375,8 @@ when it finishes. Then verify the result yourself — don't take "done" on faith
    is free for everyone, so there is no licensing question on Linux.
 
    **The `usermod` line only takes effect in new login sessions** — not in the
-   VSCode that is already open, and not in your shells, which that VSCode
-   started. Until the person signs out and back in, run every command that
+   Claude app or VS Code that is already open, and not in your shells, which
+   that app started. Until the person signs out and back in, run every command that
    touches Docker through the group explicitly:
 
    ```bash
@@ -385,7 +409,7 @@ when it finishes. Then verify the result yourself — don't take "done" on faith
      education, and small companies; organizations above 250 employees or $10M
      annual revenue need a paid subscription.
 
-5. **VSCode extensions:**
+5. **VS Code extensions** — **VS Code** only; skip this in the Claude app:
 
    ```bash
    code --install-extension Anthropic.claude-code

@@ -45,8 +45,9 @@ has in full:
 
 1. **Download MixOS**: paste that page's prompt into Claude Code, and it clones
    the newest release into `~/MixOS`.
-2. **Open the folder in VSCode**, with the Claude Code extension, signed in to
-   Claude.
+2. **Open the folder in Claude Code**: start a session in it in the
+   [Claude app](https://claude.com/download)'s **Code** tab, or open it in VS
+   Code with the Claude Code extension, signed in to Claude.
 3. **Run `/mixos init`** in Claude Code:
 
    ```prompt
@@ -54,9 +55,9 @@ has in full:
    ```
 
 That skill is the setup. It surveys what your machine is missing, asks once
-before changing anything, installs Node / Docker / the VSCode extensions (and
-Homebrew on a Mac), boots the whole stack in Docker, applies every migration,
-seeds an admin, and hands you a login for
+before changing anything, installs Node / Docker (and Homebrew on a Mac, and the
+VS Code extensions if you work in VS Code), boots the whole stack in Docker,
+applies every migration, seeds an admin, and hands you a login for
 [http://localhost:3000](http://localhost:3000). Budget 5–15 minutes on a first
 run — most of it is Docker pulling images. Then it offers to put your copy in a
 private GitHub repository of your own: that's what you deploy, and where new
@@ -188,10 +189,10 @@ Deep dives live in [`docs/themes/`](docs/themes/): [architecture](docs/themes/ar
 
 ### The guided path
 
-If you're working with Claude Code in VSCode, the `/mixos` command scaffolds any
-of the three for you and reads the right guide first. Run `/mixos` on its own for
-the list of actions; add `-q` to any action to have Claude ask clarifying
-questions before it starts.
+If you're working in Claude Code, in the Claude app or VS Code, the `/mixos`
+command scaffolds any of the three for you and reads the right guide first. Run
+`/mixos` on its own for the list of actions; add `-q` to any action to have
+Claude ask clarifying questions before it starts.
 
 - **`/mixos help`** — new here or unsure what to build? It explains how apps,
   connectors, and themes relate, asks what you're trying to do, and recommends
