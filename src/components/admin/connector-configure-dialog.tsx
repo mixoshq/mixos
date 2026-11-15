@@ -22,7 +22,7 @@ import { Field } from "@/components/ui/field";
 import { StatusPill } from "@/components/ui/status";
 import FolderTabs from "@/components/ui/folder-tabs";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
-import { renderAuthors, formatLastUpdated } from "@/lib/apps/display";
+import { Provenance, RemoveAction } from "./provenance";
 import { useClientValue } from "@/lib/use-client-value";
 import type {
   ConnectorDocLink,
@@ -57,6 +57,8 @@ interface Props {
   testAction: (connectorName: string) => Promise<ConnectorTestOutcome>;
   /** Allow the connector to change data, or make it read-only again. */
   changesAction: (connectorName: string, allowed: boolean) => Promise<void>;
+  /** Opens the Remove dialog in this one's place, from the footer's Remove. */
+  onRemove?: () => void;
 }
 
 /** "in 52 minutes" / "3 days ago" — enough for an admin to judge freshness. */
@@ -433,6 +435,7 @@ export default function ConnectorConfigureDialog({
   configureAction,
   testAction,
   changesAction,
+  onRemove,
 }: Props) {
   const [tab, setTab] = useState<DialogTab>(initialTab);
   const [saving, startSave] = useTransition();
@@ -1085,30 +1088,20 @@ export default function ConnectorConfigureDialog({
       title={connector.displayName}
       subtitle={connector.description}
       fixedHeight
-      footer={
-        <span className="flex flex-wrap justify-start gap-x-10 gap-y-1.5 text-left">
-          <span>
-            <strong className="font-semibold">Updated</strong>{" "}
-            {formatLastUpdated(connector.lastUpdated, "Not yet committed")}
-          </span>
-          {connector.authors && connector.authors.length > 0 && (
-            <span>
-              <strong className="font-semibold">By</strong>{" "}
-              {renderAuthors(connector.authors)}
-            </span>
-          )}
-        </span>
-      }
+      footer={<Provenance lastUpdated={connector.lastUpdated} authors={connector.authors} />}
       /*
         Where this connector's source lives, alongside the provenance the footer
-        already carries. Same slot, same wording as the app registry's dialog —
-        an admin moving between the two registries should not have to learn two
-        places to find an item's path.
+        already carries, then Remove. Same slot, same wording as the app
+        registry's dialog — an admin moving between the two registries should
+        not have to learn two places to find an item's path, or its Remove.
       */
       footerAside={
-        <code className="font-mono text-xs text-muted-foreground">
-          /connectors/{connector.name}/
-        </code>
+        <span className="flex items-center gap-4">
+          <code className="font-mono text-xs text-muted-foreground">
+            /connectors/{connector.name}/
+          </code>
+          {onRemove && <RemoveAction name={connector.displayName} onClick={onRemove} />}
+        </span>
       }
       tabs={
         // The band, not a panel: status belongs to the connection rather than to

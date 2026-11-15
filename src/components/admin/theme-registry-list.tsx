@@ -6,15 +6,15 @@
 
 import { useState, useTransition } from "react";
 import Image from "next/image";
-import { Check, Trash2 } from "lucide-react";
-import { Button, IconButton } from "@/components/ui/button";
+import { Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
-import { renderAuthors, formatLastUpdated } from "@/lib/apps/display";
 import type { ThemeManifest } from "@/lib/themes/types";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { ProposalTarget } from "@/lib/github/outcomes";
+import { RemoveAction, TileFooter } from "./provenance";
 import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
 
 /**
@@ -141,21 +141,20 @@ export default function ThemeRegistryList({
                 </dl>
               )}
 
-              {/* mt-auto, so the action and the provenance row sit on the
+              {/* mt-auto, so the action and the provenance band sit on the
                   tile's floor and line up across a row whose descriptions
-                  differ in length. */}
+                  differ in length.
+
+                  Delete starts the row, opposite Apply. A theme has no
+                  details dialog to carry it in its footer, as an app's and a
+                  connector's do, and the band below carries provenance alone,
+                  the same on every tile. Removing the applied theme is
+                  allowed, with a warning; removing the last one is refused. */}
               <div className="mt-auto flex items-center justify-between gap-3 pt-4">
-                {/* Where this theme's source lives — the same third
-                    provenance fact the app details dialog puts beside its
-                    footer, in the same mono treatment: the row below says
-                    when it changed and who changed it, this says where to go
-                    to change it yourself. */}
-                <code
-                  className="min-w-0 truncate font-mono text-xs text-muted-foreground"
-                  title={`/themes/${theme.slug}/`}
-                >
-                  /themes/{theme.slug}/
-                </code>
+                <RemoveAction
+                  name={theme.name}
+                  onClick={() => setRemoving({ kind: "theme", slug: theme.slug, name: theme.name })}
+                />
                 <div className="flex shrink-0 items-center gap-2">
                   {active ? (
                     // Not a disabled Apply button: there is no action here to be
@@ -181,35 +180,11 @@ export default function ThemeRegistryList({
                       Apply
                     </Button>
                   )}
-                  {/* The app and connector tiles' Remove, in the same place
-                      and weight. Removing the applied theme is allowed, with a
-                      warning; removing the last one is refused. */}
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    label={`Remove ${theme.name}`}
-                    icon={<Trash2 className="h-4 w-4" aria-hidden />}
-                    onClick={() => setRemoving({ kind: "theme", slug: theme.slug, name: theme.name })}
-                  />
                 </div>
               </div>
 
-              <div className="mt-3 flex items-baseline justify-between gap-3 border-t border-border pt-3 text-[10px] leading-none text-muted-foreground">
-                <p className="min-w-0 truncate">
-                  {theme.authors.length > 0 && (
-                    <>
-                      <strong className="font-semibold">Authored By</strong>{" "}
-                      {renderAuthors(theme.authors)}
-                    </>
-                  )}
-                </p>
-                <p className="shrink-0">
-                  <strong className="font-semibold">Updated</strong>{" "}
-                  {/* Stamped by the pre-commit hook, so a theme edited but not
-                      yet committed says so rather than showing a stale date. */}
-                  {formatLastUpdated(theme.lastUpdated, "Not yet committed")}
-                </p>
-              </div>
+              {/* The app and connector tiles' band. */}
+              <TileFooter lastUpdated={theme.lastUpdated} authors={theme.authors} />
             </div>
           );
         })}
