@@ -8,6 +8,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import {
+  readsNeedingWriteScopes,
   validateConnectorMethods,
   validateConnectorTelemetry,
   validateRegistryContract,
@@ -55,6 +56,49 @@ test("mutates and the operation are carried into the registry with the rest of t
       { method: "getItem", operation: "GET /items/{id}" },
     ],
   );
+});
+
+test("the scopes a method needs are carried into the registry, for the Methods tab", () => {
+  assert.deepEqual(
+    validateConnectorTelemetry(
+      [
+        { method: "listItems", operation: "GET /items", scopes: ["items:read"] },
+        { method: "createItem", operation: "POST /items", mutates: true, scopes: ["items:read", "items:write"] },
+        { method: "ping", operation: "GET /ping", scopes: [] },
+      ],
+      "acme",
+    ),
+    [
+      { method: "listItems", operation: "GET /items", scopes: ["items:read"] },
+      { method: "createItem", operation: "POST /items", mutates: true, scopes: ["items:read", "items:write"] },
+      { method: "ping", operation: "GET /ping", scopes: [] },
+    ],
+  );
+});
+
+test("a read that needs a scope asked for only once changes are allowed is a warning, one per method", () => {
+  const scopes = [
+    { scope: "spreadsheets.readonly", requested: true as const },
+    { scope: "spreadsheets", requested: "write" as const },
+  ];
+  const warnings = readsNeedingWriteScopes(
+    "sheets",
+    [
+      { method: "getValues", operation: "values.get", scopes: ["spreadsheets.readonly"] },
+      { method: "batchGetValuesByDataFilter", operation: "values.batchGetByDataFilter", scopes: ["spreadsheets"] },
+      // A write needing it is what "write" is for.
+      { method: "updateValues", operation: "values.update", mutates: true, scopes: ["spreadsheets"] },
+      // Undeclared: nothing to say.
+      { method: "getSpreadsheet", operation: "spreadsheets.get" },
+    ],
+    scopes,
+  );
+  assert.deepEqual(warnings, [
+    'connectors/sheets: "batchGetValuesByDataFilter" reads, but needs spreadsheets, which this connector asks ' +
+      "for only once changes are allowed. On an install that is read-only the provider refuses it.",
+  ]);
+  assert.deepEqual(readsNeedingWriteScopes("sheets", [], scopes), []);
+  assert.deepEqual(readsNeedingWriteScopes("sheets", declared("a"), undefined), []);
 });
 
 test("a method declared twice fails the build", () => {

@@ -11,9 +11,9 @@ The list is required, not opt-in: **every public method on the class must be in 
 {
   "registryId": "my-service-3f9a2c1b",
   "telemetry": [
-    { "method": "enrichPerson",  "operation": "POST /people/enrich",    "description": "Enriched a person record" },
-    { "method": "enrichCompany", "operation": "POST /companies/enrich", "description": "Enriched a company record" },
-    { "method": "updatePerson",  "operation": "PATCH /people/{id}",     "description": "Updated a person record", "mutates": true }
+    { "method": "enrichPerson",  "operation": "POST /people/enrich",    "description": "Enriched a person record",  "scopes": ["people:read"] },
+    { "method": "enrichCompany", "operation": "POST /companies/enrich", "description": "Enriched a company record", "scopes": ["companies:read"] },
+    { "method": "updatePerson",  "operation": "PATCH /people/{id}",     "description": "Updated a person record",   "mutates": true, "scopes": ["people:write"] }
   ]
 }
 ```
@@ -21,7 +21,18 @@ The list is required, not opt-in: **every public method on the class must be in 
 `operation` is the provider operation as its reference names it: a path, an RPC
 method, a GraphQL operation. No two methods may name the same one, so the list
 reads as a map of what the connector covers of the provider's API, and the
-Connector Registry shows it on the connector's Details tab.
+Connector Registry shows it on the connector's Methods tab.
+
+`scopes`, optional, is what each method needs of the scopes the connector
+requests in `auth.scopes`: every one listed, read from the provider's reference
+for that operation. Where it says "one of" several, name the one you request.
+The build refuses a name that isn't in `auth.scopes` or is never requested, and
+warns about a read that needs a scope requested only with `"write"`: some
+providers authorize a read only with their read-write scope, and such a read
+fails on an install that is read-only. The Methods tab shows each method's
+scopes with whether the grant holds them; see [Scopes](scopes.md#which-methods-a-scope-decides).
+Declaring them is not part of the contract an app is built against, so it needs
+no new version.
 
 ## Connectors write no telemetry code
 

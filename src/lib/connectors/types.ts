@@ -227,6 +227,13 @@ export interface ConnectorTelemetryDefinition {
    * changes, and an MCP tool never does (src/lib/apps/read-only.ts).
    */
   mutates?: boolean;
+  /**
+   * The scopes the method needs, every one of them, each a `scope` in
+   * `auth.scopes` that the connector requests. Shown beside the method in the
+   * connector dialog's Methods tab, with whether the provider granted each.
+   * Absent: not declared.
+   */
+  scopes?: string[];
 }
 
 /** A link an admin follows while provisioning. Always https — see the schema. */

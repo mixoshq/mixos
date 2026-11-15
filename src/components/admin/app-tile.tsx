@@ -5,19 +5,17 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { AlertCircle, Trash2 } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import type { AppReplacement, NeedsGrants } from "@/lib/apps/access";
 import LucideIcon from "@/components/lucide-icon";
-import { Button, IconButton } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status";
 import { setAppActiveAction } from "@/lib/apps/admin-actions";
 import { describeIdentity } from "@/lib/repository/identity";
 import { CARD_SHELL } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
-  renderAuthors,
-  formatLastUpdated,
   formatCount,
   truncateWords,
   TILE_DESCRIPTION_WORDS,
@@ -25,6 +23,7 @@ import {
 import AppDetailsDialog, {
   MissingConnectorWarning,
 } from "./app-details-dialog";
+import { TileFooter } from "./provenance";
 import TypedConfirmDialog from "./typed-confirm-dialog";
 import {
   missingConnectorSteps,
@@ -56,7 +55,10 @@ interface AppTileProps {
    * tools off. Activating needs the slug typed, and clears it.
    */
   replacement: AppReplacement | null;
-  /** Opens the Remove dialog, which says what goes and what stays before it removes anything. */
+  /**
+   * Opens the Remove dialog, which says what goes and what stays before it
+   * removes anything. Offered from the Details dialog's footer, not the tile.
+   */
   onRemove: () => void;
 }
 
@@ -67,7 +69,7 @@ interface AppTileProps {
  * abstraction out: connectors and themes were already tiles, so an admin moving
  * between the three registries met three different objects. The shell here is
  * the connector tile's, to the class — same `mix-card` rounded-lg border, same
- * padding, same icon plate, same path-and-action floor, same provenance footer.
+ * padding, same icon plate, same action row, same provenance band (./provenance.tsx).
  *
  * WHAT DID NOT COME ACROSS IS THE TINT. The connector tile washes its card in a
  * status colour because configuration is the whole point of that grid. An app
@@ -296,20 +298,12 @@ export default function AppTile({
         </div>
       )}
 
-      {/* mt-auto pins the action and the provenance row to the bottom, so
+      {/* mt-auto pins the actions and the provenance band to the bottom, so
           tiles of differing height still line their buttons up across the
-          row. */}
-      <div className="mt-auto flex items-center justify-between gap-3 pt-4">
-        {/* Where this app's source lives — the same third provenance fact the
-            details dialog puts beside its footer, in the same mono treatment:
-            the row below says when it changed and who changed it, this says
-            where to go to change it yourself. */}
-        <code
-          className="min-w-0 truncate font-mono text-xs text-muted-foreground"
-          title={`/apps/${app.slug}/`}
-        >
-          /apps/{app.slug}/
-        </code>
+          row. The app's path is in the Details dialog's footer, where someone
+          about to go and edit it is looking; on the tile it was a third thing
+          to read before the buttons. */}
+      <div className="mt-auto flex items-center justify-end gap-3 pt-4">
         {/* The theme tile's Apply and the connector tile's Configure, exactly:
             size="sm" and variant="primary". Details is the one thing there is
             to do on an app card — an app has no configuration to finish, so
@@ -346,38 +340,13 @@ export default function AppTile({
           >
             Details
           </Button>
-          {/* The quietest control on the tile, and an icon, so the path
-              beside it keeps its room: removing an app's code is rare, and
-              the dialog it opens says what goes and what stays first. */}
-          <IconButton
-            variant="ghost"
-            size="sm"
-            label={`Remove ${app.name}`}
-            icon={<Trash2 className="h-4 w-4" aria-hidden />}
-            onClick={onRemove}
-          />
         </div>
       </div>
 
-      {/* Identical to the connector and theme tiles' footers, deliberately: an
-          admin moving between the three registries reads provenance in the same
-          place, in the same words. */}
-      <div className="mt-3 flex items-baseline justify-between gap-3 border-t border-border pt-3 text-[10px] leading-none text-muted-foreground">
-        <p className="min-w-0 truncate">
-          {app.authors && app.authors.length > 0 && (
-            <>
-              <strong className="font-semibold">Authored By</strong>{" "}
-              {renderAuthors(app.authors)}
-            </>
-          )}
-        </p>
-        <p className="shrink-0">
-          <strong className="font-semibold">Updated</strong>{" "}
-          {/* Stamped by the pre-commit hook, so an app edited but not yet
-              committed says so rather than showing a stale date. */}
-          {formatLastUpdated(app.lastUpdated, "Not yet committed")}
-        </p>
-      </div>
+      {/* The Details dialog's footer band, in the same words: an admin reads
+          when it changed and who changed it the same way on the tile and in
+          the dialog, and the same on the connector and theme tiles. */}
+      <TileFooter lastUpdated={app.lastUpdated} authors={app.authors} />
 
       <AppDetailsDialog
         app={app}
@@ -387,6 +356,12 @@ export default function AppTile({
         onGrantCount={(count) => setLiveGrants({ from: grantCount, count })}
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}
+        // The Remove dialog replaces this one rather than stacking on it: two
+        // focus traps at once, and the details of an app that is going.
+        onRemove={() => {
+          setDetailsOpen(false);
+          onRemove();
+        }}
       />
 
       {confirming && replacement && (

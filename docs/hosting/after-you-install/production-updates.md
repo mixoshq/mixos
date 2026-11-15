@@ -110,7 +110,7 @@ branch exists.
 **Updating and removing through the App.** An extension this build installed
 from mixos.org can be changed the same way. A withdrawn or newer notice offers
 **Propose update**, and so does its card in Browse (**Propose a different
-release** when it runs the current one); **Remove** on its tile offers **Propose
+release** when it runs the current one); its **Delete** offers **Propose
 removal**. Each opens a dialog with the same checks, and for an update the update
 dialog's comparison: the releases with their dates, what the one you pick changes
 (the publisher's claims, what the manifest declares, new migrations, the files),

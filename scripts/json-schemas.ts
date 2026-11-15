@@ -24,11 +24,13 @@
  * written beside it. This writes the current version of each file, and keeps
  * whatever else is already there.
  *
- * The one exception so far: app, connector and theme v1 gained a required
- * `registryId` after 0.7.0, in place, while no extension had been published
- * (docs/plans/20261114_0947-registry-id.md). Their `since` went back to
- * "unreleased" by hand, because buildIndex() keeps an existing one, so the
- * release that reads the new shape stamps itself as their first reader.
+ * The exceptions so far, each made while no extension of that kind had been
+ * published under the schema: app, connector and theme v1 gained a required
+ * `registryId` after 0.7.0 (docs/plans/20261114_0947-registry-id.md), and
+ * connector v1 an optional `scopes` on each `telemetry` entry after 0.8.0
+ * (docs/plans/20261115_1111-connector-method-scopes.md). Each time `since` went
+ * back to "unreleased" by hand, because buildIndex() keeps an existing one, so
+ * the release that reads the new shape stamps itself as the first reader.
  */
 
 import fs from "node:fs";

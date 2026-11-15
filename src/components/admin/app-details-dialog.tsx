@@ -19,11 +19,8 @@ import { StatusPill } from "@/components/ui/status";
 import FolderTabs from "@/components/ui/folder-tabs";
 import LucideIcon from "@/components/lucide-icon";
 import AppSettingsPanel from "./app-settings-panel";
-import {
-  renderAuthors,
-  formatLastUpdated,
-  formatCount,
-} from "@/lib/apps/display";
+import { Provenance, RemoveAction } from "./provenance";
+import { formatCount } from "@/lib/apps/display";
 import {
   getMcpToolSettings,
   setMcpToolEnabledAction,
@@ -924,6 +921,7 @@ export default function AppDetailsDialog({
   onGrantCount,
   open,
   onClose,
+  onRemove,
 }: {
   app: AppManifest;
   missingConnectors: MissingConnector[];
@@ -939,6 +937,8 @@ export default function AppDetailsDialog({
   onGrantCount?: (count: number) => void;
   open: boolean;
   onClose: () => void;
+  /** Opens the Remove dialog in this one's place, from the footer's Remove. */
+  onRemove?: () => void;
 }) {
   const [tab, setTab] = useState<DialogTab>("overview");
   const [schema, setSchema] = useState<AppSchemaTable[] | null>(null);
@@ -988,29 +988,21 @@ export default function AppDetailsDialog({
           />
         </span>
       }
-      footer={
-        <span className="flex flex-wrap justify-center gap-x-10 gap-y-1.5 text-center">
-          <span>
-            <strong className="font-semibold">Updated</strong>{" "}
-            {formatLastUpdated(app.lastUpdated, "Not yet committed")}
-          </span>
-          {app.authors && app.authors.length > 0 && (
-            <span>
-              <strong className="font-semibold">By</strong>{" "}
-              {renderAuthors(app.authors)}
-            </span>
-          )}
-        </span>
-      }
+      footer={<Provenance lastUpdated={app.lastUpdated} authors={app.authors} />}
       /*
         Where this app's source lives. The footer already carries provenance —
         when it changed and who changed it — and this is the third question in
-        that set: where do I go to change it myself.
+        that set: where do I go to change it myself. Then Remove, last and
+        quietest: the tile no longer carries it, so an admin opens the app,
+        sees what it is, and removes it from here.
       */
       footerAside={
-        <code className="font-mono text-xs text-muted-foreground">
-          /apps/{app.slug}/
-        </code>
+        <span className="flex items-center gap-4">
+          <code className="font-mono text-xs text-muted-foreground">
+            /apps/{app.slug}/
+          </code>
+          {onRemove && <RemoveAction name={app.name} onClick={onRemove} />}
+        </span>
       }
       tabs={
         <FolderTabs

@@ -167,6 +167,26 @@ simply start failing.
 but this connector never requests is not broken. Rendering those as ✗ would
 report a dozen failures on a perfectly healthy connector.
 
+## Which methods a scope decides
+
+A verdict says what the grant holds; it doesn't say which calls that breaks.
+Each `telemetry` entry can name the scopes its method needs (`scopes`, see
+[Telemetry](telemetry.md)), and the connector dialog's **Methods** tab shows
+every method with those scopes and the verdict on each. A method also says, when
+it applies:
+
+- **Off while read-only** — it changes data and changes aren't allowed, so the
+  platform refuses it before the provider is asked;
+- **Works once changes are allowed** — it only reads, but needs a scope this
+  connector requests only with `"write"` (Google Sheets' data-filter reads take
+  `spreadsheets`, never `spreadsheets.readonly`), so the provider refuses it
+  until changes are allowed;
+- **Scope refused** — one of its scopes is ✗ above, so it fails until someone
+  connects again and approves it.
+
+A method with no `scopes` reads "scopes not declared": the platform doesn't
+guess which of the read scopes a read needs.
+
 ---
 
 ## Referenced by

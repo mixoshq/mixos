@@ -2969,8 +2969,9 @@ connector that left the build and keeps everything it had (§3.1), until an
 admin deletes it there (below). No code the extension ships runs in either
 half.
 
-The code half is **Remove** on each tile of Admin > Apps, Connectors and
-Themes, or `npm run remove -- <kind>/<slug>`
+The code half is **Delete** in the footer of an app's Details dialog or a
+connector's Configure dialog, or on a theme's tile in Admin > Themes, or
+`npm run remove -- <kind>/<slug>`
 ([`src/lib/repository/remove.ts`](../src/lib/repository/remove.ts)). Each says
 first what goes, what stays and what stands in the way, then asks. In the
 checkout, under both locks (below):
