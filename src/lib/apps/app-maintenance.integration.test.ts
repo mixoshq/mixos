@@ -56,6 +56,12 @@ const database = `mixos_upd_${run}`;
 const UPDATING = `upd-${run}`;
 const OTHER = `other-${run}`;
 const MIGRATION = "0001_items.sql";
+/** Every fixture route, as `[slug, path under api/]`: on disk and in the route loader map. */
+const FIXTURE_ROUTES = [
+  [UPDATING, "index"],
+  [OTHER, "index"],
+  [UPDATING, "items"],
+] as const;
 const USER_EMAIL = `user-${run}@example.com`;
 
 const MESSAGE = "This app is being updated. Try again shortly.";
@@ -331,6 +337,7 @@ describe("an app whose own migrations are behind", { skip }, () => {
     registry: typeof import("../../generated/app-registry");
     hookLoaders: typeof import("../../generated/app-hook-loaders");
     pageLoaders: typeof import("../../generated/app-page-loaders");
+    routeLoaders: typeof import("../../generated/app-route-loaders");
     buildInfo: typeof import("../../generated/build-info");
     db: typeof import("../db/client");
   };
@@ -453,6 +460,7 @@ describe("an app whose own migrations are behind", { skip }, () => {
       registry: await import("../../generated/app-registry"),
       hookLoaders: await import("../../generated/app-hook-loaders"),
       pageLoaders: await import("../../generated/app-page-loaders"),
+      routeLoaders: await import("../../generated/app-route-loaders"),
       buildInfo: await import("../../generated/build-info"),
       db: await import("../db/client"),
     };
@@ -460,6 +468,12 @@ describe("an app whose own migrations are behind", { skip }, () => {
     platform.hookLoaders.hookLoaders[UPDATING] = () => import(`@apps/${UPDATING}/hooks`);
     for (const slug of [UPDATING, OTHER]) {
       platform.pageLoaders.pageLoaders[`${slug}/pages/Main`] = () => import(`@apps/${slug}/pages/Main`);
+    }
+    // What `npm run registry` writes for the fixtures' routes, which the
+    // gateway and callAppRoute load through.
+    for (const [slug, route] of FIXTURE_ROUTES) {
+      platform.routeLoaders.routeLoaders[`${slug}/api/${route}/route`] = () =>
+        import(`@apps/${slug}/api/${route}/route`);
     }
     (platform.buildInfo.EXPECTED_APP_MIGRATIONS as { slug: string; file: string }[]).push({
       slug: UPDATING,
@@ -480,6 +494,9 @@ describe("an app whose own migrations are behind", { skip }, () => {
           delete platform.pageLoaders.pageLoaders[`${slug}/pages/Main`];
         }
         delete platform.hookLoaders.hookLoaders[UPDATING];
+        for (const [slug, route] of FIXTURE_ROUTES) {
+          delete platform.routeLoaders.routeLoaders[`${slug}/api/${route}/route`];
+        }
         const expected = platform.buildInfo.EXPECTED_APP_MIGRATIONS as { slug: string; file: string }[];
         const at = expected.findIndex((m) => m.slug === UPDATING);
         if (at >= 0) expected.splice(at, 1);
