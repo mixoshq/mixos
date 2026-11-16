@@ -2908,6 +2908,14 @@ changed channel is due at once. It runs under its own lock,
 `platform.release-check`, with a two-minute lease. Nothing it does fails the
 tick.
 
+**Check now.** The line under the build's version offers admins Check now
+(`src/lib/platform/release-check-actions.ts`), a server action that requires an
+admin first and takes no input. It sends the same request, under the same
+switch and lock, and skips only the schedule: it waits a minute after any
+attempt, and for a wait the catalogue asked for with `Retry-After`, which the
+stored state marks (`waitAskedFor`). Pressed again and again, it sends one
+request a minute at most.
+
 **Parsed, not trusted.** The request goes through the client's rules (see **The
 transport carrying the checksum**): https, an 8-second timeout, and redirects
 only within the catalogue's origin. Its cap is 512 KB, which is how large

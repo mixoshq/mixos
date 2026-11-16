@@ -14,6 +14,7 @@ import {
   type ReleaseNotice as ReleaseNoticeData,
 } from "@/lib/platform/releases";
 import { CopyButton } from "./copy-button";
+import ReleaseCheckNow from "./release-check-now";
 import ReleaseNotes from "./release-notes";
 import UpdatePullRequestButton from "./update-pull-request";
 
@@ -146,12 +147,14 @@ function Offer({ offer }: { offer: UpdateOffer }) {
 /**
  * The release check's muted line, under the build's version at the foot of
  * the admin pages: whether this instance checks, and when it last heard from
- * mixos.org, with a link to what it sends.
+ * mixos.org, with Check now when the check is on, and a link to what it
+ * sends.
  */
-export function ReleaseCheckStatus({ status }: { status: string }) {
+export function ReleaseCheckStatus({ status, checkNow = false }: { status: string; checkNow?: boolean }) {
+  const sent = <Outbound href={WHAT_THE_RELEASE_CHECK_SENDS}>What&apos;s sent</Outbound>;
   return (
     <p>
-      {status} <Outbound href={WHAT_THE_RELEASE_CHECK_SENDS}>What&apos;s sent</Outbound>
+      {status} {checkNow ? <ReleaseCheckNow>{sent}</ReleaseCheckNow> : sent}
     </p>
   );
 }

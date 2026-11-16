@@ -132,6 +132,21 @@ describe("webhook body cap and per-IP limit", { skip }, () => {
   const claims = async () =>
     (await sql`select count(*)::int as n from public.connector_webhook_events`)[0].n as number;
 
+  /**
+   * Spends an address's budget as another instance would, so this one's memory
+   * has seen nothing of it. The bucket is left nine tokens below empty, not at
+   * empty: the route refills 10 a second, so an empty bucket holds a token
+   * again 100ms later, and a busy runner can take that long between this
+   * insert and the request. From -9 it takes a second to reach a token, and a
+   * refusal still says `Retry-After: 1`.
+   */
+  async function spend(ip: string) {
+    await sql`
+      insert into public.rate_buckets (scope, subject, tokens, last_refill)
+      values ('ip', ${`connector-webhooks::${ip}`}, -9, now())
+    `;
+  }
+
   before(async () => {
     admin = postgres(serverUrl!, { max: 1, onnotice: () => {} });
     await admin.unsafe(`create database ${database}`);
@@ -224,12 +239,8 @@ describe("webhook body cap and per-IP limit", { skip }, () => {
   });
 
   test("an address whose budget is spent is refused before the database is read or anything decrypted", async () => {
-    // Spent on another instance: this one's memory has seen nothing of it.
     const ip = "192.0.2.40";
-    await sql`
-      insert into public.rate_buckets (scope, subject, tokens, last_refill)
-      values ('ip', ${`connector-webhooks::${ip}`}, 0, now())
-    `;
+    await spend(ip);
     const before = await claims();
     const delivery = signed({ n: 2 });
     statements.length = 0;
@@ -248,10 +259,7 @@ describe("webhook body cap and per-IP limit", { skip }, () => {
       assert.equal(over.res.status, 413);
 
       const ip = "192.0.2.51";
-      await sql`
-        insert into public.rate_buckets (scope, subject, tokens, last_refill)
-        values ('ip', ${`connector-webhooks::${ip}`}, 0, now())
-      `;
+      await spend(ip);
       const delivery = signed({ n: 3 });
       assert.equal((await deliver(ip, delivery.body, delivery.headers)).res.status, 429);
 

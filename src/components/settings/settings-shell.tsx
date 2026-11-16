@@ -52,7 +52,7 @@ export default async function SettingsShell({
       </div>
       <footer className="mt-12 space-y-1 text-center text-xs text-muted-foreground">
         {showBuild && isAdmin && <p>{describeBuild()}</p>}
-        {releases?.status && <ReleaseCheckStatus status={releases.status} />}
+        {releases?.status && <ReleaseCheckStatus status={releases.status} checkNow={releases.canCheckNow} />}
         <p>Made in Detroit with 🫶🏽</p>
       </footer>
     </div>

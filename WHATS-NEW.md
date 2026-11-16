@@ -12,6 +12,11 @@ just pulled.
 
 ## 2026-11-15
 
+- **Check now, beside "Checked mixos.org for new releases".** The line under
+  the build's version on the admin pages has a text button that asks mixos.org
+  at once, rather than waiting for the daily check, and the line and the
+  release notice update when it answers. It asks at most once a minute, and
+  keeps to a wait mixos.org asked for with `Retry-After`.
 - **A connector's methods can name the scopes they need, and a Methods tab
   shows them.** Each `telemetry` entry in `connector.json` takes an optional
   `"scopes": [...]`, from those `auth.scopes` requests; the build refuses one
