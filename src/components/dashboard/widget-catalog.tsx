@@ -241,10 +241,7 @@ function WidgetCard({
   onSelect: () => void;
 }) {
   return (
-    <div
-      data-tour={`widget-${app.slug}`}
-      className="flex flex-col gap-3 rounded-lg border border-border p-4"
-    >
+    <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
       <div className="flex items-start gap-3">
         <LucideIcon
           name={app.icon}

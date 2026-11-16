@@ -33,7 +33,7 @@ import { useTour } from "./tour-context";
  * the next one begins. The pauses are the design — a second on the
  * welcome line before the keycap, a second on the picture before the words
  * for it and two on those before the keycap again, then the tagline alone,
- * two seconds before "Let's begin". Enter is Let's begin too, there.
+ * 740ms before "Let's begin". Enter is Let's begin too, there.
  *
  * NEXT SENDS THE LOGO HOME. The second screen is the workspace's, not the
  * sign-in page's: the welcome line fades out completely (COPY_FADE_MS), then
@@ -53,8 +53,10 @@ import { useTour } from "./tour-context";
  * THE REVEAL IS A COLLAPSE. "Let's begin" fades the tagline and itself, then
  * the overlay's height collapses to the bar's bottom edge, under a lockup that
  * is already in place. Both are `bg-brand`, so the overlay's last frame is the
- * bar and it unmounts without a seam. Reduced motion moves the lockup without
- * flying it, and replaces the collapse with one fade.
+ * bar and it unmounts without a seam — and the tour is over: `revealed()`
+ * puts up the "is yours" message (./installed.tsx) over the dashboard.
+ * Reduced motion moves the lockup without flying it, and replaces the
+ * collapse with one fade.
  *
  * SERVER-RENDERED. Whether the tour is active is a server fact (see
  * TourProvider), so this overlay is in the HTML from the first byte and the
@@ -122,7 +124,7 @@ const screens = (name: string): Screen[] => [
         text: "Let computers do computer things so humans can do human things.",
         delay: 200,
       },
-      { kind: "begin", delay: 2000 },
+      { kind: "begin", delay: 740 },
     ],
   },
 ];
@@ -346,9 +348,6 @@ function Takeover({ branding }: { branding: Branding }) {
   const fade = (i: number) =>
     `transition-opacity duration-500 ${visible(i) ? "opacity-100" : "opacity-0"}`;
 
-  /** The screen has the dashboard picture on it, which plays. */
-  const playing = beats.some((b) => b.kind === "illustration");
-
   const beat = (b: Beat, i: number) => {
     const gap = gapAbove(beats, i);
     switch (b.kind) {
@@ -392,10 +391,7 @@ function Takeover({ branding }: { branding: Branding }) {
       case "next":
         // A keycap, faint until hovered, under the line's right edge: press
         // Enter, or click it. Its name says both what it does and what it shows.
-        // Once it is up it blinks like a cursor (`keycap-blink`, globals.css);
-        // the class goes on with it, so the blinking starts once it has
-        // faded in, not while it still is. Not beside the playing picture:
-        // one thing moving on the screen at a time.
+        // Still: it waits without asking for attention.
         return (
           <div key={i} className={`${gap} mx-auto flex max-w-xl justify-end ${fade(i)}`}>
             <button
@@ -404,9 +400,7 @@ function Takeover({ branding }: { branding: Branding }) {
               disabled={!visible(i)}
               aria-label="Next (Enter)"
               aria-keyshortcuts="Enter"
-              className={`flex items-center gap-1.5 rounded-md border border-b-2 border-brand-foreground/25 px-2 py-1 font-mono text-xs text-brand-foreground/60 transition-colors hover:border-brand-foreground/50 hover:text-brand-foreground ${
-                visible(i) && !playing ? "keycap-blink" : ""
-              }`}
+              className="flex items-center gap-1.5 rounded-md border border-b-2 border-brand-foreground/25 px-2 py-1 font-mono text-xs text-brand-foreground/60 transition-colors hover:border-brand-foreground/50 hover:text-brand-foreground"
             >
               Enter
               <CornerDownLeft className="h-3.5 w-3.5" aria-hidden />
