@@ -17,59 +17,47 @@ import { markOnboardingComplete } from "@/lib/onboarding/actions";
 /**
  * Where the welcome tour is.
  *
- * - `welcome` — the brand takeover with its two screens.
+ * - `welcome` — the brand takeover with its screens.
  * - `reveal`  — "Let's begin" was pressed: the overlay is collapsing into the
- *               menu bar, where the lockup already flew on Next.
- * - `guide`   — the overlay is gone; the step bubble is pointing at things.
- * - `done`    — nothing rendered. The only phase a returning user sees.
+ *               menu bar, where the lockup already flew on Next. When it has,
+ *               the tour is over and the "is yours" message comes up.
+ * - `done`    — no takeover. The only phase a returning user sees.
  */
-export type TourPhase = "welcome" | "reveal" | "guide" | "done";
+export type TourPhase = "welcome" | "reveal" | "done";
 
 /**
- * The point the confetti bursts from, and the viewport it has to reach the
- * edges of. Measured in the click handler, where reading the DOM is
- * legitimate, so the confetti's render stays pure.
+ * A burst under way: the point it bursts from, the viewport it has to reach
+ * the edges of, and the spots where pieces gather to spell the name, in
+ * viewport coordinates — none when the word could not be set — with the
+ * spacing between them. Measured where the burst is set off, where reading
+ * the DOM is legitimate, so the confetti's render stays pure.
  */
-export interface BurstOrigin {
+export interface Celebration {
   x: number;
   y: number;
   vw: number;
   vh: number;
-}
-
-/** A burst under way: where from, and in what colours (the theme's, without). */
-export interface Celebration extends BurstOrigin {
-  colors?: readonly string[];
+  word: readonly (readonly [number, number])[];
+  grain: number;
 }
 
 interface TourContextValue {
   phase: TourPhase;
   /** `welcome` → `reveal`. The overlay calls `revealed()` when its animation ends. */
   begin: () => void;
-  /** `reveal` → `guide`. */
+  /**
+   * `reveal` → `done`: stamps completion and puts up the message that says
+   * the install is yours, which sets the confetti off with `burst()`.
+   */
   revealed: () => void;
-  /** Any phase → `done`, and stamps completion. Used by Skip. */
-  finish: () => void;
-  /**
-   * The end of the guide: `finish`, plus the celebration — the message that
-   * says the install is done, now, and confetti from `origin` when the
-   * message calls `burst()`.
-   */
-  complete: (origin: BurstOrigin) => void;
-  /**
-   * Set the confetti off, once: the message calls it the moment its mark has
-   * drawn itself on, so the burst lands on the mark finishing.
-   */
-  burst: (colors?: readonly string[]) => void;
-  /** Where the confetti is bursting from, for a few seconds after `complete()`; null otherwise. */
+  /** Set the confetti off, once: the message calls it as it is closed. */
+  burst: (celebration: Celebration) => void;
+  /** The burst under way, for a few seconds after `burst()`; null otherwise. */
   celebrating: Celebration | null;
-  /** The "is installed" message is up, from `complete()` until it is dismissed. */
+  /** The "is yours" message is up, from `revealed()` until it is dismissed. */
   installed: boolean;
   /** The message was clicked away. */
   dismissInstalled: () => void;
-  /** Index of the guide step showing, so the page can stage itself around it. */
-  guideStep: number;
-  setGuideStep: (i: number) => void;
   /** The confetti has fallen. */
   celebrated: () => void;
 }
@@ -78,15 +66,11 @@ const TourContext = createContext<TourContextValue>({
   phase: "done",
   begin: () => {},
   revealed: () => {},
-  finish: () => {},
-  complete: () => {},
   burst: () => {},
   celebrating: null,
   installed: false,
   dismissInstalled: () => {},
   celebrated: () => {},
-  guideStep: 0,
-  setGuideStep: () => {},
 });
 
 /**
@@ -118,34 +102,24 @@ export function TourProvider({
 
   const [celebrating, setCelebrating] = useState<Celebration | null>(null);
   const [installed, setInstalled] = useState(false);
-  const [guideStep, setGuideStep] = useState(0);
 
   const begin = useCallback(() => setPhase("reveal"), []);
+  // Whether the message may still set the confetti off: armed by
+  // `revealed()`, spent by the burst, so a second call does nothing.
+  const burstArmed = useRef(false);
   const revealed = useCallback(() => {
-    setGuideStep(0);
-    setPhase("guide");
-  }, []);
-  const finish = useCallback(() => {
     setPhase("done");
-    // Fire-and-forget: the UI is already gone, and a failed stamp only means
-    // the tour plays again next time, which is the safe direction to fail.
+    // Fire-and-forget: the takeover is already gone, and a failed stamp only
+    // means the tour plays again next time, which is the safe direction to
+    // fail.
     void markOnboardingComplete();
+    burstArmed.current = true;
+    setInstalled(true);
   }, []);
-  // Where the confetti will burst from, held between `complete()` and the
-  // message's `burst()`; cleared by the burst, so a second call does nothing.
-  const pendingBurst = useRef<BurstOrigin | null>(null);
-  const complete = useCallback(
-    (origin: BurstOrigin) => {
-      finish();
-      pendingBurst.current = origin;
-      setInstalled(true);
-    },
-    [finish],
-  );
-  const burst = useCallback((colors?: readonly string[]) => {
-    if (!pendingBurst.current) return;
-    setCelebrating({ ...pendingBurst.current, colors });
-    pendingBurst.current = null;
+  const burst = useCallback((celebration: Celebration) => {
+    if (!burstArmed.current) return;
+    burstArmed.current = false;
+    setCelebrating(celebration);
   }, []);
   const celebrated = useCallback(() => setCelebrating(null), []);
   const dismissInstalled = useCallback(() => setInstalled(false), []);
@@ -156,15 +130,11 @@ export function TourProvider({
         phase,
         begin,
         revealed,
-        finish,
-        complete,
         burst,
         celebrating,
         installed,
         dismissInstalled,
         celebrated,
-        guideStep,
-        setGuideStep,
       }}
     >
       {children}

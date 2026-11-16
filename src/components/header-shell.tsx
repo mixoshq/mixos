@@ -21,7 +21,7 @@ export default function HeaderShell({
   const { phase } = useTour();
   const [peek, setPeek] = useState(false);
 
-  // The welcome tour flies the logo into this bar and then points at it; an
+  // The welcome tour flies the logo into this bar and collapses onto it; an
   // auto-hidden bar would leave both animations aimed at nothing. Inline
   // until the tour is over, then the preference applies again.
   const hidden = menuBar === "hidden" && phase === "done";

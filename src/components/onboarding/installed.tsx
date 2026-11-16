@@ -4,23 +4,30 @@
 
 "use client";
 
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import Image from "next/image";
-import { Square, SquareCheck } from "lucide-react";
+import { AppWindow, Palette, Plug, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { fitLogo, type LogoBox } from "@/lib/branding/fit";
 import type { BrandLogo } from "@/lib/branding/types";
 import { cn } from "@/lib/utils";
-import MixosMarkDrawn, { MIXOS_MARK_COLOURS, isMixosMark } from "./mixos-mark";
+import { SPELLERS, spellSpots, type WordBox } from "./confetti";
+import MixosMarkDrawn, { isMixosMark } from "./mixos-mark";
 import { useTour } from "./tour-context";
 
 /**
- * The end of the welcome tour: "MixOS is yours.", in the middle of the
- * screen, its mark drawing itself on above the headline — and the moment
- * the mark is done, confetti bursts out from behind the card (./confetti.tsx,
- * through `burst()`): at once under reduced motion, where nothing draws, and
- * after BURST_FALLBACK_MS if the animation's end never arrives.
+ * The end of the welcome tour, the moment the takeover has collapsed into
+ * the menu bar: "MixOS is yours.", popping in in the middle of the screen,
+ * its mark drawing itself on above the headline and the three things there
+ * are to add below it.
+ *
+ * I'M READY IS THE CELEBRATION. Pressing it — or closing the card any other
+ * way, Enter, Escape or a click on the dim — fades the card out and sets the
+ * confetti off from the button (./confetti.tsx, through `burst()`): 40% of
+ * it flies to loosely spell the name across the whole width of the screen,
+ * hangs there about 470ms and crumbles; the rest bursts out everywhere, over
+ * the word too, and falls at once.
  *
  * MixOS's own mark draws itself on stroke by stroke (./mixos-mark.tsx,
  * traced from the PNG). Any other mark —
@@ -30,16 +37,47 @@ import { useTour } from "./tour-context";
  * mark, still.
  *
  * Two layers around the confetti (z-120): the dim under it, which takes the
- * click, and the card over it, which lets clicks through — so the pieces fly
- * behind and around the card without crossing its words. Setup Complete
- * closes it, and so does a click anywhere else, Enter or Escape. It fades
- * rather than vanishing, then unmounts.
+ * click, and the card, which lets clicks through. The card starts above the
+ * confetti's layer and drops under it as it fades, so the burst comes out of
+ * the button over the card rather than from behind it. It fades rather than
+ * vanishing, then unmounts.
  */
+
+/**
+ * What there is to add, under the headline: words only, no links, each
+ * line short enough to sit on one line. The icons are the ones
+ * Administration uses for each (src/lib/admin/sections.ts).
+ */
+const EXTENSIONS: { icon: LucideIcon; label: string; line: string }[] = [
+  { icon: AppWindow, label: "Add Apps", line: "Tools for how you work." },
+  { icon: Plug, label: "Add Connectors", line: "Plug in your services." },
+  { icon: Palette, label: "Add Themes", line: "Make it look like yours." },
+];
 
 const MARK_BOX: LogoBox = { height: 88, maxWidth: 200 };
 const LEAVE_MS = 300;
-/** Past the longest the mark takes to draw (200ms beat + 1400ms). */
-const BURST_FALLBACK_MS = 3000;
+
+/** The word's margin from the screen's edges and the menu bar. */
+const WORD_EDGE = 16;
+/** The word is no taller than this share of the screen, however wide. */
+const WORD_MAX_SHARE = 0.5;
+
+/**
+ * Where the confetti spells the name: the screen's whole width, less a
+ * margin, centred in the page under the menu bar. The word is set as large
+ * as fits, so a short name is as wide as this and a long one shorter.
+ */
+function wordBox(barBottom: number, vw: number, vh: number): WordBox {
+  const top = barBottom + WORD_EDGE;
+  const room = vh - WORD_EDGE - top;
+  const height = Math.min(room, vh * WORD_MAX_SHARE);
+  return {
+    left: WORD_EDGE,
+    top: top + (room - height) / 2,
+    width: vw - 2 * WORD_EDGE,
+    height,
+  };
+}
 
 export default function Installed({
   name,
@@ -57,22 +95,37 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
   const { dismissInstalled, burst: burstIn } = useTour();
   const [leaving, setLeaving] = useState(false);
   const mark = logo ? fitLogo(logo, MARK_BOX) : null;
-  // In the mark's own colours when the mark is MixOS's; the theme's otherwise.
   const ownMark = isMixosMark(mark?.src);
-  const burst = useCallback(
-    () => burstIn(ownMark ? MIXOS_MARK_COLOURS : undefined),
-    [burstIn, ownMark],
-  );
-
-  // The confetti, on the mark's last stroke; see the doc above.
-  useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      burst();
-      return;
-    }
-    const t = window.setTimeout(burst, BURST_FALLBACK_MS);
-    return () => clearTimeout(t);
-  }, [burst]);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  // Every way out: the confetti from the button's centre, the word set in
+  // the headline's typeface, then the fade. Once — a click on the dim while
+  // the card fades is not a second celebration.
+  const close = useCallback(() => {
+    if (leaving) return;
+    setLeaving(true);
+    const button = buttonRef.current?.getBoundingClientRect();
+    const title = titleRef.current;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const bar = document.querySelector('[data-tour="menu-bar"]');
+    const { spots, grain } = title
+      ? spellSpots(
+          name,
+          wordBox(bar?.getBoundingClientRect().bottom ?? 0, vw, vh),
+          getComputedStyle(title).fontFamily,
+          SPELLERS,
+        )
+      : { spots: [], grain: 0 };
+    burstIn({
+      x: button ? button.left + button.width / 2 : vw / 2,
+      y: button ? button.top + button.height / 2 : vh / 2,
+      vw,
+      vh,
+      word: spots,
+      grain,
+    });
+  }, [leaving, burstIn, name]);
 
   // Fade, then go.
   useEffect(() => {
@@ -85,12 +138,12 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Enter" || e.key === "Escape") {
         e.preventDefault();
-        setLeaving(true);
+        close();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [close]);
 
   const fade = cn(
     "transition-opacity duration-300",
@@ -100,7 +153,7 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
     <>
       <div
         aria-hidden
-        onClick={() => setLeaving(true)}
+        onClick={close}
         className={cn("fixed inset-0 z-[110] cursor-pointer bg-black/45", fade)}
       />
       <div
@@ -108,14 +161,15 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
         aria-modal="true"
         aria-labelledby="installed-title"
         className={cn(
-          "pointer-events-none fixed inset-0 z-[130] flex items-center justify-center px-4",
+          "pointer-events-none fixed inset-0 flex items-center justify-center px-4",
+          leaving ? "z-[115]" : "z-[130]",
           fade,
         )}
       >
         <div
           className={cn(
             CARD_SURFACE,
-            "celebrate-card w-full max-w-md px-8 pb-8 pt-6 text-center shadow-2xl",
+            "celebrate-card w-full max-w-2xl px-6 pb-8 pt-6 text-center shadow-2xl sm:px-10",
           )}
         >
           <div
@@ -123,14 +177,9 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
             className="relative mx-auto flex h-36 w-36 items-center justify-center"
           >
             {ownMark ? (
-              <MixosMarkDrawn height={MARK_BOX.height} onDrawn={burst} />
+              <MixosMarkDrawn height={MARK_BOX.height} />
             ) : (
-              <span
-                className="celebrate-logo relative block"
-                onAnimationEnd={(e) => {
-                  if (e.animationName === "celebrate-logo-in") burst();
-                }}
-              >
+              <span className="celebrate-logo relative block">
                 {mark ? (
                   <span className="celebrate-draw relative block">
                     <Image
@@ -159,32 +208,48 @@ function Message({ name, logo }: { name: string; logo: BrandLogo | null }) {
           </div>
           <h2
             id="installed-title"
+            ref={titleRef}
             className="mt-2 font-heading text-2xl font-bold text-foreground sm:text-3xl"
           >
             {name} is yours.
           </h2>
-          <p className="mt-2 text-base leading-relaxed text-muted-foreground">
-            Add more apps, arrange your dashboard,
-            <br />
-            set up your workspace.
-          </p>
+          {/* Three columns, or on a phone, where three one-line captions
+              can't sit side by side, three rows: the icon, and beside it the
+              label over its line. Centred as a block there, so the rows
+              line up with each other rather than with the card's edge. */}
+          <ul className="mx-auto mt-6 grid w-fit grid-cols-1 gap-4 sm:w-full sm:grid-cols-3 sm:gap-3">
+            {EXTENSIONS.map(({ icon: Icon, label, line }) => (
+              <li
+                key={label}
+                className="flex items-center gap-3 text-left sm:flex-col sm:gap-0 sm:text-center"
+              >
+                <span
+                  aria-hidden
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted text-foreground"
+                >
+                  <Icon className="h-5 w-5" />
+                </span>
+                <span className="flex flex-col sm:mt-2 sm:items-center">
+                  <span className="text-sm font-semibold leading-tight text-foreground">
+                    {label}
+                  </span>
+                  <span className="mt-1 whitespace-nowrap text-xs leading-snug text-muted-foreground">
+                    {line}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
           {/* The card's one control, in a layer that otherwise lets clicks
               through to the dim. Focused, so Enter is it too. */}
           <Button
+            ref={buttonRef}
             variant="primary"
-            // An empty box that ticks itself under the pointer. Not on focus:
-            // the button has focus from the start, which would tick it then.
-            icon={
-              <span aria-hidden className="relative h-4 w-4">
-                <Square className="absolute inset-0 h-4 w-4 transition-opacity group-hover:opacity-0" />
-                <SquareCheck className="absolute inset-0 h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
-              </span>
-            }
             autoFocus
-            onClick={() => setLeaving(true)}
-            className="group pointer-events-auto mt-6"
+            onClick={close}
+            className="pointer-events-auto mt-8"
           >
-            Setup Complete
+            I&apos;m ready
           </Button>
         </div>
       </div>
