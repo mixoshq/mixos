@@ -8,6 +8,20 @@ tests and internal changes, and is the notes of its GitHub Release.
 Releases are made with `/mixos deploy release`; see the Release section of
 [.claude/skills/mixos/actions/deploy.md](.claude/skills/mixos/actions/deploy.md).
 
+## v0.9.0 (2026-11-15)
+
+Changes since v0.8.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.9.0/WHATS-NEW.md).
+
+### Features
+
+- **os:** each connector method names the scopes it needs, and a Methods tab shows them (d009925)
+- **os:** registry tiles end in their dialog's provenance band, and Delete moves into the dialog (f9f0251)
+
+### Fixes
+
+- **os:** removing an extension shows no build error in a dev server (c3fe77c)
+- **os:** an extension renamed can be removed (8f66f9d)
+
 ## v0.8.0 (2026-11-14)
 
 Changes since v0.7.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.8.0/WHATS-NEW.md).
