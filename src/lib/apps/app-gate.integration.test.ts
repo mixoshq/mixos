@@ -49,6 +49,8 @@ const GATED = `gated-${run}`;
 const CALLER = `caller-${run}`;
 /** The fixture's routes, under `api/`: written to disk and to the route loader map. */
 const GATED_ROUTES = ["index", "items"] as const;
+/** Its job, sync and service, as `<kind>/<name>`: on disk and in their kinds' loader maps. */
+const GATED_HANDLERS = ["jobs/tick", "sync/feed", "services/lookup"] as const;
 const ADMIN_EMAIL = `admin-${run}@example.com`;
 
 /** Made in `before`, so a skipped run leaves nothing behind. */
@@ -253,8 +255,19 @@ describe("the app gate", { skip }, () => {
     registry: typeof import("../../generated/app-registry");
     hookLoaders: typeof import("../../generated/app-hook-loaders");
     routeLoaders: typeof import("../../generated/app-route-loaders");
+    jobLoaders: typeof import("../../generated/app-job-loaders");
+    syncLoaders: typeof import("../../generated/app-sync-loaders");
+    serviceLoaders: typeof import("../../generated/app-service-loaders");
     db: typeof import("../db/client");
   };
+
+  /** The loader map a fixture handler goes in, by its `<kind>/` prefix. */
+  const handlerMap = (handler: (typeof GATED_HANDLERS)[number]) =>
+    ({
+      jobs: platform.jobLoaders.jobLoaders,
+      sync: platform.syncLoaders.syncLoaders,
+      services: platform.serviceLoaders.serviceLoaders,
+    })[handler.slice(0, handler.indexOf("/")) as "jobs" | "sync" | "services"];
 
   const setActive = (on: boolean) =>
     sql`update public.apps set is_active = ${on} where slug = ${GATED}`;
@@ -346,6 +359,9 @@ describe("the app gate", { skip }, () => {
       registry: await import("../../generated/app-registry"),
       hookLoaders: await import("../../generated/app-hook-loaders"),
       routeLoaders: await import("../../generated/app-route-loaders"),
+      jobLoaders: await import("../../generated/app-job-loaders"),
+      syncLoaders: await import("../../generated/app-sync-loaders"),
+      serviceLoaders: await import("../../generated/app-service-loaders"),
       db: await import("../db/client"),
     };
     platform.registry.appRegistry.push(gated, caller);
@@ -355,6 +371,11 @@ describe("the app gate", { skip }, () => {
     for (const route of GATED_ROUTES) {
       platform.routeLoaders.routeLoaders[`${GATED}/api/${route}/route`] = () =>
         import(`@apps/${GATED}/api/${route}/route`);
+    }
+    // And for its job, sync and service, which the scheduler and the services
+    // broker load through.
+    for (const handler of GATED_HANDLERS) {
+      handlerMap(handler)[`${GATED}/${handler}`] = () => import(`@apps/${GATED}/${handler}`);
     }
   });
 
@@ -370,6 +391,7 @@ describe("the app gate", { skip }, () => {
         for (const route of GATED_ROUTES) {
           delete platform.routeLoaders.routeLoaders[`${GATED}/api/${route}/route`];
         }
+        for (const handler of GATED_HANDLERS) delete handlerMap(handler)[`${GATED}/${handler}`];
         await platform.db.sql.end();
       }
       resolver?.deregister();

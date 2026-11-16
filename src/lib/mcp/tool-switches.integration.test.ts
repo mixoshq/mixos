@@ -176,6 +176,7 @@ describe("per-tool MCP switches", { skip }, () => {
     route: typeof import("../../app/api/mcp/route");
     authorize: typeof import("../../app/(main)/oauth/authorize/authorize-action");
     registry: typeof import("../../generated/app-registry");
+    mcpToolLoaders: typeof import("../../generated/app-mcp-tool-loaders");
     db: typeof import("../db/client");
   };
 
@@ -291,9 +292,18 @@ describe("per-tool MCP switches", { skip }, () => {
       route: await import("../../app/api/mcp/route"),
       authorize: await import("../../app/(main)/oauth/authorize/authorize-action"),
       registry: await import("../../generated/app-registry"),
+      mcpToolLoaders: await import("../../generated/app-mcp-tool-loaders"),
       db: await import("../db/client"),
     };
     p.registry.appRegistry.push(...APPS);
+    // What `npm run registry` writes for the fixtures' tools, which the MCP
+    // server loads through.
+    for (const app of APPS) {
+      for (const tool of app.mcp) {
+        p.mcpToolLoaders.mcpToolLoaders[`${app.slug}/mcp/${tool.name}`] = () =>
+          import(`@apps/${app.slug}/mcp/${tool.name}`);
+      }
+    }
 
     for (const app of APPS) {
       await sql`insert into public.apps (slug, name, is_active) values (${app.slug}, ${app.name}, true)`;
@@ -318,6 +328,7 @@ describe("per-tool MCP switches", { skip }, () => {
         for (const a of APPS) {
           const at = p.registry.appRegistry.findIndex((r) => r.slug === a.slug);
           if (at >= 0) p.registry.appRegistry.splice(at, 1);
+          for (const tool of a.mcp) delete p.mcpToolLoaders.mcpToolLoaders[`${a.slug}/mcp/${tool.name}`];
         }
         await p.db.sql.end();
       }

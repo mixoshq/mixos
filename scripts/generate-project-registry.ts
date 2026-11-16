@@ -95,6 +95,7 @@ import {
 } from "./route-contracts";
 import { readRoutesStatically } from "./route-reader";
 import { routeLoadersSource } from "./route-loaders";
+import { HANDLER_KINDS, HANDLER_MAPS, handlerLoadersSource } from "./handler-loaders";
 import { routeModulePath } from "../src/lib/apps/route-modules";
 import {
   readsNeedingWriteScopes,
@@ -2736,6 +2737,17 @@ ${hookImports.join("\n")}
   // import, which Turbopack resolves once, against the apps on disk when the
   // gateway compiled (scripts/route-loaders.ts).
   fs.writeFileSync(APP_ROUTE_LOADERS_FILE, routeLoadersSource(apps), "utf-8");
+
+  // The same, one file per kind, for MCP tools, syncs, jobs and services: the
+  // MCP server, the scheduler and the services broker load each through its
+  // kind's map rather than a template import (scripts/handler-loaders.ts).
+  for (const kind of HANDLER_KINDS) {
+    fs.writeFileSync(
+      path.resolve(OUTPUT_DIR, HANDLER_MAPS[kind].file),
+      handlerLoadersSource(kind, apps),
+      "utf-8",
+    );
+  }
 
   // ── Typed client surface ──────────────────────────────────────────────────
   //
