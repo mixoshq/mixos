@@ -171,3 +171,53 @@ test("the flow carries what it asked for, and the callback reads the grant again
   assert.deepEqual(verdicts(["things:read"], true), ["things:read=granted", "things:write=refused", "admin=unknown"]);
   assert.deepEqual(verdicts(["things:read", "things:write"], true), ["things:read=granted", "things:write=granted", "admin=unknown"]);
 });
+
+// ── includes ────────────────────────────────────────────────────────────────
+
+/**
+ * Todoist's catalogue: `data:read_write` "includes task:add and data:read".
+ * Asked for data:read and the write scopes, it grants data:read_write,
+ * data:delete and project:delete, and doesn't name data:read.
+ */
+const TODOIST = (includes: boolean): ConnectorAuthPolicy => ({
+  ...POLICY,
+  scopes: [
+    { scope: "task:add", requested: false },
+    { scope: "data:read", requested: true },
+    {
+      scope: "data:read_write",
+      requested: "write",
+      ...(includes ? { includes: ["task:add", "data:read"] } : {}),
+    },
+    { scope: "data:delete", requested: "write" },
+    { scope: "project:delete", requested: "write" },
+    { scope: "backups:read", requested: false },
+  ],
+});
+const TODOIST_GRANT = ["data:read_write", "data:delete", "project:delete"];
+
+test("a scope included by one in the grant is granted, though the grant doesn't name it", () => {
+  const verdicts = (policy: ConnectorAuthPolicy) =>
+    classifyGrant(policy.scopes!, TODOIST_GRANT, { writes: true }).map((r) => `${r.scope}=${r.status}`);
+
+  assert.deepEqual(verdicts(TODOIST(true)), [
+    "task:add=unknown",
+    "data:read=granted",
+    "data:read_write=granted",
+    "data:delete=granted",
+    "project:delete=granted",
+    "backups:read=unknown",
+  ]);
+  // Without includes, as before: held, and reported refused.
+  assert.equal(verdicts(TODOIST(false))[1], "data:read=refused");
+
+  // What Connect asks for doesn't change: data:read is still requested,
+  // which a read-only install needs.
+  assert.deepEqual(requestedScopes(TODOIST(true)), ["data:read"]);
+  assert.deepEqual(requestedScopes(TODOIST(true), { writes: true }), [
+    "data:read",
+    "data:read_write",
+    "data:delete",
+    "project:delete",
+  ]);
+});

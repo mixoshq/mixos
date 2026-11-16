@@ -24,7 +24,6 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { connectorRegistry } from "../src/generated/connector-registry";
 import { fetchScopeDocs } from "../src/lib/connectors/scope-docs";
 import type { DocumentedScope } from "../src/lib/connectors/scope-docs";
 
@@ -34,6 +33,8 @@ interface ManifestScope {
   access?: string;
   /** `true` always, `"write"` once an admin allows changes, `false` never. */
   requested: boolean | "write";
+  /** The scopes the provider grants as part of this one. A hand edit. */
+  includes?: string[];
 }
 
 /**
@@ -45,19 +46,23 @@ interface ManifestScope {
  * silently un-requesting a scope the connector actually needs would break
  * authorization at the next reconnect, and a provider reorganising their docs
  * is not consent to change what we ask for.
+ *
+ * `includes` is kept too, since the parse never finds it. A name in it that the
+ * merged catalogue no longer has is dropped, because the build refuses one, and
+ * reported in `droppedIncludes` as "<scope> includes <name>".
  */
-function merge(
+export function merge(
   existing: ManifestScope[],
   parsed: DocumentedScope[],
-): { scopes: ManifestScope[]; orphans: string[] } {
-  const wasRequested = new Map(existing.map((e) => [e.scope, e.requested]));
+): { scopes: ManifestScope[]; orphans: string[]; droppedIncludes: string[] } {
+  const old = new Map(existing.map((e) => [e.scope, e]));
   const documented = new Set(parsed.map((p) => p.scope));
 
   const scopes: ManifestScope[] = parsed.map((p) => ({
     scope: p.scope,
     description: p.description,
     access: p.access,
-    requested: wasRequested.get(p.scope) ?? false,
+    requested: old.get(p.scope)?.requested ?? false,
   }));
 
   const orphaned = existing.filter((e) => e.requested !== false && !documented.has(e.scope));
@@ -66,7 +71,19 @@ function merge(
   }
   const orphans = orphaned.map((e) => e.scope);
 
-  return { scopes, orphans };
+  const kept = new Set(scopes.map((s) => s.scope));
+  const droppedIncludes: string[] = [];
+  for (const s of scopes) {
+    const includes = old.get(s.scope)?.includes;
+    if (includes === undefined) continue;
+    const surviving = includes.filter((name) => kept.has(name));
+    for (const name of includes) {
+      if (!kept.has(name)) droppedIncludes.push(`${s.scope} includes ${name}`);
+    }
+    if (surviving.length > 0) s.includes = surviving;
+  }
+
+  return { scopes, orphans, droppedIncludes };
 }
 
 async function main() {
@@ -81,6 +98,9 @@ async function main() {
     process.exit(1);
   }
 
+  // Loaded here rather than imported, so merge() can be tested without a
+  // generated registry.
+  const { connectorRegistry } = await import("../src/generated/connector-registry");
   const connector = connectorRegistry.find((c) => c.name === name);
   if (!connector) {
     console.error(
@@ -113,7 +133,7 @@ async function main() {
   }
 
   const existing = (connector.auth?.scopes ?? []) as ManifestScope[];
-  const { scopes, orphans } = merge(existing, parsed);
+  const { scopes, orphans, droppedIncludes } = merge(existing, parsed);
   const requestedCount = scopes.filter((s) => s.requested === true).length;
   const writeCount = scopes.filter((s) => s.requested === "write").length;
 
@@ -144,6 +164,14 @@ async function main() {
     );
   }
 
+  if (droppedIncludes.length > 0) {
+    console.log(
+      `\nWARNING: includes a scope that page no longer documents:\n` +
+        droppedIncludes.map((d) => `  - ${d}`).join("\n") +
+        `\n  Dropped from includes. Check the provider's docs for what replaced it.`,
+    );
+  }
+
   if (!write) {
     console.log(`\nReport only. Re-run with --write to update connector.json.`);
     return;
@@ -168,4 +196,4 @@ async function main() {
   );
 }
 
-void main();
+if (require.main === module) void main();

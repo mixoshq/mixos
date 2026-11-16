@@ -65,6 +65,32 @@ export class ConnectorChangesNotAllowedError extends ConnectorError {
 }
 
 /**
+ * The scopes a grant holds: each one it names, and each one those include,
+ * followed through (`includes` on an `auth.scopes` entry).
+ *
+ * A provider can grant a broad scope in place of the narrower ones it covers
+ * and name only the broad one: asked for `data:read` and `data:read_write`,
+ * Todoist answers `data:read_write`, which it documents as including
+ * `data:read`. Read by name alone, a connector holding every scope it needs
+ * would show one of them refused. The including scope needs only to be in the
+ * grant, whether or not this connector asked for it.
+ */
+export function heldScopes(
+  scopes: readonly Pick<ConnectorScope, "scope" | "includes">[] | undefined,
+  granted: readonly string[],
+): Set<string> {
+  const includes = new Map((scopes ?? []).map((s) => [s.scope, s.includes ?? []]));
+  const held = new Set<string>();
+  const pending = [...granted];
+  for (let scope = pending.pop(); scope !== undefined; scope = pending.pop()) {
+    if (held.has(scope)) continue;
+    held.add(scope);
+    pending.push(...(includes.get(scope) ?? []));
+  }
+  return held;
+}
+
+/**
  * Whether a grant holds the scopes asked for once changes are allowed: true or
  * false when the grant's scopes are known, null when they aren't. A connector
  * that requests none holds them trivially.
@@ -77,6 +103,6 @@ export function grantHoldsWriteScopes(
   const needed = writeScopes(policy);
   if (needed.length === 0) return true;
   if (!grantedKnown) return null;
-  const held = new Set(granted);
+  const held = heldScopes(policy?.scopes, granted);
   return needed.every((s) => held.has(s));
 }
