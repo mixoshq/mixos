@@ -102,9 +102,9 @@ export async function ensureUser(args: {
  * something to put on the dashboard and a new one is not a blank page.
  *
  * Called at sign-in (the auth config's `signIn` event), and only while the
- * tour isn't finished or skipped. At sign-in rather than on page views: the
- * tour sends the user to App Manager, and an app they uninstall there has to
- * stay uninstalled, which it wouldn't if every page put it back. Sign-in still
+ * tour isn't finished. At sign-in rather than on page views: an app they
+ * uninstall in App Manager has to stay uninstalled, which it wouldn't if
+ * every page put it back. Sign-in still
  * covers every way an account comes to exist — the first admin is seeded
  * outside the app — and two at once are one idempotent upsert.
  */
