@@ -8,6 +8,18 @@ tests and internal changes, and is the notes of its GitHub Release.
 Releases are made with `/mixos deploy release`; see the Release section of
 [.claude/skills/mixos/actions/deploy.md](.claude/skills/mixos/actions/deploy.md).
 
+## v0.10.0 (2026-11-15)
+
+Changes since v0.9.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.10.0/WHATS-NEW.md).
+
+### Features
+
+- **os:** Check now asks mixos.org for new releases from the admin footer (51af5f4)
+
+### Fixes
+
+- **os:** a configured connector's tile isn't tinted green, since its pill says so (537c6bf)
+
 ## v0.9.0 (2026-11-15)
 
 Changes since v0.8.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.9.0/WHATS-NEW.md).
