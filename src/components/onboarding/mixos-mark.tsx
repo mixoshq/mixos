@@ -87,19 +87,6 @@ const GRADIENT_B = {
   ] as const,
 };
 
-/**
- * Six colours across the mark's two gradients, navy to cyan and on to
- * violet: the celebration's confetti, when the mark is this one.
- */
-export const MIXOS_MARK_COLOURS = [
-  "#02548a",
-  "#0181a8",
-  "#08aac5",
-  "#28cac8",
-  "#4c6bd2",
-  "#7068f0",
-] as const;
-
 const n = (v: number) => Number(v.toFixed(2));
 
 /**

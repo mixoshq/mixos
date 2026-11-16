@@ -67,6 +67,7 @@ Current platform plans:
 | [`20261110_0018-slug-ids.md`](20261110_0018-slug-ids.md) | Slug ids and manifest versions: mixos.org mints an 8-character id at the end of every new listing's slug; `npm run rename` and the `extension-renames.json` ledger carry an extension's data to its new slug; Wall·E, `mixos` and `mixos-dark` renamed; a required `$schema` URL in every extension JSON file, published on mixos.org and recorded per release |
 | [`20261114_0947-registry-id.md`](20261114_0947-registry-id.md) | `registryId` in `app.json`, `connector.json` and `theme.json`: the install name, minted by `npm run new` when an extension is created, required by schema v1 (changed in place), equal to the folder at build and install; mixos.org reads it instead of minting and keeps it with the repository that first listed it |
 | [`20261115_1111-connector-method-scopes.md`](20261115_1111-connector-method-scopes.md) | Each `telemetry` entry in `connector.json` may name the scopes its method needs, checked against `auth.scopes` (connector v1, changed in place); a read needing a write-requested scope warns; a Methods tab in the connector dialog shows each method with its scopes' verdicts |
+| [`20261115_2330-welcome-tour-finale.md`](20261115_2330-welcome-tour-finale.md) | The welcome tour's guide steps removed: the takeover's collapse ends the tour, the "is yours" card names apps, connectors and themes, and I'm ready bursts the confetti from the button to spell the brand name across the screen |
 
 ## File naming
 

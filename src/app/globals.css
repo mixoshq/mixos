@@ -227,99 +227,75 @@ h6 {
   animation: pivot-wiggle-3 1s step-end -0.66s infinite;
 }
 
-/* Welcome tour: each screen, and the guide bubble, settles in rather than
-   popping. Short enough that clicking Next quickly still feels immediate. */
-@keyframes tour-screen-in {
+/* Confetti for finishing the welcome tour. Each piece is two elements, so
+   four motions can run at once without fighting over one transform:
+
+   - The piece (`.confetti-piece`, at the origin — the "is yours" card's
+     button, set on the container as --origin-x/y) flies out to its spot
+     (`confetti-out`, on `translate`, decelerating), then falls from there
+     (`confetti-fall`, on `transform`, easing in to a steady speed, the way
+     paper reaches its terminal velocity rather than accelerating for ever).
+     The fall's delay is when it lets go: at once for a scattered piece, after
+     the word has hung for a word's.
+   - The bit inside it (`.confetti-bit`, the coloured paper) tumbles end over
+     end round its own tilted axis (`confetti-tumble`, on `rotate`, for good)
+     and, once it falls, flutters side to side (`confetti-flutter`, on
+     `translate`).
+
+   Every duration, delay, distance and axis is a per-piece custom property
+   set by the component, so no two fall alike. Fill mode `both` on the
+   piece: `backwards` keeps it at the origin, and at its spot, until each
+   motion starts; `forwards` keeps it off the bottom once it has fallen,
+   instead of snapping back and piling up until the component unmounts. */
+@keyframes confetti-out {
   from {
-    opacity: 0;
-    transform: translateY(8px);
+    translate: 0 0;
   }
   to {
-    opacity: 1;
-    transform: translateY(0);
+    translate: var(--burst-x) var(--burst-y);
   }
 }
 
-.tour-screen-in {
-  animation: tour-screen-in 400ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-}
-
-/* The guide's bubble and its dim: a fade alone, no rise, over a page the
-   user is already reading. */
-@keyframes tour-bubble-in {
+@keyframes confetti-fall {
   from {
-    opacity: 0;
+    transform: translate(0, 0);
   }
   to {
-    opacity: 1;
+    transform: translate(var(--drift), var(--fall-y));
   }
 }
 
-.tour-bubble-in {
-  animation: tour-bubble-in 600ms ease-out both;
-}
-
-/* Confetti for finishing the welcome tour. Every piece starts at the origin
-   (the Done button, set on the container as --origin-x/y) and runs one
-   animation in two movements: an outward burst that decelerates as it
-   reaches the screen edge (0% → 38%), then a fall under gravity that
-   accelerates off the bottom (38% → 100%). A keyframe's timing function
-   governs the interval it starts, which is what gives the two movements
-   different feels inside one animation. Per-piece vectors are inline custom
-   properties set by the component.
-
-   Fill mode `both`: `backwards` keeps delayed pieces at the origin while
-   they wait; `forwards` keeps finished pieces at the 100% state — off the
-   bottom — instead of snapping back to the origin and piling up until the
-   component unmounts. */
-@keyframes confetti-burst {
+/* A pendulum from the centre: fastest through the middle, slowing at each
+   side. Starting at the centre is what lets it begin as the piece lets go
+   without a jump. */
+@keyframes confetti-flutter {
   0% {
-    transform: translate3d(0, 0, 0) rotate(0deg);
-    animation-timing-function: cubic-bezier(0.1, 0.7, 0.3, 1);
+    translate: 0 0;
+    animation-timing-function: ease-out;
   }
-  38% {
-    transform: translate3d(var(--burst-x), var(--burst-y), 0)
-      rotate(var(--spin-1));
-    animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.5);
+  25% {
+    translate: var(--sway) 0;
+    animation-timing-function: ease-in;
+  }
+  50% {
+    translate: 0 0;
+    animation-timing-function: ease-out;
+  }
+  75% {
+    translate: calc(var(--sway) * -1) 0;
+    animation-timing-function: ease-in;
   }
   100% {
-    transform: translate3d(
-        calc(var(--burst-x) + var(--drift, 0px)),
-        var(--fall-y),
-        0
-      )
-      rotate(var(--spin-2));
+    translate: 0 0;
   }
 }
 
-/* The straggler: same burst, then it hangs at the edge and drifts down
-   slowly, the last thing to leave the screen. */
-@keyframes confetti-straggle {
-  0% {
-    transform: translate3d(0, 0, 0) rotate(0deg);
-    animation-timing-function: cubic-bezier(0.1, 0.7, 0.3, 1);
+@keyframes confetti-tumble {
+  from {
+    rotate: var(--axis) var(--spin-from);
   }
-  16% {
-    transform: translate3d(var(--burst-x), var(--burst-y), 0)
-      rotate(var(--spin-1));
-    animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
-  }
-  30% {
-    transform: translate3d(
-        calc(var(--burst-x) + var(--drift, 0px) * 0.3),
-        calc(var(--burst-y) + 24px),
-        0
-      )
-      rotate(calc(var(--spin-1) + 40deg));
-    animation-timing-function: cubic-bezier(0.45, 0, 0.7, 0.6);
-  }
-  100% {
-    transform: translate3d(
-        calc(var(--burst-x) + var(--drift, 0px)),
-        var(--fall-y),
-        0
-      )
-      rotate(var(--spin-2));
+  to {
+    rotate: var(--axis) calc(var(--spin-from) + var(--spin));
   }
 }
 
@@ -327,15 +303,23 @@ h6 {
   position: absolute;
   top: var(--origin-y, 50%);
   left: var(--origin-x, 50%);
-  border-radius: 2px;
-  background: var(--confetti-color, currentColor);
-  animation: confetti-burst var(--confetti-duration, 2.5s) linear
-    var(--confetti-delay, 0ms) both;
-  will-change: transform;
+  animation:
+    confetti-out var(--out-ms) cubic-bezier(0.1, 0.7, 0.3, 1) var(--delay)
+      both,
+    confetti-fall var(--fall-ms) ease-in var(--fall-delay) both;
+  will-change: translate, transform;
 }
 
-.confetti-straggler {
-  animation-name: confetti-straggle;
+.confetti-bit {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--confetti-color, currentColor);
+  animation:
+    confetti-tumble var(--tumble-ms) linear infinite,
+    confetti-flutter var(--flutter-ms) var(--fall-delay) infinite;
+  will-change: translate, rotate;
 }
 
 /* Sign-in card on a failed attempt: a short horizontal shake, the physical
@@ -367,7 +351,7 @@ h6 {
 /* MixOS's mark drawing itself on (src/components/onboarding/mixos-mark.tsx):
    each loop's stroke, measured as 1 (pathLength), revealed from its start
    by its dash offset, after a beat, easing in: slow to start, gathering
-   speed into the finish, where the confetti bursts. It rests drawn, so with
+   speed into the finish. It rests drawn, so with
    no animation — reduced motion — the mark is whole. */
 @keyframes mark-draw {
   from {
@@ -476,7 +460,7 @@ h6 {
 
 /* Something new arriving in the welcome tour's dashboard picture: a chat
    message, the next revenue figure. A short rise, sized for rows a few
-   pixels tall, where tour-screen-in's 8px would jump a whole row. */
+   pixels tall, where a larger one would jump a whole row. */
 @keyframes illustration-in {
   from {
     opacity: 0;
@@ -492,41 +476,19 @@ h6 {
   animation: illustration-in 400ms ease-out both;
 }
 
-/* The welcome tour's Enter keycap blinks as a text cursor does — on, off,
-   on, with no fade between, at the usual 530ms — so it reads as "waiting for
-   you to type". Still while it is hovered or focused, where the eye already
-   is. */
-@keyframes keycap-blink {
-  0% {
-    opacity: 1;
-  }
-  50%,
-  100% {
-    opacity: 0;
-  }
-}
-
-.keycap-blink {
-  animation: keycap-blink 1.06s step-end infinite;
-}
-
-.keycap-blink:hover,
-.keycap-blink:focus-visible {
-  animation: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .tour-screen-in,
-  .tour-bubble-in,
   .login-shake,
-  .confetti-piece,
   .illustration-in {
     animation-duration: 1ms;
   }
 
-  /* Not shortened like the rest: a loop at 1ms would flicker. The
-     celebration's go too, its elements resting where they land. */
-  .keycap-blink,
+  /* Confetti is motion or nothing. */
+  .confetti-piece {
+    display: none;
+  }
+
+  /* Not shortened like the rest but gone: the celebration's elements
+     rest where they land. */
   .mark-draw,
   .celebrate-card,
   .celebrate-logo,

@@ -17,7 +17,6 @@ import { onboardingCompletedAtFor } from "@/lib/onboarding/completed";
 import { TourProvider } from "@/components/onboarding/tour-context";
 import WelcomeTour from "@/components/onboarding/welcome-tour";
 import Installed from "@/components/onboarding/installed";
-import Guide from "@/components/onboarding/guide";
 import Confetti from "@/components/onboarding/confetti";
 import RegisterServiceWorker from "@/components/push/register-sw";
 import OfflineOverlay from "@/components/offline-overlay";
@@ -63,7 +62,6 @@ export default async function MainLayout({
               <main className="flex-1 overflow-auto bg-muted">{children}</main>
             </div>
             <WelcomeTour branding={{ name, menuBarLogo, loginLogo }} />
-            <Guide />
             <Confetti />
             <Installed name={name} logo={menuBarLogo} />
             <RegisterServiceWorker />

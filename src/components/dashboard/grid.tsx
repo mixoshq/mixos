@@ -26,12 +26,9 @@ import type { AppManifest, WidgetDefinition } from "@/lib/apps/types";
 import WidgetWrapper, { isConfigurable } from "./widget-wrapper";
 import WidgetCatalog from "./widget-catalog";
 import { useDashboardEdit } from "./edit-mode-context";
-import { useTour } from "@/components/onboarding/tour-context";
-import { DASHBOARD_STEP } from "@/components/onboarding/steps";
 
 import "react-grid-layout/css/styles.css";
 import { ContextMenu, type MenuItem } from "@/components/ui/menu";
-import { cn } from "@/lib/utils";
 
 type Breakpoint = "lg" | "md" | "sm";
 
@@ -72,21 +69,9 @@ export default function DashboardGrid({
   const [widgetList, setWidgetList] = useState<DashboardWidget[]>(widgets);
   const { width, containerRef } = useContainerWidth();
   const { isEditing, setIsEditing } = useDashboardEdit();
-  // The welcome tour points at "Add Widgets" and then waits for the user to
-  // finish editing with a widget added, so during the tour entering edit
-  // mode opens the catalog straight away — as it does for an empty dashboard
-  // anyway, where the only thing to do in edit mode is add something.
-  const { phase: tourPhase, guideStep } = useTour();
-  const tourActive = tourPhase === "guide";
-  // The tour talks about the menu bar and App Manager before it talks about
-  // the dashboard. Until it gets there, an empty dashboard shows nothing at all — "Your
-  // dashboard is empty" and its button would be competing with the bubble
-  // for the eye, and the button is the very thing that step asks for.
-  const emptyStateHidden = tourPhase !== "done" && guideStep < DASHBOARD_STEP;
   // Whether anything installed has a widget to add. Without one, the empty
   // dashboard offers App Manager instead of the catalog, the right-click
-  // menu on empty space is left to the browser, and the welcome tour's
-  // widget step waits: there is nothing to add yet.
+  // menu on empty space is left to the browser.
   const hasWidgetApps = availableApps.some((a) => a.widgets.length > 0);
   const currentBreakpointRef = useRef<Breakpoint>("lg");
   const [isDraggingWidget, setIsDraggingWidget] = useState(false);
@@ -201,7 +186,9 @@ export default function DashboardGrid({
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    const openCatalog = widgetList.length === 0 || tourActive;
+    // An empty dashboard opens the catalog straight away: the only thing to
+    // do in edit mode there is add something.
+    const openCatalog = widgetList.length === 0;
 
     if (reduced) {
       setIsEditing(true);
@@ -212,7 +199,7 @@ export default function DashboardGrid({
     setIsExpanding(true);
     setIsEditing(true);
     if (openCatalog) setCatalogOpen(true);
-  }, [isExpanding, isCollapsing, setIsEditing, widgetList.length, tourActive]);
+  }, [isExpanding, isCollapsing, setIsEditing, widgetList.length]);
 
   // Once the pill mounts in expand mode, measure its natural rect, then run
   // the reverse WAAPI keyframes. useLayoutEffect runs synchronously after
@@ -342,13 +329,6 @@ export default function DashboardGrid({
     (widget: DashboardWidget, layoutItem: LayoutItem) => {
       setWidgetList((prev) => [...prev, widget]);
       setLayout((prev) => [...prev, layoutItem]);
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent("dashboard:widget-added", {
-            detail: { appSlug: widget.app_slug, widgetId: widget.widget_id },
-          }),
-        );
-      }
     },
     [],
   );
@@ -419,13 +399,7 @@ export default function DashboardGrid({
       onContextMenu={handleContextMenu}
     >
       {widgetList.length === 0 ? (
-        <div
-          className={cn(
-            "flex h-full flex-col items-center justify-center gap-4",
-            emptyStateHidden && "invisible",
-            tourActive && !emptyStateHidden && "tour-screen-in",
-          )}
-        >
+        <div className="flex h-full flex-col items-center justify-center gap-4">
           <p className="text-lg text-muted-foreground">
             Your dashboard is empty
           </p>
@@ -436,15 +410,13 @@ export default function DashboardGrid({
                   setIsEditing(true);
                   setCatalogOpen(true);
                 }}
-                data-tour="edit-dashboard"
                 className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
               >
                 Add Widgets
               </button>
             ) : (
               // Nothing to add yet: App Manager, filtered to the apps that
-              // have widgets. No data-tour, so the welcome tour's widget step
-              // waits for the button above.
+              // have widgets.
               <Link
                 href={APPS_WITH_WIDGETS_URL}
                 className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-brand-foreground hover:bg-brand/90"
@@ -481,7 +453,6 @@ export default function DashboardGrid({
               return (
                 <div
                   key={widget.id}
-                  data-tour-widget-instance={widget.app_slug}
                   onDoubleClick={() => {
                     if (!isEditing) handleEnterEdit();
                   }}
@@ -508,7 +479,6 @@ export default function DashboardGrid({
           onClick={handleEnterEdit}
           aria-label="Edit dashboard"
           title="Edit dashboard"
-          data-tour="dashboard-pencil"
           className={`group fixed bottom-6 right-6 z-40 flex h-9 items-center overflow-hidden rounded-full bg-primary px-2.5 text-white shadow-sm backdrop-blur transition-opacity duration-500 hover:bg-primary/90 ${
             pencilVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
@@ -530,7 +500,6 @@ export default function DashboardGrid({
           <button
             onClick={() => setCatalogOpen(true)}
             disabled={isCollapsing || isExpanding}
-            data-tour="add-widget"
             className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-medium hover:bg-accent ${
               isCollapsing || isExpanding
                 ? "pointer-events-none opacity-0"
@@ -543,7 +512,6 @@ export default function DashboardGrid({
           <button
             onClick={handleDoneEditing}
             disabled={isCollapsing || isExpanding}
-            data-tour="done-editing"
             className={`flex items-center gap-1.5 whitespace-nowrap rounded-full bg-primary px-3 py-1.5 text-sm font-medium text-white hover:bg-primary/90 ${
               isCollapsing || isExpanding
                 ? "pointer-events-none opacity-0"
