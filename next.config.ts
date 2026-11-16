@@ -28,9 +28,9 @@ const nextConfig: NextConfig = {
   // src/lib/apps/api-router.ts readdir's `process.cwd()/apps/<slug>/api/**` and
   // checks for a literal "route.ts" on every app API request. Bundling the
   // module through the generated route map (src/generated/app-route-loaders.ts)
-  // is not enough; the .ts SOURCE FILES have to exist on disk. Without them resolveRoutePath returns null and
-  // nested app routes 404 (the bare index route still works, which makes this
-  // fail quietly — test a nested path).
+  // is not enough; the .ts SOURCE FILES have to exist on disk. Without them
+  // resolveRoutePath returns null and nested app routes 404 (the bare index
+  // route still works, which makes this fail quietly — test a nested path).
   //
   // Deliberately NOT also a `COPY` in the Dockerfile: one mechanism, in one
   // place. This is applied by Turbopack (the default builder in 16) on the Rust
@@ -63,28 +63,28 @@ const nextConfig: NextConfig = {
       "@apps": "./apps",
       "@connectors": "./connectors",
     },
-    // The platform loads an extension's optional parts with a template-literal
-    // import — @apps/<slug>/services/<name>, and likewise for MCP tools,
-    // search handlers, jobs, syncs and a connector's index — inside a
-    // try/catch that answers "no such handler" itself. Turbopack resolves each
-    // template against the files on disk, and when no installed extension has
-    // that kind of file (no app declares a service, a checkout has no
-    // connectors) it warns "Module not found" on every compile. That is the
-    // expected state of most installs.
+    // The platform loads a connector's index with a template-literal import,
+    // @connectors/<name>/index, inside a try/catch that answers for a connector
+    // that won't load itself. Turbopack resolves the template against the files
+    // on disk, and when a checkout has no connectors it warns "Module not found"
+    // on every compile. That is the expected state of most installs.
     //
-    // Only a template import under @apps/ or @connectors/ is quieted: Turbopack
-    // titles it "Module not found: Can't resolve '@apps/' <dynamic> …", and the
-    // "<dynamic>" marker is what a static import never has. A static import of a
-    // missing module, or a template import anywhere else, still warns.
+    // Only that template import is quieted: Turbopack titles it "Module not
+    // found: Can't resolve '@connectors/' <dynamic> …", and the "<dynamic>"
+    // marker is what a static import never has. A static import of a missing
+    // module, or a template import anywhere else, still warns.
     //
-    // App API routes are not on that list: they load through a generated map of
-    // explicit imports (scripts/route-loaders.ts), because a template import
-    // is resolved once, when the gateway compiles, and a route added under
-    // `next dev` was a 404 until a restart.
+    // App code is not on that list. Routes, MCP tools, search handlers, syncs,
+    // jobs and services load through generated maps of explicit imports
+    // (scripts/route-loaders.ts, scripts/handler-loaders.ts), so loading them
+    // doesn't depend on Turbopack resolving a template again when an app gains
+    // a file under `next dev`. The gateway's template wasn't resolved again, and
+    // a new app's routes were a 404 until a restart. A template import under
+    // @apps/ warns again, which is right: there should be none.
     ignoreIssue: [
       {
         path: "**/src/**",
-        title: /^Module not found: Can't resolve '@(?:apps|connectors)\/' <dynamic>/,
+        title: /^Module not found: Can't resolve '@connectors\/' <dynamic>/,
       },
     ],
   },

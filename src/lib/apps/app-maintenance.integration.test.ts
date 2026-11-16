@@ -62,6 +62,15 @@ const FIXTURE_ROUTES = [
   [OTHER, "index"],
   [UPDATING, "items"],
 ] as const;
+/** Every fixture job, MCP tool, sync and service, as `[slug, "<kind>/<name>"]`: on disk and in its kind's loader map. */
+const FIXTURE_HANDLERS = [
+  [UPDATING, "jobs/tick"],
+  [OTHER, "jobs/tick"],
+  [UPDATING, "mcp/peek"],
+  [OTHER, "mcp/peek"],
+  [UPDATING, "sync/feed"],
+  [UPDATING, "services/lookup"],
+] as const;
 const USER_EMAIL = `user-${run}@example.com`;
 
 const MESSAGE = "This app is being updated. Try again shortly.";
@@ -339,9 +348,22 @@ describe("an app whose own migrations are behind", { skip }, () => {
     hookLoaders: typeof import("../../generated/app-hook-loaders");
     pageLoaders: typeof import("../../generated/app-page-loaders");
     routeLoaders: typeof import("../../generated/app-route-loaders");
+    jobLoaders: typeof import("../../generated/app-job-loaders");
+    mcpToolLoaders: typeof import("../../generated/app-mcp-tool-loaders");
+    syncLoaders: typeof import("../../generated/app-sync-loaders");
+    serviceLoaders: typeof import("../../generated/app-service-loaders");
     buildInfo: typeof import("../../generated/build-info");
     db: typeof import("../db/client");
   };
+
+  /** The loader map a fixture handler goes in, by its `<kind>/` prefix. */
+  const handlerMap = (handler: (typeof FIXTURE_HANDLERS)[number][1]) =>
+    ({
+      jobs: platform.jobLoaders.jobLoaders,
+      mcp: platform.mcpToolLoaders.mcpToolLoaders,
+      sync: platform.syncLoaders.syncLoaders,
+      services: platform.serviceLoaders.serviceLoaders,
+    })[handler.slice(0, handler.indexOf("/")) as "jobs" | "mcp" | "sync" | "services"];
 
   const setActive = (slug: string, on: boolean) =>
     sql`update public.apps set is_active = ${on} where slug = ${slug}`;
@@ -462,6 +484,10 @@ describe("an app whose own migrations are behind", { skip }, () => {
       hookLoaders: await import("../../generated/app-hook-loaders"),
       pageLoaders: await import("../../generated/app-page-loaders"),
       routeLoaders: await import("../../generated/app-route-loaders"),
+      jobLoaders: await import("../../generated/app-job-loaders"),
+      mcpToolLoaders: await import("../../generated/app-mcp-tool-loaders"),
+      syncLoaders: await import("../../generated/app-sync-loaders"),
+      serviceLoaders: await import("../../generated/app-service-loaders"),
       buildInfo: await import("../../generated/build-info"),
       db: await import("../db/client"),
     };
@@ -475,6 +501,11 @@ describe("an app whose own migrations are behind", { skip }, () => {
     for (const [slug, route] of FIXTURE_ROUTES) {
       platform.routeLoaders.routeLoaders[`${slug}/api/${route}/route`] = () =>
         import(`@apps/${slug}/api/${route}/route`);
+    }
+    // And for their jobs, tools, sync and service, which the scheduler, the MCP
+    // server and the services broker load through.
+    for (const [slug, handler] of FIXTURE_HANDLERS) {
+      handlerMap(handler)[`${slug}/${handler}`] = () => import(`@apps/${slug}/${handler}`);
     }
     (platform.buildInfo.EXPECTED_APP_MIGRATIONS as { slug: string; file: string }[]).push({
       slug: UPDATING,
@@ -498,6 +529,7 @@ describe("an app whose own migrations are behind", { skip }, () => {
         for (const [slug, route] of FIXTURE_ROUTES) {
           delete platform.routeLoaders.routeLoaders[`${slug}/api/${route}/route`];
         }
+        for (const [slug, handler] of FIXTURE_HANDLERS) delete handlerMap(handler)[`${slug}/${handler}`];
         const expected = platform.buildInfo.EXPECTED_APP_MIGRATIONS as { slug: string; file: string }[];
         const at = expected.findIndex((m) => m.slug === UPDATING);
         if (at >= 0) expected.splice(at, 1);
