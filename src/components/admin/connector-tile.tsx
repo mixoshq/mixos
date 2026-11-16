@@ -19,7 +19,7 @@ import { TileFooter } from "./provenance";
  * One connector in the registry grid.
  *
  * THE TINT IS NEVER THE ONLY SIGNAL. Every state also carries its words in the
- * pill, per `ui/status.tsx` — a green card that says nothing is a colour-only
+ * pill, per `ui/status.tsx` — an amber card that says nothing is a colour-only
  * status, and the one person most likely to administer a deployment alone is
  * the one least likely to have someone to ask what green meant.
  *
@@ -30,11 +30,14 @@ import { TileFooter } from "./provenance";
  * colour is the pill, which uses the solid token with its own foreground.
  */
 const TILE_TONE: Record<ConnectorConfigState, string> = {
-  ready: "border-success/40 bg-success/10",
+  // Untinted: the Configured pill in the corner already says it, and a grid of
+  // set-up connectors washed in green would bury the one that still needs
+  // something. Only a state that asks for an admin's attention is tinted.
+  ready: "",
   "needs-authorization": "border-warning/40 bg-warning/10",
-  // Empty, not a repeat of the shell's own `border-border bg-card`: the
-  // untinted state IS the card shell, and restating it here is how the two
-  // would later drift apart.
+  // Empty, as `ready` is, not a repeat of the shell's own `border-border
+  // bg-card`: the untinted state IS the card shell, and restating it here is
+  // how the two would later drift apart.
   unconfigured: "",
 };
 
@@ -74,8 +77,9 @@ export default function ConnectorTile({
       className={cn(
         CARD_SHELL,
         "flex h-full flex-col p-5 transition-colors",
-        // No tint while disabled: a green card would read as "ready to call"
-        // for a connector nothing may call. The pill below says why.
+        // No tint while disabled: nothing may call it until it is enabled, so
+        // what its setup still needs is not the thing to act on first. The
+        // Disabled pill below says why.
         !disabled && TILE_TONE[state],
       )}
     >
@@ -83,7 +87,7 @@ export default function ConnectorTile({
         {/*
           The icon sits on its own neutral plate rather than directly on the
           tint. A provider's mark is drawn against white and carries its own
-          colours; laying it on a green wash makes both look wrong, and the
+          colours; laying it on a coloured wash makes both look wrong, and the
           plate keeps every tile's icon area identical whether or not the
           connector ships artwork.
         */}
