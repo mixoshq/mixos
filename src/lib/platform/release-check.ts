@@ -5,7 +5,9 @@
 /**
  * The release check: once a day, from the scheduler tick (`/api/cron`), ask
  * mixos.org which releases of MixOS exist, so the admin pages can say when a
- * newer one is out. ./releases.ts holds the rules; this module does the I/O.
+ * newer one is out, and when an admin presses Check now
+ * (./release-check-actions.ts). ./releases.ts holds the rules; this module
+ * does the I/O.
  *
  * ── WHAT IS SENT, AND WHAT ISN'T ────────────────────────────────────────────
  *
@@ -44,6 +46,7 @@ import { LockUnavailableError, withPlatformLock } from "./lock";
 import {
   afterReleaseCheck,
   afterReleaseCheckFailure,
+  checkNowWaitsUntil,
   describeRelease,
   describeReleaseCheck,
   parseReleaseCheckState,
@@ -71,6 +74,13 @@ export type ReleaseCheckOutcome =
   | "failed";
 
 export interface ReleaseCheckOptions {
+  /**
+   * An admin's Check now: due by `checkNowWaitsUntil()` rather than the
+   * schedule, so "not-due" means it was checked under a minute ago or the
+   * catalogue asked for a wait. Everything else is the tick's: the switch,
+   * the lock, the request and what is stored.
+   */
+  manual?: boolean;
   /** MIXOS_RELEASE_CHANNEL unless given. */
   channel?: ReleaseChannel;
   now?: () => Date;
@@ -93,7 +103,9 @@ export async function runReleaseCheck(options: ReleaseCheckOptions = {}): Promis
     return "failed";
   }
 
-  if (!releaseCheckIsDue(await readReleaseCheckState(), channel, now())) return "not-due";
+  const isDue = (state: ReleaseCheckState | null) =>
+    options.manual ? checkNowWaitsUntil(state, now()) === null : releaseCheckIsDue(state, channel, now());
+  if (!isDue(await readReleaseCheckState())) return "not-due";
 
   try {
     return await withPlatformLock(
@@ -101,7 +113,7 @@ export async function runReleaseCheck(options: ReleaseCheckOptions = {}): Promis
       async (lease) => {
         // Read again under the lock: another tick may have checked meanwhile.
         const previous = await readReleaseCheckState();
-        if (!releaseCheckIsDue(previous, channel, now())) return "not-due";
+        if (!isDue(previous)) return "not-due";
 
         let next: ReleaseCheckState;
         let outcome: ReleaseCheckOutcome;

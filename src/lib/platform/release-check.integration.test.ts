@@ -251,11 +251,12 @@ describe("the release check", { skip }, () => {
     assert.equal(view.notice?.text, `MixOS 999.0.0 is available (this instance runs ${mixosVersion()}). A major release: it may need changes.`);
     assert.equal(view.notice?.releaseUrl, "https://mixos.org/docs/releases/v999.0.0");
     assert.match(view.status ?? "", /^Checked 127\.0\.0\.1:\d+ for new releases 3 hours ago\.$/);
+    assert.equal(view.canCheckNow, true);
 
     process.env.MIXOS_UPDATE_CHECK = "false";
     try {
       const off = await check.releaseCheckView(new Date(T0.getTime() + 3 * HOUR));
-      assert.deepEqual(off, { notice: null, status: "Release checks are off (MIXOS_UPDATE_CHECK)." });
+      assert.deepEqual(off, { notice: null, status: "Release checks are off (MIXOS_UPDATE_CHECK).", canCheckNow: false });
     } finally {
       delete process.env.MIXOS_UPDATE_CHECK;
     }
@@ -343,5 +344,37 @@ describe("the release check", { skip }, () => {
       await sql`delete from public._platform_locks where name = 'platform.release-check'`;
     }
     assert.equal(site.requests.length, sent);
+  });
+
+  test("Check now: skips the schedule, waits a minute, and keeps to a wait the catalogue asked for", async () => {
+    const MINUTE = 60_000;
+    const sent = site.requests.length;
+    // The last attempt failed at 48 hours, without Retry-After, so the
+    // schedule waits an hour. Check now doesn't.
+    assert.equal(await check.runReleaseCheck({ now: at(48 * HOUR + 2 * MINUTE) }), "not-due");
+    const now = await hushed(() => check.runReleaseCheck({ manual: true, now: at(48 * HOUR + 2 * MINUTE), random: () => 0 }));
+    assert.equal(now.result, "checked");
+    assert.equal(site.requests.length, sent + 1);
+    assert.equal((await stored())?.lastError, null);
+
+    // Again within the minute: nothing is sent.
+    assert.equal(await check.runReleaseCheck({ manual: true, now: at(48 * HOUR + 2 * MINUTE + 30_000) }), "not-due");
+    assert.equal(site.requests.length, sent + 1);
+
+    // A wait the catalogue asks for holds it past the minute, and no longer.
+    const failedAt = 48 * HOUR + 5 * MINUTE;
+    site.failWith(503, { "retry-after": "600" });
+    try {
+      assert.equal((await hushed(() => check.runReleaseCheck({ manual: true, now: at(failedAt) }))).result, "failed");
+    } finally {
+      site.recover();
+    }
+    assert.equal((await stored())?.waitAskedFor, true);
+    assert.equal(await check.runReleaseCheck({ manual: true, now: at(failedAt + 2 * MINUTE) }), "not-due");
+    assert.equal(site.requests.length, sent + 2);
+    const later = await hushed(() => check.runReleaseCheck({ manual: true, now: at(failedAt + 10 * MINUTE), random: () => 0 }));
+    assert.equal(later.result, "checked");
+    assert.equal(site.requests.length, sent + 3);
+    assert.equal((await stored())?.waitAskedFor, undefined);
   });
 });

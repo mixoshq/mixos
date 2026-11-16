@@ -38,6 +38,9 @@
  * after the last success plus up to an hour; after a failure, an hour later or
  * at the catalogue's `Retry-After`, but never more than a day. A changed
  * channel is due at once, as a changed set of extensions is for that check.
+ * An admin's Check now, beside the line under the build's version, skips the
+ * schedule, but not a minute after the last attempt, nor a wait the catalogue
+ * asked for (`checkNowWaitsUntil()`).
  *
  * ── NEVER APPLIED ───────────────────────────────────────────────────────────
  *
@@ -118,6 +121,13 @@ const ReleaseCheckStateSchema = z.object({
   /** Why the last attempt failed, or null when it succeeded. */
   lastError: z.string().nullable(),
   nextCheckAt: z.string().nullable(),
+  /**
+   * Whether `nextCheckAt` is the catalogue's own `Retry-After`, from a failure
+   * that sent one. An admin's Check now waits for it, but not for the hour
+   * this instance picks itself after a failure. Absent in rows written before
+   * Check now, which reads as false.
+   */
+  waitAskedFor: z.boolean().optional(),
 });
 export type ReleaseCheckState = z.infer<typeof ReleaseCheckStateSchema>;
 
@@ -173,7 +183,49 @@ export function afterReleaseCheckFailure(
     channel: previous?.channel ?? channel,
     latest: previous?.latest ?? null,
     ...scheduleAfterFailure(previous, error, retryAfterSeconds, now),
+    waitAskedFor: retryAfterSeconds !== undefined && Number.isFinite(retryAfterSeconds),
   };
+}
+
+/**
+ * How long an admin's Check now waits after any attempt, scheduled or not, so
+ * a button pressed again and again sends one request a minute at most.
+ */
+export const CHECK_NOW_GAP_MS = 60_000;
+
+/**
+ * When an admin's Check now may next ask the catalogue, or null when it may
+ * now. It skips the daily schedule, and so the hour this instance waits after
+ * a failure, which is what makes it a way to try again sooner. It keeps to two
+ * things: a minute after the last attempt, and a wait the catalogue asked for
+ * with `Retry-After`.
+ */
+export function checkNowWaitsUntil(state: ReleaseCheckState | null, now: Date): Date | null {
+  if (!state?.lastAttemptAt) return null;
+  const waits: number[] = [Date.parse(state.lastAttemptAt) + CHECK_NOW_GAP_MS];
+  if (state.lastError && state.waitAskedFor && state.nextCheckAt) waits.push(Date.parse(state.nextCheckAt));
+  const until = Math.max(...waits.filter((t) => !Number.isNaN(t)));
+  return Number.isFinite(until) && until > now.getTime() ? new Date(until) : null;
+}
+
+/** "in a minute", "in 5 mins", "in 2 hours": how long until `until`, rounded up. */
+function inWords(until: Date, now: Date): string {
+  const minutes = Math.ceil((until.getTime() - now.getTime()) / 60_000);
+  if (minutes <= 1) return "in a minute";
+  if (minutes < 60) return `in ${minutes} mins`;
+  const hours = Math.ceil(minutes / 60);
+  return `in ${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
+/** Why Check now didn't ask the catalogue, said to the admin who pressed it, or null when it may ask now. */
+export function checkNowRefusal(state: ReleaseCheckState | null, host: string, now: Date): string | null {
+  const until = checkNowWaitsUntil(state, now);
+  if (!until) return null;
+  const askedFor =
+    state?.lastError && state.waitAskedFor && state.nextCheckAt && Date.parse(state.nextCheckAt) >= until.getTime();
+  return askedFor
+    ? `${host} asked for a wait. Try again ${inWords(until, now)}.`
+    : `Checked under a minute ago. Try again ${inWords(until, now)}.`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -236,8 +288,8 @@ export interface ReleaseNotice {
  * What a newer release's step means for whoever runs this instance. Under 0.x
  * a minor release may need changes and a patch release is fixes, which is the
  * rule a release's version is bumped by (scripts/release-prep.ts): a breaking
- * change, an `os` change, or a change to the platform's files makes a minor
- * release, and anything else a patch.
+ * change, a feature, a new platform migration or a new manifest schema makes
+ * a minor release, and anything else a patch.
  */
 function stepSentence(step: ReleaseStep, to: ReleaseVersion): string {
   const base = `${to.major}.${to.minor}.${to.patch}`;
@@ -322,6 +374,8 @@ export interface ReleaseCheckView {
   notice: ReleaseNotice | null;
   /** Under the build's version, or null when there's no catalogue to name. */
   status: string | null;
+  /** Whether the line offers Check now: only with the check on and a catalogue to ask. */
+  canCheckNow: boolean;
 }
 
 /** Everything the admin pages show about new releases of MixOS. */
@@ -330,5 +384,6 @@ export function describeReleaseCheck(input: ReleaseCheckInput): ReleaseCheckView
   return {
     notice: enabled && state ? describeRelease(state.latest, channel, current) : null,
     status: host ? releaseStatusLine(enabled, state, channel, host, now) : null,
+    canCheckNow: enabled && host !== null,
   };
 }

@@ -14,9 +14,12 @@ import assert from "node:assert/strict";
 import type { CoreRelease } from "@/lib/repository/types";
 import { CHECK_EVERY_MS, CHECK_JITTER_MS, LONGEST_WAIT_MS } from "@/lib/repository/updates";
 import {
+  CHECK_NOW_GAP_MS,
   UPGRADE_GUIDE_URL,
   afterReleaseCheck,
   afterReleaseCheckFailure,
+  checkNowRefusal,
+  checkNowWaitsUntil,
   describeRelease,
   describeReleaseCheck,
   latestOnChannel,
@@ -247,6 +250,57 @@ describe("scheduling", () => {
   });
 });
 
+describe("Check now", () => {
+  const checked = afterReleaseCheck([release("v0.5.0")], "stable", T0, () => 0.5);
+
+  test("skips the schedule, but not a minute after the last attempt", () => {
+    assert.equal(checkNowWaitsUntil(null, T0), null);
+    assert.equal(checkNowRefusal(null, "mixos.org", T0), null);
+
+    assert.deepEqual(checkNowWaitsUntil(checked, after(30_000)), after(MINUTE));
+    assert.equal(checkNowRefusal(checked, "mixos.org", after(30_000)), "Checked under a minute ago. Try again in a minute.");
+    // A minute on, though the schedule waits 21 hours.
+    assert.equal(releaseCheckIsDue(checked, "stable", after(MINUTE)), false);
+    assert.equal(checkNowWaitsUntil(checked, after(MINUTE)), null);
+    assert.equal(CHECK_NOW_GAP_MS, MINUTE);
+  });
+
+  test("after a failure it tries again sooner than the hour, unless the catalogue asked for a wait", () => {
+    const failedAt = after(30 * HOUR);
+    const failed = afterReleaseCheckFailure(checked, "stable", "fetch failed", undefined, failedAt);
+    assert.equal(failed.waitAskedFor, false);
+    assert.equal(releaseCheckIsDue(failed, "stable", after(2 * MINUTE, failedAt)), false);
+    assert.equal(checkNowWaitsUntil(failed, after(2 * MINUTE, failedAt)), null);
+
+    const limited = afterReleaseCheckFailure(checked, "stable", "The repository answered 429.", 7200, failedAt);
+    assert.equal(limited.waitAskedFor, true);
+    assert.deepEqual(checkNowWaitsUntil(limited, after(2 * MINUTE, failedAt)), after(2 * HOUR, failedAt));
+    assert.equal(checkNowRefusal(limited, "mixos.org", after(2 * MINUTE, failedAt)), "mixos.org asked for a wait. Try again in 2 hours.");
+    assert.equal(checkNowRefusal(limited, "mixos.org", after(HOUR + 50 * MINUTE, failedAt)), "mixos.org asked for a wait. Try again in 10 mins.");
+    assert.equal(checkNowWaitsUntil(limited, after(2 * HOUR, failedAt)), null);
+
+    // A wait shorter than the minute is the minute's.
+    const brief = afterReleaseCheckFailure(checked, "stable", "The repository answered 503.", 30, failedAt);
+    assert.equal(checkNowRefusal(brief, "mixos.org", after(10_000, failedAt)), "Checked under a minute ago. Try again in a minute.");
+  });
+
+  test("a row stored before Check now reads as no wait asked for", () => {
+    const { waitAskedFor, ...older } = afterReleaseCheckFailure(checked, "stable", "The repository answered 429.", 7200, after(HOUR));
+    assert.equal(waitAskedFor, true);
+    const parsed = parseReleaseCheckState(JSON.stringify(older));
+    assert.ok(parsed);
+    assert.equal(checkNowWaitsUntil(parsed, after(HOUR + 2 * MINUTE)), null);
+  });
+
+  test("offered only with the check on and a catalogue to ask", () => {
+    const input = { enabled: true, channel: "stable" as const, state: checked, current: "0.4.2", host: "mixos.org", now: after(HOUR) };
+    assert.equal(describeReleaseCheck(input).canCheckNow, true);
+    assert.equal(describeReleaseCheck({ ...input, state: null }).canCheckNow, true);
+    assert.equal(describeReleaseCheck({ ...input, enabled: false }).canCheckNow, false);
+    assert.equal(describeReleaseCheck({ ...input, host: null }).canCheckNow, false);
+  });
+});
+
 // ── the status line ─────────────────────────────────────────────────────────
 
 describe("the status line", () => {
@@ -275,6 +329,7 @@ describe("the status line", () => {
     assert.deepEqual(describeReleaseCheck({ ...input, enabled: false }), {
       notice: null,
       status: "Release checks are off (MIXOS_UPDATE_CHECK).",
+      canCheckNow: false,
     });
     assert.equal(describeReleaseCheck({ ...input, host: null }).status, null);
     assert.equal(describeReleaseCheck({ ...input, current: "0.5.0" }).notice, null);

@@ -19,6 +19,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import {
+  AppRouterContext,
+  type AppRouterInstance,
+} from "next/dist/shared/lib/app-router-context.shared-runtime";
 import type { UpdateOffer } from "@/lib/github/outcomes";
 import { describeRelease } from "@/lib/platform/releases";
 import type { CoreRelease } from "@/lib/repository/types";
@@ -262,6 +266,24 @@ test("the status line links to what is sent", () => {
   );
   assert.equal(text(html), "Checked mixos.org for new releases 3 hours ago. What's sent (opens in a new tab)");
   assert.match(html, /href="https:\/\/mixos\.org\/docs\/security\/surface#the-release-check"/);
+  assert.deepEqual(buttons(html), []);
+});
+
+test("with the check on, the line offers Check now, a text button before the link", () => {
+  const router = { refresh() {}, push() {}, replace() {}, back() {}, forward() {}, prefetch() {} } as unknown as AppRouterInstance;
+  const html = renderToStaticMarkup(
+    createElement(
+      AppRouterContext.Provider,
+      { value: router },
+      createElement(ReleaseCheckStatus, { status: "Checked mixos.org for new releases 3 hours ago.", checkNow: true }),
+    ),
+  );
+  assert.equal(text(html), "Checked mixos.org for new releases 3 hours ago. Check now · What's sent (opens in a new tab)");
+  assert.deepEqual(buttons(html), ["Check now"]);
+  assert.match(html, /<button type="button"[^>]*>Check now<\/button>/);
+  // What it says when the server didn't ask the catalogue is read out, on a
+  // line of its own after the link.
+  assert.match(html, /What&#x27;s sent.*<\/a><span role="status" aria-live="polite" class="block"><\/span><\/p>$/);
 });
 
 // ── never applied ───────────────────────────────────────────────────────────
@@ -316,4 +338,22 @@ test("nothing in the check or its notice can apply a release: no process, no fil
   for (const never of ['"/merges"', "merge-upstream", '/merge"', "auto_merge", 'method: "P']) {
     assert.ok(!work.includes(never), `${never} in update-pull.ts`);
   }
+
+  // Check now, in the line under the build's version, from its own file. Its
+  // one action runs the check above, which asks the catalogue and writes the
+  // check's own row, and nothing else.
+  const checkNow = read("src/components/admin/release-check-now.tsx");
+  assert.deepEqual(checkNow.match(/from "@\/lib\/[a-z/-]*actions"/g), ['from "@/lib/platform/release-check-actions"']);
+  assert.deepEqual(checkNow.match(/[A-Za-z]+Action\(/g), ["checkForReleasesNowAction("]);
+  const checkNowAction = read("src/lib/platform/release-check-actions.ts");
+  for (const [file, source] of [["release-check-now.tsx", checkNow], ["release-check-actions.ts", checkNowAction]]) {
+    assert.doesNotMatch(importsOf(source), NEVER, file);
+  }
+  assert.deepEqual(
+    [...importsOf(checkNowAction).matchAll(/from "([^"]+)"/g)].map((m) => m[1]),
+    ["@/lib/apps/access", "@/lib/auth/session", "@/lib/repository/client", "@/lib/repository/provenance", "./release-check", "./releases"],
+  );
+  assert.match(checkNowAction, /runReleaseCheck\(\{ manual: true \}\)/);
+  // An admin first, before anything is read or sent.
+  assert.ok(checkNowAction.indexOf("await requireAdmin(") < checkNowAction.indexOf("runReleaseCheck("));
 });
