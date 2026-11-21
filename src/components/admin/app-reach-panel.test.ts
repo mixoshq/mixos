@@ -64,6 +64,7 @@ function app(extra: Partial<AppManifest>): AppManifest {
     emits: [],
     listensTo: [],
     branding: null,
+    search: [],
     mcp: [],
     ...extra,
   };

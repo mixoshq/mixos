@@ -232,6 +232,13 @@ async function renameApp(tx: TransactionSql, r: ExtensionRename): Promise<Rename
       [r.from, r.to],
     );
   }
+  // A person's search order and switches keep the app where they put it.
+  await tx`
+    update public.user_search_preferences
+    set source_order = array_replace(source_order, ${r.from}, ${r.to}),
+        disabled_sources = array_replace(disabled_sources, ${r.from}, ${r.to})
+    where ${r.from} = any(source_order) or ${r.from} = any(disabled_sources)
+  `;
   // `<ip>::<slug>`: a lockout on the app's password stays a lockout.
   await tx`
     update public.app_unlock_failures

@@ -291,6 +291,11 @@ describe("Delete data against a real database", { skip }, () => {
         (code_hash, client_id, user_id, redirect_uri, code_challenge, granted_apps, expires_at)
       values ('code-notes', 'client-a', ${user}, 'https://client.example/cb', 'challenge', ${[NOTES]}, now() + interval '1 minute')
     `;
+    // A person's search settings: NOTES placed before ARCHIVE, and switched off.
+    await sql`
+      insert into public.user_search_preferences (user_id, source_order, disabled_sources)
+      values (${user}, ${[NOTES, "@apps", ARCHIVE]}::text[], ${[NOTES]}::text[])
+    `;
 
     // Everything a connector keeps, for both.
     for (const name of [CRM, CRM_EU]) {
@@ -561,6 +566,14 @@ describe("Delete data against a real database", { skip }, () => {
     const codes = changed.get("public.oauth_authorization_codes")!;
     assert.deepEqual(codes.added.map((r) => [r.code_hash, r.granted_apps]), [["code-notes", []]]);
     changed.delete("public.oauth_authorization_codes");
+
+    // Search settings keep every other app, where the person put it.
+    const search = changed.get("public.user_search_preferences")!;
+    assert.deepEqual(
+      search.added.map((r) => [r.source_order, r.disabled_sources]),
+      [[["@apps", ARCHIVE], []]],
+    );
+    changed.delete("public.user_search_preferences");
 
     // The audit log only gains the deletion's row.
     const audit = changed.get("public.admin_audit_log")!;

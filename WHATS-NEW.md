@@ -10,6 +10,21 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-11-21
+
+- **Global search, and a `search` field for apps.** A search icon in the menu
+  bar, before the gift, and ⌘K / Ctrl+K open a modal that finds an installed
+  app by name and searches inside every app that declares `search` in its
+  `app.json`: one object per entry, with its searchable `fields` (title first),
+  a handler at `search/<name>.ts`, and a `link` template like
+  `"notes?id={id}"` that the build checks against the app's pages. Handlers
+  run read-only as the signed-in person and rank with `searchFields()` from
+  `@/lib/apps/search`. Results are grouped by app, five per object, with Show
+  10 more. **My Account → Search** reorders and switches apps, and hides the
+  icon or turns off the shortcut. Platform migration 0003 adds
+  `user_search_preferences`: run `npm run db:local` (or the release step). See
+  [`docs/apps/search.md`](docs/apps/search.md).
+
 ## 2026-11-15
 
 - **Check now, beside "Checked mixos.org for new releases".** The line under

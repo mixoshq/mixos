@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   Palette,
   Plug,
+  Search,
   Settings,
   UserCog,
   Users,
@@ -62,6 +63,7 @@ export const DEPLOYMENT_SECTIONS: NavSection[] = [
 export const ACCOUNT_SECTIONS: NavSection[] = [
   { label: "Account", href: "/account", icon: UserCog },
   { label: "Preferences", href: "/account/preferences", icon: Settings },
+  { label: "Search", href: "/account/search", icon: Search },
   {
     label: "App Manager",
     href: "/apps",

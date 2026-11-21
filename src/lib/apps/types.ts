@@ -315,6 +315,17 @@ export interface AppManifest {
    */
   mcp: McpToolDefinition[];
   /**
+   * The kinds of object this app contributes to MixOS's global search (⌘K).
+   * Each entry's `name` maps to a handler at `apps/<slug>/search/<name>.ts`
+   * (default export `async (ctx: SearchContext, input) => SearchResult[]`).
+   *
+   * Reached only by a signed-in person who holds the app, read-only, with this
+   * app's roles resolved, and only while they have not switched the app off on
+   * their Search settings page. Defaults to `[]` (the app is not searched, and
+   * is not listed on that page). See `docs/apps/search.md`.
+   */
+  search: SearchObjectDefinition[];
+  /**
    * Per-page visibility declarations. Keys are POSIX paths relative to
    * `apps/<slug>/pages/`, *without* leading or trailing slash; the empty
    * string `""` refers to the root page (`pages/Main.tsx`). Example:
@@ -580,6 +591,48 @@ export interface McpToolDefinition {
    * no Gong calls") over a hedge ("may be incomplete").
    */
   notCovered?: string;
+}
+
+/**
+ * One searchable property of a search object.
+ */
+export interface SearchFieldDefinition {
+  /** The property's name in the app's data: a column, a key. Passed to the handler. */
+  key: string;
+  /** What the property is called, for a person: "Title", "Notes". */
+  label: string;
+}
+
+/**
+ * One kind of object an app contributes to global search, as declared in
+ * `app.json` under `search`. The handler lives at `apps/<slug>/search/<name>.ts`.
+ * See `docs/apps/search.md`.
+ */
+export interface SearchObjectDefinition {
+  /**
+   * Handler name — maps to `apps/<slug>/search/<name>.ts`. Lowercase-hyphenated,
+   * unique in the app. Also the object's id in `/api/search?object=`.
+   */
+  name: string;
+  /** The group heading in the search modal, plural: "Notes", "Candidates". */
+  label: string;
+  /** A Lucide icon for the object's rows. Defaults to the app's own icon. */
+  icon?: string;
+  /**
+   * The properties that are searched, in priority order. The first is the
+   * title: a match there ranks above a match in any other field. Handed to the
+   * handler as `input.fields`, so the declaration and the query cannot differ.
+   */
+  fields: SearchFieldDefinition[];
+  /**
+   * Where a result opens: a path relative to `/apps/<slug>/`, optionally with a
+   * query string, e.g. `"notes?id={id}"`. `{id}` is the result's id; any other
+   * `{key}` is filled from the result's `params`. Every value is URL-encoded,
+   * and the path must be one of the app's pages (the generator checks), so a
+   * result can only ever open inside its own app. App pages have literal paths,
+   * so placeholders go in the query string.
+   */
+  link: string;
 }
 
 /**

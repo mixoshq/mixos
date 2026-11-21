@@ -2,7 +2,7 @@
   "$schema": "https://mixos.org/schemas/app/v1.json",
   "registryId": "template-00000000",
   "name": "Hello MixOS",
-  "description": "A sample app demonstrating the plugin architecture: one widget, one MCP tool, and a manifest carrying the fields most apps need.",
+  "description": "A sample app demonstrating the plugin architecture: one widget, one MCP tool, one kind of object in global search, and a manifest carrying the fields most apps need.",
   "tagline": "A starter app showing the plugin architecture in place",
   "icon": "box",
   "authors": [
@@ -42,6 +42,24 @@
         "mixos"
       ],
       "notCovered": "Anything real. This entry exists to show the shape of a declaration: what the tool returns, when to reach for it, where the data came from, and where it stops."
+    }
+  ],
+  "search": [
+    {
+      "name": "greetings",
+      "label": "Greetings",
+      "icon": "message-circle",
+      "fields": [
+        {
+          "key": "phrase",
+          "label": "Greeting"
+        },
+        {
+          "key": "language",
+          "label": "Language"
+        }
+      ],
+      "link": "greetings?id={id}"
     }
   ],
   "widgets": [

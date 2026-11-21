@@ -96,6 +96,13 @@ export const PLATFORM = new Map([
   ["@/lib/apps/use-app-query", { names: "*", use: "The client data hook, `useAppQuery`" }],
   ["@/lib/apps/swr-cache", { names: ["createSwrCache"], use: "A cache over the app's own `context.db`" }],
   ["@/lib/apps/sync", { names: ["defineSync"], use: "Declared syncs" }],
+  [
+    "@/lib/apps/search",
+    {
+      names: ["searchFields", "containsPattern", "matchesQuery"],
+      use: "A search handler's ranking: contains, title first (`docs/apps/search.md`)",
+    },
+  ],
   ["@/lib/apps/widget-config-presets", { names: "*", use: "Widget config field builders" }],
   ["@/lib/connectors/errors", { names: ["ConnectorError", "isConnectorError"], use: "Recognising a connector failure" }],
   ["@/lib/use-client-value", { names: "*", use: "`useClientValue`" }],
