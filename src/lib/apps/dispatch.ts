@@ -52,6 +52,7 @@ import { resolveRoutePath } from "@/lib/apps/api-router";
 import { checkAppGate } from "@/lib/apps/app-gate";
 import { buildAppContext, buildPublicAppContext } from "@/lib/apps/context";
 import { getClientIp } from "@/lib/apps/public-access";
+import { loadRouteModule } from "@/lib/apps/route-loader";
 import {
   isRouteDefinition,
   runRoute,
@@ -265,14 +266,23 @@ async function dispatch({
   if (!gate.open) return gate.reason === "updating" ? appUpdating() : notFound();
 
   // Import and dispatch are separated so a route that throws at module scope is
-  // not reported as missing. That distinction cost real debugging time.
-  let mod: Record<string, unknown>;
-  try {
-    mod = await import(`@apps/${appSlug}/api/${routePath}/route`);
-  } catch (err) {
-    console.error(`[gateway] ${appSlug}/api/${routePath} failed to load:`, err);
+  // not reported as missing. That distinction cost real debugging time. Both
+  // are a 404 to the caller; the log says which. The module comes from the
+  // generated loader map, not a template import, so a route added under
+  // `next dev` loads once `npm run registry` has run (./route-loader.ts).
+  const load = await loadRouteModule(appSlug, routePath);
+  if (load.kind === "missing") {
+    console.warn(
+      `[gateway] ${appSlug}/api/${routePath} is on disk but not in the generated route map. ` +
+        `Run \`npm run registry\`.`,
+    );
     return notFound();
   }
+  if (load.kind === "failed") {
+    console.error(`[gateway] ${appSlug}/api/${routePath} failed to load:`, load.error);
+    return notFound();
+  }
+  const mod = load.module;
 
   const declaration = mod[method];
   if (declaration === undefined) {

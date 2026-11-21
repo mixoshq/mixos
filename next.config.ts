@@ -27,8 +27,8 @@ const nextConfig: NextConfig = {
   // fs calls, not a runtime-computed directory walk:
   // src/lib/apps/api-router.ts readdir's `process.cwd()/apps/<slug>/api/**` and
   // checks for a literal "route.ts" on every app API request. Bundling the
-  // module via the dynamic `@apps/...` import is not enough; the .ts SOURCE
-  // FILES have to exist on disk. Without them resolveRoutePath returns null and
+  // module through the generated route map (src/generated/app-route-loaders.ts)
+  // is not enough; the .ts SOURCE FILES have to exist on disk. Without them resolveRoutePath returns null and
   // nested app routes 404 (the bare index route still works, which makes this
   // fail quietly — test a nested path).
   //
@@ -64,8 +64,8 @@ const nextConfig: NextConfig = {
       "@connectors": "./connectors",
     },
     // The platform loads an extension's optional parts with a template-literal
-    // import — @apps/<slug>/services/<name>, and likewise for routes, MCP
-    // tools, jobs, syncs and a connector's index — inside a try/catch that
+    // import — @apps/<slug>/services/<name>, and likewise for MCP tools, jobs,
+    // syncs and a connector's index — inside a try/catch that
     // answers "no such handler" itself. Turbopack resolves each template against
     // the files on disk, and when no installed extension has that kind of file
     // (no app declares a service, a checkout has no connectors) it warns "Module
@@ -75,6 +75,11 @@ const nextConfig: NextConfig = {
     // titles it "Module not found: Can't resolve '@apps/' <dynamic> …", and the
     // "<dynamic>" marker is what a static import never has. A static import of a
     // missing module, or a template import anywhere else, still warns.
+    //
+    // App API routes are not on that list: they load through a generated map of
+    // explicit imports (scripts/route-loaders.ts), because a template import
+    // is resolved once, when the gateway compiles, and a route added under
+    // `next dev` was a 404 until a restart.
     ignoreIssue: [
       {
         path: "**/src/**",
