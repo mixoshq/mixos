@@ -15,6 +15,7 @@ interface Row {
   shortcut_enabled: boolean;
   source_order: string[];
   disabled_sources: string[];
+  disabled_objects: string[];
 }
 
 /**
@@ -27,7 +28,7 @@ interface Row {
 export async function getSearchPreferences(userId: string): Promise<SearchPreferences> {
   try {
     const [row] = await sql<Row[]>`
-      select show_icon, shortcut_enabled, source_order, disabled_sources
+      select show_icon, shortcut_enabled, source_order, disabled_sources, disabled_objects
       from public.user_search_preferences
       where user_id = ${userId}
     `;
@@ -37,6 +38,7 @@ export async function getSearchPreferences(userId: string): Promise<SearchPrefer
       shortcutEnabled: row.shortcut_enabled,
       order: row.source_order,
       disabled: row.disabled_sources,
+      disabledObjects: row.disabled_objects,
     };
   } catch (err) {
     console.error("[search] could not read the search preferences; using the defaults:", err);
@@ -48,14 +50,15 @@ export async function getSearchPreferences(userId: string): Promise<SearchPrefer
 export async function saveSearchPreferences(userId: string, prefs: SearchPreferences): Promise<void> {
   await sql`
     insert into public.user_search_preferences
-      (user_id, show_icon, shortcut_enabled, source_order, disabled_sources, updated_at)
+      (user_id, show_icon, shortcut_enabled, source_order, disabled_sources, disabled_objects, updated_at)
     values (${userId}, ${prefs.showIcon}, ${prefs.shortcutEnabled},
-            ${prefs.order}::text[], ${prefs.disabled}::text[], now())
+            ${prefs.order}::text[], ${prefs.disabled}::text[], ${prefs.disabledObjects}::text[], now())
     on conflict (user_id) do update
       set show_icon = excluded.show_icon,
           shortcut_enabled = excluded.shortcut_enabled,
           source_order = excluded.source_order,
           disabled_sources = excluded.disabled_sources,
+          disabled_objects = excluded.disabled_objects,
           updated_at = now()
   `;
 }

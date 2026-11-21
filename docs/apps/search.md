@@ -18,9 +18,12 @@ writing **a handler per kind of object**. Nothing is searched unless you opt in.
   result (⌘/Ctrl+Enter in a new tab) or loads ten more; **Escape** closes.
 - **An Apps group**: typing `cal` offers to open Calendar. MixOS provides it;
   your app is in it if it has pages.
-- On the settings page a person can reorder apps, switch an app off, hide the
-  menu-bar icon or turn off the shortcut. With both of those off, search isn't
-  available to them at all.
+- On the settings page a person can drag apps into the order they want, switch
+  an app off, or switch off one of its objects (listed with your `label` and
+  `fields` keys, so name them for a person). They can also hide the menu-bar
+  icon or turn off the shortcut; with both of those off, search isn't
+  available to them at all. An object switched off is never asked; an app
+  with every object off is never opened.
 
 A query shorter than 2 characters searches the Apps group only: one letter
 matches everything.
@@ -33,7 +36,7 @@ matches everything.
   {
     "name": "notes",                 // → handler at search/notes.ts
     "label": "Notes",                // the group heading, plural
-    "icon": "notebook",              // optional Lucide name; defaults to the app's icon
+    "icon": "notebook",              // a Lucide name, shown with the object everywhere
     "fields": [                      // the properties searched, title first
       { "key": "title", "label": "Title" },
       { "key": "body", "label": "Body" }
@@ -47,7 +50,7 @@ matches everything.
 |---|---|---|
 | `name` | yes | Lowercase-hyphenated, unique in the app. Names the handler file. |
 | `label` | yes | What these objects are called, plural: "Notes", "Candidates". 40 characters or fewer. |
-| `icon` | no | A Lucide name for this object's rows. Defaults to the app's `icon`. |
+| `icon` | yes | A [Lucide](https://lucide.dev/icons) name, lowercase-hyphenated. Shown beside the object's heading and rows in the search modal, and its line on the person's Search settings, so your app's objects read apart at a glance. The build fails a name Lucide doesn't have. |
 | `fields` | yes | 1 to 6 `{ key, label }`. `key` is the column or property; **the first is the title**, and a match there ranks above any other. |
 | `link` | yes | Where a result opens: a path relative to `/apps/<slug>/`, then optionally a query string. See below. |
 

@@ -18,11 +18,15 @@ import type { SearchPreferences } from "./types";
  */
 const SourceKey = z.string().regex(/^@?[a-z0-9][a-z0-9_-]{0,199}$/);
 
+/** `<slug>/<object>` (./types.ts `objectKey`), checked for shape the same way. */
+const ObjectKey = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,199}\/[a-z0-9]+(?:-[a-z0-9]+)*$/);
+
 const PreferencesSchema = z.object({
   showIcon: z.boolean(),
   shortcutEnabled: z.boolean(),
   order: z.array(SourceKey).max(500),
   disabled: z.array(SourceKey).max(500),
+  disabledObjects: z.array(ObjectKey).max(2500),
 });
 
 /**
@@ -47,6 +51,7 @@ export async function updateMySearchPreferences(
       ...parsed.data,
       order: [...new Set(parsed.data.order)],
       disabled: [...new Set(parsed.data.disabled)],
+      disabledObjects: [...new Set(parsed.data.disabledObjects)],
     });
     return { error: null };
   } catch (err) {

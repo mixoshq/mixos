@@ -291,10 +291,12 @@ describe("Delete data against a real database", { skip }, () => {
         (code_hash, client_id, user_id, redirect_uri, code_challenge, granted_apps, expires_at)
       values ('code-notes', 'client-a', ${user}, 'https://client.example/cb', 'challenge', ${[NOTES]}, now() + interval '1 minute')
     `;
-    // A person's search settings: NOTES placed before ARCHIVE, and switched off.
+    // A person's search settings: NOTES placed before ARCHIVE, switched off,
+    // and an object of each switched off.
     await sql`
-      insert into public.user_search_preferences (user_id, source_order, disabled_sources)
-      values (${user}, ${[NOTES, "@apps", ARCHIVE]}::text[], ${[NOTES]}::text[])
+      insert into public.user_search_preferences (user_id, source_order, disabled_sources, disabled_objects)
+      values (${user}, ${[NOTES, "@apps", ARCHIVE]}::text[], ${[NOTES]}::text[],
+              ${[`${NOTES}/notes`, `${ARCHIVE}/notes`]}::text[])
     `;
 
     // Everything a connector keeps, for both.
@@ -570,8 +572,8 @@ describe("Delete data against a real database", { skip }, () => {
     // Search settings keep every other app, where the person put it.
     const search = changed.get("public.user_search_preferences")!;
     assert.deepEqual(
-      search.added.map((r) => [r.source_order, r.disabled_sources]),
-      [[["@apps", ARCHIVE], []]],
+      search.added.map((r) => [r.source_order, r.disabled_sources, r.disabled_objects]),
+      [[["@apps", ARCHIVE], [], [`${ARCHIVE}/notes`]]],
     );
     changed.delete("public.user_search_preferences");
 

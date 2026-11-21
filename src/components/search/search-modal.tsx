@@ -21,6 +21,7 @@ import LucideIcon from "@/components/lucide-icon";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  APPS_SOURCE,
   MAX_QUERY,
   MIN_OBJECT_QUERY,
   MORE_PAGE,
@@ -375,7 +376,9 @@ export default function SearchModal({ onClose }: { onClose: () => void }) {
             <div id={listId} role="listbox" aria-label="Search results">
               {results.groups.map((group) => {
                 const headingId = `${listId}-group-${group.source.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
-                const titled = group.sections.length > 1;
+                // Every app's objects get a heading with their icon; the Apps
+                // group's one section is the group itself.
+                const titled = group.source !== APPS_SOURCE;
                 return (
                   <div key={group.source} role="group" aria-labelledby={headingId} className="pb-2">
                     <div
@@ -390,7 +393,11 @@ export default function SearchModal({ onClose }: { onClose: () => void }) {
                       return (
                         <div key={section.object}>
                           {titled && (
-                            <div className="px-4 pb-0.5 pt-1.5 text-xs font-medium text-muted-foreground" aria-hidden>
+                            <div
+                              className="flex items-center gap-1.5 px-4 pb-0.5 pt-1.5 text-xs font-medium text-muted-foreground"
+                              aria-hidden
+                            >
+                              <LucideIcon name={section.icon} className="h-3.5 w-3.5" aria-hidden />
                               {section.label}
                             </div>
                           )}

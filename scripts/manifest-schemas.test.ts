@@ -323,6 +323,7 @@ test("a search object's link, fields and count are held to their limits", () => 
   const object = (extra: Record<string, unknown> = {}) => ({
     name: "notes",
     label: "Notes",
+    icon: "notebook",
     fields: [{ key: "title", label: "Title" }],
     link: "notes?id={id}",
     ...extra,
@@ -339,4 +340,19 @@ test("a search object's link, fields and count are held to their limits", () => 
     /search: an app may declare at most 5 search objects/,
   );
   assert.match(problems({ search: [object({ extra: true })] }), /search\.0/);
+});
+
+test("every search object names its icon, as a Lucide name", () => {
+  const object = (icon?: string) => ({
+    name: "notes",
+    label: "Notes",
+    ...(icon === undefined ? {} : { icon }),
+    fields: [{ key: "title", label: "Title" }],
+    link: "notes?id={id}",
+  });
+  assert.equal(problems({ search: [object("message-circle")] }), "");
+  assert.match(problems({ search: [object()] }), /search\.0\.icon: every search object needs an icon/);
+  for (const icon of ["MessageCircle", "message_circle", "", "notes icon"]) {
+    assert.match(problems({ search: [object(icon)] }), /search\.0\.icon: icon must be a Lucide name/, icon);
+  }
 });

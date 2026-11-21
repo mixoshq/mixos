@@ -5,6 +5,7 @@
 import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
+import { icons as lucideIcons } from "lucide-react";
 import type {
   AppManifest,
   AppAuthor,
@@ -975,6 +976,19 @@ function validateSearchObjects(
     }
     seen.add(o.name);
 
+    // The UI draws an unknown name as a plain box (src/components/lucide-icon.tsx),
+    // which nobody would notice was a typo. Same name-to-component rule as there.
+    const component = o.icon
+      .split("-")
+      .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+      .join("");
+    if (!(component in lucideIcons)) {
+      throw new FatalManifestError(
+        `apps/${slug}/app.json: search object "${o.name}" has the icon "${o.icon}", which Lucide doesn't have. ` +
+          `Use a name from https://lucide.dev/icons, lowercase-hyphenated (e.g. message-circle).`,
+      );
+    }
+
     const keys = new Set<string>();
     for (const f of o.fields) {
       if (keys.has(f.key)) {
@@ -1015,7 +1029,7 @@ function validateSearchObjects(
   return raw.map((o) => ({
     name: o.name,
     label: o.label,
-    ...(o.icon != null ? { icon: o.icon } : {}),
+    icon: o.icon,
     fields: o.fields.map((f) => ({ key: f.key, label: f.label })),
     link: o.link,
   }));

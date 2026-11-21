@@ -37,6 +37,12 @@ export interface SearchPreferences {
   order: string[];
   /** Source keys switched off. */
   disabled: string[];
+  /**
+   * Objects switched off inside an app, as `objectKey(slug, name)`. Kept
+   * apart from `disabled`, so switching an app off and on again leaves its
+   * objects as the person set them.
+   */
+  disabledObjects: string[];
 }
 
 export const DEFAULT_SEARCH_PREFERENCES: SearchPreferences = {
@@ -44,7 +50,16 @@ export const DEFAULT_SEARCH_PREFERENCES: SearchPreferences = {
   shortcutEnabled: true,
   order: [],
   disabled: [],
+  disabledObjects: [],
 };
+
+/**
+ * The key one app's object is switched off by: `<slug>/<object>`. Neither an
+ * app slug nor an object name can hold a `/`, so the pair splits one way.
+ */
+export function objectKey(source: string, object: string): string {
+  return `${source}/${object}`;
+}
 
 /** With both ways in turned off, search is not available at all. */
 export function searchAvailable(prefs: Pick<SearchPreferences, "showIcon" | "shortcutEnabled">): boolean {
@@ -91,7 +106,7 @@ export interface SearchSection {
   /** The object's name, for Show more. */
   object: string;
   label: string;
-  /** Lucide name for the rows. */
+  /** The object's Lucide icon, for its heading and its rows. */
   icon: string;
   hits: SearchHit[];
   hasMore: boolean;
@@ -127,7 +142,13 @@ export interface SearchSourceView {
   key: string;
   name: string;
   icon: string;
-  /** The object labels, for the line under the name: "Notes, Tags". */
-  objects: string[];
+  /**
+   * What the app searches: each object's name, label, icon and searchable
+   * field keys, title first. Whether each is on is the person's live setting
+   * (`SearchPreferences.disabledObjects`), never read from here.
+   */
+  objects: { name: string; label: string; icon: string; fields: string[] }[];
+  /** A line in place of `objects`, for a source with none: the Apps group. */
+  note: string | null;
   enabled: boolean;
 }
