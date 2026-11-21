@@ -27,8 +27,8 @@ const nextConfig: NextConfig = {
   // fs calls, not a runtime-computed directory walk:
   // src/lib/apps/api-router.ts readdir's `process.cwd()/apps/<slug>/api/**` and
   // checks for a literal "route.ts" on every app API request. Bundling the
-  // module via the dynamic `@apps/...` import is not enough; the .ts SOURCE
-  // FILES have to exist on disk. Without them resolveRoutePath returns null and
+  // module through the generated route map (src/generated/app-route-loaders.ts)
+  // is not enough; the .ts SOURCE FILES have to exist on disk. Without them resolveRoutePath returns null and
   // nested app routes 404 (the bare index route still works, which makes this
   // fail quietly — test a nested path).
   //
@@ -64,24 +64,56 @@ const nextConfig: NextConfig = {
       "@connectors": "./connectors",
     },
     // The platform loads an extension's optional parts with a template-literal
-    // import — @apps/<slug>/services/<name>, and likewise for routes, MCP
-    // tools, search handlers, jobs, syncs and a connector's index — inside a
+    // import — @apps/<slug>/services/<name>, and likewise for MCP tools,
+    // search handlers, jobs, syncs and a connector's index — inside a
     // try/catch that answers "no such handler" itself. Turbopack resolves each
     // template against the files on disk, and when no installed extension has
-    // that kind of file
-    // (no app declares a service, a checkout has no connectors) it warns "Module
-    // not found" on every compile. That is the expected state of most installs.
+    // that kind of file (no app declares a service, a checkout has no
+    // connectors) it warns "Module not found" on every compile. That is the
+    // expected state of most installs.
     //
     // Only a template import under @apps/ or @connectors/ is quieted: Turbopack
     // titles it "Module not found: Can't resolve '@apps/' <dynamic> …", and the
     // "<dynamic>" marker is what a static import never has. A static import of a
     // missing module, or a template import anywhere else, still warns.
+    //
+    // App API routes are not on that list: they load through a generated map of
+    // explicit imports (scripts/route-loaders.ts), because a template import
+    // is resolved once, when the gateway compiles, and a route added under
+    // `next dev` was a 404 until a restart.
     ignoreIssue: [
       {
         path: "**/src/**",
         title: /^Module not found: Can't resolve '@(?:apps|connectors)\/' <dynamic>/,
       },
     ],
+  },
+  experimental: {
+    // Server Fast Refresh off, so that a route built after a change sees the
+    // change. Next 16.4 turns it on by default for App Router routes under
+    // Turbopack, and with it on, a new app's page answers 404 after `npm run
+    // registry` until `next dev` restarts.
+    //
+    // In dev every route's server modules share one module system, and
+    // src/generated/app-registry.ts is a single module in it that nearly every
+    // page imports. With Fast Refresh, an edit reaches a module that is already
+    // loaded only through an update pulled when a route is built, diffed
+    // against the last version that same route pulled. A route built for the
+    // first time after the edit has nothing to diff against, so it applies
+    // nothing, and loading its chunks doesn't replace a module that's already
+    // loaded. It gets the copy another route loaded before the edit. The new
+    // app's page is that route: it reads the old registry, doesn't find the
+    // app, and calls notFound(). It stays that way until a route built before
+    // the edit is requested again, or the server restarts.
+    //
+    // With it off, a route's server chunks are evicted and loaded afresh after
+    // a change, as before Fast Refresh. The cost is that an edit re-evaluates
+    // the route's server modules, not just the one that changed. What has to
+    // survive that is already on globalThis, like the database pool in
+    // src/lib/db/client.ts. This is still needed on Next 16.4.6. The plan, with
+    // the reproduction that tells you when it no longer is:
+    // docs/plans/20261116_0733-page-registry.md.
+    turbopackServerFastRefresh: false,
   },
   devIndicators: false,
   logging: {

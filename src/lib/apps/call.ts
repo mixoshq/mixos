@@ -52,6 +52,8 @@ import {
   type ResolvedContext,
   type RouteDefinition,
 } from "@/lib/apps/route";
+import { loadRouteModule } from "@/lib/apps/route-loader";
+import { routeModulePath } from "@/lib/apps/route-modules";
 import { getAppOrigin } from "@/lib/env/origin";
 import { APP_UPDATING_MESSAGE } from "@/lib/platform/maintenance-gate";
 
@@ -114,14 +116,24 @@ export async function callAppRoute<TOut = unknown>(
       : new AppError("NOT_FOUND", `"${appSlug}" is not active.`);
   }
 
-  const modulePath = pattern === "" ? "index" : pattern;
-  let mod: Record<string, unknown>;
-  try {
-    mod = await import(`@apps/${appSlug}/api/${modulePath}/route`);
-  } catch (err) {
-    console.error(`[call] ${appSlug}/api/${modulePath} failed to load:`, err);
+  // Through the generated loader map, as the gateway loads it, so a route added
+  // under `next dev` loads once `npm run registry` has run. A missing loader
+  // and a module that throws at load are both NOT_FOUND to the page; the log
+  // says which (./route-loader.ts).
+  const modulePath = routeModulePath(pattern);
+  const load = await loadRouteModule(appSlug, modulePath);
+  if (load.kind === "missing") {
+    console.warn(
+      `[call] ${appSlug}/api/${modulePath} is declared but not in the generated route map. ` +
+        `Run \`npm run registry\`.`,
+    );
     throw new AppError("NOT_FOUND", `"${spec}" could not be loaded.`);
   }
+  if (load.kind === "failed") {
+    console.error(`[call] ${appSlug}/api/${modulePath} failed to load:`, load.error);
+    throw new AppError("NOT_FOUND", `"${spec}" could not be loaded.`);
+  }
+  const mod = load.module;
 
   const declaration = mod[method];
   if (!isRouteDefinition(declaration)) {

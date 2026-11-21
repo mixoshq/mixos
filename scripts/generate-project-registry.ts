@@ -94,6 +94,8 @@ import {
   undeclaredRoleProblems,
 } from "./route-contracts";
 import { readRoutesStatically } from "./route-reader";
+import { routeLoadersSource } from "./route-loaders";
+import { routeModulePath } from "../src/lib/apps/route-modules";
 import {
   readsNeedingWriteScopes,
   validateConnectorMethods,
@@ -189,6 +191,7 @@ const APP_REGISTRY_FILE = path.resolve(OUTPUT_DIR, "app-registry.ts");
 const APP_CLIENTS_FILE = path.resolve(OUTPUT_DIR, "app-clients.ts");
 const APP_PAGE_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-page-loaders.ts");
 const APP_HOOK_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-hook-loaders.ts");
+const APP_ROUTE_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-route-loaders.ts");
 const CONNECTOR_REGISTRY_FILE = path.resolve(
   OUTPUT_DIR,
   "connector-registry.ts",
@@ -2728,6 +2731,12 @@ ${hookImports.join("\n")}
 `;
   fs.writeFileSync(APP_HOOK_LOADERS_FILE, hookLoadersOutput, "utf-8");
 
+  // Server-only, like the page loaders, and for the same reason: the gateway
+  // and callAppRoute load a route through this map rather than a template
+  // import, which Turbopack resolves once, against the apps on disk when the
+  // gateway compiled (scripts/route-loaders.ts).
+  fs.writeFileSync(APP_ROUTE_LOADERS_FILE, routeLoadersSource(apps), "utf-8");
+
   // ── Typed client surface ──────────────────────────────────────────────────
   //
   // A TYPE-ONLY map from `<slug>` → `"<METHOD> /<pattern>"` → the route's own
@@ -2767,7 +2776,7 @@ ${hookImports.join("\n")}
     .map((app) => {
       const routes = app.routes.flatMap((route) =>
         route.methods.map((m) => {
-          const modulePath = route.path === "" ? "index" : route.path;
+          const modulePath = routeModulePath(route.path);
           return `    "${m.method} /${route.path}": typeof import("@apps/${app.slug}/api/${modulePath}/route").${m.method};`;
         }),
       );
