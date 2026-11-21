@@ -4,7 +4,7 @@
 
 import { sql } from "@/lib/db/client";
 import type { ConnectorScope } from "./types";
-import { isScopeRequested } from "./write-policy";
+import { heldScopes, isScopeRequested } from "./write-policy";
 
 /**
  * What the provider actually granted, per scope.
@@ -41,13 +41,16 @@ export interface ScopeStatusRow {
  * those as refused would report a dozen failures on a healthy connector. A
  * scope requested only once changes are allowed is one of them on a grant
  * that didn't ask for it: `writes` is what the authorization asked.
+ *
+ * A scope is granted when the grant names it or a scope that includes it
+ * (`heldScopes`): a provider may name only the broader of two it granted.
  */
 export function classifyGrant(
   scopes: ConnectorScope[],
   granted: string[],
   { writes = false }: { writes?: boolean } = {},
 ): Array<{ scope: string; status: ScopeStatus }> {
-  const held = new Set(granted);
+  const held = heldScopes(scopes, granted);
   return scopes.map((s) => ({
     scope: s.scope,
     status: !isScopeRequested(s, writes) ? "unknown" : held.has(s.scope) ? "granted" : "refused",

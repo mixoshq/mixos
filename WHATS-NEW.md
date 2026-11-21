@@ -21,9 +21,23 @@ just pulled.
   run read-only as the signed-in person and rank with `searchFields()` from
   `@/lib/apps/search`. Results are grouped by app, five per object, with Show
   10 more. **My Account → Search** reorders apps, switches an app or one of
-  its objects off, and hides the icon or turns off the shortcut. Platform migration 0003 adds
-  `user_search_preferences`: run `npm run db:local` (or the release step). See
-  [`docs/apps/search.md`](docs/apps/search.md).
+  its objects off, and hides the icon or turns off the shortcut. Platform
+  migration 0003 adds `user_search_preferences`: run `npm run db:local` (or
+  the release step). See [`docs/apps/search.md`](docs/apps/search.md).
+
+## 2026-11-16
+
+- **A connector's scope can include others, so a held scope isn't reported
+  refused.** An `auth.scopes` entry in `connector.json` takes an optional
+  `"includes": [...]`, the scopes the provider documents as part of it
+  (Todoist's `data:read_write` includes `task:add` and `data:read`). A grant
+  that names only the broader scope holds them too, so the verdict recorded at
+  Connect marks them Granted, and the Methods tab stops calling their methods
+  "Scope refused". The Scopes tab shows "Included in" on each. The build
+  refuses a name that isn't in `auth.scopes`, and the scopes refresh keeps the
+  list. What Connect asks for doesn't change. Connector schema v1 gained the
+  field in place. See
+  [`docs/plans/20261116_0021-scope-includes.md`](docs/plans/20261116_0021-scope-includes.md).
 
 ## 2026-11-15
 
