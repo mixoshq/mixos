@@ -160,6 +160,7 @@ function manifest(slug: string, name: string, extra: Partial<AppManifest>): AppM
     emits: [],
     listensTo: [],
     branding: null,
+    search: [],
     mcp: [],
     ...extra,
   };

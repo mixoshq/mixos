@@ -9,6 +9,7 @@ import {
   RawAppManifestSchema,
   RawConnectorManifestSchema,
   RawThemeManifestSchema,
+  searchLinkProblem,
 } from "./manifest-schemas";
 import { JOB_TIMEOUT_MS, MAX_SYNC_BUDGET_MS } from "../src/lib/apps/job-limits";
 
@@ -326,5 +327,71 @@ test("every manifest names its registryId: a lowercase name, a hyphen and an 8-c
       assert.match(check({ ...manifest, registryId }), /registryId: must be the install name/, `${kind} ${registryId}`);
     }
     assert.match(check({ ...manifest, registryId: `${"a".repeat(40)}-3f9a2c1b` }), /registryId: Too big: expected string to have <=48 characters/, kind);
+  }
+});
+
+// ── searchLinkProblem ──────────────────────────────────────────────────────
+
+test("the build accepts a page path with placeholders in the query", () => {
+  for (const link of ["notes", "notes?id={id}", "?id={id}", "notes/archive?id={id}&tab=details", "a-b/c-d?x={x_y}"]) {
+    assert.equal(searchLinkProblem(link), null, link);
+  }
+});
+
+test("the build refuses a link that could leave the app, or names no page", () => {
+  for (const link of [
+    "",
+    "/notes?id={id}",
+    "//evil.example",
+    "https://evil.example?id={id}",
+    "javascript:alert(1)",
+    "../admin?id={id}",
+    "notes/../admin",
+    "notes/{id}",
+    "notes?id={id}#top",
+    "notes?id=prefix-{id}",
+    "notes\\x?id={id}",
+    "Notes?id={id}",
+    "notes?{id}",
+  ]) {
+    assert.notEqual(searchLinkProblem(link), null, link);
+  }
+});
+
+test("a search object's link, fields and count are held to their limits", () => {
+  const object = (extra: Record<string, unknown> = {}) => ({
+    name: "notes",
+    label: "Notes",
+    icon: "notebook",
+    fields: [{ key: "title", label: "Title" }],
+    link: "notes?id={id}",
+    ...extra,
+  });
+  assert.equal(problems({ search: [object()] }), "");
+  assert.match(problems({ search: [object({ link: "/notes" })] }), /search\.0\.link: must be a page path/);
+  assert.match(problems({ search: [object({ fields: [] })] }), /search\.0\.fields: a search object must declare at least one/);
+  assert.match(
+    problems({ search: [object({ fields: Array.from({ length: 7 }, (_, i) => ({ key: `f${i}`, label: "F" })) })] }),
+    /search\.0\.fields: a search object may declare at most 6 fields/,
+  );
+  assert.match(
+    problems({ search: Array.from({ length: 6 }, (_, i) => object({ name: `o${i}` })) }),
+    /search: an app may declare at most 5 search objects/,
+  );
+  assert.match(problems({ search: [object({ extra: true })] }), /search\.0/);
+});
+
+test("every search object names its icon, as a Lucide name", () => {
+  const object = (icon?: string) => ({
+    name: "notes",
+    label: "Notes",
+    ...(icon === undefined ? {} : { icon }),
+    fields: [{ key: "title", label: "Title" }],
+    link: "notes?id={id}",
+  });
+  assert.equal(problems({ search: [object("message-circle")] }), "");
+  assert.match(problems({ search: [object()] }), /search\.0\.icon: every search object needs an icon/);
+  for (const icon of ["MessageCircle", "message_circle", "", "notes icon"]) {
+    assert.match(problems({ search: [object(icon)] }), /search\.0\.icon: icon must be a Lucide name/, icon);
   }
 });

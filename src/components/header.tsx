@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import AppsDropdown from "@/components/apps/apps-dropdown";
 import ReleaseNotesMenu from "@/components/release-notes/release-notes-menu";
+import SearchButton from "@/components/search/search-button";
 import { useDashboardEdit } from "@/components/dashboard/edit-mode-context";
 import { CARD_SURFACE } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -168,7 +169,8 @@ export default function Header({
       </div>
 
       <div className="flex shrink-0 items-center gap-2">
-        {/* Before the name: what changed lately, and nothing at all when nothing has. */}
+        {/* Search first, then the gift: what changed lately, and nothing at all when nothing has. */}
+        <SearchButton />
         <ReleaseNotesMenu />
         <div className="relative" ref={menuRef}>
           <button
