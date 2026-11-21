@@ -24,6 +24,7 @@ import {
   APPS_SOURCE,
   FIRST_PAGE,
   MIN_OBJECT_QUERY,
+  objectKey,
   orderSources,
   type SearchGroup,
   type SearchHit,
@@ -71,7 +72,8 @@ export async function searchSourcesFor(
         key,
         name: APPS_GROUP_NAME,
         icon: APPS_GROUP_ICON,
-        objects: ["Open an app by its name"],
+        objects: [],
+        note: "Open an app by its name",
         enabled: !disabled.has(key),
       };
     }
@@ -80,7 +82,13 @@ export async function searchSourcesFor(
       key,
       name: app.name,
       icon: app.icon,
-      objects: app.search.map((o) => o.label),
+      objects: app.search.map((o) => ({
+        name: o.name,
+        label: o.label,
+        icon: o.icon,
+        fields: o.fields.map((f) => f.key),
+      })),
+      note: null,
       enabled: !disabled.has(key),
     };
   });
@@ -132,16 +140,17 @@ async function searchingUser(userId: string) {
 }
 
 /**
- * Every source's first page for `query`, in the person's order, sources
- * switched off left out. A group with no hits and no error is left out too, so
- * the modal lists only what matched. Below MIN_OBJECT_QUERY characters only
- * the Apps group is searched.
+ * Every source's first page for `query`, in the person's order, sources and
+ * objects switched off left out. A group with no hits and no error is left out
+ * too, so the modal lists only what matched. Below MIN_OBJECT_QUERY characters
+ * only the Apps group is searched.
  */
 export async function globalSearch(userId: string, query: string): Promise<SearchResponse> {
   const { prefs, openable, searchable, ordered } = await sourcesFor(userId);
   if (!prefs.showIcon && !prefs.shortcutEnabled) throw new SearchUnavailableError();
   const dbUser = await searchingUser(userId);
   const disabled = new Set(prefs.disabled);
+  const offObjects = new Set(prefs.disabledObjects);
   const bySlug = new Map(searchable.map((a) => [a.slug, a]));
 
   const groups = await Promise.all(
@@ -169,10 +178,13 @@ export async function globalSearch(userId: string, query: string): Promise<Searc
         }
         if (query.length < MIN_OBJECT_QUERY) return null;
         const app = bySlug.get(key)!;
+        // An app with every object switched off isn't opened at all.
+        const objects = app.search.filter((o) => !offObjects.has(objectKey(app.slug, o.name)));
+        if (objects.length === 0) return null;
         const session = await openAppForSearch(app, dbUser);
         const sections = await Promise.all(
-          app.search.map(async (o) =>
-            section(o.name, o.label, o.icon ?? app.icon, await searchObjectPage(session, o, query, 0, FIRST_PAGE)),
+          objects.map(async (o) =>
+            section(o.name, o.label, o.icon, await searchObjectPage(session, o, query, 0, FIRST_PAGE)),
           ),
         );
         const shown = sections.filter((s) => s.hits.length > 0 || s.error !== null);
@@ -210,6 +222,7 @@ export async function searchMore(
   }
 
   if (query.length < MIN_OBJECT_QUERY) return none;
+  if (prefs.disabledObjects.includes(objectKey(source, object))) return none;
   const app = searchable.find((a) => a.slug === source);
   const declared = app?.search.find((o) => o.name === object);
   if (!app || !declared) return none;

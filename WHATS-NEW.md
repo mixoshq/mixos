@@ -20,8 +20,8 @@ just pulled.
   `"notes?id={id}"` that the build checks against the app's pages. Handlers
   run read-only as the signed-in person and rank with `searchFields()` from
   `@/lib/apps/search`. Results are grouped by app, five per object, with Show
-  10 more. **My Account → Search** reorders and switches apps, and hides the
-  icon or turns off the shortcut. Platform migration 0003 adds
+  10 more. **My Account → Search** reorders apps, switches an app or one of
+  its objects off, and hides the icon or turns off the shortcut. Platform migration 0003 adds
   `user_search_preferences`: run `npm run db:local` (or the release step). See
   [`docs/apps/search.md`](docs/apps/search.md).
 

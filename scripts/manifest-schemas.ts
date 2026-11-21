@@ -779,7 +779,11 @@ const searchObjectSchema = z.strictObject({
       "search object names must be lowercase-hyphenated (e.g. notes)",
     ),
   label: z.string().min(1).max(40),
-  icon: z.string().min(1).optional(),
+  // Required: each object shows its own icon in the modal and the settings.
+  // The generator additionally checks Lucide has it, which a schema can't see.
+  icon: z
+    .string({ error: "every search object needs an icon: a Lucide name, e.g. notebook" })
+    .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "icon must be a Lucide name, lowercase-hyphenated (e.g. message-circle)"),
   fields: z
     .array(searchFieldSchema)
     .min(1, "a search object must declare at least one searchable field; the first is the title")

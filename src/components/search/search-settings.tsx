@@ -5,15 +5,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, GripVertical } from "lucide-react";
+import { GripVertical } from "lucide-react";
 import LucideIcon from "@/components/lucide-icon";
-import { IconButton } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import Notice from "@/components/ui/notice";
 import { Toggle } from "@/components/ui/toggle";
 import { useListReorder } from "@/lib/dnd/use-list-reorder";
 import {
   mergeOrder,
+  objectKey,
   orderSources,
   type SearchPreferences,
   type SearchSourceView,
@@ -40,6 +40,7 @@ export default function SearchSettings({ sources }: { sources: SearchSourceView[
     [sources, byKey, prefs.order],
   );
   const disabled = useMemo(() => new Set(prefs.disabled), [prefs.disabled]);
+  const offObjects = useMemo(() => new Set(prefs.disabledObjects), [prefs.disabledObjects]);
 
   async function save(next: SearchPreferences) {
     setError(null);
@@ -51,18 +52,15 @@ export default function SearchSettings({ sources }: { sources: SearchSourceView[
     void save({ ...prefs, order: mergeOrder(next.map((s) => s.key), prefs.order) });
   }
 
-  function move(index: number, by: -1 | 1) {
-    const to = index + by;
-    if (to < 0 || to >= ordered.length) return;
-    const next = [...ordered];
-    const [item] = next.splice(index, 1);
-    next.splice(to, 0, item);
-    reorder(next);
-  }
-
   function setEnabled(key: string, on: boolean) {
     const rest = prefs.disabled.filter((k) => k !== key);
     void save({ ...prefs, disabled: on ? rest : [...rest, key] });
+  }
+
+  function setObjectEnabled(source: string, object: string, on: boolean) {
+    const key = objectKey(source, object);
+    const rest = prefs.disabledObjects.filter((k) => k !== key);
+    void save({ ...prefs, disabledObjects: on ? rest : [...rest, key] });
   }
 
   const { getItemProps, dragIndex, dragOverIndex } = useListReorder({ items: ordered, onReorder: reorder });
@@ -115,7 +113,7 @@ export default function SearchSettings({ sources }: { sources: SearchSourceView[
       <Card>
         <CardHeader
           title="Apps to search"
-          description="Results are grouped by app, in this order. Drag an app, or use the arrows, to move it; switch one off to leave it out of search."
+          description="Results are grouped by app, in this order. Drag an app to move it. Switch an app off to leave it out of search, or switch off just one of the things it searches."
         />
         <CardBody>
           <ul className="space-y-2" aria-label="Apps to search, in order">
@@ -126,44 +124,59 @@ export default function SearchSettings({ sources }: { sources: SearchSourceView[
                   key={source.key}
                   {...getItemProps(index)}
                   className={cn(
-                    "flex items-center gap-3 rounded-md border border-border p-3 transition-colors",
+                    "rounded-md border border-border p-3 transition-colors",
                     dragIndex === index && "opacity-50",
                     dragOverIndex === index && dragIndex !== index && "border-primary",
                   )}
                 >
-                  <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden />
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground">
-                    <LucideIcon name={source.icon} className="h-4 w-4" aria-hidden />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-foreground">{source.name}</span>
-                    <span className="block truncate text-xs text-muted-foreground">{source.objects.join(", ")}</span>
-                  </span>
-                  <span className="flex shrink-0 items-center">
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      label={`Move ${source.name} up`}
-                      icon={<ArrowUp className="h-4 w-4" />}
-                      disabled={index === 0}
-                      onClick={() => move(index, -1)}
+                  <div className="flex items-center gap-3">
+                    <GripVertical className="h-4 w-4 shrink-0 cursor-grab text-muted-foreground" aria-hidden />
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-muted-foreground">
+                      <LucideIcon name={source.icon} className="h-4 w-4" aria-hidden />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-foreground">{source.name}</span>
+                      {source.note && (
+                        <span className="block truncate text-xs text-muted-foreground">{source.note}</span>
+                      )}
+                    </span>
+                    <Toggle
+                      checked={on}
+                      onCheckedChange={(next) => setEnabled(source.key, next)}
+                      label={`Search ${source.name}`}
+                      onText="On"
+                      offText="Off"
                     />
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      label={`Move ${source.name} down`}
-                      icon={<ArrowDown className="h-4 w-4" />}
-                      disabled={index === ordered.length - 1}
-                      onClick={() => move(index, 1)}
-                    />
-                  </span>
-                  <Toggle
-                    checked={on}
-                    onCheckedChange={(next) => setEnabled(source.key, next)}
-                    label={`Search ${source.name}`}
-                    onText="On"
-                    offText="Off"
-                  />
+                  </div>
+                  {source.objects.length > 0 && (
+                    <ul className="mt-2 space-y-1.5 border-t border-border pl-[4.75rem] pt-2" aria-label={`What ${source.name} searches`}>
+                      {source.objects.map((object) => (
+                        <li key={object.name} className="flex items-center gap-3">
+                          <LucideIcon name={object.icon} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                          <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+                            <span className="font-medium text-foreground">{object.label}</span>:{" "}
+                            {object.fields.map((field, i) => (
+                              <span key={field}>
+                                {i > 0 && ", "}
+                                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
+                                  {field}
+                                </code>
+                              </span>
+                            ))}
+                          </span>
+                          <Toggle
+                            checked={!offObjects.has(objectKey(source.key, object.name))}
+                            onCheckedChange={(next) => setObjectEnabled(source.key, object.name, next)}
+                            label={`Search ${object.label} in ${source.name}`}
+                            disabled={!on}
+                            title={on ? undefined : `${source.name} is off. Switch it on to choose its objects.`}
+                            onText="On"
+                            offText="Off"
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </li>
               );
             })}

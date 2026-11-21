@@ -18,8 +18,11 @@
 --                     installed later lands at the end.
 --   disabled_sources  Source keys the person switched off. An app not listed
 --                     is searched, so a new app is on until switched off.
+--   disabled_objects  Objects switched off inside an app, as '<slug>/<object>'
+--                     (an app's `search[].name`). Apart from disabled_sources,
+--                     so switching an app off and on keeps its objects' state.
 --
--- A renamed app's slug is replaced in both arrays by the release step
+-- A renamed app's slug is replaced in all three arrays by the release step
 -- (scripts/sync-renames.ts), and Delete data removes it
 -- (src/lib/repository/delete-data.ts).
 -- ============================================================================
@@ -30,6 +33,7 @@ create table public.user_search_preferences (
   shortcut_enabled boolean not null default true,
   source_order     text[] not null default '{}',
   disabled_sources text[] not null default '{}',
+  disabled_objects text[] not null default '{}',
   updated_at       timestamptz not null default now()
 );
 

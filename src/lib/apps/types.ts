@@ -616,8 +616,13 @@ export interface SearchObjectDefinition {
   name: string;
   /** The group heading in the search modal, plural: "Notes", "Candidates". */
   label: string;
-  /** A Lucide icon for the object's rows. Defaults to the app's own icon. */
-  icon?: string;
+  /**
+   * A Lucide icon name for this object, e.g. `notebook`. Shown beside its
+   * heading and rows in the search modal and on the person's Search settings,
+   * so each kind of object in an app reads apart at a glance. Required; the
+   * generator refuses a name Lucide doesn't have.
+   */
+  icon: string;
   /**
    * The properties that are searched, in priority order. The first is the
    * title: a match there ranks above a match in any other field. Handed to the
