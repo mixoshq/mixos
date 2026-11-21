@@ -47,6 +47,8 @@ const run = randomBytes(3).toString("hex");
 const database = `mixos_gate_${run}`;
 const GATED = `gated-${run}`;
 const CALLER = `caller-${run}`;
+/** The fixture's routes, under `api/`: written to disk and to the route loader map. */
+const GATED_ROUTES = ["index", "items"] as const;
 const ADMIN_EMAIL = `admin-${run}@example.com`;
 
 /** Made in `before`, so a skipped run leaves nothing behind. */
@@ -91,8 +93,7 @@ function writeFixtures(): void {
     fs.mkdirSync(path.join(appsDir, slug), { recursive: true });
     fs.writeFileSync(path.join(appsDir, slug, "app.json"), `{ "name": "${name}" }\n`);
   }
-  fixture("api/index/route.ts", route("index"));
-  fixture("api/items/route.ts", route("items"));
+  for (const name of GATED_ROUTES) fixture(`api/${name}/route.ts`, route(name));
   fixture("jobs/tick.ts", `export default async function tick() { ran(); }\n`);
   fixture(
     "sync/feed.ts",
@@ -250,6 +251,7 @@ describe("the app gate", { skip }, () => {
     actions: typeof import("./scheduler-actions");
     registry: typeof import("../../generated/app-registry");
     hookLoaders: typeof import("../../generated/app-hook-loaders");
+    routeLoaders: typeof import("../../generated/app-route-loaders");
     db: typeof import("../db/client");
   };
 
@@ -342,10 +344,17 @@ describe("the app gate", { skip }, () => {
       actions: await import("./scheduler-actions"),
       registry: await import("../../generated/app-registry"),
       hookLoaders: await import("../../generated/app-hook-loaders"),
+      routeLoaders: await import("../../generated/app-route-loaders"),
       db: await import("../db/client"),
     };
     platform.registry.appRegistry.push(gated, caller);
     platform.hookLoaders.hookLoaders[GATED] = () => import(`@apps/${GATED}/hooks`);
+    // What `npm run registry` writes for the fixture's routes, which the
+    // gateway and callAppRoute load through.
+    for (const route of GATED_ROUTES) {
+      platform.routeLoaders.routeLoaders[`${GATED}/api/${route}/route`] = () =>
+        import(`@apps/${GATED}/api/${route}/route`);
+    }
   });
 
   after(async () => {
@@ -357,6 +366,9 @@ describe("the app gate", { skip }, () => {
           if (at >= 0) registry.splice(at, 1);
         }
         delete platform.hookLoaders.hookLoaders[GATED];
+        for (const route of GATED_ROUTES) {
+          delete platform.routeLoaders.routeLoaders[`${GATED}/api/${route}/route`];
+        }
         await platform.db.sql.end();
       }
       resolver?.deregister();
