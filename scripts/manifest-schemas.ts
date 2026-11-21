@@ -1263,6 +1263,14 @@ const connectorAuthSchema = z
            * it; `false` never.
            */
           requested: z.union([z.boolean(), z.literal("write")]),
+          /**
+           * The scopes the provider grants as part of this one, as its own
+           * documentation says ("data:read_write includes task:add and
+           * data:read"). A grant naming this scope holds them too, though the
+           * provider may leave them out of it. Each must be in `auth.scopes`.
+           * A hand edit, which the scopes refresh keeps.
+           */
+          includes: z.array(z.string().min(1)).optional(),
         }),
       )
       .optional(),
@@ -1328,6 +1336,30 @@ const connectorAuthSchema = z
         path: ["authorizeUrl"],
       });
     }
+
+    // A scope another includes is one the catalogue documents: a name that
+    // isn't there is a typo, and the verdict could never mark it held. Whether
+    // it is requested doesn't matter, since what a scope includes is the
+    // provider's fact, not this connector's request.
+    const catalogue = new Set((a.scopes ?? []).map((s) => s.scope));
+    (a.scopes ?? []).forEach((s, i) => {
+      const seen = new Set<string>();
+      (s.includes ?? []).forEach((included, j) => {
+        const at = ["scopes", i, "includes", j];
+        let message: string | null = null;
+        if (included === s.scope) {
+          message = `${s.scope} includes itself. List the other scopes the provider grants with it.`;
+        } else if (seen.has(included)) {
+          message = `${s.scope} includes ${included} twice.`;
+        } else if (!catalogue.has(included)) {
+          message =
+            `${s.scope} includes ${included}, which is not in auth.scopes. Name a scope from the catalogue ` +
+            `(npx tsx scripts/check-scopes.ts <name> --write writes it).`;
+        }
+        seen.add(included);
+        if (message) ctx.addIssue({ code: "custom", message, path: at });
+      });
+    });
   });
 
 const connectorPaginationSchema = z
