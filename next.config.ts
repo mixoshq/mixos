@@ -114,6 +114,11 @@ const nextConfig: NextConfig = {
     // the reproduction that tells you when it no longer is:
     // docs/plans/20261116_0733-page-registry.md.
     turbopackServerFastRefresh: false,
+    // Upgrade reminders and `next upgrade --agent` follow security advisories
+    // only: a reminder appears when the installed Next.js has a published
+    // advisory, not for every new release. Next's default, written down so it
+    // is a decision rather than an accident.
+    agentUpgrade: "security",
   },
   devIndicators: false,
   logging: {
