@@ -2,6 +2,10 @@
   "$schema": "https://mixos.org/schemas/release-notes/v1.json",
   "notes": [
     {
+      "date": "2026-11-21",
+      "note": "Search: press ⌘K (Ctrl+K on Windows) or the magnifying glass in the menu bar to find an app by name, or what's inside your apps. Use the arrow keys and Enter to open a result. My Account › Search sets which apps it looks in, and in what order."
+    },
+    {
       "date": "2026-11-10",
       "note": "Wall·E and the MixOS and MixOS Dark themes have new names that end in a short id, so they can't clash with someone else's extension. Wall·E keeps its place on your dashboard and the theme you picked stays applied; Wall·E's page is now /apps/wall-e-345e113c."
     },

@@ -95,6 +95,7 @@ const APP = {
   emits: [],
   listensTo: [],
   branding: null,
+  search: [],
   mcp: [],
 } satisfies AppManifest;
 

@@ -202,6 +202,7 @@ function manifest(slug: string, name: string, extra: Partial<AppManifest>): AppM
     emits: [],
     listensTo: [],
     branding: null,
+    search: [],
     mcp: [{ name: "peek", description: "Peek.", sources: ["mixos"] }],
     ...extra,
   };

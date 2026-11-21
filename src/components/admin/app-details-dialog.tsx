@@ -1118,6 +1118,10 @@ export default function AppDetailsDialog({
               ))}
               <Row label="MCP tools" value={app.mcp.length} />
               <Row
+                label="Search objects"
+                value={app.search.length === 0 ? 0 : app.search.map((o) => o.label).join(", ")}
+              />
+              <Row
                 label="Database tables"
                 /* The only live number in the panel, so it is the only one that
                    cannot be stated on the first render. An em dash for the

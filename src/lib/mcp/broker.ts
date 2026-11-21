@@ -3,12 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { appRegistry } from "@/generated/app-registry";
-import { connectorRegistry } from "@/generated/connector-registry";
 import { getUserById, hasAppGrant } from "@/lib/apps/access";
 import { checkAppGate } from "@/lib/apps/app-gate";
-import { readOnlyConnectors, refusalMessage } from "@/lib/apps/read-only";
-import { createReadOnlyScopedClient } from "@/lib/apps/scoped-db";
-import { createServicesClient } from "@/lib/apps/services";
+import { refusalMessage } from "@/lib/apps/read-only";
+import { buildReadOnlyAppContext } from "@/lib/apps/read-only-context";
 import { recordMcpCall } from "@/lib/apps/telemetry";
 import type { McpToolContext } from "@/lib/hooks/types";
 import { APP_UPDATING_MESSAGE } from "@/lib/platform/maintenance-gate";
@@ -238,10 +236,7 @@ async function buildMcpToolContext(
     throw new McpToolError("FORBIDDEN_USER", "This account is no longer active.");
   }
 
-  // Dynamic import mirrors services.ts: keeps a static cycle from forming with
-  // the context builder.
-  const { buildAppContext } = await import("@/lib/apps/context");
-  const appCtx = await buildAppContext(slug, {
+  const readOnly = await buildReadOnlyAppContext(slug, {
     id: dbUser.id,
     email: dbUser.email,
     display_name: dbUser.display_name,
@@ -249,22 +244,7 @@ async function buildMcpToolContext(
   });
 
   return {
-    user: appCtx.user,
-    connectors: readOnlyConnectors(appCtx.connectors, connectorRegistry),
-    db: appCtx.manifest.database ? createReadOnlyScopedClient(slug) : null,
-    telemetry: appCtx.telemetry,
-    // Not `appCtx.services`: that client runs the provider's handler with a
-    // writable db and connectors, and a tool must not be able to write by
-    // asking another app to. This one runs it read-only.
-    services:
-      appCtx.manifest.consumes.length > 0
-        ? createServicesClient({
-            callerSlug: slug,
-            actingUser: appCtx.user,
-            readOnly: true,
-          })
-        : null,
-    manifest: appCtx.manifest,
+    ...readOnly,
     caller: {
       kind: "mcp",
       clientId: principal.clientId,

@@ -131,6 +131,38 @@ export interface McpToolContext {
   caller: McpCaller;
 }
 
+/** A global search, run for a signed-in person typing in the ⌘K modal. */
+export interface SearchCaller {
+  kind: "search";
+}
+
+/**
+ * Context passed to a search handler (`apps/<slug>/search/<name>.ts`), run by
+ * MixOS's global search on behalf of the signed-in person.
+ *
+ * The MCP tool context's shape, for the same reason: a search answers a
+ * question and changes nothing.
+ *
+ *   - `user` is always present. The platform has already checked they hold
+ *     this app. Re-authorize in your own terms anyway — return only the rows
+ *     this person could open in your app, by their role.
+ *   - `db` is READ-ONLY, and `connectors` are narrowed to their declared reads.
+ *   - No `notifications`, `hooks` or `telemetry`: a search runs on every
+ *     keystroke a person pauses on.
+ *   - `services` is present when the app declares `consumes`, and runs the
+ *     provider read-only.
+ *
+ * See `docs/apps/search.md`.
+ */
+export interface SearchContext {
+  user: AppContextUser;
+  connectors: Record<string, BaseConnector>;
+  db: ReadOnlyScopedClient | null;
+  services: ServicesClient | null;
+  manifest: AppManifest;
+  caller: SearchCaller;
+}
+
 /**
  * The context an app's server code gets for a caller with an identity: the
  * `session` and `signed-in` tiers. A route handler's context carries two more

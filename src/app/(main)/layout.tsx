@@ -20,6 +20,8 @@ import Installed from "@/components/onboarding/installed";
 import Confetti from "@/components/onboarding/confetti";
 import RegisterServiceWorker from "@/components/push/register-sw";
 import OfflineOverlay from "@/components/offline-overlay";
+import { SearchProvider } from "@/components/search/search-context";
+import { getSearchPreferences } from "@/lib/search/preferences";
 
 /**
  * Every page under `(main)` is session-dependent and must render per request.
@@ -43,7 +45,12 @@ export default async function MainLayout({
     getBrandName(),
     getMenuBarLogo(),
   ]);
-  const onboardingCompletedAt = await onboardingCompletedAtFor(session.user.id);
+  // Search settings with the session, so the menu bar's search icon is right
+  // on the first paint.
+  const [onboardingCompletedAt, searchPrefs] = await Promise.all([
+    onboardingCompletedAtFor(session.user.id),
+    getSearchPreferences(session.user.id),
+  ]);
   // The sign-in mark only matters while the welcome tour is showing it, so
   // every other page skips its filters. Replaying the tour refreshes from the
   // server, which lands back here with the stamp cleared.
@@ -53,21 +60,23 @@ export default async function MainLayout({
   return (
     <AuthProvider>
       <PreferencesProvider>
-        <TourProvider active={onboardingCompletedAt === null}>
-          <DashboardEditProvider>
-            <div className="flex h-screen flex-col">
-              {/* In the column, not over it: the menu bar and the page start after it, so nothing overlaps. */}
-              <ReleaseBanner isAdmin={session.user.isAdmin} userId={session.user.id} />
-              <HeaderShell logo={menuBarLogo} name={name} />
-              <main className="flex-1 overflow-auto bg-muted">{children}</main>
-            </div>
-            <WelcomeTour branding={{ name, menuBarLogo, loginLogo }} />
-            <Confetti />
-            <Installed name={name} logo={menuBarLogo} />
-            <RegisterServiceWorker />
-            <OfflineOverlay />
-          </DashboardEditProvider>
-        </TourProvider>
+        <SearchProvider initialPrefs={searchPrefs}>
+          <TourProvider active={onboardingCompletedAt === null}>
+            <DashboardEditProvider>
+              <div className="flex h-screen flex-col">
+                {/* In the column, not over it: the menu bar and the page start after it, so nothing overlaps. */}
+                <ReleaseBanner isAdmin={session.user.isAdmin} userId={session.user.id} />
+                <HeaderShell logo={menuBarLogo} name={name} />
+                <main className="flex-1 overflow-auto bg-muted">{children}</main>
+              </div>
+              <WelcomeTour branding={{ name, menuBarLogo, loginLogo }} />
+              <Confetti />
+              <Installed name={name} logo={menuBarLogo} />
+              <RegisterServiceWorker />
+              <OfflineOverlay />
+            </DashboardEditProvider>
+          </TourProvider>
+        </SearchProvider>
       </PreferencesProvider>
     </AuthProvider>
   );

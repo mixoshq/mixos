@@ -64,12 +64,13 @@ const nextConfig: NextConfig = {
       "@connectors": "./connectors",
     },
     // The platform loads an extension's optional parts with a template-literal
-    // import — @apps/<slug>/services/<name>, and likewise for MCP tools, jobs,
-    // syncs and a connector's index — inside a try/catch that
-    // answers "no such handler" itself. Turbopack resolves each template against
-    // the files on disk, and when no installed extension has that kind of file
-    // (no app declares a service, a checkout has no connectors) it warns "Module
-    // not found" on every compile. That is the expected state of most installs.
+    // import — @apps/<slug>/services/<name>, and likewise for MCP tools,
+    // search handlers, jobs, syncs and a connector's index — inside a
+    // try/catch that answers "no such handler" itself. Turbopack resolves each
+    // template against the files on disk, and when no installed extension has
+    // that kind of file (no app declares a service, a checkout has no
+    // connectors) it warns "Module not found" on every compile. That is the
+    // expected state of most installs.
     //
     // Only a template import under @apps/ or @connectors/ is quieted: Turbopack
     // titles it "Module not found: Can't resolve '@apps/' <dynamic> …", and the

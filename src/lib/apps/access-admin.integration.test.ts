@@ -166,6 +166,7 @@ function manifest(slug: string, name: string, extra: Partial<AppManifest> = {}):
     emits: [],
     listensTo: [],
     branding: null,
+    search: [],
     mcp: [],
     ...extra,
   };

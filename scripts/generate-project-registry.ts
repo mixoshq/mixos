@@ -5,6 +5,7 @@
 import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
+import { icons as lucideIcons } from "lucide-react";
 import type {
   AppManifest,
   AppAuthor,
@@ -15,6 +16,7 @@ import type {
   RouteAuth,
   RouteContract,
   ScheduleDefinition,
+  SearchObjectDefinition,
   ServiceDefinition,
   ServiceDependency,
   SyncDefinition,
@@ -312,6 +314,7 @@ function unscannedEntryPoints(appDir: string, manifest: AppManifest): string[] {
     ["sync", manifest.sync.map((s) => s.name)],
     ["services", manifest.provides.map((s) => s.name)],
     ["mcp", manifest.mcp.map((t) => t.name)],
+    ["search", manifest.search.map((o) => o.name)],
   ] as const) {
     for (const name of names) entries.push(`${dir}/${name}.ts`, `${dir}/${name}.tsx`);
   }
@@ -944,6 +947,94 @@ function validateMcpTools(
     ...(t.hint != null ? { hint: t.hint } : {}),
     sources: t.sources,
     ...(t.notCovered != null ? { notCovered: t.notCovered } : {}),
+  }));
+}
+
+/**
+ * Verify each declared search object: unique names and field keys, a handler
+ * at `apps/<slug>/search/<name>.ts` with a default export, and a `link` whose
+ * path is one of the app's pages.
+ *
+ * The schema has already held the link to its shape (a relative page path,
+ * placeholders only in query values; see `searchLinkProblem`). What it cannot
+ * see is the filesystem: a link to a page that doesn't exist would send every
+ * result to the app's not-found screen, and nobody would notice until a person
+ * clicked one.
+ *
+ * The export check is a source scan rather than an import, for the reason
+ * `validateMcpTools` gives: a handler pulls in server code, and the generator
+ * must run with no database or credentials present.
+ */
+function validateSearchObjects(
+  raw: SearchObjectDefinition[] | undefined,
+  slug: string,
+  appDir: string,
+): SearchObjectDefinition[] {
+  if (!raw || raw.length === 0) return [];
+
+  const seen = new Set<string>();
+  for (const o of raw) {
+    if (seen.has(o.name)) {
+      throw new FatalManifestError(`apps/${slug}/app.json: duplicate search object name "${o.name}".`);
+    }
+    seen.add(o.name);
+
+    // The UI draws an unknown name as a plain box (src/components/lucide-icon.tsx),
+    // which nobody would notice was a typo. Same name-to-component rule as there.
+    const component = o.icon
+      .split("-")
+      .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+      .join("");
+    if (!(component in lucideIcons)) {
+      throw new FatalManifestError(
+        `apps/${slug}/app.json: search object "${o.name}" has the icon "${o.icon}", which Lucide doesn't have. ` +
+          `Use a name from https://lucide.dev/icons, lowercase-hyphenated (e.g. message-circle).`,
+      );
+    }
+
+    const keys = new Set<string>();
+    for (const f of o.fields) {
+      if (keys.has(f.key)) {
+        throw new FatalManifestError(
+          `apps/${slug}/app.json: search object "${o.name}" lists the field "${f.key}" twice.`,
+        );
+      }
+      keys.add(f.key);
+    }
+
+    const pagePath = o.link.split("?")[0];
+    const page = ["Main.tsx", "Main.ts"].map((f) => path.join(appDir, "pages", pagePath, f));
+    if (!page.some((p) => fs.existsSync(p))) {
+      throw new FatalManifestError(
+        `apps/${slug}/app.json: search object "${o.name}" links to "${o.link}", but the app has no page there. ` +
+          `Expected pages/${pagePath ? `${pagePath}/` : ""}Main.tsx.`,
+      );
+    }
+
+    const candidates = [
+      path.join(appDir, "search", `${o.name}.ts`),
+      path.join(appDir, "search", `${o.name}.tsx`),
+    ];
+    const handlerPath = candidates.find((p) => fs.existsSync(p));
+    if (!handlerPath) {
+      throw new FatalManifestError(
+        `apps/${slug}/app.json: search[].name "${o.name}" has no handler on disk. Expected search/${o.name}.ts.`,
+      );
+    }
+    const src = fs.readFileSync(handlerPath, "utf-8");
+    if (!/export\s+default\b/.test(src)) {
+      throw new FatalManifestError(
+        `apps/${slug}/search/${o.name}.ts: missing a default export. The handler is \`export default async function (ctx: SearchContext, input: SearchInput) => SearchResult[]\`.`,
+      );
+    }
+  }
+
+  return raw.map((o) => ({
+    name: o.name,
+    label: o.label,
+    icon: o.icon,
+    fields: o.fields.map((f) => ({ key: f.key, label: f.label })),
+    link: o.link,
   }));
 }
 
@@ -1632,6 +1723,7 @@ async function readAppText(
       ...connectorEntryNames(r.connectors),
       ...connectorEntryNames(r.optionalConnectors),
     ]),
+    search: validateSearchObjects(r.search, slug, appDir),
     ...(pageVisibility ? { pageVisibility } : {}),
   };
 

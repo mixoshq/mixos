@@ -105,7 +105,11 @@ describe("a renamed extension's data follows it", { skip }, () => {
         (select count(*)::int from public.telemetry_events where source_slug = ${slug} or caller_app_slug = ${slug}) as telemetry,
         (select count(*)::int from public.oauth_tokens where ${slug} = any(granted_apps)) as mcp,
         (select count(*)::int from public.release_notes_seen where note_id like ${`app:${slug}:%`}) as seen,
-        (select count(*)::int from public.app_unlock_failures where subject = ${`10.0.0.1::${slug}`}) as lockouts
+        (select count(*)::int from public.app_unlock_failures where subject = ${`10.0.0.1::${slug}`}) as lockouts,
+        (select count(*)::int from public.user_search_preferences where ${slug} = any(source_order)) as "searchOrder",
+        (select count(*)::int from public.user_search_preferences where ${slug} = any(disabled_sources)) as "searchOff",
+        (select count(*)::int from public.user_search_preferences
+          where ${`${slug}/notes`} = any(disabled_objects)) as "searchObjectOff"
     `;
     return { ...counts };
   }
@@ -124,6 +128,9 @@ describe("a renamed extension's data follows it", { skip }, () => {
     mcp: 1,
     seen: 1,
     lockouts: 1,
+    searchOrder: 1,
+    searchOff: 1,
+    searchObjectOff: 1,
   };
   const NONE = Object.fromEntries(Object.keys(ALL_OF_IT).map((k) => [k, 0]));
 
@@ -174,6 +181,10 @@ describe("a renamed extension's data follows it", { skip }, () => {
       values (${user}, ${`app:${from}:2026-11-01:abcdef012345`}, '2026-11-01')
     `;
     await sql`insert into public.app_unlock_failures (subject, failures) values (${`10.0.0.1::${from}`}, 2)`;
+    await sql`
+      insert into public.user_search_preferences (user_id, source_order, disabled_sources, disabled_objects)
+      values (${user}, ${["@apps", from, "other"]}::text[], ${[from]}::text[], ${["other/notes", `${from}/notes`]}::text[])
+    `;
     await sql.unsafe(`insert into "${appSchemaName(from)}".notes (id, body) values (1, 'kept')`);
 
     // The busy app's new slug already holds a grant: a build without the
@@ -213,6 +224,12 @@ describe("a renamed extension's data follows it", { skip }, () => {
 
     assert.deepEqual(await keptFor(to), ALL_OF_IT);
     assert.deepEqual(await keptFor(from), NONE);
+    // In the same place in the person's search order, not appended at the end.
+    const [prefs] = await sql`
+      select source_order, disabled_objects from public.user_search_preferences where user_id = ${user}
+    `;
+    assert.deepEqual(prefs.source_order, ["@apps", to, "other"]);
+    assert.deepEqual(prefs.disabled_objects, ["other/notes", `${to}/notes`]);
     const [row] = await sql`select is_active, missing_since from public.apps where slug = ${to}`;
     assert.deepEqual({ ...row }, { is_active: true, missing_since: null });
 

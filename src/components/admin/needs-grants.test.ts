@@ -66,6 +66,7 @@ const app: AppManifest = {
   emits: [],
   listensTo: [],
   branding: null,
+  search: [],
   mcp: [],
 };
 

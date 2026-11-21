@@ -573,6 +573,24 @@ async function deleteApp(tx: TransactionSql, slug: string, k: Kept): Promise<App
       `
     ).count;
 
+  // Its place in each person's search settings, so a later app with the slug
+  // starts where any new app does: at the end, and searched. Not counted: a
+  // place in a list is not data the app kept.
+  const objectPrefix = `${slug}/`;
+  await tx`
+    update public.user_search_preferences
+    set source_order = array_remove(source_order, ${slug}),
+        disabled_sources = array_remove(disabled_sources, ${slug}),
+        disabled_objects = array(
+          select o from unnest(disabled_objects) with ordinality as t(o, n)
+          where left(o, ${objectPrefix.length}) <> ${objectPrefix}
+          order by n
+        )
+    where ${slug} = any(source_order)
+       or ${slug} = any(disabled_sources)
+       or exists (select 1 from unnest(disabled_objects) o where left(o, ${objectPrefix.length}) = ${objectPrefix})
+  `;
+
   // Its row, and what hangs off it by foreign key.
   const [hanging] = await tx<
     { grants: number; installs: number; passwords: number; widgets: number; mcpToolSwitches: number }[]
