@@ -101,6 +101,14 @@ Two rules the refresh follows, and you must not work around:
   authorization at the next reconnect; a provider reorganising their docs is not
   consent to change what we ask for. The script warns instead.
 
+When the provider's docs say one scope **includes** others ("`data:read_write`
+includes `task:add` and `data:read`"), add them by hand to the broader entry:
+`"includes": ["task:add", "data:read"]`. The provider may name only the broader
+scope in its grant, and without `includes` the narrower one reads Refused on the
+Scopes tab and every method needing it "Scope refused", though it works. The
+refresh keeps `includes`, as it keeps `requested`. See
+[Scopes](docs/connectors/scopes.md#a-scope-that-includes-others).
+
 Read the output. "14 scopes parsed" is not the test — whether the descriptions
 are English sentences and the read/write split looks right is the test.
 

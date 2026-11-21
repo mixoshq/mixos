@@ -72,7 +72,10 @@ holds. **Usage Logs takes no authoring at all** — declare your methods in
 `telemetry` (which invariant 16 requires anyway) and the log populates itself.
 **Details takes none either**: dependency counts come from other apps'
 manifests, status from the credential row. **Scopes** lists `auth.scopes`,
-which `scripts/check-scopes.ts` writes from your `auth.scopesUrl`.
+which `scripts/check-scopes.ts` writes from your `auth.scopesUrl`. Where the
+provider grants one scope as part of another, add `includes` to the broader
+entry by hand (see [Scopes](scopes.md#a-scope-that-includes-others)), or a
+grant that names only the broader one reports the narrower one refused.
 
 If you find yourself wanting to change the shape of Details or Usage Logs for
 one connector, that is a platform change and a `docs/plans/` plan — not

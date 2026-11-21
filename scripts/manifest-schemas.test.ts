@@ -239,6 +239,45 @@ test("the scopes a method needs are ones the connector requests, each named once
   assert.match(withMethods([{ method: "listDeals", operation: "GET /deals", scopes: [""] }, create]), /telemetry\.0\.scopes\.0/);
 });
 
+test("a scope includes others from auth.scopes, each named once, and never itself", () => {
+  const scopes = (includes: unknown) => [
+    { scope: "task:add", requested: false },
+    { scope: "data:read", requested: true },
+    { scope: "data:read_write", requested: "write", includes },
+  ];
+  const withIncludes = (includes: unknown) =>
+    connectorProblems(
+      connector({
+        auth: {
+          strategy: "oauth2_authorization_code",
+          authorizeUrl: "https://todo.example/authorize",
+          tokenUrl: "https://todo.example/token",
+          credentialKeys: ["clientId", "clientSecret"],
+          scopes: scopes(includes),
+        },
+        credentialFields: [
+          { key: "clientId", label: "Client ID", type: "text" },
+          { key: "clientSecret", label: "Client secret", type: "password" },
+        ],
+        telemetry: [
+          { method: "getTasks", operation: "GET /tasks", scopes: ["data:read"] },
+          { method: "createTask", operation: "POST /tasks", mutates: true, scopes: ["data:read_write"] },
+        ],
+      }),
+    );
+
+  // An included scope needn't be requested: task:add isn't.
+  assert.equal(withIncludes(["task:add", "data:read"]), "");
+  assert.match(
+    withIncludes(["data:raed"]),
+    /auth\.scopes\.2\.includes\.0: data:read_write includes data:raed, which is not in auth\.scopes/,
+  );
+  assert.match(withIncludes(["data:read", "data:read"]), /auth\.scopes\.2\.includes\.1: data:read_write includes data:read twice/);
+  assert.match(withIncludes(["data:read_write"]), /auth\.scopes\.2\.includes\.0: data:read_write includes itself/);
+  assert.match(withIncludes([""]), /auth\.scopes\.2\.includes\.0/);
+  assert.match(withIncludes("data:read"), /auth\.scopes\.2\.includes/);
+});
+
 test("a connector that authenticates with nothing names no scopes on its methods", () => {
   assert.equal(connectorProblems(connector({ auth: { strategy: "none" } })), "");
   assert.match(
