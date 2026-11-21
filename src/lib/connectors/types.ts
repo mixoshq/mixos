@@ -111,6 +111,12 @@ export interface ConnectorScope {
   access?: ConnectorScopeAccess;
   /** Does this connector ask for it at authorization time? */
   requested: ConnectorScopeRequest;
+  /**
+   * The scopes the provider grants as part of this one, each also in
+   * `auth.scopes`. A grant that names this scope holds them too, though the
+   * provider may not name them (`heldScopes` in ./write-policy.ts).
+   */
+  includes?: string[];
 }
 
 export interface ConnectorAuthPolicy {
