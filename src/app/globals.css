@@ -96,6 +96,49 @@ h6 {
   font-family: var(--type-heading);
 }
 
+/* A select's caret, drawn by the control. The browser's own sits against the
+   right border, and Chrome ignores padding-right when it places it, so no
+   amount of padding moves it in. This switches it off and draws a chevron in
+   its place: two 1.5px strokes in `--muted-foreground`, as the resize handle
+   below is drawn, 1.125rem in from the right edge. The 2.5rem of padding keeps
+   a long option's text from running under it.
+
+   `select.mix-input` is the `Select` control (src/components/ui/input.tsx) and
+   any select that borrows its class. Unlayered, so it wins over the control's
+   `px-3` utility. */
+select.mix-input {
+  appearance: none;
+  padding-right: 2.5rem;
+  background-image:
+    linear-gradient(
+      45deg,
+      transparent calc(50% - 0.75px),
+      var(--muted-foreground) calc(50% - 0.75px),
+      var(--muted-foreground) calc(50% + 0.75px),
+      transparent calc(50% + 0.75px)
+    ),
+    linear-gradient(
+      135deg,
+      transparent calc(50% - 0.75px),
+      var(--muted-foreground) calc(50% - 0.75px),
+      var(--muted-foreground) calc(50% + 0.75px),
+      transparent calc(50% + 0.75px)
+    );
+  background-position:
+    calc(100% - 1.4375rem) 55%,
+    calc(100% - 1.125rem) 55%;
+  background-size: 0.3125rem 0.3125rem;
+  background-repeat: no-repeat;
+}
+
+/* Forced colours drop background images, which would leave no caret at all:
+   there, the browser draws its own again. */
+@media (forced-colors: active) {
+  select.mix-input {
+    appearance: auto;
+  }
+}
+
 /* Match the widget card radius (rounded-lg = 0.5rem) on the drag/resize
    placeholder so the dropzone visually belongs to the same grid of cards. */
 .react-grid-item.react-grid-placeholder {
