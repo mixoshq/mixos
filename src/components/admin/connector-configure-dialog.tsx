@@ -305,6 +305,24 @@ function ScopeStatusIcon({ verdict }: { verdict: ScopeVerdict }) {
 }
 
 /**
+ * That a scope comes with another one: the provider grants it as part of each
+ * scope listed, and may name only that one in the grant.
+ */
+function IncludedInPill({ scopes }: { scopes: string[] }) {
+  const names = scopes.map(shortScopeId);
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`;
+  const tip =
+    names.length === 1
+      ? `The provider grants it as part of ${list}, and may name only ${list} in the grant. Either one in the grant holds it.`
+      : `The provider grants it as part of ${list}, and may name only that scope in the grant. Any of them in the grant holds it.`;
+  return (
+    <InfoTooltip tip={tip}>
+      <StatusPill tone="neutral">Included in {names.join(", ")}</StatusPill>
+    </InfoTooltip>
+  );
+}
+
+/**
  * The one thing about a method an admin most needs to know before an app calls
  * it, or null when nothing stands in its way. First match wins: a write that is
  * off says so before anything about its scopes, since the platform refuses it
@@ -641,6 +659,18 @@ export default function ConnectorConfigureDialog({
     () => connector.auth?.scopes ?? [],
     [connector.auth],
   );
+  /**
+   * Each scope another one includes, with the scopes that include it. Read from
+   * the manifest: the verdict already counts them (`heldScopes`), and the pill
+   * says why a scope the provider didn't name reads as granted.
+   */
+  const includedIn = useMemo(() => {
+    const by = new Map<string, string[]>();
+    for (const s of catalogue) {
+      for (const included of s.includes ?? []) by.set(included, [...(by.get(included) ?? []), s.scope]);
+    }
+    return by;
+  }, [catalogue]);
   /**
    * Whether an admin allowed this connector to change data. It decides which
    * scopes Connect asks for, so it is read before any of them are listed.
@@ -1506,7 +1536,7 @@ export default function ConnectorConfigureDialog({
                       {
                         verdict: "held" as const,
                         label: "Granted",
-                        tip: "This connector asks for it and the provider granted it. Calls needing it will work.",
+                        tip: "This connector asks for it and the provider granted it, by name or with a scope that includes it. Calls needing it will work.",
                       },
                       {
                         verdict: "refused" as const,
@@ -1588,6 +1618,11 @@ export default function ConnectorConfigureDialog({
                               <StatusPill tone="neutral">
                                 {changesAllowed ? "Requested: changes allowed" : "Requested once changes are allowed"}
                               </StatusPill>
+                            )}
+                            {/* Granted with a broader scope, which may be
+                                the only one the provider names. */}
+                            {includedIn.has(sc.scope) && (
+                              <IncludedInPill scopes={includedIn.get(sc.scope)!} />
                             )}
                           </span>
                           {sc.description && (
