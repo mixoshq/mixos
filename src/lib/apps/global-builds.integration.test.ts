@@ -105,6 +105,7 @@ function manifest(slug: string, global: boolean): AppManifest {
     emits: [],
     listensTo: [],
     branding: null,
+    search: [],
     mcp: [],
   };
 }

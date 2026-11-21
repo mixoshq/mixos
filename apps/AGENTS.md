@@ -61,6 +61,8 @@ Read these once, then read the guides. Most agent failures come from ignoring th
 
 34. **Every JSON file starts with `$schema`, which says which shape it is.** `app.json` starts `"$schema": "https://mixos.org/schemas/app/v1.json"`, and `release-notes.json` `"$schema": "https://mixos.org/schemas/release-notes/v1.json"`. The build and a Registry install refuse a file without it, or naming a version this MixOS doesn't read: a newer one needs a newer MixOS, and an older one is a shape it no longer reads. Start from `npm run new`, whose template carries both; the pre-commit hook adds `$schema` to a manifest that has none, and `registryId` when the folder already ends in an id, and never changes either once set. `.registry.json` carries one too, written by install. mixos.org sets each release's minimum MixOS version from it. See [`$schema`](../docs/apps/architecture.md#schema-which-shape-a-file-is).
 
+35. **Global search is declared per object, and each object's handler is read-only.** To make your app's records findable from ⌘K, declare `search: [{ name, label, icon?, fields, link }]` in `app.json` and put the handler at `search/<name>.ts` (default export `async (ctx: SearchContext, input: SearchInput) => SearchResult[]`). `fields` are the searchable properties, **title first**; rank with `searchFields()` and `containsPattern()` from `@/lib/apps/search`, so a match in the title outranks one in any other field, as in every other app. `link` is the page a result opens, relative to the app, with `{id}` or a `params` key in the **query string** (app pages have no dynamic segments): `"notes?id={id}"`. The build fails a link to a page that doesn't exist. The handler gets the MCP tool context's read-only shape and runs as the signed-in person, bounded at 5 seconds; return only what they could open in your app. Max 5 objects per app, 6 fields each. See [`docs/apps/search.md`](../docs/apps/search.md).
+
 Authoritative types: [`src/lib/apps/types.ts`](../src/lib/apps/types.ts). Canonical template: [`apps/_template/`](_template/).
 
 ---
@@ -85,6 +87,7 @@ Authoritative types: [`src/lib/apps/types.ts`](../src/lib/apps/types.ts). Canoni
 16. [MCP Tools](../docs/apps/mcp.md) — exposing read-only tools to Claude: the `mcp` manifest field, `mcp/<name>.ts` handlers, per-app consent
 17. [Data Freshness](../docs/apps/data-freshness.md) — incremental sync, watermarks, snapshot tables, stale-while-revalidate caching, stepped backfills
 18. [Remix](../docs/apps/remix.md) — bringing a component of another installed app into yours with `/mixos remix`, and the `remixedFrom` record
+19. [Search](../docs/apps/search.md) — making your app's records findable from ⌘K: the `search` manifest field, `search/<name>.ts` handlers, link templates, ranking
 
 Creating or modifying a **connector** instead? See [`../connectors/AGENTS.md`](../connectors/AGENTS.md). A **theme**? See [`../themes/AGENTS.md`](../themes/AGENTS.md).
 

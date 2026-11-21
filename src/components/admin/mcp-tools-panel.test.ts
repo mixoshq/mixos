@@ -55,6 +55,7 @@ const app: AppManifest = {
   emits: [],
   listensTo: [],
   branding: null,
+  search: [],
   mcp: [
     { name: "peek", description: "Peek at the ledger.", sources: ["mixos"] },
     { name: "poke", description: "Poke the ledger.", sources: ["mixos"] },

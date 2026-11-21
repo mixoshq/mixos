@@ -716,6 +716,84 @@ const mcpToolDefinitionSchema = z.strictObject({
 const MAX_MCP_TOOLS_PER_APP = 5;
 
 /**
+ * Caps on global search. Every object an app declares is a query the endpoint
+ * runs on each keystroke a person pauses on, for every app they hold — so the
+ * budget is per app, like MCP tools'. Fields are capped because the helper that
+ * ranks them runs one query per field.
+ */
+const MAX_SEARCH_OBJECTS_PER_APP = 5;
+const MAX_SEARCH_FIELDS_PER_OBJECT = 6;
+
+/**
+ * A search link: a page path relative to `/apps/<slug>/`, optionally a query
+ * string, with `{placeholder}`s in query values only. Paths are literal (an app
+ * page has no dynamic segments), so a placeholder in the path could only ever
+ * name a page that does not exist. The generator additionally checks the path
+ * against the app's pages, which a schema can't see.
+ *
+ * What it refuses is what could make a link leave the app: a scheme, a leading
+ * slash or `//`, a `..` segment, a fragment, a backslash.
+ */
+const SEARCH_LINK_PATH = /^(?:[a-z0-9]+(?:-[a-z0-9]+)*(?:\/[a-z0-9]+(?:-[a-z0-9]+)*)*)?$/;
+const SEARCH_LINK_QUERY_PAIR = /^[A-Za-z0-9_-]+=(?:[A-Za-z0-9_.~-]*|\{[a-zA-Z][a-zA-Z0-9_]*\})$/;
+
+export function searchLinkProblem(link: string): string | null {
+  if (link.length > 200) return "must be 200 characters or fewer";
+  const at = link.indexOf("?");
+  const path = at === -1 ? link : link.slice(0, at);
+  const query = at === -1 ? null : link.slice(at + 1);
+  if (!SEARCH_LINK_PATH.test(path)) {
+    return (
+      'must be a page path relative to the app, like "notes" or "notes/archive" — ' +
+      "lowercase-hyphenated segments, no leading slash, no scheme, no {placeholder} in the path " +
+      "(app pages have no dynamic segments; put the id in the query string)"
+    );
+  }
+  if (query !== null) {
+    const pairs = query.split("&");
+    if (pairs.some((pair) => !SEARCH_LINK_QUERY_PAIR.test(pair))) {
+      return 'query must be name=value pairs, each value literal or one placeholder, like "?id={id}&tab=details"';
+    }
+  }
+  if (path === "" && query === null) return 'must name a page or carry a query string, like "?id={id}"';
+  return null;
+}
+
+const searchFieldSchema = z.strictObject({
+  key: z
+    .string()
+    .regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, "search field keys must be identifiers (a column or property name)"),
+  label: z.string().min(1).max(40),
+});
+
+/**
+ * One kind of object an app contributes to global search. The handler, and the
+ * link's page, are verified on disk by the generator.
+ */
+const searchObjectSchema = z.strictObject({
+  name: z
+    .string()
+    .min(1)
+    .regex(
+      /^[a-z0-9]+(-[a-z0-9]+)*$/,
+      "search object names must be lowercase-hyphenated (e.g. notes)",
+    ),
+  label: z.string().min(1).max(40),
+  icon: z.string().min(1).optional(),
+  fields: z
+    .array(searchFieldSchema)
+    .min(1, "a search object must declare at least one searchable field; the first is the title")
+    .max(
+      MAX_SEARCH_FIELDS_PER_OBJECT,
+      `a search object may declare at most ${MAX_SEARCH_FIELDS_PER_OBJECT} fields — each is a query on every search`,
+    ),
+  link: z.string().superRefine((link, ctx) => {
+    const problem = searchLinkProblem(link);
+    if (problem) ctx.addIssue({ code: "custom", message: problem });
+  }),
+});
+
+/**
  * Cap on catalogue keywords per extension. Facets are only useful while they
  * discriminate; an extension that tags itself with everything is
  * indistinguishable from one that tags itself with nothing, and it dilutes
@@ -1042,6 +1120,16 @@ export const RawAppManifestSchema = z
       .max(
         MAX_MCP_TOOLS_PER_APP,
         `an app may expose at most ${MAX_MCP_TOOLS_PER_APP} MCP tools — prefer fewer, coarser tools`,
+      )
+      .optional(),
+    // Global search. Each `search[].name` is verified on disk by the generator
+    // (apps/<slug>/search/<name>.ts, a default handler), and each `link`'s
+    // path against the app's pages.
+    search: z
+      .array(searchObjectSchema)
+      .max(
+        MAX_SEARCH_OBJECTS_PER_APP,
+        `an app may declare at most ${MAX_SEARCH_OBJECTS_PER_APP} search objects`,
       )
       .optional(),
     // Remixes this app took from other installed apps, each the moment it was

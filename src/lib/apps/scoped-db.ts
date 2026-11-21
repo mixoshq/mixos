@@ -66,7 +66,7 @@ export function createReadOnlyScopedClient(appSlug: string): ReadOnlyScopedClien
       get(target, prop, receiver) {
         if (typeof prop === "string" && MUTATING_METHODS.has(prop)) {
           throw new ReadOnlyError(
-            `MCP tools are read-only: "${prop}()" is not available on context.db (app "${appSlug}", table "${name}").`,
+            `MCP tools and search handlers are read-only: "${prop}()" is not available on context.db (app "${appSlug}", table "${name}").`,
           );
         }
         const value = Reflect.get(target, prop, receiver);
