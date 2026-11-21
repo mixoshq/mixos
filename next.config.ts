@@ -87,6 +87,33 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  experimental: {
+    // Server Fast Refresh off, so that a route built after a change sees the
+    // change. Next 16.4 turns it on by default for App Router routes under
+    // Turbopack, and with it on, a new app's page answers 404 after `npm run
+    // registry` until `next dev` restarts.
+    //
+    // In dev every route's server modules share one module system, and
+    // src/generated/app-registry.ts is a single module in it that nearly every
+    // page imports. With Fast Refresh, an edit reaches a module that is already
+    // loaded only through an update pulled when a route is built, diffed
+    // against the last version that same route pulled. A route built for the
+    // first time after the edit has nothing to diff against, so it applies
+    // nothing, and loading its chunks doesn't replace a module that's already
+    // loaded. It gets the copy another route loaded before the edit. The new
+    // app's page is that route: it reads the old registry, doesn't find the
+    // app, and calls notFound(). It stays that way until a route built before
+    // the edit is requested again, or the server restarts.
+    //
+    // With it off, a route's server chunks are evicted and loaded afresh after
+    // a change, as before Fast Refresh. The cost is that an edit re-evaluates
+    // the route's server modules, not just the one that changed. What has to
+    // survive that is already on globalThis, like the database pool in
+    // src/lib/db/client.ts. This is still needed on Next 16.4.6. The plan, with
+    // the reproduction that tells you when it no longer is:
+    // docs/plans/20261116_0733-page-registry.md.
+    turbopackServerFastRefresh: false,
+  },
   devIndicators: false,
   logging: {
     incomingRequests: {
