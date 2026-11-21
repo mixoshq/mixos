@@ -116,6 +116,36 @@ no method declared `mutates`, which would have nothing to use it. See
 One array, not two. The catalogue and the request are the same list seen from
 two angles, and keeping them in separate places is how they drift apart.
 
+### A scope that includes others
+
+Some providers grant a broad scope in place of the narrower ones it covers, and
+then name only the broad one in the grant. Todoist documents `data:read_write`
+as including `task:add` and `data:read`; asked for `data:read` and
+`data:read_write`, it answers `data:read_write`. Say so on the broad scope's
+entry, with `includes`:
+
+```jsonc
+{ "scope": "data:read", "access": "read", "requested": true },
+{ "scope": "data:read_write", "access": "read-write", "requested": "write",
+  "includes": ["task:add", "data:read"] }
+```
+
+A grant that names `data:read_write` then holds `data:read` too, and the verdict
+below marks it Granted rather than Refused. Inclusion is followed through: what
+an included scope includes is held as well. The including scope needs only to
+be in the grant, whether or not this connector asked for it.
+
+`includes` is the provider's fact, written as its documentation says it, so it
+sits on the entry whatever `requested` says. The build refuses a name that
+isn't in `auth.scopes`, one listed twice, and a scope that includes itself.
+
+It changes nothing about what Connect asks for. Each scope is still asked for as
+its own `requested` says: a read-only install asks for `data:read`, which it
+needs, and dropping it from the request because another scope covers it would be
+a security decision taken as a side effect. Like `requested`, `includes` is a
+hand edit; the refresh keeps it, and drops a name the refreshed catalogue no
+longer has, with a warning.
+
 **`requested` is required and never inferred.** The refresh writes far more
 entries than a connector asks for, so a flag defaulting to true would silently
 request the provider's entire catalogue. `--write` also *preserves* the existing
@@ -148,13 +178,18 @@ answer would report one user's refusal as everybody's.
 
 | | Meaning |
 | --- | --- |
-| ✓ **Granted** | requested by this connector, and in the grant |
+| ✓ **Granted** | requested by this connector, and in the grant, by name or through a scope that [includes](#a-scope-that-includes-others) it |
 | ✗ **Refused** | requested, and **not** in the grant |
 | ? **Unknown** | this API documents it; this connector never asks for it |
 
 A provider may leave `scope` out of its token response when it granted exactly
 what was requested (RFC 6749 §5.1). That is recorded as a grant of every
 requested scope, not as a grant of none.
+
+A scope another one includes carries a pill on the Scopes tab, **Included in**
+that scope, so a Granted row the provider's grant doesn't name explains itself.
+The verdict is recorded at the callback like any other: one taken before the
+connector declared `includes` reads Refused until someone connects again.
 
 **Refused is the one that earns the feature.** It happens when someone unticks a
 permission on the consent screen, when a workspace policy narrows the grant, or
