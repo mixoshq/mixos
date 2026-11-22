@@ -3,9 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Loading an app's MCP tools, syncs, jobs and services through the generated
- * maps (scripts/handler-loaders.ts), through the real callers: `loadTool` and
- * `describeTool` (src/lib/mcp/tools.ts), `runJobNow` (./scheduler.ts) and the
+ * Loading an app's MCP tools, search handlers, syncs, jobs and services
+ * through the generated maps (scripts/handler-loaders.ts), through the real
+ * callers: `loadTool` and `describeTool` (src/lib/mcp/tools.ts), the search
+ * broker (src/lib/search/broker.ts), `runJobNow` (./scheduler.ts) and the
  * services broker (./services.ts).
  *
  * The maps replaced template imports that Turbopack resolved once, when the
@@ -18,7 +19,7 @@
  *   - what the caller answers in each case is what it answered before.
  *
  * No database: `@/lib/db/client` is a fake `sql` that records each statement,
- * and the app gate and the app context are stubbed, all by a resolve hook. The
+ * and the app gate and the app contexts are stubbed, all by a resolve hook. The
  * loaders are entries put into the generated maps for each test.
  */
 
@@ -61,16 +62,22 @@ export async function buildAppContext() { return ctx(); }
 export async function buildSystemAppContext() { return ctx(); }
 export async function buildPublicAppContext() { return ctx(); }
 `,
+  "apps/read-only-context.ts": `export async function buildReadOnlyAppContext(slug, user) {
+  return { user, connectors: {}, db: null, services: {}, manifest: {} };
+}
+`,
 };
 
 let work: string;
 let resolver: ReturnType<typeof registerHooks> | undefined;
 let platform: {
   tools: typeof import("../mcp/tools");
+  search: typeof import("../search/broker");
   scheduler: typeof import("./scheduler");
   services: typeof import("./services");
   registry: typeof import("../../generated/app-registry");
   mcp: typeof import("../../generated/app-mcp-tool-loaders");
+  searchMap: typeof import("../../generated/app-search-loaders");
   syncs: typeof import("../../generated/app-sync-loaders");
   jobs: typeof import("../../generated/app-job-loaders");
   serviceMap: typeof import("../../generated/app-service-loaders");
@@ -78,10 +85,18 @@ let platform: {
 
 /** The fixtures' registry entries, as the generator hoists what these callers read. */
 const TOOL = { name: "peek", description: "Peeks.", sources: ["mixos"] };
+const NOTES = {
+  name: "notes",
+  label: "Notes",
+  icon: "notebook",
+  fields: [{ key: "title", label: "Title" }],
+  link: "notes?id={id}",
+};
 const provider = {
   slug: SLUG,
   name: "Probe",
   mcp: [TOOL],
+  search: [NOTES],
   schedules: [{ name: "tick", everyMinutes: 5 }],
   sync: [
     {
@@ -99,6 +114,7 @@ const caller = {
   slug: CALLER,
   name: "Caller",
   mcp: [],
+  search: [],
   schedules: [],
   sync: [],
   provides: [],
@@ -126,10 +142,12 @@ before(async () => {
   });
   platform = {
     tools: await import("../mcp/tools"),
+    search: await import("../search/broker"),
     scheduler: await import("./scheduler"),
     services: await import("./services"),
     registry: await import("../../generated/app-registry"),
     mcp: await import("../../generated/app-mcp-tool-loaders"),
+    searchMap: await import("../../generated/app-search-loaders"),
     syncs: await import("../../generated/app-sync-loaders"),
     jobs: await import("../../generated/app-job-loaders"),
     serviceMap: await import("../../generated/app-service-loaders"),
@@ -153,6 +171,7 @@ type Loader = () => Promise<Record<string, unknown>>;
 /** Each map the fixtures' handlers live in, under the keys the generator writes. */
 const maps = () => ({
   [`${SLUG}/mcp/peek`]: platform.mcp.mcpToolLoaders,
+  [`${SLUG}/search/notes`]: platform.searchMap.searchLoaders,
   [`${SLUG}/sync/feed`]: platform.syncs.syncLoaders,
   [`${SLUG}/jobs/tick`]: platform.jobs.jobLoaders,
   [`${SLUG}/services/lookup`]: platform.serviceMap.serviceLoaders,
@@ -289,6 +308,57 @@ describe("the scheduler", () => {
     const run = recordedRun("sync:feed");
     assert.equal(run.status, "error");
     assert.match(String(run.error), /must default-export defineSync/);
+  });
+});
+
+describe("the search broker", () => {
+  const USER = { id: "u-1", email: "a@example.test", display_name: "A", is_admin: false };
+  const page = async () => {
+    const session = await platform.search.openAppForSearch(provider, USER);
+    return platform.search.searchObjectPage(session, NOTES, "pl", 0, 5);
+  };
+  const UNAVAILABLE = { ok: false, error: "Couldn't search this right now." };
+
+  test("a handler with no loader is an unavailable object, and the log says to run the generator", async (t) => {
+    const { result, warn, error } = await logged(t, page);
+    assert.deepEqual(result, UNAVAILABLE);
+    assert.equal(warn.length, 1);
+    assert.match(warn[0], new RegExp(`\\[search\\] ${SLUG}/search/notes is declared but not in the generated search map`));
+    assert.match(warn[0], REGISTRY);
+    assert.deepEqual(error, []);
+  });
+
+  test("a handler that throws at load is unavailable too, and the log carries the error", async (t) => {
+    setLoader(`${SLUG}/search/notes`, throwing);
+    const { result, warn, error } = await logged(t, page);
+    assert.deepEqual(result, UNAVAILABLE);
+    assert.deepEqual(warn, []);
+    assert.equal(error.length, 1);
+    assert.match(String(error[0][0]), new RegExp(`\\[search\\] ${SLUG}/search/notes failed to load`));
+    assert.equal(error[0][1], boom);
+  });
+
+  test("a loaded handler is asked for one more than the page, and its rows become hits", async (t) => {
+    let asked: unknown;
+    setLoader(`${SLUG}/search/notes`, async () => ({
+      default: async (_ctx: unknown, input: { limit: number }) => {
+        asked = input;
+        return [{ id: 7, title: "  Plan  " }];
+      },
+    }));
+    const { result } = await logged(t, page);
+    assert.deepEqual(asked, { query: "pl", fields: ["title"], offset: 0, limit: 6 });
+    assert.deepEqual(result, {
+      ok: true,
+      hasMore: false,
+      hits: [{ id: "7", title: "Plan", subtitle: null, href: `/apps/${SLUG}/notes?id=7` }],
+    });
+  });
+
+  test("a loaded module without a default export is unavailable, as before", async (t) => {
+    setLoader(`${SLUG}/search/notes`, async () => ({ notes: () => [] }));
+    const { result } = await logged(t, page);
+    assert.deepEqual(result, UNAVAILABLE);
   });
 });
 
