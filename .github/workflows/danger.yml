@@ -41,6 +41,20 @@ jobs:
 
       - run: npm ci
 
-      - run: npx danger ci
+      - if: github.event.pull_request.head.repo.full_name == github.repository
+        run: npx danger ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # A pull request from a fork gets a read-only token whatever `permissions`
+      # says, so Danger can't comment, set a status or add a label, and a plain
+      # `danger ci` would fail on that rather than on the pull request. This runs
+      # every rule all the same: --text-only reports to this job's log instead of
+      # posting, and --failOnErrors fails the job on any `fail`, so the gates
+      # (a migration's version bump, an extension added to the core, a pinned
+      # repository URL…) hold for outside contributors too. dangerfile.ts skips
+      # the labels for a fork.
+      - if: github.event.pull_request.head.repo.full_name != github.repository
+        run: npx danger ci --text-only --failOnErrors
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

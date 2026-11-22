@@ -129,5 +129,15 @@ compatible with MPL-2.0. One transitive dependency,
 that carries obligations only if you distribute it as a linked binary rather
 than running it in a container.
 
+## Fonts
+
+The built-in themes, `mixos` and `mixos-dark`, ship three fonts under the
+**SIL Open Font License 1.1**: Inter, Plus Jakarta Sans and JetBrains Mono. Each
+font's licence sits beside its file in `themes/<theme>/assets/fonts/`
+(`OFL-*.txt`), and is served beside it too. The OFL lets you use, bundle and
+redistribute the fonts, commercially too, as long as the licence goes with
+them and you don't sell the fonts on their own. A theme of your own that copies
+one of these files should copy its `OFL-*.txt` with it.
+
 *This document explains the licence; it is not legal advice, and the text of
 [`LICENSE`](LICENSE) governs where the two differ.*

@@ -1,0 +1,44 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Version updates, weekly. Security updates are separate: they come as soon as
+# an advisory is published, whenever Dependabot security updates are on in the
+# repository's settings, and this file doesn't hold them back.
+#
+# Commit messages follow CONTRIBUTING.md, because a release takes its notes from
+# them (scripts/release-prep.ts):
+#   - fix(deps): a runtime dependency. Listed under Fixes, since what an
+#     instance runs changes.
+#   - chore(deps-dev): a dev dependency. Left out of the notes.
+#   - ci(deps): a GitHub Action. Left out of the notes.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # Minor and patch updates in one pull request a week; a major update gets
+    # its own, since it is the one likely to need code changes.
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: fix
+      prefix-development: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+      include: scope

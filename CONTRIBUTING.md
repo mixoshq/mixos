@@ -7,6 +7,12 @@ connectors and themes, read the guide for that kind of extension
 ([`apps/AGENTS.md`](apps/AGENTS.md), [`connectors/AGENTS.md`](connectors/AGENTS.md),
 [`themes/AGENTS.md`](themes/AGENTS.md)) before writing code.
 
+Everyone taking part in MixOS, in issues, pull requests and discussions,
+follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Found a security vulnerability? Don't open an issue or a pull request for it:
+report it privately, as [`SECURITY.md`](SECURITY.md) describes.
+
 ## Sign off every commit (DCO)
 
 MixOS uses the [Developer Certificate of Origin](https://developercertificate.org/)
