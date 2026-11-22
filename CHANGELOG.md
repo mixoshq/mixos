@@ -10,6 +10,8 @@ Releases are made with `/mixos deploy release`; see the Release section of
 
 ## v0.11.0 (2026-11-22)
 
+**v0.11.0 is the first public release of MixOS.**
+
 Changes since v0.10.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.11.0/WHATS-NEW.md).
 
 ### Features
