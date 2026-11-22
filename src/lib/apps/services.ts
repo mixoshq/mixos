@@ -12,8 +12,11 @@ import type {
 } from "@/lib/hooks/types";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
+import { serviceLoaders } from "@/generated/app-service-loaders";
 import { hasAppGrant } from "./access";
 import { checkAppGate } from "./app-gate";
+import { handlerLoaderKey } from "./handler-modules";
+import { loadFromMap } from "./module-map";
 import { readOnlyConnectors, refusalMessage } from "./read-only";
 import { createReadOnlyScopedClient } from "./scoped-db";
 import { recordServiceCall } from "./telemetry";
@@ -278,19 +281,39 @@ type ServiceHandler = (
   params: unknown,
 ) => unknown | Promise<unknown>;
 
+/**
+ * The provider's handler, through the generated map of explicit imports
+ * (src/generated/app-service-loaders.ts) rather than a template import
+ * (scripts/handler-loaders.ts says why), so a service added under `next dev`
+ * answers once `npm run registry` has run.
+ *
+ * A handler with no loader and one that throws at load are both NO_HANDLER to
+ * the consumer, with the same message, which names no internals. The log says
+ * which (./module-map.ts).
+ */
 async function loadServiceHandler(
   providerSlug: string,
   serviceName: string,
 ): Promise<ServiceHandler> {
-  let mod: { default?: unknown };
-  try {
-    mod = await import(`@apps/${providerSlug}/services/${serviceName}`);
-  } catch {
+  const load = await loadFromMap(
+    serviceLoaders,
+    handlerLoaderKey(providerSlug, "services", serviceName),
+  );
+  if (load.kind !== "loaded") {
+    if (load.kind === "missing") {
+      console.warn(
+        `[services] ${load.key} is declared but not in the generated service map. ` +
+          `Run \`npm run registry\`.`,
+      );
+    } else {
+      console.error(`[services] ${load.key} failed to load:`, load.error);
+    }
     throw new ServiceRequestError(
       "NO_HANDLER",
       `"${providerSlug}:${serviceName}" has no handler on disk.`,
     );
   }
+  const mod: { default?: unknown } = load.module;
   if (typeof mod.default !== "function") {
     throw new ServiceRequestError(
       "NO_HANDLER",

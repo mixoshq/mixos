@@ -28,8 +28,12 @@
 
 import { sql } from "@/lib/db/client";
 import { appRegistry } from "@/generated/app-registry";
+import { jobLoaders } from "@/generated/app-job-loaders";
+import { syncLoaders } from "@/generated/app-sync-loaders";
 import { checkAppGate, type AppGate } from "@/lib/apps/app-gate";
 import { isDefinedSync, runSync } from "@/lib/apps/sync";
+import { handlerLoaderKey, type HandlerKind } from "@/lib/apps/handler-modules";
+import { loadFromMap, type ModuleLoaders } from "@/lib/apps/module-map";
 
 /**
  * Declared syncs share the scheduled-jobs table with hand-written jobs, under a
@@ -254,6 +258,38 @@ export async function setSchedulerEnabled(on: boolean): Promise<void> {
   `;
 }
 
+const HANDLER_LOADERS = {
+  jobs: jobLoaders,
+  sync: syncLoaders,
+} satisfies Partial<Record<HandlerKind, ModuleLoaders>>;
+
+/**
+ * A job's or sync's module, through its kind's generated map of explicit
+ * imports rather than a template import (scripts/handler-loaders.ts says why),
+ * so a job or sync added under `next dev` runs once `npm run registry` has
+ * run.
+ *
+ * Throws for both faults, so the run is recorded as an error either way, as
+ * it was before the map. What it records differs: a module that throws at
+ * load is recorded with its own error, and one with no loader with the remedy
+ * (src/lib/apps/module-map.ts).
+ */
+async function loadHandler(
+  slug: string,
+  kind: keyof typeof HANDLER_LOADERS,
+  name: string,
+): Promise<Record<string, unknown>> {
+  const load = await loadFromMap(HANDLER_LOADERS[kind], handlerLoaderKey(slug, kind, name));
+  if (load.kind === "failed") throw load.error;
+  if (load.kind === "missing") {
+    throw new Error(
+      `apps/${load.key}.ts is declared but not in the generated ${kind === "sync" ? "sync" : "job"} map. ` +
+        `Run \`npm run registry\`.`,
+    );
+  }
+  return load.module;
+}
+
 /**
  * Run a job this pod has claimed, record the run and release the claim.
  *
@@ -311,7 +347,7 @@ async function runClaimed(
       if (!definition) {
         throw new Error(`apps/${slug} no longer declares sync "${syncName}"`);
       }
-      const mod = await import(`@apps/${slug}/sync/${syncName}`);
+      const mod = await loadHandler(slug, "sync", syncName);
       if (!isDefinedSync(mod.default)) {
         throw new Error(
           `apps/${slug}/sync/${syncName}.ts must default-export defineSync({...})`,
@@ -331,7 +367,7 @@ async function runClaimed(
           `(window ${result.windowDays}d${result.note ? ", " + result.note : ""})`,
       );
     } else {
-      const mod = await import(`@apps/${slug}/jobs/${job}`);
+      const mod = await loadHandler(slug, "jobs", job);
       const handler = mod.default;
       if (typeof handler !== "function") {
         throw new Error(

@@ -11,20 +11,16 @@
  * the importing module compiled, so a route added under `next dev` stayed a
  * 404 until a restart (scripts/route-loaders.ts).
  *
- * The three outcomes are kept apart because they are different faults. A
- * route with no loader is on disk but not in the registry this server was
- * built from, and `npm run registry` fixes it. A route whose loader throws is
- * code that failed at module scope, and the error is the thing to read.
- * Reporting the second as the first cost real debugging time once already.
+ * The three outcomes, and why they are kept apart, are ./module-map.ts's: a
+ * route with no loader wants `npm run registry`, and a route whose loader
+ * throws is code that failed at module scope.
  */
 
 import { routeLoaders } from "@/generated/app-route-loaders";
+import { loadFromMap, type ModuleLoad } from "@/lib/apps/module-map";
 import { routeLoaderKey } from "@/lib/apps/route-modules";
 
-export type RouteModuleLoad =
-  | { kind: "loaded"; key: string; module: Record<string, unknown> }
-  | { kind: "missing"; key: string }
-  | { kind: "failed"; key: string; error: unknown };
+export type RouteModuleLoad = ModuleLoad;
 
 /**
  * `modulePath` is the on-disk path under `api/` (`index` for the root route).
@@ -32,15 +28,6 @@ export type RouteModuleLoad =
  * from a directory listing or the hoisted contract; the own-key lookup is a
  * second line, so no path can name a prototype property.
  */
-export async function loadRouteModule(
-  appSlug: string,
-  modulePath: string,
-): Promise<RouteModuleLoad> {
-  const key = routeLoaderKey(appSlug, modulePath);
-  if (!Object.hasOwn(routeLoaders, key)) return { kind: "missing", key };
-  try {
-    return { kind: "loaded", key, module: await routeLoaders[key]() };
-  } catch (error) {
-    return { kind: "failed", key, error };
-  }
+export function loadRouteModule(appSlug: string, modulePath: string): Promise<RouteModuleLoad> {
+  return loadFromMap(routeLoaders, routeLoaderKey(appSlug, modulePath));
 }
