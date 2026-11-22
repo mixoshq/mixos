@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import webpush from "web-push";
+import { setVapidDetails } from "web-push";
 
 /**
  * Web Push VAPID configuration, read from the environment. Locally these come
@@ -49,7 +49,7 @@ export function getVapidConfig(): VapidConfig {
     );
   }
 
-  webpush.setVapidDetails(subject!, publicKey!, privateKey!);
+  setVapidDetails(subject!, publicKey!, privateKey!);
   cached = { publicKey: publicKey!, privateKey: privateKey!, subject: subject! };
   return cached;
 }
