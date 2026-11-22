@@ -39,6 +39,11 @@ updates:
       # they support it; minor and patch updates still come.
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # Node's types follow the Node MixOS runs on, 24 (.nvmrc and the
+      # Dockerfile), not the newest Node: @types/node 26 describes APIs that
+      # 24 doesn't have and fails typecheck (#129). Move this with the runtime.
+      - dependency-name: "@types/node"
+        versions: [">=25"]
     commit-message:
       prefix: fix
       prefix-development: chore
