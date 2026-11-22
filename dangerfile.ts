@@ -59,6 +59,13 @@ for (const f of allFiles) {
 
 const existingLabels = danger.github.issue.labels.map((l) => l.name);
 
+// A pull request from a fork runs with a read-only token, so this job can't add
+// a label to it (and the workflow runs Danger with --text-only, which reports to
+// the job's log instead of a comment). The labels below are left to a maintainer;
+// every rule after them still runs, and a `fail` still fails the job.
+const fromFork =
+  danger.github.pr.head.repo?.full_name !== danger.github.pr.base.repo.full_name;
+
 if (osFiles.length > 0) {
   const fileList = osFiles.map((f) => `- \`${f}\``).join("\n");
 
@@ -70,7 +77,7 @@ if (osFiles.length > 0) {
   );
 
   // Add the os-change label to flag for admin review
-  if (!existingLabels.includes(OS_CHANGE_LABEL)) {
+  if (!fromFork && !existingLabels.includes(OS_CHANGE_LABEL)) {
     danger.github.api.issues.addLabels({
       owner: danger.github.thisPR.owner,
       repo: danger.github.thisPR.repo,
@@ -88,7 +95,7 @@ const newScopeLabels = [...scopeLabels]
   .filter((l) => !existingLabels.includes(l))
   .sort();
 
-if (newScopeLabels.length > 0) {
+if (newScopeLabels.length > 0 && !fromFork) {
   danger.github.api.issues.addLabels({
     owner: danger.github.thisPR.owner,
     repo: danger.github.thisPR.repo,
@@ -97,6 +104,11 @@ if (newScopeLabels.length > 0) {
   });
   message(
     `Tagged scope: ${newScopeLabels.map((l) => `\`${l}\``).join(", ")}.`
+  );
+} else if (newScopeLabels.length > 0) {
+  message(
+    `Scope: ${newScopeLabels.map((l) => `\`${l}\``).join(", ")}. ` +
+      `Not labelled: this job can't label a pull request from a fork.`
   );
 }
 
