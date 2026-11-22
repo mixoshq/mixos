@@ -33,6 +33,10 @@
  * (docs/plans/20261116_0021-scope-includes.md). Each time `since` went
  * back to "unreleased" by hand, because buildIndex() keeps an existing one, so
  * the release that reads the new shape stamps itself as the first reader.
+ * App v1 gained an optional `search` after 0.10.0
+ * (docs/plans/20261121_1400-global-search.md), where that step was missed:
+ * `since` stayed at 0.8.0 through the release, and was set afterwards, by hand,
+ * to 0.11.0, the release that first read it.
  */
 
 import fs from "node:fs";
