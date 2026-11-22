@@ -33,6 +33,12 @@ updates:
       # supports them; minor and patch updates still come.
       - dependency-name: eslint
         update-types: ["version-update:semver-major"]
+      # TypeScript 7 is the native compiler, without the JavaScript API that
+      # typescript-eslint and Danger call (ts.transpileModule and the rest), so
+      # lint and Danger both fail (#125). Take TypeScript majors again once
+      # they support it; minor and patch updates still come.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: fix
       prefix-development: chore
