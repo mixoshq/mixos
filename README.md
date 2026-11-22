@@ -18,6 +18,13 @@
 > [!WARNING]
 > MixOS is in alpha. Test it before you use it in production. Use it at your own risk.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard-dark.png">
+    <img src="docs/screenshots/dashboard-light.png" alt="The MixOS dashboard: today's tasks, a chart of weekly signups and the team's week, each a widget from a different app">
+  </picture>
+</p>
+
 ---
 
 MixOS gives a team one place to sign in, one set of roles, one look, and one
@@ -40,6 +47,39 @@ Three extension points, in increasing order of scope:
 | **Apps**       | A tool people use: pages, API routes, tables, jobs    | `apps/<slug>/`       | [apps/AGENTS.md](apps/AGENTS.md)             |
 | **Connectors** | A shared, credentialed link to an external service    | `connectors/<name>/` | [connectors/AGENTS.md](connectors/AGENTS.md) |
 | **Themes**     | The colours, type, and logo every app renders through | `themes/<slug>/`     | [themes/AGENTS.md](themes/AGENTS.md)         |
+
+## Screenshots
+
+Every widget, page and search result here comes from an app: a folder under
+`apps/` with a manifest. Readers in dark mode see the MixOS Dark theme.
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/search-dark.png">
+        <img src="docs/screenshots/search-light.png" alt="Global search, opened with ⌘K, with results grouped by app: events from Team Calendar and tasks from Team Tasks">
+      </picture>
+      <p><strong>Search everything.</strong> ⌘K searches every app that declares something to find, grouped by app.</p>
+    </td>
+    <td width="33%" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/app-page-dark.png">
+        <img src="docs/screenshots/app-page-light.png" alt="An app's own page: weekly signups by channel, with KPI cards, a stacked bar chart and a table">
+      </picture>
+      <p><strong>Apps have pages.</strong> A widget on the dashboard opens the app's full page.</p>
+    </td>
+    <td width="33%" valign="top">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/admin-apps-dark.png">
+        <img src="docs/screenshots/admin-apps-light.png" alt="Admin > Apps, listing each installed app with who can use it, its pages and widgets, and when it was updated">
+      </picture>
+      <p><strong>Run it yourself.</strong> Admins activate apps, grant them to people, and install more from the Registry.</p>
+    </td>
+  </tr>
+</table>
+
+The apps in these screenshots are examples made for them, with made-up data.
 
 ## Quick start
 
@@ -79,6 +119,7 @@ MixOS on your computer, are in
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Quick start](#quick-start)
 - [Installing and hosting MixOS](#installing-and-hosting-mixos)
 - [Extending MixOS](#extending-mixos)
