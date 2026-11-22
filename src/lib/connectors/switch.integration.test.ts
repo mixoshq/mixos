@@ -48,6 +48,7 @@ const APP_NAME = "Switch Test";
 async function loadPlatform() {
   return {
     ...(await import("@/generated/connector-registry")),
+    ...(await import("@/generated/connector-loaders")),
     ...(await import("@/generated/app-registry")),
     ...(await import("./switch")),
     ...(await import("./switch-admin")),
@@ -153,6 +154,10 @@ describe("the connector switch", { skip }, () => {
     p = await loadPlatform();
 
     p.connectorRegistry.push(manifestOf(KEYED), manifestOf(OAUTH));
+    // Templates aren't registered, so the generator gives them no loader
+    // either: filed here as their registry entries are, under the same key.
+    p.connectorLoaders[`${KEYED}/index`] = () => import("@connectors/_template/index");
+    p.connectorLoaders[`${OAUTH}/index`] = () => import("@connectors/_template-oauth/index");
     const base = p.appRegistry[0];
     assert.ok(base, "the registry needs one app to copy a manifest shape from");
     p.appRegistry.push({
