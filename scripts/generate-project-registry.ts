@@ -95,6 +95,7 @@ import {
 } from "./route-contracts";
 import { readRoutesStatically } from "./route-reader";
 import { routeLoadersSource } from "./route-loaders";
+import { appSourcesCss } from "./app-sources";
 import { HANDLER_KINDS, HANDLER_MAPS, handlerLoadersSource } from "./handler-loaders";
 import { connectorLoadersSource, loadableConnectors } from "./connector-loaders";
 import { routeModulePath } from "../src/lib/apps/route-modules";
@@ -194,6 +195,7 @@ const APP_CLIENTS_FILE = path.resolve(OUTPUT_DIR, "app-clients.ts");
 const APP_PAGE_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-page-loaders.ts");
 const APP_HOOK_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-hook-loaders.ts");
 const APP_ROUTE_LOADERS_FILE = path.resolve(OUTPUT_DIR, "app-route-loaders.ts");
+const APP_SOURCES_CSS_FILE = path.resolve(OUTPUT_DIR, "app-sources.css");
 const CONNECTOR_REGISTRY_FILE = path.resolve(
   OUTPUT_DIR,
   "connector-registry.ts",
@@ -2739,6 +2741,11 @@ ${hookImports.join("\n")}
   // import, which Turbopack resolves once, against the apps on disk when the
   // gateway compiled (scripts/route-loaders.ts).
   fs.writeFileSync(APP_ROUTE_LOADERS_FILE, routeLoadersSource(apps), "utf-8");
+
+  // Each registered app's folder, named as a Tailwind source for globals.css,
+  // so its classes are generated even where git ignores it, as a core clone's
+  // .git/info/exclude does (scripts/app-sources.ts).
+  fs.writeFileSync(APP_SOURCES_CSS_FILE, appSourcesCss(apps.map((a) => a.slug)), "utf-8");
 
   // The same, one file per kind, for MCP tools, search handlers, syncs, jobs
   // and services: the MCP server, the search broker, the scheduler and the
