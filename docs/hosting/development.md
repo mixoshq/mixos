@@ -290,16 +290,18 @@ it turns it on for every instance on that database. So a checkout offers
 
 ## Working in it
 
-Everything you build lives in one of three folders. The folder's name is its
-name in MixOS, so `apps/my-app` opens at
-[localhost:3000/apps/my-app](http://localhost:3000/apps/my-app).
+Everything you build lives in one of three folders. Each extension's folder is
+named after its `registryId`: the name you gave it and an eight-character id
+that `npm run new` adds, so two people's `my-app` can be installed side by side.
+The folder's name is its name in MixOS, so `apps/my-app-3f9a2c1b` opens at
+[localhost:3000/apps/my-app-3f9a2c1b](http://localhost:3000/apps/my-app-3f9a2c1b).
 
 ```text
 mixos/
-  apps/my-app/         an app
-  connectors/my-crm/   a connector
-  themes/my-brand/     a theme
-  src/                 MixOS itself
+  apps/my-app-3f9a2c1b/         an app
+  connectors/my-crm-3f9a2c1b/   a connector
+  themes/my-brand-3f9a2c1b/     a theme
+  src/                          MixOS itself
 ```
 
 Folders whose names start with `_`, like `apps/_template`, are templates and are
@@ -552,7 +554,7 @@ or `npm run db:migrate` (any other database) before `npm run migrate:apps`.
 ### App API routes return 404
 
 Only with `npm run docker:prod`: `apps/` didn't make it into the image. Test a
-**nested** route, such as `/api/apps/my-app/something`, since an app's index
+**nested** route, such as `/api/apps/my-app-3f9a2c1b/something`, since an app's index
 route works even when the folder is missing. Check with
 `docker compose -p mixos exec app ls apps`.
 
