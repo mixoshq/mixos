@@ -8,6 +8,26 @@ tests and internal changes, and is the notes of its GitHub Release.
 Releases are made with `/mixos deploy release`; see the Release section of
 [.claude/skills/mixos/actions/deploy.md](.claude/skills/mixos/actions/deploy.md).
 
+## v0.11.0 (2026-11-22)
+
+Changes since v0.10.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.11.0/WHATS-NEW.md).
+
+### Features
+
+- **os:** a switch and an icon for each search object, and drag-only ordering (19c2d2e)
+- **os:** global search, opened from the menu bar or ⌘K, and a search field for apps (7773992)
+- **os:** a connector's scope can include others, so a held scope isn't reported refused (109faa3)
+- **os:** the welcome tour ends on "is yours", and I'm ready spells the name in confetti (ca18635)
+
+### Fixes
+
+- **os:** search handlers load through a generated map too (ce94a56)
+- **os:** MCP tools, syncs, jobs and services load through generated maps (df02572)
+- **os:** a select's caret sits in from the right border (8b159fa)
+- **deps:** Next.js 16.4.3 to 16.4.6, for seven security advisories (7edb530)
+- **os:** a route added under next dev answers without a restart (6561c33)
+- **os:** a new app's page renders without restarting next dev (af5274e)
+
 ## v0.10.0 (2026-11-15)
 
 Changes since v0.9.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.10.0/WHATS-NEW.md).
