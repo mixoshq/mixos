@@ -11,10 +11,11 @@ export const BCRYPT_ROUNDS = 12;
  * away. Sign-in compares against it when an email has no account, or an
  * account has no password (./config.ts), so that answer costs one hash, as a
  * wrong password does. That holds only while it matches hashPassword()'s
- * library, cost and `$2a$` format, which password.test.ts checks.
+ * library, cost and format (`$2b$`, as bcryptjs 3 writes it), which
+ * password.test.ts checks.
  */
 export const DUMMY_PASSWORD_HASH =
-  "$2a$12$ZSICekxxj75mWYhVz..K7OhtTUchlVgrULb9xRjLSioTxFUTQ1OMm";
+  "$2b$12$o5T8AKHlGBZ2x9hQ3lfpROX/BL7eaBfmVHuVIa/r5MO727P7W4zFK";
 
 export async function hashPassword(plaintext: string): Promise<string> {
   return bcrypt.hash(plaintext, BCRYPT_ROUNDS);
