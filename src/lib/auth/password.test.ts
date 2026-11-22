@@ -19,7 +19,7 @@ test("the dummy hash has the cost and format hashPassword() produces", async () 
   const real = await hashPassword("a password for this test");
   assert.equal(bcrypt.getRounds(DUMMY_PASSWORD_HASH), BCRYPT_ROUNDS);
   assert.equal(bcrypt.getRounds(real), BCRYPT_ROUNDS);
-  assert.equal(DUMMY_PASSWORD_HASH.slice(0, 7), real.slice(0, 7), "`$2a$` and the cost");
+  assert.equal(DUMMY_PASSWORD_HASH.slice(0, 7), real.slice(0, 7), "the version prefix and the cost");
   assert.equal(DUMMY_PASSWORD_HASH.length, real.length);
 });
 
@@ -27,4 +27,13 @@ test("the dummy hash checks without error and matches none of these", async () =
   for (const attempt of ["", "password", "a password for this test"]) {
     assert.equal(await verifyPassword(attempt, DUMMY_PASSWORD_HASH), false);
   }
+});
+
+// bcryptjs 3 writes `$2b$`, where 2.4 wrote `$2a$`. A password set before the
+// upgrade is still stored as `$2a$`, and has to keep working.
+test("a hash bcryptjs 2.4 wrote still verifies", async () => {
+  const legacy = await bcrypt.hash("set before the upgrade", 4);
+  const asWritten = legacy.replace(/^\$2b\$/, "$2a$");
+  assert.equal(await verifyPassword("set before the upgrade", asWritten), true);
+  assert.equal(await verifyPassword("not it", asWritten), false);
 });
