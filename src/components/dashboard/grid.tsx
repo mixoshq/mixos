@@ -30,7 +30,8 @@ import { useDashboardEdit } from "./edit-mode-context";
 import "react-grid-layout/css/styles.css";
 import { ContextMenu, type MenuItem } from "@/components/ui/menu";
 
-type Breakpoint = "lg" | "md" | "sm";
+const BREAKPOINTS = ["lg", "md", "sm"] as const;
+type Breakpoint = (typeof BREAKPOINTS)[number];
 
 /**
  * Inside a widget, where the browser's own menu is what the user is reaching
@@ -90,8 +91,11 @@ export default function DashboardGrid({
   // widget so the right-click menu can open it as well as the edit bar's gear.
   const [configuringId, setConfiguringId] = useState<string | null>(null);
 
-  const handleBreakpointChange = useCallback((newBreakpoint: Breakpoint) => {
-    currentBreakpointRef.current = newBreakpoint;
+  // react-grid-layout types the breakpoint it reports as any string (2.3 on),
+  // though it only ever reports a key of the `breakpoints` passed below.
+  const handleBreakpointChange = useCallback((newBreakpoint: string) => {
+    const known = BREAKPOINTS.find((b) => b === newBreakpoint);
+    if (known) currentBreakpointRef.current = known;
   }, []);
 
   // Fade the pencil out after 20s of no cursor motion on the dashboard; any

@@ -42,14 +42,14 @@ jobs:
           --health-timeout 5s
           --health-retries 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The token stays out of .git/config. The pull request's code runs
           # in this job (npm ci, the generator, the build), and a GitHub App
           # pull request's code comes from a publisher.
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm

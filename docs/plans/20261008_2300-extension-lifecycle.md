@@ -99,11 +99,11 @@ Register step. This plan merges them with the page's recommendations into one li
 
 A lot landed after 3 September. These facts, as of 8 October 2026, change the design:
 
-- **The register lock exists.** Since cc2f2e5 (10 Sep) the whole install runs under
+- **The register lock exists.** Since f742f03 (10 Sep) the whole install runs under
   `withPlatformLock("repository.register")`, a row lease with a 15-minute TTL, chosen over
   `pg_try_advisory_lock` because session advisory locks don't survive a transaction pooler
   (`src/lib/repository/install.ts:685@runtime-10`; `src/lib/platform/lock.ts:17-30,46-119@core-4`).
-- **Apps have an off switch.** Since dac57b7 (23 Sep, on `main`) a new app arrives with
+- **Apps have an off switch.** Since b70f0c9 (23 Sep, on `main`) a new app arrives with
   `apps.is_active = false` and Admin > Apps has an audited Activate and Deactivate
   (`scripts/sync-app-registry.ts:22-25,48-57@core-4`; `src/lib/apps/admin-actions.ts:114-170@core-4`).
   Connectors have no switch.
@@ -521,7 +521,7 @@ pending folder and moves into place at Register (D5):
 ```
 
 - The first six fields are the approved ones. `gitTag` is nullable (website releases have none,
-  runtime-10 commit 16746f0). `filesHash` (1.3) lets Register, the generator and CI check the
+  runtime-10 commit 5bc6514). `filesHash` (1.3) lets Register, the generator and CI check the
   folder against what was verified, offline. `repository` comes from the verified `tarballUrl` and
   `subpath`, so a notice can say when a listing's next release comes from a different repository,
   and it is part of the extension's identity (1.8). `requiresMixOS` lets the build enforce the
@@ -1565,9 +1565,9 @@ ranks whose base is ready go ahead without changing rank. "State" is as of 11 Oc
 
 ### Already done, and dropped from the queue
 
-- **§08 #1, the register lock.** Done in cc2f2e5 (10 Sep): a row lease, not an advisory lock, by
+- **§08 #1, the register lock.** Done in f742f03 (10 Sep): a row lease, not an advisory lock, by
   design. Rank 1 is the rest; Register's use of it rides in rank 7.
-- **Lesson 01 and §08 #9 for apps.** `apps.is_active` since dac57b7 (23 Sep, on `main`). Rank 25
+- **Lesson 01 and §08 #9 for apps.** `apps.is_active` since b70f0c9 (23 Sep, on `main`). Rank 25
   closes the bypasses.
 - **Lesson 01 for themes.** One applied theme, by design.
 - **§08 #5's refusal.** `runInstall()` already refuses an incompatible release with no override;

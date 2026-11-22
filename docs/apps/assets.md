@@ -44,7 +44,7 @@ Co-located assets are bundled and served with hashed filenames (e.g. `logo.a1b2c
 
 ## CSS & Styling
 
-The platform uses Tailwind CSS, and all Tailwind utility classes are available in your app components out of the box. For app-specific styles beyond Tailwind, you have two options:
+The platform uses Tailwind CSS, and all Tailwind utility classes are available in your app components out of the box. The registry build names every registered app's folder as a Tailwind source, so a class only your app uses is generated too, even in a checkout where git ignores the app's folder. For app-specific styles beyond Tailwind, you have two options:
 
 ### CSS Modules (scoped styles)
 
