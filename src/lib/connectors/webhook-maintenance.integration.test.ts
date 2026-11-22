@@ -65,6 +65,7 @@ const isGateRead = (s: string) => s.includes("platform_schema_version");
 async function loadPlatform() {
   return {
     ...(await import("@/generated/connector-registry")),
+    ...(await import("@/generated/connector-loaders")),
     ...(await import("@/generated/build-info")),
     ...(await import("./config")),
     POST: (await import("@/app/api/webhooks/[name]/route")).POST,
@@ -122,6 +123,9 @@ describe("the webhook route while the platform schema is behind", { skip }, () =
       ) as ConnectorManifest),
       name: NAME,
     });
+    // A template isn't registered, so the generator gives it no loader either:
+    // filed here as its registry entry is, under the same key.
+    p.connectorLoaders[`${NAME}/index`] = () => import("@connectors/_template-oauth/index");
     const [user] = await sql`
       insert into public.users (email, display_name, is_admin)
       values (${`maint-${run}@mixos.test`}, 'Admin', true) returning id

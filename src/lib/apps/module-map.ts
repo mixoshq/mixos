@@ -3,17 +3,18 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Loading an app module from one of the generated maps of explicit imports:
- * routes (./route-loader.ts), MCP tools, search handlers, syncs, jobs and
- * services.
+ * Loading an extension's module from one of the generated maps of explicit
+ * imports: an app's routes (./route-loader.ts), MCP tools, search handlers,
+ * syncs, jobs and services, and a connector's index
+ * (src/lib/connectors/loader.ts).
  *
  * The maps exist because a template import, `import(\`@apps/${slug}/…\`)`, is
  * resolved by Turbopack against the files on disk, and is not always resolved
  * again when an app gains one under `next dev`: the gateway's wasn't, and a new
  * app's routes were a 404 until a restart (scripts/route-loaders.ts,
- * scripts/handler-loaders.ts). A generated file of literal imports is
- * rewritten by `npm run registry`, Next recompiles it, and the new module is in
- * the graph.
+ * scripts/handler-loaders.ts, scripts/connector-loaders.ts). A generated file
+ * of literal imports is rewritten by `npm run registry`, Next recompiles it,
+ * and the new module is in the graph.
  *
  * The three outcomes are kept apart because they are different faults. A key
  * with no loader is on disk but not in the registry this server was built

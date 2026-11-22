@@ -5,6 +5,7 @@
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getClientIp } from "@/lib/apps/public-access";
 import { getDecryptedConfig } from "@/lib/connectors/config";
+import { ConnectorLoadError, constructConnector } from "@/lib/connectors/loader";
 import { isConnectorDisabled } from "@/lib/connectors/switch";
 import { maintenanceState } from "@/lib/platform/maintenance";
 import { maintenanceGate } from "@/lib/platform/maintenance-gate";
@@ -134,11 +135,9 @@ export async function POST(
   }
 
   try {
-    const mod = await import(`@connectors/${name}/index`);
-    const ConnectorClass =
-      mod.default ??
-      mod[Object.keys(mod).find((k) => typeof mod[k] === "function")!];
-    const instance: BaseConnector = new ConnectorClass();
+    // Through the generated connector map (src/lib/connectors/loader.ts). One
+    // that won't load throws into the catch below, as an import that failed did.
+    const instance: BaseConnector = await constructConnector(name);
     if (credentials) await instance.initialize(credentials);
 
     if (supportsWebhooks(instance)) {
@@ -163,7 +162,11 @@ export async function POST(
     // Undo the claim so the provider's retry is processed instead of being
     // silently deduped into oblivion.
     await releaseWebhookDelivery(verified.eventKey);
-    console.error(`[connector-webhook] ${name} handler threw:`, err);
+    if (err instanceof ConnectorLoadError) {
+      console.error(`[connector-webhook] ${err.message}`, err.cause ?? "");
+    } else {
+      console.error(`[connector-webhook] ${name} handler threw:`, err);
+    }
     return new Response(null, { status: 500 });
   }
 }

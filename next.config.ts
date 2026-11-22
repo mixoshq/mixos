@@ -63,30 +63,11 @@ const nextConfig: NextConfig = {
       "@apps": "./apps",
       "@connectors": "./connectors",
     },
-    // The platform loads a connector's index with a template-literal import,
-    // @connectors/<name>/index, inside a try/catch that answers for a connector
-    // that won't load itself. Turbopack resolves the template against the files
-    // on disk, and when a checkout has no connectors it warns "Module not found"
-    // on every compile. That is the expected state of most installs.
-    //
-    // Only that template import is quieted: Turbopack titles it "Module not
-    // found: Can't resolve '@connectors/' <dynamic> …", and the "<dynamic>"
-    // marker is what a static import never has. A static import of a missing
-    // module, or a template import anywhere else, still warns.
-    //
-    // App code is not on that list. Routes, MCP tools, search handlers, syncs,
-    // jobs and services load through generated maps of explicit imports
-    // (scripts/route-loaders.ts, scripts/handler-loaders.ts), so loading them
-    // doesn't depend on Turbopack resolving a template again when an app gains
-    // a file under `next dev`. The gateway's template wasn't resolved again, and
-    // a new app's routes were a 404 until a restart. A template import under
-    // @apps/ warns again, which is right: there should be none.
-    ignoreIssue: [
-      {
-        path: "**/src/**",
-        title: /^Module not found: Can't resolve '@connectors\/' <dynamic>/,
-      },
-    ],
+    // Extensions load through generated maps of explicit imports, one per
+    // kind (scripts/route-loaders.ts, scripts/handler-loaders.ts,
+    // scripts/connector-loaders.ts), never a template import, so there is no
+    // "Module not found" here to quiet. If a template import under @apps/ or
+    // @connectors/ comes back, Turbopack warns about it, and it should.
   },
   experimental: {
     // Server Fast Refresh off, so that a route built after a change sees the
