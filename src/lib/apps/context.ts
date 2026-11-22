@@ -18,6 +18,7 @@ import {
   disabledConnector,
   getDisabledConnectors,
 } from "@/lib/connectors/switch";
+import { constructConnector } from "@/lib/connectors/loader";
 import { initializeWithUserGrant } from "@/lib/connectors/user-grant";
 import { getWritableConnectors } from "@/lib/connectors/writable";
 import { appReachRules, narrowConnector } from "./connector-reach";
@@ -268,11 +269,10 @@ async function loadTenantConnectors(
     }
 
     try {
-      const mod = await import(`@connectors/${connName}/index`);
-      const ConnectorClass =
-        mod.default ??
-        mod[Object.keys(mod).find((k) => typeof mod[k] === "function")!];
-      const instance: BaseConnector = new ConnectorClass();
+      // Through the generated connector map (src/lib/connectors/loader.ts). A
+      // connector that won't load throws into this try's catch, as an import
+      // that failed did, with an error that says which way it failed.
+      const instance: BaseConnector = await constructConnector(connName);
       // A client-credentials token is minted with the connector's write scopes
       // only for a caller that may write with it.
       if (reachFor(connName).writes) HttpConnector.allowWrites(instance);
