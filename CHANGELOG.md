@@ -16,19 +16,19 @@ Changes since v0.10.0. The larger ones are described in [WHATS-NEW.md](https://g
 
 ### Features
 
-- **os:** a switch and an icon for each search object, and drag-only ordering (19c2d2e)
-- **os:** global search, opened from the menu bar or ⌘K, and a search field for apps (7773992)
-- **os:** a connector's scope can include others, so a held scope isn't reported refused (109faa3)
-- **os:** the welcome tour ends on "is yours", and I'm ready spells the name in confetti (ca18635)
+- **os:** a switch and an icon for each search object, and drag-only ordering (b72ab93)
+- **os:** global search, opened from the menu bar or ⌘K, and a search field for apps (96232e7)
+- **os:** a connector's scope can include others, so a held scope isn't reported refused (fbcb0bf)
+- **os:** the welcome tour ends on "is yours", and I'm ready spells the name in confetti (e290109)
 
 ### Fixes
 
-- **os:** search handlers load through a generated map too (ce94a56)
-- **os:** MCP tools, syncs, jobs and services load through generated maps (df02572)
-- **os:** a select's caret sits in from the right border (8b159fa)
-- **deps:** Next.js 16.4.3 to 16.4.6, for seven security advisories (7edb530)
-- **os:** a route added under next dev answers without a restart (6561c33)
-- **os:** a new app's page renders without restarting next dev (af5274e)
+- **os:** search handlers load through a generated map too (499dfd5)
+- **os:** MCP tools, syncs, jobs and services load through generated maps (3500ab0)
+- **os:** a select's caret sits in from the right border (02b3efc)
+- **deps:** Next.js 16.4.3 to 16.4.6, for seven security advisories (62fc358)
+- **os:** a route added under next dev answers without a restart (4193de4)
+- **os:** a new app's page renders without restarting next dev (fcd4b00)
 
 ## v0.10.0 (2026-11-15)
 
@@ -36,11 +36,11 @@ Changes since v0.9.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Features
 
-- **os:** Check now asks mixos.org for new releases from the admin footer (51af5f4)
+- **os:** Check now asks mixos.org for new releases from the admin footer (37ccfae)
 
 ### Fixes
 
-- **os:** a configured connector's tile isn't tinted green, since its pill says so (537c6bf)
+- **os:** a configured connector's tile isn't tinted green, since its pill says so (460a058)
 
 ## v0.9.0 (2026-11-15)
 
@@ -48,13 +48,13 @@ Changes since v0.8.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Features
 
-- **os:** each connector method names the scopes it needs, and a Methods tab shows them (d009925)
-- **os:** registry tiles end in their dialog's provenance band, and Delete moves into the dialog (f9f0251)
+- **os:** each connector method names the scopes it needs, and a Methods tab shows them (84b2242)
+- **os:** registry tiles end in their dialog's provenance band, and Delete moves into the dialog (185e174)
 
 ### Fixes
 
-- **os:** removing an extension shows no build error in a dev server (c3fe77c)
-- **os:** an extension renamed can be removed (8f66f9d)
+- **os:** removing an extension shows no build error in a dev server (3036968)
+- **os:** an extension renamed can be removed (ce1bf6d)
 
 ## v0.8.0 (2026-11-14)
 
@@ -62,7 +62,7 @@ Changes since v0.7.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Breaking changes
 
-- **os:** an extension names itself as registryId, and its folder after it (79a6f75)
+- **os:** an extension names itself as registryId, and its folder after it (5b7498a)
 
   app.json, connector.json and theme.json require
   "registryId", equal to the extension's folder, and connector.json's
@@ -75,7 +75,7 @@ Changes since v0.6.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Breaking changes
 
-- **os:** every extension JSON file names its shape with $schema (77ccce01)
+- **os:** every extension JSON file names its shape with $schema (e700a637)
 
   app.json, connector.json, theme.json,
   release-notes.json and .registry.json must start with
@@ -85,8 +85,8 @@ Changes since v0.6.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Features
 
-- **os:** Wall·E and the built-in themes get ids (a46386f3)
-- **os:** npm run rename, and the release step carries an extension's data to its new slug (9ad74876)
+- **os:** Wall·E and the built-in themes get ids (3b10901b)
+- **os:** npm run rename, and the release step carries an extension's data to its new slug (d35a7829)
 
 ## v0.6.0 (2026-11-08)
 
@@ -94,61 +94,61 @@ Changes since v0.5.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Features
 
-- **os:** Production Updates' Tech Talk, as mixos.org's pill (197c62e)
-- **os:** Production Updates, in place of the GitHub App (7aac302)
-- **os:** the confetti covers the screen evenly, in the mark's colours (d6629ff)
-- **os:** the menu bar marks Dashboard while you're on it (2181c30)
-- **os:** the confetti bursts from behind the card, at the screen's centre (b6fe9f2)
-- **os:** Setup Complete's box ticks itself under the pointer (0a7f0a8)
-- **os:** 1983 pieces of confetti (cfd066f)
-- **os:** the confetti bursts as the mark finishes drawing (e21280f)
-- **os:** "MixOS is yours.", with the mark drawing itself on (30dab78)
-- **os:** Skip tour outlined only under the pointer (8cdaebb)
-- **os:** right-clicking a dashboard with widgets offers Edit Dashboard (97fd1cf)
-- **os:** no ring around the celebration's mark (013b5fe)
-- **os:** the guide shows the Apps icon, and Skip as an outline, bottom left (adf3de9)
-- **os:** the first Enter keycap a second after the welcome line (52279a0)
-- **os:** the settings sidebar's group headings in the text colour (90a280f)
-- **os:** the settings menus as My Account, Administration, Deployment (66fefd4)
-- **os:** the celebration's mark animates in, once (8d5adda)
-- **os:** the GitHub App under a Developers group, saying what it's for (7c50c64)
-- **os:** the settings sidebar's group headings in bold (028e7fe)
-- **os:** an empty dashboard with nothing to add points to App Manager (ad04897)
-- **os:** no Skip tour while the dashboard is being edited (6964c2f)
-- **os:** the tour ends on "MixOS is installed!" after the first edit (4e1a1c2)
-- **os:** the guide says Apps → App Manager, with Skip in its own corner (e231035)
-- **os:** the guide waits on what you do, with only Skip tour in its bubble (2711664)
-- **os:** the dashboard picture at a laptop's 16:10, the keycap still by it (59b83df)
-- **os:** the dashboard picture plays, and the tagline gets its own screen (0d9b981)
-- **os:** the Enter keycap blinks like a text cursor (ecafd54)
-- **os:** the welcome line alone under the mark, the keycap blinking (7be27ad)
-- **os:** show MixOS Launcher's icon in its window header (0097de0)
-- **os:** the welcome line waits on Enter, under the mark alone (3fcca3c)
-- **os:** release notices in the admin accent, the banner over the bar (f67974c)
-- **os:** guide visits App Manager and ends on the first widget (a7ce0c8)
-- **os:** welcome tour sends the logo home and shows a dashboard (0fe1266)
-- **os:** sign-in page says when there's no database, with Try again (49f3558)
-- **os:** show each copy's folder in MixOS Launcher (d0ef22b)
-- **os:** MixOS Launcher finds running copies itself, and keeps its window in view (97bb7c7)
-- **os:** give MixOS Launcher an installer window (f3cbb3a)
-- **os:** MixOS Launcher, a Mac app that runs, watches and sets up local copies (68f83de)
-- **os:** give every local checkout its own instance, and so its own database (2344544)
-- **os:** say when local MixOS is up, and offer the next port when 3000 is taken (ce1efab)
-- **os:** connect Claude, ChatGPT or Copilot from My MCP Connections (5234626)
-- **os:** MixOS's notes lead the popover without a heading of their own (1f22b79)
-- **themes:** release notes for mixos and mixos-dark (e831155)
-- **wall-e:** release notes, back to the first release (59d6f11)
-- **os:** App Manager's Release Notes page, with a filter by extension (582ef43)
-- **os:** a gift in the menu bar with what changed in the last 14 days (a5596ab)
-- **os:** release notes beside each extension's manifest, and MixOS's own (7ae11f9)
-- **os:** install only releases mixos.org signed (6198a5b)
-- **os:** Browse shows active installs, as mixos.org does (46fb2f1)
+- **os:** Production Updates' Tech Talk, as mixos.org's pill (cb7a04a)
+- **os:** Production Updates, in place of the GitHub App (75db98b)
+- **os:** the confetti covers the screen evenly, in the mark's colours (db78c28)
+- **os:** the menu bar marks Dashboard while you're on it (923f638)
+- **os:** the confetti bursts from behind the card, at the screen's centre (282e1c7)
+- **os:** Setup Complete's box ticks itself under the pointer (f22b89b)
+- **os:** 1983 pieces of confetti (c284a6d)
+- **os:** the confetti bursts as the mark finishes drawing (25b2956)
+- **os:** "MixOS is yours.", with the mark drawing itself on (1cd3dd5)
+- **os:** Skip tour outlined only under the pointer (1262d41)
+- **os:** right-clicking a dashboard with widgets offers Edit Dashboard (1a41b35)
+- **os:** no ring around the celebration's mark (a375205)
+- **os:** the guide shows the Apps icon, and Skip as an outline, bottom left (ab88f55)
+- **os:** the first Enter keycap a second after the welcome line (e286325)
+- **os:** the settings sidebar's group headings in the text colour (371ea63)
+- **os:** the settings menus as My Account, Administration, Deployment (cf82f4e)
+- **os:** the celebration's mark animates in, once (fdd9cfb)
+- **os:** the GitHub App under a Developers group, saying what it's for (0a4ab3e)
+- **os:** the settings sidebar's group headings in bold (9d079b6)
+- **os:** an empty dashboard with nothing to add points to App Manager (7c0d2f6)
+- **os:** no Skip tour while the dashboard is being edited (35e39dd)
+- **os:** the tour ends on "MixOS is installed!" after the first edit (f60fd47)
+- **os:** the guide says Apps → App Manager, with Skip in its own corner (9a53276)
+- **os:** the guide waits on what you do, with only Skip tour in its bubble (2d2c09c)
+- **os:** the dashboard picture at a laptop's 16:10, the keycap still by it (b63a815)
+- **os:** the dashboard picture plays, and the tagline gets its own screen (fdc83bf)
+- **os:** the Enter keycap blinks like a text cursor (f64258c)
+- **os:** the welcome line alone under the mark, the keycap blinking (4bb98ad)
+- **os:** show MixOS Launcher's icon in its window header (aa57059)
+- **os:** the welcome line waits on Enter, under the mark alone (6a62df4)
+- **os:** release notices in the admin accent, the banner over the bar (f258f93)
+- **os:** guide visits App Manager and ends on the first widget (164b532)
+- **os:** welcome tour sends the logo home and shows a dashboard (9d1a13d)
+- **os:** sign-in page says when there's no database, with Try again (dcd31c2)
+- **os:** show each copy's folder in MixOS Launcher (b3b0c55)
+- **os:** MixOS Launcher finds running copies itself, and keeps its window in view (e7bff67)
+- **os:** give MixOS Launcher an installer window (204252e)
+- **os:** MixOS Launcher, a Mac app that runs, watches and sets up local copies (b1f5e91)
+- **os:** give every local checkout its own instance, and so its own database (2e8b771)
+- **os:** say when local MixOS is up, and offer the next port when 3000 is taken (4ae169b)
+- **os:** connect Claude, ChatGPT or Copilot from My MCP Connections (d5bce24)
+- **os:** MixOS's notes lead the popover without a heading of their own (7cc5f0c)
+- **themes:** release notes for mixos and mixos-dark (4c91e3c)
+- **wall-e:** release notes, back to the first release (4468291)
+- **os:** App Manager's Release Notes page, with a filter by extension (7dd7211)
+- **os:** a gift in the menu bar with what changed in the last 14 days (daf016a)
+- **os:** release notes beside each extension's manifest, and MixOS's own (c496440)
+- **os:** install only releases mixos.org signed (f70f6ad)
+- **os:** Browse shows active installs, as mixos.org does (7df49e2)
 
 ### Fixes
 
-- **os:** Tech Talk lives with the admin components, not in app API (ec05beb)
-- **os:** an app uninstalled mid-tour stays uninstalled (afe18f2)
-- **os:** quiet Turbopack's warnings for extension parts nothing installed has (6a9aa97)
+- **os:** Tech Talk lives with the admin components, not in app API (d2e1b7a)
+- **os:** an app uninstalled mid-tour stays uninstalled (8a16310)
+- **os:** quiet Turbopack's warnings for extension parts nothing installed has (6bf98cb)
 
 ## v0.5.0 (2026-10-25)
 
@@ -156,7 +156,7 @@ Changes since v0.4.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Fixes
 
-- **deps:** Next.js 16.4.3 and zod 4.6.7, for four security advisories (8c3b508)
+- **deps:** Next.js 16.4.3 and zod 4.6.7, for four security advisories (11d8859)
 
 ## v0.4.0 (2026-10-20)
 
@@ -164,7 +164,7 @@ Changes since v0.3.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Breaking changes
 
-- **os:** hold connectors to a versioned contract, and allow their writes per install (d9870121)
+- **os:** hold connectors to a versioned contract, and allow their writes per install (145122ad)
 
   connector.json needs "version", and an "operation" on
   each telemetry entry. A connectors or optionalConnectors entry is
@@ -179,47 +179,47 @@ Changes since v0.2.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Breaking changes
 
-- **os:** send a FormData to a raw route with call(), and drop the untyped client (e705fd1)
+- **os:** send a FormData to a raw route with call(), and drop the untyped client (fd96fd8)
 
   createAppClient() has no get, post, put, patch or
   delete; use call(). An app.json with apiVisibility fails the build.
 
-- **os:** squash the platform migrations into one baseline schema (d174588)
+- **os:** squash the platform migrations into one baseline schema (5857d65)
 
   The release step refuses a database built by migrations
   0001-0014 until its ledger and schema are repaired to the baseline.
 
-- **os:** switch each MCP tool on or off per app, off by default (fcedd7f)
+- **os:** switch each MCP tool on or off per app, off by default (20a7a76)
 
   Every MCP tool starts off, including tools in use.
   After upgrading, turn on the ones you want on each app's MCP tab.
 
 ### Features
 
-- **os:** /mixos upgrade, and a banner for admins when a release is out (f413521)
-- **os:** stop /mixos deploy until origin is a repository of your own (d0e056b)
-- **os:** end /mixos init by offering a private repository of your own (733e73b)
-- **os:** ignore the extensions the core doesn't carry, in a core checkout alone (2f05f96)
-- **os:** /mixos remix, to abstract a component of one app into another (36f5e17)
-- **os:** manage who can reach an app from its Access tab (28a9952)
-- **os:** show an app's egress on a Reach tab in its admin dialog (d7ff138)
+- **os:** /mixos upgrade, and a banner for admins when a release is out (a54458a)
+- **os:** stop /mixos deploy until origin is a repository of your own (f5ae1fa)
+- **os:** end /mixos init by offering a private repository of your own (32fc1e1)
+- **os:** ignore the extensions the core doesn't carry, in a core checkout alone (9799d5d)
+- **os:** /mixos remix, to abstract a component of one app into another (6f87122)
+- **os:** manage who can reach an app from its Access tab (e7e6fcc)
+- **os:** show an app's egress on a Reach tab in its admin dialog (5668c40)
 
 ### Fixes
 
-- **os:** say what to check when no CI ran, without assuming a fork (ff57512)
-- **os:** link the admin to the install guide's new pages (2a2b1e0)
-- **os:** name the moved self-hosting guide in the hand-back (9360858)
-- **os:** Danger fails a PR that adds an extension to the core (9347c79)
-- **os:** Danger fails a version bump outside a release PR (ebc9c8e)
+- **os:** say what to check when no CI ran, without assuming a fork (5db79b8)
+- **os:** link the admin to the install guide's new pages (41dbc11)
+- **os:** name the moved self-hosting guide in the hand-back (7f272f9)
+- **os:** Danger fails a PR that adds an extension to the core (6606a03)
+- **os:** Danger fails a version bump outside a release PR (0493cdd)
 
 ### Operations
 
-- **os:** run the database tests in CI against a throwaway Postgres (72301f3)
+- **os:** run the database tests in CI against a throwaway Postgres (30a2efb)
 
 ### Other changes
 
-- Update Buy Me a Coffee username in FUNDING.yml (5aeca24)
-- added logo to readme (64bab30)
+- Update Buy Me a Coffee username in FUNDING.yml (314e8b6)
+- added logo to readme (ba559b3)
 
 ## v0.2.0 (2026-10-13)
 
@@ -227,24 +227,24 @@ Changes since v0.1.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Breaking changes
 
-- **os:** fail the build on an install that needs a newer MixOS (4918d92)
+- **os:** fail the build on an install that needs a newer MixOS (2b3584e)
 
   A checkout or a deploy that carries an extension
   whose floor is above its version no longer builds.
 
-- **os:** switch off an extension that takes a different one's name (8843938)
+- **os:** switch off an extension that takes a different one's name (9ebd174)
 
   Migration 0011 records every app the database knows,
   and every connector with saved credentials, as local. One installed
   from the Registry is switched off once at the first release step that
   carries it, and an app's API keys are revoked.
 
-- **os:** record each install in its folder, and hand back the commit (54f2f4b)
+- **os:** record each install in its folder, and hand back the commit (7dbd014)
 
   A pending install made before this has no record, so
   Register refuses it. Discard it and install it again.
 
-- **os:** install into .mixos/pending/ and register with npm run register (a1188e5)
+- **os:** install into .mixos/pending/ and register with npm run register (d4b9ef1)
 
   An app or connector installed from Browse waits in
   .mixos/pending/ until `npm run register -- <kind>/<slug>`. Installs are
@@ -253,65 +253,65 @@ Changes since v0.1.0. The larger ones are described in [WHATS-NEW.md](https://gi
 
 ### Features
 
-- **os:** offer Propose update and Propose removal on a deployment, and list them (e763d62)
-- **os:** propose an update or a removal as a pull request through the GitHub App (0f780ef)
-- **os:** let a proposal replace or delete an extension's folder, judged against what the build runs (f7cc5f8)
-- **os:** offer the update pull request on the notice, and list them on Admin \> GitHub (2fe5478)
-- **os:** open an update pull request once GitHub confirms upstream's tag (d815bff)
-- **os:** name, scope and body a MixOS update pull request (4b40c54)
-- **os:** offer Update on the notices and in Browse (f799f69)
-- **os:** empty the generator's public/ copy of an extension before copying it again (a1148eb)
-- **os:** put a pending update in place at Register, with a backup (6d4701c)
-- **os:** add Propose to Browse, and list the App's pull requests (9a36360)
-- **os:** propose an install as a pull request through the GitHub App (1a2fa78)
-- **os:** check workflows and previews, and fence the App's writes (475b573)
-- **os:** add the update dialog, and say what a pending update is (716c8d5)
-- **os:** download another release of an extension as a pending update (ab652a1)
-- **os:** add Admin \> GitHub (6c682f4)
-- **os:** create, link, check and unlink the GitHub App (b44248b)
-- **os:** talk to GitHub as the App, through one client and narrowed tokens (197b119)
-- **os:** add GITHUB_APP_ENCRYPTION_KEY, which turns on the GitHub App (585632e)
-- **os:** add "Remove code and delete this checkout's data" to Remove (c1f3892)
-- **os:** add Delete data under Not in this build (cf302ea)
-- **os:** delete an extension's kept data, decided from the database (9ac7f9e)
-- **os:** record which builds use a database, and mark connectors a build lacks (fcd3632)
-- **os:** add Remove to Admin \> Apps, Connectors and Themes (c530ccf)
-- **os:** prune public/ copies the generator no longer makes (d978bd5)
-- **os:** remove an extension's code from a checkout (67f650e)
-- **os:** announce a newer MixOS at the top of the admin pages (6e6cf66)
-- **os:** check mixos.org daily for new releases of MixOS (7f8cf26)
-- **os:** smoke-test an app after Register with --smoke (f43c099)
-- **os:** check pull requests that change an extension (27d8a7b)
-- **os:** show withdrawn and newer releases under admin page headers (0f274a1)
-- **os:** check mixos.org daily about extensions installed from it (86933e1)
-- **os:** say in the install and review dialogs whether a floor is met (c7eee86)
-- **os:** ask for the name before turning on a replacing extension (05a1f12)
-- **os:** say in Browse where an installed extension came from (fa5ed99)
-- **os:** generate registry-installs.ts, and leave installs unstamped (8a31ae0)
-- **os:** lead Browse installs to the review, without Install & Activate (89a28e4)
-- **os:** review, register and discard pending installs in Admin (0a61ce1)
-- **os:** take turns on a checkout lock, .mixos/lock (a9b5919)
-- **os:** label audit rows nobody signed in for as unverified (1eb7a62)
-- **os:** read each route's defineRoute options in an install's check (46ad7d7)
-- **os:** check a Registry install before it lands, without running it (0814a4a)
-- **os:** refuse package paths that would land as something other than they name (2169bba)
-- **os:** hold back only the app whose own migrations are behind (8635df7)
+- **os:** offer Propose update and Propose removal on a deployment, and list them (c91aadb)
+- **os:** propose an update or a removal as a pull request through the GitHub App (52f2ba2)
+- **os:** let a proposal replace or delete an extension's folder, judged against what the build runs (f0dd3ea)
+- **os:** offer the update pull request on the notice, and list them on Admin \> GitHub (7fc3c4e)
+- **os:** open an update pull request once GitHub confirms upstream's tag (8df6769)
+- **os:** name, scope and body a MixOS update pull request (a3fa573)
+- **os:** offer Update on the notices and in Browse (0322c7d)
+- **os:** empty the generator's public/ copy of an extension before copying it again (0b8d5d8)
+- **os:** put a pending update in place at Register, with a backup (6dee7ed)
+- **os:** add Propose to Browse, and list the App's pull requests (96c4259)
+- **os:** propose an install as a pull request through the GitHub App (f4ccb8b)
+- **os:** check workflows and previews, and fence the App's writes (8cc4e9d)
+- **os:** add the update dialog, and say what a pending update is (bc6e884)
+- **os:** download another release of an extension as a pending update (a71fced)
+- **os:** add Admin \> GitHub (e61a256)
+- **os:** create, link, check and unlink the GitHub App (4182781)
+- **os:** talk to GitHub as the App, through one client and narrowed tokens (7c90dc1)
+- **os:** add GITHUB_APP_ENCRYPTION_KEY, which turns on the GitHub App (75f159d)
+- **os:** add "Remove code and delete this checkout's data" to Remove (8a28787)
+- **os:** add Delete data under Not in this build (ecf6156)
+- **os:** delete an extension's kept data, decided from the database (64f4a69)
+- **os:** record which builds use a database, and mark connectors a build lacks (b0456ea)
+- **os:** add Remove to Admin \> Apps, Connectors and Themes (8d6e29d)
+- **os:** prune public/ copies the generator no longer makes (af01edc)
+- **os:** remove an extension's code from a checkout (b5a917c)
+- **os:** announce a newer MixOS at the top of the admin pages (481d9cb)
+- **os:** check mixos.org daily for new releases of MixOS (f4bd191)
+- **os:** smoke-test an app after Register with --smoke (2cb6866)
+- **os:** check pull requests that change an extension (9fefc89)
+- **os:** show withdrawn and newer releases under admin page headers (9c78fd2)
+- **os:** check mixos.org daily about extensions installed from it (5b4d9f6)
+- **os:** say in the install and review dialogs whether a floor is met (d5d3bbc)
+- **os:** ask for the name before turning on a replacing extension (32ed73a)
+- **os:** say in Browse where an installed extension came from (528b20d)
+- **os:** generate registry-installs.ts, and leave installs unstamped (88ed790)
+- **os:** lead Browse installs to the review, without Install & Activate (3f7321c)
+- **os:** review, register and discard pending installs in Admin (c755436)
+- **os:** take turns on a checkout lock, .mixos/lock (df8062f)
+- **os:** label audit rows nobody signed in for as unverified (59e7632)
+- **os:** read each route's defineRoute options in an install's check (e54abd1)
+- **os:** check a Registry install before it lands, without running it (6ee4779)
+- **os:** refuse package paths that would land as something other than they name (ef66943)
+- **os:** hold back only the app whose own migrations are behind (490fa1f)
 
 ### Fixes
 
-- **os:** keep a withdrawn release's reason to one full stop (533e7f9)
-- **os:** leave .gitignore and .gitattributes out of installs (0873a31)
-- **os:** stack admin page headers on narrow screens (23b218b)
-- **os:** leave a local version bump out of /mixos deploy's commits (c0fdabd)
-- **os:** follow catalogue redirects only within the catalogue's origin (fde7f67)
-- **os:** don't re-stamp lastUpdated on what a merge brings in (a863061)
-- **os:** audit an admin connecting a tenant connector (e8c2476)
-- **os:** record analytics only for an app the user holds and may run (8ffdf38)
-- **os:** keep the app API mounts out of the proxy so bodies arrive whole (4bb118d)
-- **os:** cap webhook bodies while reading, and limit webhooks per IP (73340c4)
-- **os:** limit failed MCP bearer checks per IP (b27754c)
-- **os:** limit password re-checks per user, and hash once per sign-in attempt (36f1263)
-- **os:** make the Docker image read-only to the server (c2d1b41)
+- **os:** keep a withdrawn release's reason to one full stop (cb80ff8)
+- **os:** leave .gitignore and .gitattributes out of installs (7a42231)
+- **os:** stack admin page headers on narrow screens (fb14949)
+- **os:** leave a local version bump out of /mixos deploy's commits (66e32e2)
+- **os:** follow catalogue redirects only within the catalogue's origin (97f1f15)
+- **os:** don't re-stamp lastUpdated on what a merge brings in (c245382)
+- **os:** audit an admin connecting a tenant connector (2b5af52)
+- **os:** record analytics only for an app the user holds and may run (a16c306)
+- **os:** keep the app API mounts out of the proxy so bodies arrive whole (c5290d5)
+- **os:** cap webhook bodies while reading, and limit webhooks per IP (c351abf)
+- **os:** limit failed MCP bearer checks per IP (9f913bd)
+- **os:** limit password re-checks per user, and hash once per sign-in attempt (29ec2c2)
+- **os:** make the Docker image read-only to the server (1b579bc)
 
 ## v0.1.0 (2026-10-10)
 
