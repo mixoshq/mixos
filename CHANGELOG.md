@@ -8,6 +8,26 @@ tests and internal changes, and is the notes of its GitHub Release.
 Releases are made with `/mixos deploy release`; see the Release section of
 [.claude/skills/mixos/actions/deploy.md](.claude/skills/mixos/actions/deploy.md).
 
+## v0.11.1 (2026-11-22)
+
+Changes since v0.11.0. The larger ones are described in [WHATS-NEW.md](https://github.com/mixoshq/mixos/blob/v0.11.1/WHATS-NEW.md).
+
+### Fixes
+
+- **os:** the sign-in timing dummy is a bcryptjs 3 hash (1077b80)
+- **deps:** Bump bcryptjs and @types/bcryptjs (97ed67a)
+- **deps:** Bump croner from 10.0.1 to 11.0.1 (7cfd592)
+- **os:** push notifications use web-push 4's named exports (f43c77e)
+- **os:** the dashboard takes react-grid-layout 2.3's breakpoint type (62bccf6)
+- **os:** a connection URL postgres.js 4 would misread is still reported by name (e2b154a)
+- **os:** Tailwind generates a registered app's classes even where git ignores the app (b656b2b)
+- **deps:** Bump postgres from 3.4.9 to 4.1.1 (83a76c7)
+- **deps:** Bump web-push from 3.6.7 to 4.0.0 (27452ba)
+- **deps:** Bump the npm-minor-and-patch group with 15 updates (6098d13)
+- **os:** a connector loads through a generated map, and the ignoreIssue rule goes (485a31b)
+- **os:** Danger runs every rule on a pull request from a fork (452a1b9)
+- **os:** the built-in themes ship their fonts' licence (643f681)
+
 ## v0.11.0 (2026-11-22)
 
 **v0.11.0 is the first public release of MixOS.**
