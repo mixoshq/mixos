@@ -87,6 +87,7 @@ MixOS on your computer, are in
 - [Connecting Claude (MCP)](#connecting-claude-mcp)
 - [Developing](#developing)
 - [Releases](#releases)
+- [Security](#security)
 - [Licence](#licence)
 
 ## Installing and hosting MixOS
@@ -340,6 +341,13 @@ person runs them.
 
 A version release is not the release step, `npm run release`, which applies
 a deployment's database migrations.
+
+## Security
+
+Report a vulnerability privately, not in an issue: see
+[`SECURITY.md`](SECURITY.md), which also says what an installed app or
+connector can reach. The design is in
+[`docs/security-architecture.md`](docs/security-architecture.md).
 
 ## Licence
 
