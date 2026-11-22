@@ -4,7 +4,8 @@
 
 /**
  * Loading an app module from one of the generated maps of explicit imports:
- * routes (./route-loader.ts), MCP tools, syncs, jobs and services.
+ * routes (./route-loader.ts), MCP tools, search handlers, syncs, jobs and
+ * services.
  *
  * The maps exist because a template import, `import(\`@apps/${slug}/…\`)`, is
  * resolved by Turbopack against the files on disk, and is not always resolved

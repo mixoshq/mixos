@@ -4,11 +4,13 @@
 
 /**
  * The generated handler maps (scripts/handler-loaders.ts), which the MCP
- * server, the scheduler and the services broker load app code through.
+ * server, the search broker, the scheduler and the services broker load app
+ * code through.
  *
  * They replaced template imports that Turbopack resolved once, when the
- * importing module compiled, so a tool, sync, job or service added under
- * `next dev` did not load until a restart. What holds the fix in place: every
+ * importing module compiled, so a tool, search handler, sync, job or service
+ * added under `next dev` did not load until a restart. What holds the fix in
+ * place: every
  * handler gets one LITERAL import, under the key the runtime looks up
  * (src/lib/apps/handler-modules.ts), in its own kind's map, and each map
  * covers the handlers the generator registers, no more and no fewer.
@@ -54,16 +56,18 @@ describe("the generated text", () => {
     {
       slug: "acme-3f9a2c1b",
       mcp: [{ name: "pipeline" }, { name: "deal-notes" }],
+      search: [{ name: "contacts" }],
       sync: [{ name: "deals" }],
       schedules: [{ name: "nightly" }, { name: "hourly-digest" }],
       provides: [{ name: "accounts" }],
     },
-    { slug: "quiet-0a1b2c3d", mcp: [], sync: [], schedules: [], provides: [] },
+    { slug: "quiet-0a1b2c3d", mcp: [], search: [], sync: [], schedules: [], provides: [] },
     { slug: "bare-4e5f6a7b" },
   ];
 
   const expected: Record<HandlerKind, string[]> = {
     mcp: ["pipeline", "deal-notes"],
+    search: ["contacts"],
     sync: ["deals"],
     jobs: ["nightly", "hourly-digest"],
     services: ["accounts"],
@@ -160,6 +164,15 @@ export default async function countItems() {
   return { from: "mcp/count-items" };
 }
 `,
+  "search/notes.ts": `export default async function notes() {
+  return { from: "search/notes" };
+}
+`,
+  // A search object links to a page, which the generator checks is there.
+  "pages/notes/Main.tsx": `export default function Notes() {
+  return null;
+}
+`,
   // A sync's default export is a defineSync() result; the map only loads it.
   "sync/feed.ts": `export default { from: "sync/feed" };
 `,
@@ -187,6 +200,15 @@ const MANIFEST = {
     { name: "peek", description: "Peeks.", sources: ["mixos"] },
     { name: "count-items", description: "Counts.", sources: ["mixos"] },
   ],
+  search: [
+    {
+      name: "notes",
+      label: "Notes",
+      icon: "notebook",
+      fields: [{ key: "title", label: "Title" }],
+      link: "notes?id={id}",
+    },
+  ],
   sync: [
     {
       name: "feed",
@@ -206,6 +228,7 @@ const MANIFEST = {
 /** What each kind's map should hold for the fixture, by name. */
 const DECLARED: Record<HandlerKind, string[]> = {
   mcp: ["peek", "count-items"],
+  search: ["notes"],
   sync: ["feed"],
   jobs: ["tick", "nightly-digest"],
   services: ["lookup"],

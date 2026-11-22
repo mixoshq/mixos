@@ -3,10 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * The key an app handler's loader is filed under, for an MCP tool, a sync, a
- * job or a service.
+ * The key an app handler's loader is filed under, for an MCP tool, a search
+ * handler, a sync, a job or a service.
  *
- * One rule for the registry generator, which writes the four generated maps
+ * One rule for the registry generator, which writes the five generated maps
  * (scripts/handler-loaders.ts), and for the callers that read them. Two copies
  * would drift, and a key the runtime spells differently from the generator is
  * a handler that never loads with its loader sitting right there.
@@ -17,7 +17,7 @@
  */
 
 /** The directory under `apps/<slug>/` each kind of handler lives in. */
-export type HandlerKind = "mcp" | "sync" | "jobs" | "services";
+export type HandlerKind = "mcp" | "search" | "sync" | "jobs" | "services";
 
 /**
  * `<slug>/<kind>/<name>`: the import specifier less its `@apps/`, so a log line

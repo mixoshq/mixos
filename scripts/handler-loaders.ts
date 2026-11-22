@@ -3,8 +3,9 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * The text of the four generated handler maps: one explicit `import()` per MCP
- * tool, sync, job and service of every registered app, one file per kind.
+ * The text of the five generated handler maps: one explicit `import()` per MCP
+ * tool, search handler, sync, job and service of every registered app, one
+ * file per kind.
  *
  * WHY EXPLICIT. The platform used to load each of these with a template
  * import, `import(\`@apps/${slug}/mcp/${name}\`)` and the like. Turbopack turns
@@ -19,7 +20,8 @@
  *
  * WHY ONE FILE PER KIND. Each caller imports only its own kind's map, so its
  * module graph holds what the template's context held and no more: the MCP
- * route does not pull in every job, nor the scheduler every MCP tool.
+ * route does not pull in every job, nor the scheduler every MCP tool, nor the
+ * search endpoint either of them.
  *
  * Built from the names in the manifests the scan accepted, each already
  * checked to have a handler on disk, so each map holds exactly the handlers
@@ -32,6 +34,7 @@ import { handlerLoaderKey, type HandlerKind } from "../src/lib/apps/handler-modu
 export interface HandlerLoaderApp {
   slug: string;
   mcp?: readonly { name: string }[];
+  search?: readonly { name: string }[];
   sync?: readonly { name: string }[];
   schedules?: readonly { name: string }[];
   provides?: readonly { name: string }[];
@@ -57,6 +60,13 @@ export const HANDLER_MAPS: Record<HandlerKind, HandlerMap> = {
     consumer: "src/lib/mcp/tools.ts",
     what: "MCP tools",
     names: (app) => app.mcp,
+  },
+  search: {
+    file: "app-search-loaders.ts",
+    exportName: "searchLoaders",
+    consumer: "src/lib/search/broker.ts",
+    what: "search handlers",
+    names: (app) => app.search,
   },
   sync: {
     file: "app-sync-loaders.ts",

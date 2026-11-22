@@ -1,15 +1,18 @@
-# Extension loaders: one explicit import per MCP tool, sync, job and service
+# Extension loaders: one explicit import per MCP tool, search handler, sync, job and service
 
-**Status:** built on 16 November 2026, on branch `fix/extension-loaders`, which sits on
-`fix/route-loaders` (not yet merged) because it reuses that branch's generator wiring. All of
-these pass: `npm test` (2006 tests against a throwaway Postgres 17, none skipped),
-`npm run typecheck`, `npm run lint` and the live check under Verification. The live check found
-that the restart bug this plan set out to fix doesn't reproduce for a job (see Verification).
+**Status:** built on 16 November 2026, on branch `fix/extension-loaders`, on top of
+`fix/route-loaders`. Rebased onto `main` on 22 November, after route loaders (#105) and global
+search (#106) merged. Global search had added a fifth template import, for search handlers, so it
+joined the other four here. All of these pass: `npm test` (2039 tests against a throwaway
+Postgres 17, none skipped), `npm run typecheck`, `npm run lint`, and the live check under
+Verification, which was run before the rebase. The live check found that the restart bug this
+plan set out to fix doesn't reproduce for a job (see Verification).
 
 **Scope:** platform. The registry generator (`scripts/generate-project-registry.ts`, plus a new
-`scripts/handler-loaders.ts`), four new generated files under `src/generated/`, a shared loader
-(`src/lib/apps/module-map.ts`) that `src/lib/apps/route-loader.ts` also uses, the three callers
-(`src/lib/mcp/tools.ts`, `src/lib/apps/scheduler.ts`, `src/lib/apps/services.ts`), the
+`scripts/handler-loaders.ts`), five new generated files under `src/generated/`, a shared loader
+(`src/lib/apps/module-map.ts`) that `src/lib/apps/route-loader.ts` also uses, the four callers
+(`src/lib/mcp/tools.ts`, `src/lib/search/broker.ts`, `src/lib/apps/scheduler.ts`,
+`src/lib/apps/services.ts`), the
 `turbopack.ignoreIssue` rule and its comment in `next.config.ts`, and the fixtures of three
 database-backed suites.
 
@@ -20,19 +23,20 @@ database-backed suites.
 import, which Turbopack resolves once, against the files on disk when the importing module
 compiles. A file added later isn't in that context, and nothing recompiles the importer.
 
-Four more kinds of app code load the same way:
+Five more kinds of app code load the same way:
 
 | Kind | Caller | Import |
 |---|---|---|
 | MCP tool | `loadTool` in `src/lib/mcp/tools.ts` | ``import(`@apps/${slug}/mcp/${toolName}`)`` |
+| Search handler | `loadSearchHandler` in `src/lib/search/broker.ts` | ``import(`@apps/${slug}/search/${name}`)`` |
 | Sync | `runClaimed` in `src/lib/apps/scheduler.ts` | ``import(`@apps/${slug}/sync/${syncName}`)`` |
 | Job | `runClaimed` in `src/lib/apps/scheduler.ts` | ``import(`@apps/${slug}/jobs/${job}`)`` |
 | Service | `loadServiceHandler` in `src/lib/apps/services.ts` | ``import(`@apps/${providerSlug}/services/${serviceName}`)`` |
 
-The expectation was that a tool, sync, job or service added to an app while `next dev` runs fails
+The expectation was that a tool, search handler, sync, job or service added to an app while `next dev` runs fails
 to load until a restart, even after `npm run registry` has put it in the registry. For a job,
 the live check found it doesn't (Verification). The change is still worth making for the other
-reasons listed there. Here, no app in a fresh checkout declares any of the four, so each template
+reasons listed there. Here, no app in a fresh checkout declares most of these, so each template
 matches nothing and Turbopack warns "Module not found" on every compile. `next.config.ts` is
 meant to quiet that warning.
 
@@ -43,6 +47,7 @@ meant to quiet that warning.
    | File | Export | Key | Consumer |
    |---|---|---|---|
    | `src/generated/app-mcp-tool-loaders.ts` | `mcpToolLoaders` | `<slug>/mcp/<name>` | `src/lib/mcp/tools.ts` |
+   | `src/generated/app-search-loaders.ts` | `searchLoaders` | `<slug>/search/<name>` | `src/lib/search/broker.ts` |
    | `src/generated/app-sync-loaders.ts` | `syncLoaders` | `<slug>/sync/<name>` | `src/lib/apps/scheduler.ts` |
    | `src/generated/app-job-loaders.ts` | `jobLoaders` | `<slug>/jobs/<name>` | `src/lib/apps/scheduler.ts` |
    | `src/generated/app-service-loaders.ts` | `serviceLoaders` | `<slug>/services/<name>` | `src/lib/apps/services.ts` |
@@ -55,14 +60,15 @@ meant to quiet that warning.
    own kind, as the template's context did. One shared map would pull every job, sync and service
    into the MCP route, and every MCP tool into the scheduler.
 2. **Built from what the registry vouches for.** Each map comes from the registered manifests'
-   `mcp`, `sync`, `schedules` and `provides` names. The generator has already checked that each
+   `mcp`, `search`, `sync`, `schedules` and `provides` names. The generator has already checked that each
    name has a handler file on disk, and it aborts the build if one is missing. A rejected app gets
    no entries, just as it gets no registry entry.
 3. **Server only, each in its own file.** Same header and reasons as `routeLoaders`. None of the
-   four is imported by `app-registry.ts`, which client components import.
+   five is imported by `app-registry.ts`, which client components import.
 4. **One rule for the key.** `src/lib/apps/handler-modules.ts` is pure, with no generated import,
    so the generator and the callers can both use it. It defines `handlerLoaderKey(slug, kind,
-   name)`, where `kind` is the directory: `mcp`, `sync`, `jobs` or `services`.
+   name)`, where `kind` is the directory: `mcp`, `search`, `sync`, `jobs` or
+   `services`.
 5. **One loader, shared with routes.** `loadFromMap(loaders, key)` in `src/lib/apps/module-map.ts`
    returns `loaded` with the module, `missing` when the key isn't in the map, or `failed` with the
    error when the module threw while loading. It looks up own keys only (`Object.hasOwn`).
@@ -74,6 +80,7 @@ meant to quiet that warning.
    | Caller | Missing (no loader) | Failed (threw at load) |
    |---|---|---|
    | `loadTool` | `null`, as today. New: a warning to run `npm run registry`. | `null`, logged with the error, as today. |
+   | `loadSearchHandler` | `null`, so the object shows "Couldn't search this right now.", as today. New: a warning to run `npm run registry`. | The same, logged with the error, as today. |
    | Sync in `runClaimed` | The run is recorded as `error`, as today. `last_error` now says the sync isn't in the generated map and to run `npm run registry`. | The run is recorded as `error`, with the module's own error, as today. |
    | Job in `runClaimed` | The same as a sync. | The same as a sync. |
    | `loadServiceHandler` | `NO_HANDLER`, "has no handler on disk.", as today. New: a warning to run `npm run registry`. | `NO_HANDLER` with the same message, as today. New: logged with the error. It used to be swallowed. |
@@ -95,15 +102,16 @@ meant to quiet that warning.
 ## Structure
 
 - `src/lib/apps/handler-modules.ts` (new, pure): the `HandlerKind` type
-  (`"mcp" | "sync" | "jobs" | "services"`) and `handlerLoaderKey`.
+  (`"mcp" | "search" | "sync" | "jobs" | "services"`) and `handlerLoaderKey`.
 - `src/lib/apps/module-map.ts` (new, pure): `ModuleLoad`, `ModuleLoaders` and `loadFromMap`.
 - `src/lib/apps/route-loader.ts`: `loadRouteModule` calls `loadFromMap`. `RouteModuleLoad`
   stays as an alias of `ModuleLoad`.
-- `scripts/handler-loaders.ts` (new, pure, no I/O). It has a table of the four kinds, each with
+- `scripts/handler-loaders.ts` (new, pure, no I/O). It has a table of the five kinds, each with
   its file, export name, consumer and manifest field. `handlerLoadersSource(kind, apps)` returns
   one generated file's text.
-- `scripts/generate-project-registry.ts`: writes the four files next to the route loaders.
-- `src/lib/mcp/tools.ts`, `src/lib/apps/scheduler.ts` and `src/lib/apps/services.ts`: replace
+- `scripts/generate-project-registry.ts`: writes the five files next to the route loaders.
+- `src/lib/mcp/tools.ts`, `src/lib/search/broker.ts`, `src/lib/apps/scheduler.ts` and
+  `src/lib/apps/services.ts`: replace
   the template import with `loadFromMap` on the kind's map, and keep the outcomes in the table
   above. The comments say why.
 - `next.config.ts`: the narrowed `ignoreIssue` rule and its comment.
@@ -118,17 +126,20 @@ meant to quiet that warning.
     under `handlerLoaderKey`'s key, with no template literal. An app without that kind adds
     nothing. With no apps, the map is empty and still exported. The header says server only and
     names the consumer.
-  - Through `scanApps` on a fixture app that declares a tool, a sync, a job and a service, each
-    map has exactly the declared names.
+  - Through `scanApps` on a fixture app that declares a tool, a search object (with the page its
+    link names), a sync, a job and a service, each map has exactly the declared names.
   - Each generated file, written out and imported with `@apps/` pointed at the fixture, loads
     its handler's own module.
 - `src/lib/apps/module-map.test.ts`: `loadFromMap` returns `missing`, `failed` (with the error) and
   `loaded`, and doesn't resolve an inherited key.
-- `src/lib/apps/handler-loaders.test.ts`, with no database. The app gate, the system context, the
-  telemetry write and `@/lib/db/client` are stubbed by a resolve hook, and the loaders are entries
+- `src/lib/apps/handler-loaders.test.ts`, with no database. The app gate, the system and
+  read-only contexts, the telemetry write and `@/lib/db/client` are stubbed by a resolve hook, and the loaders are entries
   put into the generated maps for each test. Through each real caller:
   - `loadTool` and `describeTool`: missing is `null` with the warning, failed is `null` with the
     error logged, and loaded is the tool with its schema.
+  - `openAppForSearch` and `searchObjectPage`: missing and failed are both the object's "Couldn't
+    search this right now.", each with its own log line. Loaded asks the handler for one more row
+    than the page and returns its hits. A module with no default export is still unavailable.
   - `runJobNow` for a job and for a sync: missing records `error` with the "run
     `npm run registry`" message, failed records `error` with the module's own message, and loaded
     runs the job, or reaches the `defineSync` check for a sync.
@@ -169,11 +180,12 @@ scheduler and the gateway compiled before anything was added:
   job, tool and route. The old code printed a "Module not found: Can't resolve '@apps/' <dynamic>"
   warning for the scheduler's imports on every recompile, despite `ignoreIssue`. The new code
   printed none.
-- MCP tools and services weren't checked live. `tools/list` needs an OAuth token, and a service
+- MCP tools, search handlers and services weren't checked live. Search handlers joined in the
+  rebase, after the live check. `tools/list` needs an OAuth token, and a service
   needs a consumer to call it. Their loaders are covered by `src/lib/apps/handler-loaders.test.ts`
   and the database-backed suites.
 
-So for these four kinds, the change buys:
+So for these five kinds, the change buys:
 
 - one loading path with routes;
 - a log that tells a missing handler from one that throws at load. A service that threw at load
@@ -188,4 +200,6 @@ So for these four kinds, the change buys:
 - Why the old gateway 404'd a new app's route before its import while the scheduler, on the same
   server, saw the new app. Possibly a stale `appRegistry` in the gateway's bundle, like the stale
   page registry that the route-loaders plan records. It wasn't instrumented, because editing
-  `dispatch.ts` recompiles it and would hide the effect.
+  `dispatch.ts` recompiles it and would hide the effect. Since then,
+  [`20261116_0733-page-registry.md`](20261116_0733-page-registry.md) traced the stale page
+  registry to Turbopack's server Fast Refresh and turned it off. That may explain this too.

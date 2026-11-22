@@ -3,7 +3,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { z } from "zod";
+import { searchLoaders } from "@/generated/app-search-loaders";
 import { checkAppGate } from "@/lib/apps/app-gate";
+import { handlerLoaderKey } from "@/lib/apps/handler-modules";
+import { loadFromMap } from "@/lib/apps/module-map";
 import { buildReadOnlyAppContext } from "@/lib/apps/read-only-context";
 import { refusalMessage } from "@/lib/apps/read-only";
 import type { SearchInput, SearchResult } from "@/lib/apps/search";
@@ -38,18 +41,28 @@ const UPDATING = "This app is being updated.";
 export type SearchHandler = (ctx: SearchContext, input: SearchInput) => unknown | Promise<unknown>;
 
 /**
- * Import a search handler. Template-literal import, as the platform loads MCP
- * tools, jobs and services. Null when the module or its default export is
- * missing, which the generator refuses, so it means a broken checkout.
+ * Import a search handler, through the generated map of explicit imports
+ * (src/generated/app-search-loaders.ts) rather than a template import
+ * (scripts/handler-loaders.ts says why), so a handler added under `next dev`
+ * loads once `npm run registry` has run.
+ *
+ * Null when the handler can't be used: no loader in the map, a module that
+ * throws at load, or one with no default export. The log tells the first two
+ * apart (src/lib/apps/module-map.ts). The person sees the same either way.
  */
 async function loadSearchHandler(slug: string, name: string): Promise<SearchHandler | null> {
-  let mod: { default?: unknown };
-  try {
-    mod = await import(`@apps/${slug}/search/${name}`);
-  } catch (err) {
-    console.error(`[search] failed to import ${slug}/search/${name}:`, err);
+  const load = await loadFromMap(searchLoaders, handlerLoaderKey(slug, "search", name));
+  if (load.kind === "missing") {
+    console.warn(
+      `[search] ${load.key} is declared but not in the generated search map. Run \`npm run registry\`.`,
+    );
     return null;
   }
+  if (load.kind === "failed") {
+    console.error(`[search] ${load.key} failed to load:`, load.error);
+    return null;
+  }
+  const mod: { default?: unknown } = load.module;
   return typeof mod.default === "function" ? (mod.default as SearchHandler) : null;
 }
 
