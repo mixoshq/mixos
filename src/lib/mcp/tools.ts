@@ -5,11 +5,14 @@
 import { z } from "zod";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
+import { mcpToolLoaders } from "@/generated/app-mcp-tool-loaders";
 import type { AppManifest, McpToolDefinition } from "@/lib/apps/types";
 import { MIXOS_SOURCE } from "@/lib/apps/types";
 import type { McpToolContext } from "@/lib/hooks/types";
 import { hasAppGrant } from "@/lib/apps/access";
 import { checkAppGate } from "@/lib/apps/app-gate";
+import { handlerLoaderKey } from "@/lib/apps/handler-modules";
+import { loadFromMap } from "@/lib/apps/module-map";
 import { enabledToolsBySlug } from "./tool-settings";
 
 /**
@@ -137,21 +140,31 @@ export interface LoadedTool {
 }
 
 /**
- * Dynamically import a tool handler. Template-literal import, matching how the
- * platform already loads API routes, jobs, and service handlers — Turbopack
- * tolerates it for these subtrees (only the page/widget maps need to be static).
+ * Import a tool handler, through the generated map of explicit imports
+ * (src/generated/app-mcp-tool-loaders.ts) rather than a template import
+ * (scripts/handler-loaders.ts says why), so a tool added under `next dev`
+ * loads once `npm run registry` has run.
+ *
+ * `null` when the tool can't be used: no loader in the map, a module that
+ * throws at load, or one missing its handler or schema. The log tells the
+ * first two apart (src/lib/apps/module-map.ts).
  */
 export async function loadTool(
   slug: string,
   toolName: string,
 ): Promise<LoadedTool | null> {
-  let mod: { default?: unknown; inputSchema?: unknown };
-  try {
-    mod = await import(`@apps/${slug}/mcp/${toolName}`);
-  } catch (err) {
-    console.error(`[mcp] failed to import ${slug}/mcp/${toolName}:`, err);
+  const load = await loadFromMap(mcpToolLoaders, handlerLoaderKey(slug, "mcp", toolName));
+  if (load.kind === "missing") {
+    console.warn(
+      `[mcp] ${load.key} is declared but not in the generated tool map. Run \`npm run registry\`.`,
+    );
     return null;
   }
+  if (load.kind === "failed") {
+    console.error(`[mcp] failed to import ${load.key}:`, load.error);
+    return null;
+  }
+  const mod: { default?: unknown; inputSchema?: unknown } = load.module;
   if (typeof mod.default !== "function") return null;
   // Duck-type rather than `instanceof z.ZodType`: an app could conceivably
   // resolve a different copy of zod, and the only capability we need is parsing.
