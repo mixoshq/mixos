@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import webpush from "web-push";
+import { sendNotification } from "web-push";
 import { isPushServiceEndpoint } from "./endpoint";
 import { getVapidConfig } from "./vapid";
 import {
@@ -47,7 +47,7 @@ export async function sendPushToUsers(
         return;
       }
       try {
-        await webpush.sendNotification(sub, json);
+        await sendNotification(sub, json);
         sent += 1;
       } catch (err) {
         const status = (err as { statusCode?: number })?.statusCode;
