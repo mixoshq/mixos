@@ -15,6 +15,9 @@
   <img alt="Node 22+" src="https://img.shields.io/badge/node-22%2B-brightgreen.svg">
 </p>
 
+> [!WARNING]
+> MixOS is in alpha. Test it before you use it in production. Use it at your own risk.
+
 ---
 
 MixOS gives a team one place to sign in, one set of roles, one look, and one
