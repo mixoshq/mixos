@@ -26,6 +26,13 @@ updates:
       npm-minor-and-patch:
         update-types: [minor, patch]
     open-pull-requests-limit: 5
+    ignore:
+      # ESLint 10 breaks eslint-plugin-react, which eslint-config-next pulls in:
+      # it calls context.getFilename(), which ESLint 10 removed, so lint fails
+      # on every file (#118). Take ESLint majors again once eslint-config-next
+      # supports them; minor and patch updates still come.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: fix
       prefix-development: chore
