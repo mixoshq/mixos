@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+import { isIP } from "node:net";
 import postgres, { type Options, type Sql } from "postgres";
 
 /** postgres.js `Options` with no custom type parsers registered. */
@@ -30,9 +31,12 @@ type ConnectionEnv =
  *    short-lived instances, and pointing them at the direct port-5432 endpoint
  *    exhausts Postgres connections quickly.
  *
- *    Caveat that motivated shape 2: a password containing `@ : / ? # %` breaks
- *    URL parsing unless it is percent-encoded. Supabase URL-encodes the value
- *    it shows you, so copy it verbatim rather than retyping the password.
+ *    Caveat that motivated shape 2: postgres.js reads a password containing
+ *    `@ : # %` or a space as written, but a `/` or `?` in it ends the part of
+ *    the URL it belongs to, and the rest is misread, so those two have to be
+ *    percent-encoded (and so does a `%` followed by two hex digits, which is
+ *    decoded). Supabase URL-encodes the value it shows you, so copy it verbatim
+ *    rather than retyping the password.
  *
  * 2. Discrete `PG*` fields, which pass through with no parsing and therefore no
  *    escaping rules. Useful for a local Postgres.
@@ -139,19 +143,41 @@ export function createPgClient(extra: PgOpts = {}): Sql {
   const options = { prepare: false, ...extra } as PgOpts;
 
   if ("url" in conn) {
+    let sql: Sql;
     try {
-      return postgres(conn.url, { ...options, ssl: conn.ssl });
+      sql = postgres(conn.url, { ...options, ssl: conn.ssl });
     } catch (err) {
       // Node's URL parser keeps the whole string on its error, as `input`, so
       // logging that error would print the password with it. Say which
       // variable is wrong instead, and drop the original.
       const code = (err as NodeJS.ErrnoException | null)?.code;
       if (code !== "ERR_INVALID_URL" && !(err instanceof URIError)) throw err;
-      throw new Error(
-        `${connectionUrlName() ?? "The connection string"} is not a valid connection URL. ` +
-          `A password containing @ : / ? # % has to be percent-encoded.`,
-      );
+      throw invalidConnectionUrl();
     }
+    // postgres.js doesn't throw on a URL it misreads: it connects to the wrong
+    // place, and the first query fails as a DNS error far from the cause. Both
+    // usual causes leave a `:` in a host, which no host name has: a port that
+    // isn't a number stays on its host (`db.example.com:port`), and a `/` or
+    // `?` in the password cuts the URL short at it (`owner:p`). An IPv6
+    // address has more than one `:`, and a socket directory starts with `/`.
+    if (sql.options.host.some(misreadHost)) {
+      void sql.end({ timeout: 0 });
+      throw invalidConnectionUrl();
+    }
+    return sql;
   }
   return postgres({ ...conn, ...options });
+}
+
+/** A host a connection URL can't have meant: see createPgClient. */
+function misreadHost(host: string): boolean {
+  return host.split(":").length === 2 && isIP(host) === 0 && !host.startsWith("/");
+}
+
+/** Names the variable that's wrong, and never repeats its value. */
+function invalidConnectionUrl(): Error {
+  return new Error(
+    `${connectionUrlName() ?? "The connection string"} is not a valid connection URL. ` +
+      `A port has to be a number, and a password containing / or ? has to be percent-encoded.`,
+  );
 }

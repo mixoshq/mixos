@@ -24,10 +24,12 @@ function withEnv(vars: Partial<Record<(typeof VARS)[number], string>>, fn: () =>
   }
 }
 
+// postgres.js doesn't throw on these: it misreads them and would connect to
+// the wrong host. createPgClient catches them, and says which variable.
 for (const [problem, url, secret] of [
-  ["an unencoded # in the password", "postgres://owner:S3cret#pw@db.example.com/mixos", "S3cret#pw"],
   ["a port that is not a number", "postgres://owner:S3cretPw@db.example.com:port/mixos", "S3cretPw"],
-  ["a malformed percent-escape", "postgres://owner:S3cret%zzPw@db.example.com/mixos", "S3cret%zzPw"],
+  ["an unencoded / in the password", "postgres://owner:S3cret/pw@db.example.com/mixos", "S3cret/pw"],
+  ["an unencoded ? in the password", "postgres://owner:S3cret?pw@db.example.com/mixos", "S3cret?pw"],
 ] as const) {
   test(`a connection string with ${problem} is reported by name, never printed`, () => {
     for (const name of ["DATABASE_URL", "POSTGRES_URL"] as const) {
@@ -51,6 +53,56 @@ for (const [problem, url, secret] of [
     }
   });
 }
+
+// What postgres.js reads as written: no need to percent-encode these.
+for (const [problem, password] of [
+  ["an unencoded # in the password", "S3cret#pw"],
+  ["an unencoded @ in the password", "S3cret@pw"],
+  ["an unencoded : in the password", "S3cret:pw"],
+  ["a % that starts no escape", "S3cret%zzPw"],
+] as const) {
+  test(`a connection string with ${problem} connects as written`, async () => {
+    let client: ReturnType<typeof createPgClient> | undefined;
+    withEnv({ DATABASE_URL: `postgres://owner:${password}@db.example.com:6543/mixos`, PGSSLMODE: "disable" }, () => {
+      client = createPgClient();
+    });
+    assert.ok(client);
+    assert.equal(client.options.pass, password);
+    assert.deepEqual(client.options.host, ["db.example.com"]);
+    assert.deepEqual(client.options.port, [6543]);
+    assert.equal(client.options.database, "mixos");
+    await client.end({ timeout: 0 });
+  });
+}
+
+test("an IPv6 host and a host list are not taken for a misread port", async () => {
+  for (const url of [
+    "postgres://owner:pw@[::1]:5432/mixos",
+    "postgres://owner:pw@db1.example.com:5432,db2.example.com:5433/mixos",
+  ]) {
+    let client: ReturnType<typeof createPgClient> | undefined;
+    withEnv({ DATABASE_URL: url, PGSSLMODE: "disable" }, () => {
+      client = createPgClient();
+    });
+    assert.ok(client, url);
+    await client.end({ timeout: 0 });
+  }
+});
+
+test("the explicit ssl option wins over the URL's sslmode", async () => {
+  // postgres.js 4 reads sslmode from the URL and PGSSLMODE from the
+  // environment, but an ssl option comes first, and createPgClient always
+  // passes one, from PGSSLMODE: TLS stays MixOS's decision.
+  for (const [mode, expected] of [["disable", false], ["require", "require"], ["verify-full", "verify-full"]] as const) {
+    let client: ReturnType<typeof createPgClient> | undefined;
+    withEnv({ DATABASE_URL: "postgres://owner:pw@db.example.com/mixos?sslmode=disable", PGSSLMODE: mode }, () => {
+      client = createPgClient();
+    });
+    assert.ok(client);
+    assert.equal(client.options.ssl, expected, mode);
+    await client.end({ timeout: 0 });
+  }
+});
 
 test("connectionUrlName names the variable connectionUrl reads", () => {
   const env = (vars: Record<string, string>) => vars as unknown as NodeJS.ProcessEnv;
