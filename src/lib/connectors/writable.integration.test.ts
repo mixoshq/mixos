@@ -48,6 +48,7 @@ const READER = `reader-${run}`;
 async function loadPlatform() {
   return {
     ...(await import("@/generated/connector-registry")),
+    ...(await import("@/generated/connector-loaders")),
     ...(await import("@/generated/app-registry")),
     ...(await import("./writable")),
     ...(await import("./writable-admin")),
@@ -141,6 +142,10 @@ describe("Allow changes", { skip }, () => {
       name: READS,
       telemetry: keyed.telemetry.filter((t) => !t.mutates),
     });
+    // A template isn't registered, so the generator gives it no loader either:
+    // filed here as its registry entry is, under the same key. READS is never
+    // constructed, only switched, so it needs none.
+    p.connectorLoaders[`${KEYED}/index`] = () => import("@connectors/_template/index");
     const base = p.appRegistry[0];
     assert.ok(base, "the registry needs one app to copy a manifest shape from");
     const app = (slug: string, name: string, access: "read" | "write"): AppManifest =>

@@ -196,7 +196,8 @@ So for these five kinds, the change buys:
 ## Follow-ups
 
 - Connectors: the same map for `@connectors/<name>/index`, with its three callers. After that,
-  the `ignoreIssue` rule could go.
+  the `ignoreIssue` rule could go. Done in
+  [`20261122_1059-connector-loaders.md`](20261122_1059-connector-loaders.md).
 - Why the old gateway 404'd a new app's route before its import while the scheduler, on the same
   server, saw the new app. Possibly a stale `appRegistry` in the gateway's bundle, like the stale
   page registry that the route-loaders plan records. It wasn't instrumented, because editing

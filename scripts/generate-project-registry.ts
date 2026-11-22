@@ -96,6 +96,7 @@ import {
 import { readRoutesStatically } from "./route-reader";
 import { routeLoadersSource } from "./route-loaders";
 import { HANDLER_KINDS, HANDLER_MAPS, handlerLoadersSource } from "./handler-loaders";
+import { connectorLoadersSource, loadableConnectors } from "./connector-loaders";
 import { routeModulePath } from "../src/lib/apps/route-modules";
 import {
   readsNeedingWriteScopes,
@@ -197,6 +198,7 @@ const CONNECTOR_REGISTRY_FILE = path.resolve(
   OUTPUT_DIR,
   "connector-registry.ts",
 );
+const CONNECTOR_LOADERS_FILE = path.resolve(OUTPUT_DIR, "connector-loaders.ts");
 const THEMES_DIR = path.resolve(__dirname, "../themes");
 const MIGRATIONS_DIR = path.resolve(__dirname, "../supabase/migrations");
 const PACKAGE_JSON_FILE = path.resolve(__dirname, "../package.json");
@@ -2835,6 +2837,15 @@ export type ConnectorName = (typeof connectorNames)[number];
   fs.writeFileSync(CONNECTOR_REGISTRY_FILE, connectorOutput, "utf-8");
   console.log(
     `Generated connector registry with ${connectors.length} connector(s)`,
+  );
+
+  // Server-only, like the app loader maps, and for the same reason: the app
+  // context, Verify connection and the webhook route construct a connector
+  // through this map rather than a template import (scripts/connector-loaders.ts).
+  fs.writeFileSync(
+    CONNECTOR_LOADERS_FILE,
+    connectorLoadersSource(loadableConnectors(CONNECTORS_DIR, connectors)),
+    "utf-8",
   );
 
   // Both registries are in hand here, which is what this check needs.

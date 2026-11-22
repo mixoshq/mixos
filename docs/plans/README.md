@@ -72,6 +72,7 @@ Current platform plans:
 | [`20261116_0021-scope-includes.md`](20261116_0021-scope-includes.md) | An `auth.scopes` entry may list the scopes it `includes` (connector v1, changed in place); a grant naming it holds them, so the verdict at the OAuth callback and the write gate stop reporting a held scope refused; the Scopes tab says "Included in" |
 | [`20261116_0722-extension-loaders.md`](20261116_0722-extension-loaders.md) | App MCP tools, search handlers, syncs, jobs and services load through generated, server-only maps of explicit imports, one per kind (`src/generated/app-{mcp-tool,search,sync,job,service}-loaders.ts`), in place of template imports, as routes do; one shared loader, with routes, keeps a missing handler apart from one that throws at load; the `ignoreIssue` rule narrows to connectors |
 | [`20261121_1400-global-search.md`](20261121_1400-global-search.md) | Global search: a `search` manifest field with `search/<name>.ts` handlers run read-only through a broker, one `/api/search` endpoint, the ⌘K modal and menu-bar icon, and a Search page in My Account backed by `user_search_preferences` (migration 0003) |
+| [`20261122_1059-connector-loaders.md`](20261122_1059-connector-loaders.md) | A connector's `index` loads through a generated, server-only map of explicit imports (`src/generated/connector-loaders.ts`) in place of a template import, for the app context, Verify connection and webhooks; one loader tells a connector missing from the map from one that throws at load; the `ignoreIssue` rule in `next.config.ts` goes |
 
 ## File naming
 

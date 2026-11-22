@@ -4,6 +4,7 @@
 
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getDecryptedConfig } from "./config";
+import { ConnectorLoadError, constructConnector } from "./loader";
 import { connectorErrorEnvelope } from "./response";
 import type { EnvelopeCategory } from "./response";
 import { isConnectorDisabled } from "./switch";
@@ -75,11 +76,7 @@ export async function runConnectorTest(
       };
     }
 
-    const mod = await import(`@connectors/${connectorName}/index`);
-    const ConnectorClass =
-      mod.default ??
-      mod[Object.keys(mod).find((k) => typeof mod[k] === "function")!];
-    const instance: BaseConnector = new ConnectorClass();
+    const instance: BaseConnector = await constructConnector(connectorName);
 
     if (!supportsTesting(instance)) {
       return {
@@ -120,6 +117,23 @@ export async function runConnectorTest(
     const result = await instance.testConnection();
     return { ok: true, detail: result.detail ?? null };
   } catch (err) {
+    if (err instanceof ConnectorLoadError) {
+      // The log below names only a category, which for this would be
+      // `internal_error`: say what actually happened, and why.
+      console.error(`[connector-test] ${err.message}`, err.cause ?? "");
+      // Registered but not in the map this server was built from: the same
+      // answer as for a connector missing from the registry, above. A module
+      // that throws at load is a bug in it, and keeps the general answer.
+      if (err.reason === "missing") {
+        return {
+          ok: false,
+          category: "unsupported",
+          message: `${manifest.displayName} isn't in this server's connector map.`,
+          adminHint: "Regenerate the registry (npm run registry) and reload.",
+          upstreamRequestId: null,
+        };
+      }
+    }
     // Admin-only surface, so admin-only detail is appropriate here — but it
     // still comes from our own classification, never an upstream body.
     const { body } = connectorErrorEnvelope(err, { isAdmin: true });
