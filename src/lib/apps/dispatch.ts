@@ -65,6 +65,7 @@ import { capRequestBody } from "@/lib/apps/request-body";
 import type { RouteAuth } from "@/lib/apps/types";
 import { buildCsp, cspNonce } from "@/lib/csp";
 import { maintenanceState } from "@/lib/platform/maintenance";
+import { deepFreeze } from "./freeze";
 
 /**
  * Cap request bodies at 27 MB. Routes still validate their own payloads; this is
@@ -471,9 +472,10 @@ async function dispatch({
  * If it needs a role, it needs `session`.
  */
 function withoutAppRoles<
-  T extends { roles: string[]; hasRole: (r: string[]) => boolean },
+  T extends { readonly roles: readonly string[]; readonly hasRole: (r: string[]) => boolean },
 >(user: T): T {
-  return { ...user, roles: [], hasRole: () => false };
+  // Frozen like the user it copies (src/lib/apps/context.ts).
+  return deepFreeze({ ...user, roles: [], hasRole: () => false });
 }
 
 /** Does any declared auth reach callers on this mount? */

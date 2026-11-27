@@ -29,7 +29,18 @@ import { createTelemetryClient, instrumentConnector } from "./telemetry";
 import { getUserAppRole } from "./access";
 import { loadAppEnv } from "./env";
 import { createHttpClient } from "./http";
+import { deepFreeze } from "./freeze";
 import { appRegistrar } from "@/lib/hooks/loader";
+
+/**
+ * The app's registry entry, frozen. Every context hands it over as
+ * `context.manifest`, and it is the same object the platform reads again for
+ * the app's egress, connectors, consent and whether it is global, so an app
+ * must not be able to write to it (./freeze.ts).
+ */
+function registeredManifest(appSlug: string): AppManifest {
+  return deepFreeze(appRegistry.find((a) => a.slug === appSlug)!);
+}
 
 /** One connector's manifest, or undefined if it is not in the registry. */
 function connectorManifest(name: string) {
@@ -71,20 +82,23 @@ export async function buildAppContext(
   appSlug: string,
   dbUser: { id: string; email: string; display_name: string; is_admin: boolean }
 ): Promise<AppContext> {
-  const manifest = appRegistry.find((a) => a.slug === appSlug)!;
+  const manifest = registeredManifest(appSlug);
 
   // Effective role for this app (assigned role, falling back to defaultRole).
   const effectiveRole = await getUserAppRole(dbUser.id, appSlug);
   const roles = effectiveRole ? [effectiveRole] : [];
 
-  const user: AppContextUser = {
+  // Frozen: the services broker reads this object to say who is asking, so an
+  // app that could set `id` or `isAdmin` on it could ask another app's service
+  // as someone else (./freeze.ts).
+  const user: AppContextUser = deepFreeze({
     id: dbUser.id,
     email: dbUser.email,
     displayName: dbUser.display_name,
     isAdmin: dbUser.is_admin,
     roles,
     hasRole: (wanted: string[]) => wanted.some((r) => roles.includes(r)),
-  };
+  });
 
   const registrar = appRegistrar(manifest.slug);
   const containment = await buildContainment(manifest);
@@ -142,7 +156,7 @@ export async function buildAppContext(
 export async function buildPublicAppContext(
   appSlug: string,
 ): Promise<PublicAppContext> {
-  const manifest = appRegistry.find((a) => a.slug === appSlug)!;
+  const manifest = registeredManifest(appSlug);
   const registrar = appRegistrar(manifest.slug);
   const containment = await buildContainment(manifest);
   const connectors = await loadTenantConnectors(
@@ -395,7 +409,7 @@ export async function buildSystemAppContext(
    */
   signal?: AbortSignal,
 ): Promise<SystemAppContext> {
-  const manifest = appRegistry.find((a) => a.slug === appSlug)!;
+  const manifest = registeredManifest(appSlug);
   const registrar = appRegistrar(manifest.slug);
   const containment = await buildContainment(manifest);
   const connectors = await loadTenantConnectors(

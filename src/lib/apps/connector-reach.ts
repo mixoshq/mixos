@@ -27,13 +27,27 @@ import { ConnectorChangesNotAllowedError } from "@/lib/connectors/write-policy";
  *     Also `paginate()`, `initialize()`, `testConnection()` and
  *     `handleWebhook()`, which only the platform calls.
  *
- * Plain values (`name`, `configured`) pass through. A connector an admin
- * turned off arrives as the context builder's stand-in and is handed on as it
- * is: every call on it already fails with the reason that matters.
+ * Two values pass through, `name` and `configured`, and nothing else does.
+ * The connector keeps its decrypted credentials on the instance, in a field
+ * that is protected only to the compiler, so a caller handed the instance, or
+ * a Proxy whose target is the instance, could read them with a property
+ * access, `JSON.stringify`, `Object.entries` or `util.inspect`, and use them
+ * past every declaration. So what a caller gets is a facade: a Proxy over an
+ * empty object with no prototype, holding the connector only in this
+ * function's closure. Its own keys, its prototype and its descriptors are the
+ * empty object's, so nothing that walks the object reaches the connector, and
+ * it can't be written to.
+ *
+ * A connector an admin turned off arrives as the context builder's stand-in
+ * and is handed on as it is: every call on it already fails with the reason
+ * that matters, and it holds no credentials.
  *
  * Kept free of the generated registry so it can be tested on its own: callers
  * pass the declarations in.
  */
+
+/** The members a caller reads as values. Every other non-method reads as undefined. */
+const VALUES: ReadonlySet<string> = new Set(["name", "configured"]);
 
 export interface ReachRules {
   /** May the caller run a method declared `mutates`? */
@@ -53,27 +67,76 @@ export function narrowConnector(
 
   const reads = new Set(declared.filter((m) => !m.mutates).map((m) => m.method));
   const writes = new Set(declared.filter((m) => m.mutates).map((m) => m.method));
+  const callable = (member: string) => reads.has(member) || (rules.writes && writes.has(member));
 
-  return new Proxy(connector, {
-    get(target, prop) {
-      // `target` as the receiver, not the proxy: a connector's getters read
-      // their own private fields, and routing `this` back through the proxy
-      // turns a working getter into a runtime error.
-      const value: unknown = Reflect.get(target, prop, target);
-      if (typeof value !== "function") return value;
+  // Read off the connector with the connector as the receiver: its getters
+  // read its own private fields, and routing `this` through a proxy turns a
+  // working getter into a runtime error.
+  const read = (member: string): unknown => Reflect.get(connector, member, connector);
+
+  // Whether `member` is a method of the connector's, decided from its
+  // descriptor so that asking never runs one of its getters. A method is a
+  // function-valued data property, on the class or, written as an arrow
+  // function, on the instance. With no descriptor anywhere, the member is
+  // read: that is how a facade this function made answers (the MCP path
+  // narrows an app's facade again), and on an instance it is absent anyway.
+  const methodOf = (member: string): ((...a: unknown[]) => unknown) | undefined => {
+    for (let o: object | null = connector; o !== null; o = Reflect.getPrototypeOf(o)) {
+      const d = Reflect.getOwnPropertyDescriptor(o, member);
+      if (d) return "value" in d && typeof d.value === "function" ? d.value : undefined;
+    }
+    const value = read(member);
+    return typeof value === "function" ? (value as (...a: unknown[]) => unknown) : undefined;
+  };
+
+  // One function per member, so `c.listDeals === c.listDeals`.
+  const bound = new Map<string, (...args: unknown[]) => unknown>();
+
+  // Extensible, and never written to: the traps below refuse every write. A
+  // target that couldn't be extended would make `"listDeals" in c` a
+  // TypeError, since a proxy may not report a key its frozen target lacks.
+  const empty: object = Object.create(null);
+
+  return new Proxy(empty, {
+    get(_empty, prop) {
+      // Symbols included: `util.inspect.custom`, `Symbol.toPrimitive` and the
+      // like are the connector's to answer only by declaring a method, which
+      // a symbol can't be.
+      if (typeof prop !== "string") return undefined;
+      if (VALUES.has(prop)) return read(prop);
+
+      const method = methodOf(prop);
       // `toString`, `hasOwnProperty` and the like are Object's, not the
-      // connector's, and string interpolation reaches for them.
-      if (value === Reflect.get(Object.prototype, prop)) return value;
+      // connector's, and string interpolation reaches for them. Called on
+      // the facade, they see the empty object.
+      if (method !== undefined && method === Reflect.get(Object.prototype, prop)) return method;
 
-      if (typeof prop === "string" && (reads.has(prop) || (rules.writes && writes.has(prop)))) {
-        return (...args: unknown[]) => (value as (...a: unknown[]) => unknown).apply(target, args);
+      if (callable(prop) && method !== undefined) {
+        let fn = bound.get(prop);
+        if (!fn) {
+          // Looked up again at call time, as the connector's own code would.
+          fn = (...args: unknown[]) => (read(prop) as (...a: unknown[]) => unknown).apply(connector, args);
+          bound.set(prop, fn);
+        }
+        return fn;
       }
-      const member = String(prop);
-      return () => {
-        throw writes.has(member) ? rules.refuseWrite(member) : rules.refuseUndeclared(member);
-      };
+      if (reads.has(prop) || writes.has(prop) || method !== undefined) {
+        return () => {
+          throw writes.has(prop) ? rules.refuseWrite(prop) : rules.refuseUndeclared(prop);
+        };
+      }
+      // A field: credentials, a token, the manifest. Not the caller's.
+      return undefined;
     },
-  });
+    has(_empty, prop) {
+      return typeof prop === "string" && (VALUES.has(prop) || reads.has(prop) || writes.has(prop));
+    },
+    set: () => false,
+    defineProperty: () => false,
+    deleteProperty: () => false,
+    setPrototypeOf: () => false,
+    preventExtensions: () => false,
+  }) as BaseConnector;
 }
 
 /**

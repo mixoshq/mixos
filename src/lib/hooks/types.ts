@@ -17,23 +17,27 @@ import type { BrandLogo, BrandLogoFilterResult } from "@/lib/branding/types";
 // AppContext — the runtime bag passed to apps, widgets, and hooks
 // ============================================================
 
+/**
+ * Who is calling. The platform hands it over frozen (src/lib/apps/context.ts):
+ * the services broker reads it again to say who is asking another app.
+ */
 export interface AppContextUser {
-  id: string;
-  email: string;
-  displayName: string;
-  isAdmin: boolean;
+  readonly id: string;
+  readonly email: string;
+  readonly displayName: string;
+  readonly isAdmin: boolean;
   /**
    * The user's effective role keys for this app (currently at most one). Drawn
    * from the manifest's declared `roles`; empty when the app declares no roles
    * or the user has none. Role meaning is app-specific.
    */
-  roles: string[];
+  readonly roles: readonly string[];
   /**
    * Returns true if the user holds any of the given role keys for this app.
    * Pure — it does not consider `isAdmin`. An app that wants admins to bypass
    * role checks should write `user.isAdmin || user.hasRole([...])`.
    */
-  hasRole: (roles: string[]) => boolean;
+  readonly hasRole: (roles: string[]) => boolean;
 }
 
 /**

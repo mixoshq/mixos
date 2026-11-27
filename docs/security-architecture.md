@@ -214,8 +214,9 @@ Output:     base64(IV) : base64(AuthTag) : base64(Ciphertext)
 |   3. JSON.parse --> credential object             |
 |   4. new ConnectorClass()                        |
 |   5. instance.initialize(credentials)            |
-|      - Credentials stored as private fields      |
-|   6. Narrow to the declared methods (§16.1)      |
+|      - Credentials kept on the instance          |
+|   6. Hand over a facade: the declared methods,   |
+|      `name` and `configured`, nothing else (§16.1)|
 |   7. Inject into context.connectors              |
 |                                                  |
 |  Instance is STATELESS and REQUEST-SCOPED:       |
@@ -232,7 +233,7 @@ Output:     base64(IV) : base64(AuthTag) : base64(Ciphertext)
 | Credentials in browser JS      | No app code imports a connector at runtime; the build refuses it (§24) |
 | Credentials in API responses   | Connectors are server-only; SDK returns app data only  |
 | Credentials leaked via caching | Connector instances are stateless, never cached        |
-| An app reaching around a connector | The app gets it narrowed to its declared methods; `request()` throws (§16.1) |
+| An app reaching around a connector | The app gets a facade with its declared methods and nothing else: `request()` throws, and no property, `JSON.stringify` or inspection reaches the instance or its credentials (§16.1) |
 | Credentials at rest in DB      | AES-256-GCM with per-record random IV                  |
 | Tampered ciphertext            | GCM authentication tag verified on every decrypt       |
 | Key in source code             | Key loaded from env var at runtime, not committed      |
@@ -1229,6 +1230,12 @@ fixed, admin-configured upstream belongs in a connector instead.
 `context.http` cannot do something an app needs, that is a platform gap to fix,
 not a rule for the app to disclaim.
 
+**The list is the one that was reviewed.** `createHttpClient` checks a frozen
+copy of `egress` taken when the context is built, and the manifest it came from
+is frozen too (§24), so an app can't add a host at runtime. Until this was
+fixed, the client checked the registry's own array, which `context.manifest`
+handed to the app, and `context.manifest.egress.push(…)` widened it.
+
 **Platform code** fetches URLs it did not author in three places, and none goes
 through `context.http`:
 
@@ -1377,13 +1384,28 @@ credentials", and dropping the upstream error body is the base class's job.
 ### 16.1 What an app can reach on a connector
 
 An app is never handed the connector instance. `loadTenantConnectors()` hands it
-the instance narrowed by
-[`src/lib/apps/connector-reach.ts`](../src/lib/apps/connector-reach.ts) to the
+a facade made by
+[`src/lib/apps/connector-reach.ts`](../src/lib/apps/connector-reach.ts): the
 methods the connector's `telemetry` declares, which the build holds to the
-class's public methods. Anything else callable throws, `request()` above all:
-protected to the compiler, reachable with `as any` at runtime, and able to send
-any verb to any path with the connector's credential. So the manifest is the
-whole of what an app can do with a connector.
+class's public methods, and two values, `name` and `configured`. Anything else
+callable throws, `request()` above all: protected to the compiler, reachable
+with `as any` at runtime, and able to send any verb to any path with the
+connector's credential.
+
+Nothing else reads through, because the instance holds the decrypted
+credentials in a field that is protected only to the compiler. The facade is a
+Proxy over an empty object with no prototype, holding the instance only in a
+closure: a field reads as `undefined`, its own keys, descriptors and prototype
+are the empty object's (so `JSON.stringify`, `Object.entries`, a spread and
+`util.inspect` find nothing), and it can't be written to. Before this, the
+narrowing Proxy's target was the instance, and `context.connectors.x.credentials`
+returned the credential set. `src/lib/apps/context-reach.integration.test.ts`
+holds every context an app is handed to this, with a census of everything
+reachable from it.
+
+So, for code that stays within what the scan allows (§24), the manifest is the
+whole of what an app can do with a connector. Code that gets around the scan
+runs in the same process as the instance, and §24 says what that means.
 
 A method declared `mutates` runs only with two keys, each held by someone
 different:
@@ -1949,6 +1971,14 @@ user is re-authorized in the provider's terms rather than inheriting the
 consumer's decision. Calls are **depth-1**: a provider handler cannot chain to
 another provider, so there are no cycles and no impersonation.
 
+**Who is asking is the platform's to say.** The broker reads the acting user
+from the consumer's own `context.user`, which is frozen
+(`src/lib/apps/freeze.ts`), so the consumer can't set another person's id, or
+`isAdmin`, before it asks. It read a writable object until this was fixed, which
+let a consumer ask a provider's `audience: "user"` service as anyone. The
+consumer's declarations come from its registry entry, frozen the same way, so
+it can't add a `consumes` it was never reviewed for either.
+
 On the public surface there is no user, so only `audience: "app"` services are
 reachable — a public consumer route must do its own authorization first.
 
@@ -2071,7 +2101,15 @@ lie outside what syntax shows:
 
 - reaching a privileged object through what `context` hands over. The scan
   cannot see where an object leads, so `context` must carry no privileged
-  references;
+  references. That is held at runtime instead: `context.manifest` and
+  `context.user` are frozen (`src/lib/apps/freeze.ts`), because the platform
+  reads both again (the manifest for the app's egress, connectors, consent and
+  whether it is global; the user for who is asking another app's service, §23),
+  and a connector is a facade (§16.1). `context.http` checks a frozen copy of
+  `egress`. `src/lib/apps/context-reach.integration.test.ts` walks everything
+  reachable from each kind of context (a route's, a public route's, a job's and
+  an MCP tool's) and finds no pool, registry, `process`, connector instance or
+  secret. What a closure holds is out of its sight, and out of the app's;
 - writing to a shared module by an indirect route: an alias of the imported
   binding, an object returned from it, or a prototype reached through an
   instance. Only the direct forms above are refused;

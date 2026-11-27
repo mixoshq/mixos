@@ -10,6 +10,16 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-11-27
+
+- **What `context` hands an app is read-only, and a connector is only its
+  methods.** `context.manifest` and `context.user` are frozen, so a write to
+  either throws, and `AppContextUser`'s fields are `readonly`.
+  `context.connectors.<name>` exposes the connector's declared methods, `name`
+  and `configured`; anything else on it reads as `undefined`, and logging or
+  serializing it shows `{}`. An app that only reads its context is unaffected.
+  See [`docs/apps/api-routes.md`](docs/apps/api-routes.md#using-connectors).
+
 ## 2026-11-21
 
 - **Global search, and a `search` field for apps.** A search icon in the menu

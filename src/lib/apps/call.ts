@@ -56,6 +56,7 @@ import { loadRouteModule } from "@/lib/apps/route-loader";
 import { routeModulePath } from "@/lib/apps/route-modules";
 import { getAppOrigin } from "@/lib/env/origin";
 import { APP_UPDATING_MESSAGE } from "@/lib/platform/maintenance-gate";
+import { deepFreeze } from "./freeze";
 
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 
@@ -174,7 +175,8 @@ export async function callAppRoute<TOut = unknown>(
             // A `signed-in` caller was never granted the app, so it carries no
             // app roles — mirroring the gateway, where handing over the app's
             // defaultRole would make every role gate default-allow.
-            user: { ...base.user, roles: [], hasRole: () => false },
+            // Frozen like the user it copies (./context.ts).
+            user: deepFreeze({ ...base.user, roles: [], hasRole: () => false }),
             auth: resolution.tier,
           }
         : { ...base, auth: resolution.tier };

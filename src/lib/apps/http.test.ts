@@ -247,6 +247,13 @@ test("a host outside egress, or another scheme, is refused before any lookup", a
   await assert.rejects(client.fetch("file:///etc/passwd"), refused(/file: scheme/));
 });
 
+test("the client checks its own copy of egress, so a change to the list it was given widens nothing", async () => {
+  const declared = ["api.example.com"];
+  const client = createHttpClient("acme", declared);
+  declared.push("evil.example.com");
+  await assert.rejects(client.fetch("https://evil.example.com/"), refused(/not allowed to reach evil\.example\.com/));
+});
+
 test("an allowed name that resolves to loopback is refused", async () => {
   const client = createHttpClient("acme", ["localhost"]);
   await assert.rejects(client.fetch("http://localhost/"), refused(/non-public/));

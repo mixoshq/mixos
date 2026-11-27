@@ -68,6 +68,25 @@ const LEDGER = `ledger-${run}`;
 /** Held by everyone, one tool. */
 const ALMANAC = `almanac-${run}`;
 
+/**
+ * The next build's entry for `slug`, with `change`: a new object, as a build
+ * makes one. The entry in place can't be written to once a context has been
+ * built from it, since that freezes it (src/lib/apps/freeze.ts). Swapped into
+ * the fixtures and the registry alike; the function it returns puts the old
+ * entry back in both.
+ */
+function rebuilt(registry: AppManifest[], slug: string, change: Partial<AppManifest>): () => void {
+  const before = APPS.find((a) => a.slug === slug)!;
+  const swap = (entry: AppManifest) => {
+    for (const list of [APPS, registry] as AppManifest[][]) {
+      const at = list.findIndex((a) => a.slug === slug);
+      if (at >= 0) list[at] = entry;
+    }
+  };
+  swap({ ...before, ...change });
+  return () => swap(before);
+}
+
 const STUBS = new Map<string, string>([
   [
     "@/lib/auth/session",
@@ -519,12 +538,11 @@ describe("per-tool MCP switches", { skip }, () => {
 
   test("an app that stops being global takes its tools from everyone not granted it, a kept role included", async () => {
     signIn("admin");
-    const almanac = APPS.find((a) => a.slug === ALMANAC)!;
     // A role from while it was global, as the release step leaves it.
     await sql`insert into public.user_app_grants (user_id, app_slug, role_only) values (${ids.alice}, ${ALMANAC}, true)`;
     assert.deepEqual(await call(`${ALMANAC}__glance`), { ok: { from: "glance" } });
 
-    almanac.global = false;
+    const restore = rebuilt(p.registry.appRegistry, ALMANAC, { global: false });
     try {
       assert.deepEqual(await listed(), []);
       assert.deepEqual(await call(`${ALMANAC}__glance`), { error: `[FORBIDDEN_USER] You don't have access to "Almanac".` });
@@ -534,7 +552,7 @@ describe("per-tool MCP switches", { skip }, () => {
       assert.deepEqual(await p.grants.grantAppAccess(ALMANAC, ids.alice), { ok: true, changed: true });
       assert.deepEqual(await call(`${ALMANAC}__glance`), { ok: { from: "glance" } });
     } finally {
-      almanac.global = true;
+      restore();
     }
   });
 });
