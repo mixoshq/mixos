@@ -47,7 +47,7 @@ next year.
 
 | Tab | Built from | You write |
 | --- | --- | --- |
-| **Details** | the credential row (configured, last verified), the admin switch, other apps' manifests | *nothing structural* |
+| **Details** | the credential row (configured, last verified), the admin switch, Allow changes, other apps' manifests and switches, the last 30 days of `telemetry_events` | *nothing structural* |
 | **Configure** | the platform's save / authorize / verify steps, plus your provider-side steps | **`setup`** |
 | **Methods** | `telemetry`: each method, its operation and description, whether it changes data, and the scopes it needs with the grant's verdict on each | **`telemetry[].scopes`** |
 | **Scopes** | `auth.scopes`, checked against the grant, citing `auth.scopesUrl` | **`auth.scopesUrl`** |
@@ -70,8 +70,9 @@ Plus `icon` and `description`, which are content rather than design.
 Everything else on all five tabs is derived from data the platform already
 holds. **Usage Logs takes no authoring at all** — declare your methods in
 `telemetry` (which invariant 16 requires anyway) and the log populates itself.
-**Details takes none either**: dependency counts come from other apps'
-manifests, status from the credential row. **Scopes** lists `auth.scopes`,
+**Details takes none either**: its Reach section comes from other apps'
+manifests, their switches and the recorded calls, status from the credential
+row. **Scopes** lists `auth.scopes`,
 which `scripts/check-scopes.ts` writes from your `auth.scopesUrl`. Where the
 provider grants one scope as part of another, add `includes` to the broader
 entry by hand (see [Scopes](scopes.md#a-scope-that-includes-others)), or a
@@ -92,6 +93,45 @@ Tabs are **never filtered or disabled**: all five render for every connector,
 and one with nothing to show says why in words — a public API's Scopes tab, a
 log no app has written to yet. A disabled tab poses a question ("why can't I
 click that?") the tab bar has no room to answer.
+
+### The Reach section
+
+The Details tab's **Reach** section answers two questions an admin asks before
+changing a connector, and one they ask during an incident: which apps does
+this affect, and what could each one do with it? For every app that declares
+the connector, required or optional:
+
+- whether it runs. An inactive app runs none of its code, so it calls nothing,
+  and it is listed last with an **Inactive** pill, since activating it hands
+  it what its row lists;
+- what MixOS lets it call: every declared read, and every declared write only
+  when its entry asks for `"access": "write"` *and* an admin has allowed
+  changes. Its row carries a **Changes data** pill then, and **Read-only
+  here** when it asks and the connector is read-only. These are the rules the
+  app's facade enforces
+  ([`connector-reach.ts`](../../src/lib/apps/connector-reach.ts)), applied in
+  [`src/lib/connectors/reach.ts`](../../src/lib/connectors/reach.ts);
+- what it called in the last 30 days, method by method, with failures, from
+  `telemetry_events`. A method it called that it can't call now says so. Calls
+  from an app that no longer declares the connector are listed beneath.
+
+The tile carries the summary: "Used by 3 active apps · 1 can change data".
+
+The section shows what MixOS allows, not what the provider does: that is the
+credential's scopes, on the Methods and Scopes tabs. It is shown before the
+credentials are saved too, since saving them is what hands the connector to
+these apps.
+
+Two things it never does, because both would show less reach than there is:
+
+- **Guess that an app is off.** When the apps' switches can't be read, every
+  app counts as running, and the section says so.
+- **Say "no calls" when it doesn't know.** The calls are streamed in after the
+  page, from one query for every connector, and a table that can't be read
+  reads "Couldn't read which methods it called."
+
+The calls are evidence, not a full account: a call the facade refused never
+reached the connector, so it isn't recorded, and recording is best-effort.
 
 ---
 

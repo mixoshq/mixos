@@ -9,6 +9,7 @@ import { Plug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status";
 import { truncateWords, TILE_DESCRIPTION_WORDS } from "@/lib/apps/display";
+import { describeReach } from "@/lib/connectors/reach";
 import type { ConnectorConfigState } from "@/lib/connectors/status";
 import type { ConnectorWithStatus } from "./connector-registry-list";
 import { CARD_SHELL } from "@/components/ui/card";
@@ -71,6 +72,7 @@ export default function ConnectorTile({
 }) {
   const { state } = connector;
   const disabled = connector.disabledAt !== null;
+  const reach = describeReach(connector.reach);
 
   return (
     <div
@@ -148,6 +150,10 @@ export default function ConnectorTile({
           )}
         </div>
       )}
+
+      {/* Who it reaches, at a glance: the Details tab's Reach section has
+          each app. Nothing when no app declares it. */}
+      {reach && <p className="mt-3 text-xs text-muted-foreground">{reach}</p>}
 
       {/* mt-auto pins the actions and the provenance band to the bottom, so
           tiles of differing height still line their buttons up across the

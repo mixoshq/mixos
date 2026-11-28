@@ -14,6 +14,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ConnectorConfigureDialog from "./connector-configure-dialog";
 import type { ConnectorWithStatus } from "./connector-registry-list";
+import { connectorReach } from "@/lib/connectors/reach";
 
 /** The text a reader sees, tags and entities aside. */
 const text = (html: string) =>
@@ -25,6 +26,17 @@ const text = (html: string) =>
     .trim();
 
 function connector(over: Partial<ConnectorWithStatus> = {}): ConnectorWithStatus {
+  const telemetry = over.telemetry ?? [
+    { method: "listDeals", operation: "GET /deals", description: "Listed deals" },
+    { method: "createDeal", operation: "POST /deals", description: "Created a deal", mutates: true },
+  ];
+  const reach = connectorReach({
+    connector: { name: "crm", telemetry },
+    apps: [{ slug: "pipeline", name: "Pipeline", connectorRequirements: [{ name: "crm", optional: false, access: "write" }] }],
+    active: { pipeline: false },
+    disabled: false,
+    changesAllowed: over.changesAllowed ?? false,
+  });
   return {
     name: "crm",
     displayName: "Acme CRM",
@@ -43,6 +55,7 @@ function connector(over: Partial<ConnectorWithStatus> = {}): ConnectorWithStatus
     access: { granted: [], grantedKnown: false, log: [] },
     scopeStatus: [],
     dependents: { required: ["Pipeline"], optional: [], writes: ["Pipeline"] },
+    reach,
     disabledAt: null,
     replacement: null,
     changesAllowed: false,

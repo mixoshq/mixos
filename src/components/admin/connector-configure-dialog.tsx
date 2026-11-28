@@ -39,7 +39,9 @@ import {
   writeMethods,
   writeScopes,
 } from "@/lib/connectors/write-policy";
+import type { ObservedCalls } from "@/lib/connectors/reach";
 import type { ConnectorWithStatus } from "./connector-registry-list";
+import ConnectorReachSection from "./connector-reach-section";
 
 type DialogTab = "details" | "configure" | "methods" | "scopes" | "logs";
 
@@ -61,6 +63,8 @@ interface Props {
   changesAction: (connectorName: string, allowed: boolean) => Promise<void>;
   /** Opens the Remove dialog in this one's place, from the footer's Remove. */
   onRemove?: () => void;
+  /** What apps called through each connector lately, for the Reach section; the page streams it. */
+  observed?: Promise<ObservedCalls | null>;
 }
 
 /** "in 52 minutes" / "3 days ago" — enough for an admin to judge freshness. */
@@ -629,6 +633,7 @@ export default function ConnectorConfigureDialog({
   testAction,
   changesAction,
   onRemove,
+  observed,
 }: Props) {
   const [tab, setTab] = useState<DialogTab>(initialTab);
   const [saving, startSave] = useTransition();
@@ -636,7 +641,6 @@ export default function ConnectorConfigureDialog({
   const [testing, startTest] = useTransition();
   const [outcome, setOutcome] = useState<ConnectorTestOutcome | null>(null);
   const [copied, setCopied] = useState(false);
-  const [showDependents, setShowDependents] = useState(false);
   /**
    * Which step the admin has navigated to, or `undefined` to follow the
    * checklist — the first unfinished step. Clearing it after a successful
@@ -1223,9 +1227,6 @@ export default function ConnectorConfigureDialog({
   /** A public API: no credential, so no permissions and no scope page. */
   const authenticates = (connector.auth?.strategy ?? "none") !== "none";
   const dependentsText = describeDependents(connector.dependents);
-  const hasDependents =
-    connector.dependents.required.length > 0 ||
-    connector.dependents.optional.length > 0;
 
   const tabs: Array<{ key: DialogTab; label: string }> = [
     { key: "details", label: "Details" },
@@ -1413,58 +1414,6 @@ export default function ConnectorConfigureDialog({
               </dl>
             )}
 
-            {/* ── Who is waiting on this ──────────────────────────────────── */}
-            {credentialsSaved && (
-              <section>
-                <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  Apps using this connector
-                </h3>
-                <p className="mt-1 text-sm text-foreground">{dependentsText}</p>
-                {/*
-                  Counts first, names on request. Someone about to replace a
-                  client secret needs to know what they are about to affect, and
-                  "4 apps" does not tell them that — but four names inline on
-                  every connector would bury the rest of the tab.
-                */}
-                {hasDependents && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setShowDependents((v) => !v)}
-                      aria-expanded={showDependents}
-                      className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary underline underline-offset-2 hover:no-underline"
-                    >
-                      {showDependents ? "Hide" : "Show"} apps
-                    </button>
-                    {showDependents && (
-                      <dl className="mt-2 space-y-1 text-sm">
-                        {connector.dependents.required.length > 0 && (
-                          <div className="flex flex-wrap gap-x-2">
-                            <dt className="text-muted-foreground">
-                              Required by
-                            </dt>
-                            <dd className="text-foreground">
-                              {connector.dependents.required.join(" · ")}
-                            </dd>
-                          </div>
-                        )}
-                        {connector.dependents.optional.length > 0 && (
-                          <div className="flex flex-wrap gap-x-2">
-                            <dt className="text-muted-foreground">
-                              Optional for
-                            </dt>
-                            <dd className="text-foreground">
-                              {connector.dependents.optional.join(" · ")}
-                            </dd>
-                          </div>
-                        )}
-                      </dl>
-                    )}
-                  </>
-                )}
-              </section>
-            )}
-
             {/* ── What apps can call ───────────────────────────────────────
                 How many methods, and how many change data: everything an app
                 can reach through this connector, and the only things. Each one,
@@ -1494,6 +1443,25 @@ export default function ConnectorConfigureDialog({
                 </button>
               )}
             </section>
+
+            {/* ── Who can reach it ─────────────────────────────────────────
+                Every app that declares it, whether it runs, what MixOS lets
+                it call and what it called lately: what a change here
+                affects, and what one of them could do with it. Shown before
+                the credentials are saved too, since saving them is what
+                hands it to these apps. Last, because it lists every app:
+                the one-line sections above stay in view however many
+                there are. */}
+            <ConnectorReachSection
+              reach={connector.reach}
+              connectorName={connector.name}
+              observed={observed}
+              declaredWrites={writes.length}
+              disabled={disabled}
+              userScoped={connector.userScoped === true}
+              authenticates={authenticates}
+              writeGrantMissing={reconnectForWrites && connector.userScoped !== true}
+            />
           </div>
         )}
 
