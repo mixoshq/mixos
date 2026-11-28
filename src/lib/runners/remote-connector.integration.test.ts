@@ -54,7 +54,13 @@ describe("a connector in its runner, through the platform", { skip }, () => {
   let server: http.Server;
   let bundles = "";
   const seen: string[] = [];
-  let p: Record<string, any>;
+  let p: typeof import("@/generated/connector-registry") &
+    typeof import("@/generated/app-registry") &
+    typeof import("@/lib/connectors/config") &
+    typeof import("@/lib/connectors/test-connection") &
+    typeof import("@/lib/apps/context") &
+    typeof import("./remote-connector") &
+    typeof import("./isolation-audit") & { platformSql: Sql };
 
   before(async () => {
     server = http.createServer((req, res) => {
@@ -86,10 +92,10 @@ describe("a connector in its runner, through the platform", { skip }, () => {
       ...(await import("@/lib/apps/context")),
       ...(await import("./remote-connector")),
       ...(await import("./isolation-audit")),
-      platformSql: (await import("@/lib/db/client")).sql,
+      platformSql: (await import("@/lib/db/client")).sql as unknown as Sql,
     };
     const manifest = JSON.parse(fs.readFileSync(path.join(REPO, "connectors", KEYED, "connector.json"), "utf8")) as ConnectorManifest;
-    p.connectorRegistry.push({ ...manifest, name: KEYED });
+    p.connectorRegistry.push({ ...manifest, name: KEYED } as never);
     const { buildConnectorBundle } = await import("../../../scripts/build-runner-bundles");
     bundles = fs.mkdtempSync(path.join(os.tmpdir(), "mixos-bundles-"));
     p.useRunnerBundleRoot(bundles);
@@ -131,7 +137,7 @@ describe("a connector in its runner, through the platform", { skip }, () => {
   });
 
   test("an app's declared read runs in the runner, through the facade, and is recorded", async () => {
-    const ctx = (await quietly(() => p.buildSystemAppContext(APP))) as { connectors: Record<string, unknown> };
+    const ctx = (await quietly(() => p.buildSystemAppContext(APP))) as unknown as { connectors: Record<string, unknown> };
     const items = (ctx.connectors[KEYED] as Items).listItems();
     assert.deepEqual((await items).map((i) => i.id), ["1"]);
     assert.ok(seen.includes("GET /items"));
@@ -147,14 +153,14 @@ describe("a connector in its runner, through the platform", { skip }, () => {
   });
 
   test("a write the app didn't ask for is refused by the platform, and never reaches the runner", async () => {
-    const ctx = (await quietly(() => p.buildSystemAppContext(APP))) as { connectors: Record<string, unknown> };
+    const ctx = (await quietly(() => p.buildSystemAppContext(APP))) as unknown as { connectors: Record<string, unknown> };
     const before = seen.length;
     await assert.rejects(async () => (ctx.connectors[KEYED] as Items).createItem({ name: "x" }), /doesn't ask for "access": "write"/);
     assert.equal(seen.slice(before).filter((s) => s.startsWith("POST")).length, 0);
   });
 
   test("Verify connection runs the connector's testConnection in its runner", async () => {
-    const result = (await quietly(() => p.runConnectorTest(KEYED, {}))) as { ok: boolean };
+    const result = (await quietly(() => p.runConnectorTest(KEYED, {}))) as unknown as { ok: boolean };
     assert.equal(result.ok, true);
     assert.ok(seen.includes("GET /me"));
   });
