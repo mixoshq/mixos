@@ -12,6 +12,15 @@ just pulled.
 
 ## 2026-11-28
 
+- **Connector calls are kept for 90 days, not forever.** The cron tick now
+  deletes connector telemetry older than `MIXOS_CONNECTOR_TELEMETRY_DAYS`: 90
+  unless set, with no upper limit, and `0` keeps it all, as before. It is never
+  read as fewer than 90, because unused write access expires after 90 days.
+  **On upgrade**, the first ticks delete what's older than 90 days, a batch at
+  a time; set the variable before upgrading to keep more. Migration 0010 adds
+  the index the prune reads. See
+  [`docs/hosting/install.md`](docs/hosting/install.md#step-4-set-the-environment).
+
 - **Labels you can check, a Reach page, and an escape catalogue.** Apps carry
   labels computed from what is enforced (Stays on this instance, Read-only,
   Its own data only, No public routes, Runs in the server process), each with

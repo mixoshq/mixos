@@ -68,6 +68,7 @@ import {
   missingPlatformKeys,
 } from "../src/lib/env/keys";
 import { flagProblems, releaseChannelProblem } from "../src/lib/repository/policy";
+import { connectorTelemetryProblem } from "../src/lib/apps/telemetry-retention";
 import { seedAdmin } from "./admin-seed";
 import { migrateAppSchemas } from "./app-migrations";
 import { migratePlatform } from "./platform-migrations";
@@ -118,6 +119,14 @@ function reportMissingConfiguration(): void {
   if (channel) {
     console.warn("\nA release channel that is not stable or prerelease:");
     console.warn(`  - ${channel}`);
+  }
+
+  // Raised to 90 days, or nothing deleted until it can be read: either way not
+  // what whoever typed it meant.
+  const retention = connectorTelemetryProblem();
+  if (retention) {
+    console.warn("\nHow long connector calls are kept:");
+    console.warn(`  - ${retention}`);
   }
 }
 

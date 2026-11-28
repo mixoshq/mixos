@@ -65,6 +65,7 @@ services:
       # MIXOS_RELEASE_CHANNEL=prerelease adds prereleases to the release notice.
       - MIXOS_UPDATE_CHECK=${MIXOS_UPDATE_CHECK:-}
       - MIXOS_RELEASE_CHANNEL=${MIXOS_RELEASE_CHANNEL:-}
+      - MIXOS_CONNECTOR_TELEMETRY_DAYS=${MIXOS_CONNECTOR_TELEMETRY_DAYS:-}
       # Who owns the checkout, on Linux and in WSL, so the dev server writes it
       # as them rather than as root — see scripts/container-dev.sh. Empty on
       # macOS, where the container stays root as it always has.
@@ -192,6 +193,7 @@ services:
       - MIXOS_REPOSITORY_URL=${MIXOS_REPOSITORY_URL:-}
       - MIXOS_UPDATE_CHECK=${MIXOS_UPDATE_CHECK:-}
       - MIXOS_RELEASE_CHANNEL=${MIXOS_RELEASE_CHANNEL:-}
+      - MIXOS_CONNECTOR_TELEMETRY_DAYS=${MIXOS_CONNECTOR_TELEMETRY_DAYS:-}
       # As on app-dev: the app's origin follows the port it is published on.
       - NEXTAUTH_URL=http://localhost:${MIXOS_PORT:-3000}
     networks:

@@ -1016,7 +1016,9 @@ available, and state that Vercel installs stay in-process.
 
 **Decision for you:** pruning `connector` rows at 90 days changes today's "kept
 forever". `app`, `mcp` and `service` rows stay as they are, per the comment at
-`telemetry.ts:196-203`.
+`telemetry.ts:196-203`. *(Decided 2026-11-28: kept. Changed later the same day:
+pruned at `MIXOS_CONNECTOR_TELEMETRY_DAYS`, 90 unless set, never fewer, and
+none for 0; see `src/lib/apps/telemetry-retention.ts`.)*
 
 **Fails open, deliberately.** Recording is best-effort, so a telemetry failure
 never fails a call, and the detector never deactivates on its own. This is a
@@ -1049,7 +1051,8 @@ model's "compromised app code" row.
 **Effort:** L, 5–8 days.
 
 **As built** (2026-11-28), with the decisions: connector rows kept, and no
-automatic deactivation.
+automatic deactivation. Connector rows have since been pruned at
+`MIXOS_CONNECTOR_TELEMETRY_DAYS` (migration 0010).
 
 - **Recorded refusals:** the facade (`undeclared`, `write-not-asked`,
   `write-not-allowed`), the route's budget (`budget`) and the disabled stand-in
@@ -1262,7 +1265,9 @@ per app. Audited as `connector.app.access`.
 4. **Unused write access expires.**
    - The rule: if an app hasn't made a successful call to a `mutates` method on a
      connector in 90 days, its write toggle for that connector is turned off.
-     Connector telemetry is kept forever (decision), so the history is there.
+     Connector telemetry is kept at least 90 days
+     (`MIXOS_CONNECTOR_TELEMETRY_DAYS` is never read as fewer), so the history
+     is there.
    - Its admins see a notice, and it is audited as `app.capability.expired`.
      Turning it back on is one click.
    - Runs in the cron tick, after Item 6's detector.
@@ -1540,6 +1545,9 @@ roughly 15–25, and 5b and 7b implementation, if approved, another 20–30.
   active Registry app needs a review after the upgrade (fail closed).
 - **Item 6:** connector telemetry is **not** pruned, and stays kept forever as
   today. Only what Item 6 adds is bounded: egress rows and anomaly rows.
+  *Changed 2026-11-28: connector rows are pruned at
+  `MIXOS_CONNECTOR_TELEMETRY_DAYS`, 90 days unless set, never fewer, and none
+  for 0.*
 - **This file:** moves to `docs/plans/` once it is safe to commit, after Item 0
   ships.
 - **Direction for 5b and 7–10** (second round): see §10. Items 7–10 are added.
