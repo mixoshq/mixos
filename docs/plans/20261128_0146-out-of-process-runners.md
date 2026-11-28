@@ -1,7 +1,7 @@
 # Registry apps and connectors out of process (design only)
 
-**Status:** proposed, 28 November 2026. A design document, waiting for your
-decisions (below). Nothing here is built. It is Items 5b and 7b of
+**Status:** approved, 28 November 2026, with the recommended answer to each
+decision (below). Being built, in the order at the end. It is Items 5b and 7b of
 [`20261127_1649-runtime-isolation-hardening.md`](20261127_1649-runtime-isolation-hardening.md),
 with T3b and T3c of
 [`20261128_0128-secrets-out-of-process.md`](20261128_0128-secrets-out-of-process.md),
@@ -172,7 +172,18 @@ What it leaves:
 - **Build:** Registry app and connector code is built into a separate output
   that runners load, and left out of the server bundle on the isolated tier.
 
-## Decisions for you
+## Decisions (28 November 2026)
+
+Each was taken as recommended:
+
+- **1 (a):** a Registry app's pages must be client pages on the isolated tier.
+- **2:** Node's permission model, with an empty environment. The image moves
+  to Node 26, the current LTS.
+- **3:** one runner per Registry app and one per connector.
+- **4:** on by default where the tier exists, with `MIXOS_ISOLATION=off` for an
+  operator who must, audited and shown on the admin pages.
+
+The options, as they were put:
 
 1. **Server pages in Registry apps:** (a) refused on the isolated tier, client
    pages only (recommended); (b) allowed, running in-process and labelled

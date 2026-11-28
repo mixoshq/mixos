@@ -1,9 +1,11 @@
 # Secrets out of the app process (design only)
 
-**Status:** proposed, 28 November 2026. A design document. Nothing here is
-built. It is Item 4's T3 in
+**Status:** decided, 28 November 2026: T3a isn't built, and T3b and T3c are
+the runners of
+[`20261128_0146-out-of-process-runners.md`](20261128_0146-out-of-process-runners.md),
+approved the same day. Nothing here is built on its own. It is Item 4's T3 in
 [`20261127_1649-runtime-isolation-hardening.md`](20261127_1649-runtime-isolation-hardening.md)
-§7, and waits for a decision.
+§7.
 
 **Scope:** platform. Where the server's keys, the database password and
 connector credentials live, relative to the code of the apps it runs.
