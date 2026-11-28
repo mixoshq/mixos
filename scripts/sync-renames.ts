@@ -94,6 +94,8 @@ const APP_SLUG_TABLES = [
   "app_activity_seen",
   "app_anomalies",
   "connector_app_access",
+  "app_capability_approvals",
+  "app_capability_denials",
 ] as const;
 
 /** The telemetry an app is the source of (delete-data.ts counts the same). */

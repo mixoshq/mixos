@@ -8,6 +8,7 @@ import { appRegistry } from "@/generated/app-registry";
 import { IS_GRANT_SQL } from "@/lib/apps/grant-rule";
 import { identityDetails, type IdentityDetails } from "@/lib/repository/identity";
 import { assertReviewedForActivation } from "./app-review";
+import { approveOnActivation } from "./capability-approvals";
 
 function getGlobalAppSlugs(): string[] {
   return appRegistry.filter((a) => a.global).map((a) => a.slug);
@@ -252,6 +253,9 @@ export async function setAppActive(
     { onConflict: "slug" },
   );
   if (error) throw new Error(`Failed to update ${slug}: ${error.message}`);
+  // Activating approves what the app asks for now (./capability-approvals.ts):
+  // the release step re-prompts only for what it asks for beyond that.
+  if (isActive) await approveOnActivation(slug, null);
   return confirmed;
 }
 

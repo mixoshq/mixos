@@ -11,6 +11,7 @@ import { pruneRateBuckets } from "@/lib/rate-limit";
 import { pruneUnlockFailures } from "@/lib/apps/unlock-rate-limit";
 import { pruneEgressTelemetry, pruneRouteTelemetry } from "@/lib/apps/telemetry";
 import { pruneAcknowledgedAnomalies, runDetection, type DetectionOutcome } from "@/lib/apps/detection";
+import { expireUnusedWrites, type ExpiredWrite } from "@/lib/apps/capability-approvals";
 import { pruneWebhookEvents } from "@/lib/connectors/webhook";
 import { runReleaseCheck, type ReleaseCheckOutcome } from "@/lib/platform/release-check";
 import { recordThisBuild } from "@/lib/platform/this-build";
@@ -127,6 +128,15 @@ export async function GET(request: NextRequest) {
     console.error("[cron] detection failed:", err);
     detection = "error";
   }
+  // Write access an app hasn't used in 90 days, taken away (Item 8), after
+  // detection, in a catch of its own.
+  let expiredWrites: ExpiredWrite[] | "error";
+  try {
+    expiredWrites = await expireUnusedWrites();
+  } catch (err) {
+    console.error("[cron] write expiry failed:", err);
+    expiredWrites = "error";
+  }
 
   return NextResponse.json({
     ok: true,
@@ -136,6 +146,7 @@ export async function GET(request: NextRequest) {
     prunedEgressEvents,
     prunedAnomalies,
     detection,
+    expiredWrites,
     prunedUnlockFailures,
     prunedWebhookEvents,
     buildSeen,

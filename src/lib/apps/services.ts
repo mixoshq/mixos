@@ -50,6 +50,7 @@ export type ServiceErrorCode =
   | "NOT_EXPOSED" // provider doesn't provide this service
   | "NOT_DECLARED" // consumer didn't declare the dependency
   | "FORBIDDEN" // provider's consumers allowlist excludes the caller
+  | "NOT_ALLOWED" // an admin turned this consumed service off for the caller (Item 8)
   | "PROVIDER_INACTIVE" // an admin has switched the provider app off
   | "PROVIDER_UPDATING" // the provider's own migrations are behind this build
   | "NO_USER" // audience "user" but no acting user (job/public context)
@@ -79,6 +80,12 @@ interface ServicesClientDeps {
    * cannot write by asking another app to.
    */
   readOnly?: boolean;
+  /**
+   * The consumed services an admin turned off for the caller, as
+   * `<provider>/<service>` (src/lib/apps/capability-approvals.ts), or null
+   * when that couldn't be read, which turns every one off.
+   */
+  denied?: ReadonlySet<string> | null;
 }
 
 export function createServicesClient(deps: ServicesClientDeps): ServicesClient {
@@ -129,6 +136,14 @@ async function runServiceRequest(
     throw new ServiceRequestError(
       "NOT_DECLARED",
       `"${callerSlug}" has not declared consuming "${providerSlug}:${serviceName}".`,
+    );
+  }
+
+  // An admin turned it off for this app, or that couldn't be read.
+  if (deps.denied === null || deps.denied?.has(`${providerSlug}/${serviceName}`)) {
+    throw new ServiceRequestError(
+      "NOT_ALLOWED",
+      `An administrator turned off "${providerSlug}:${serviceName}" for "${callerSlug}".`,
     );
   }
 

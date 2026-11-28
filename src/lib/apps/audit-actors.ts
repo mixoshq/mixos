@@ -30,6 +30,9 @@
 /** The release step's name in the log. */
 export const RELEASE_STEP_ACTOR = "release-step";
 
+/** The scheduler tick's name in the log, for what it does by itself (an expired write, Item 8). */
+export const SCHEDULER_ACTOR = "scheduler";
+
 /** What every name the CLI writes starts with. */
 export const CLI_ACTOR_PREFIX = "cli:";
 
@@ -46,5 +49,5 @@ export function cliActorName(user: string | undefined, hostname: string | undefi
 
 /** Whether a row's actor is one no sign-in checked: the CLI's or the release step's. */
 export function isUnverifiedActor(actorEmail: string): boolean {
-  return actorEmail.startsWith(CLI_ACTOR_PREFIX) || actorEmail === RELEASE_STEP_ACTOR;
+  return actorEmail.startsWith(CLI_ACTOR_PREFIX) || actorEmail === RELEASE_STEP_ACTOR || actorEmail === SCHEDULER_ACTOR;
 }

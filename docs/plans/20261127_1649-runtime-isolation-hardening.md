@@ -1295,6 +1295,22 @@ A platform migration. Backfill:
 
 **Effort:** M–L, 5–7 days.
 
+**As built** (2026-11-28).
+
+- **Local apps: flag only,** the plan's default, since the decision is open.
+- **Activation is approval:** `setAppActive` records the current set, so a
+  Registry app switched off for growth is approved by activating it (after
+  5a's review, whose dialog leads with what is new).
+- **Kinds** as planned, plus `search` and `global`; `optional-connector` is a
+  kind of its own, since it is the one connector kind that can be turned off.
+- **Denials** fail closed: unreadable turns all four deniable kinds off.
+  Consumed services answer a new `NOT_ALLOWED` (503).
+- **Expiry reuses 7a:** it sets "Can't change data" with `expired_at`, so the
+  way back is the Reach section's "Remove its limits", and setting a limit
+  clears `expired_at`. Audited as a new `scheduler` actor, labelled unverified.
+- **The shared queries** are in `capability-store.ts`, so the release step's
+  bundle carries no request pool.
+
 ---
 
 ## 13. Item 9: Trust you can check
@@ -1464,6 +1480,7 @@ None.
 8. **Item 7a.** Per-app narrowing; builds on 3a's Reach section. *In review:*
    migration 0008, with the departures under its "As built".
 9. **Item 8.** Capability approvals; builds on 5a and 7a. Expiry uses Item 6.
+   *In review:* migration 0009, with the departures under its "As built".
 10. **Item 9.** Labels, the Reach page and the escape suite. The suite starts
     earlier: Item 2's PR seeds `tests/escapes/` with Item 0's and its own cases,
     and each later item adds to it.

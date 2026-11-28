@@ -13,6 +13,7 @@ import type { BaseConnector } from "@/lib/connectors/types";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { getAppNarrowings } from "@/lib/connectors/app-access";
+import { getDeniedKeys } from "./capability-approvals";
 import type { AppNarrowing } from "@/lib/connectors/reach";
 import {
   getAppCredentialRows,
@@ -81,14 +82,40 @@ function telemetryClientFor(manifest: AppManifest, userId: string | null) {
  * bounded by the hosts it declared. Both are `[]`/`null` by default — an app
  * that asked for neither can reach neither.
  */
-async function buildContainment(manifest: AppManifest, userId: string | null = null) {
+async function buildContainment(manifest: AppManifest, userId: string | null, denials: Denials) {
+  // A host an admin turned off for this app (./capability-approvals.ts) is
+  // left out, so context.http refuses it as it would one never declared.
+  const egress = (manifest.egress ?? []).filter((h) => !denied(denials, "egress", h.toLowerCase()));
   return {
     env: await loadAppEnv(manifest.slug, manifest.env ?? []),
-    http:
-      (manifest.egress ?? []).length > 0
-        ? createHttpClient(manifest.slug, manifest.egress, { userId })
-        : null,
+    http: (manifest.egress ?? []).length > 0 ? createHttpClient(manifest.slug, egress, { userId }) : null,
   };
+}
+
+/**
+ * The capabilities an admin turned off for an app (./capability-approvals.ts),
+ * read once per context: a set of keys, or null when they couldn't be read,
+ * which turns every one that can be turned off off. Fails closed.
+ */
+type Denials = ReadonlySet<string> | null;
+
+async function readDenials(slug: string, logTag: string): Promise<Denials> {
+  try {
+    return await getDeniedKeys(slug);
+  } catch (err) {
+    console.error(`[${logTag}] could not read what an admin turned off for this app, so all of it is off:`, err);
+    return null;
+  }
+}
+
+function denied(denials: Denials, kind: string, capability = ""): boolean {
+  return denials === null || denials.has(`${kind}:${capability}`);
+}
+
+/** The consumed services turned off, as `<provider>/<service>`, for the services broker. */
+function deniedServices(denials: Denials): ReadonlySet<string> | null {
+  if (denials === null) return null;
+  return new Set([...denials].filter((k) => k.startsWith("consumes:")).map((k) => k.slice("consumes:".length)));
 }
 
 export async function buildAppContext(
@@ -114,7 +141,8 @@ export async function buildAppContext(
   });
 
   const registrar = appRegistrar(manifest.slug);
-  const containment = await buildContainment(manifest, dbUser.id);
+  const denials = await readDenials(manifest.slug, "buildAppContext");
+  const containment = await buildContainment(manifest, dbUser.id, denials);
 
   // Initialize declared connectors: the admin-configured credentials in
   // `connector_configs`, shared by every user, or for a `userScoped` connector
@@ -125,20 +153,21 @@ export async function buildAppContext(
     manifest,
     "buildAppContext",
     dbUser.id,
+    denials,
   );
 
   // Create scoped DB if app declares database support
   const db = manifest.database ? createScopedClient(appSlug) : null;
 
-  // Web Push sender if the app declares the notifications capability.
-  const notifications = manifest.notifications
-    ? createNotificationsClient(appSlug)
-    : null;
+  // Web Push sender if the app declares the notifications capability, and an
+  // admin hasn't turned it off.
+  const notifications =
+    manifest.notifications && !denied(denials, "notifications") ? createNotificationsClient(appSlug) : null;
 
   // Cross-app data requests, only when the app declares dependencies.
   const services =
     manifest.consumes.length > 0
-      ? createServicesClient({ callerSlug: appSlug, actingUser: user })
+      ? createServicesClient({ callerSlug: appSlug, actingUser: user, denied: deniedServices(denials) })
       : null;
 
   const context: AppContext = {
@@ -171,18 +200,20 @@ export async function buildPublicAppContext(
 ): Promise<PublicAppContext> {
   const manifest = registeredManifest(appSlug);
   const registrar = appRegistrar(manifest.slug);
-  const containment = await buildContainment(manifest);
+  const denials = await readDenials(manifest.slug, "buildPublicAppContext");
+  const containment = await buildContainment(manifest, null, denials);
   const connectors = await loadTenantConnectors(
     manifest,
     "buildPublicAppContext",
     null,
+    denials,
   );
   const db = manifest.database ? createScopedClient(appSlug) : null;
   // Cross-app requests on the public surface: user-less, so the broker permits
   // only `audience: "app"` services (a public route must do its own auth first).
   const services =
     manifest.consumes.length > 0
-      ? createServicesClient({ callerSlug: appSlug, actingUser: null })
+      ? createServicesClient({ callerSlug: appSlug, actingUser: null, denied: deniedServices(denials) })
       : null;
 
   return {
@@ -211,6 +242,8 @@ async function loadTenantConnectors(
   manifest: AppManifest,
   logTag: string,
   userId: string | null,
+  /** What an admin turned off for the app: an optional connector so is left out, as one not set up is. */
+  denials: Denials,
 ): Promise<Record<string, BaseConnector>> {
   const connectors: Record<string, BaseConnector> = {};
 
@@ -222,7 +255,7 @@ async function loadTenantConnectors(
   */
   const declaredNames = [
     ...manifest.connectors,
-    ...(manifest.optionalConnectors ?? []),
+    ...(manifest.optionalConnectors ?? []).filter((n) => !denied(denials, "optional-connector", n)),
   ];
   if (declaredNames.length === 0) return connectors;
 
@@ -516,20 +549,21 @@ export async function buildSystemAppContext(
 ): Promise<SystemAppContext> {
   const manifest = registeredManifest(appSlug);
   const registrar = appRegistrar(manifest.slug);
-  const containment = await buildContainment(manifest);
+  const denials = await readDenials(manifest.slug, "buildSystemAppContext");
+  const containment = await buildContainment(manifest, null, denials);
   const connectors = await loadTenantConnectors(
     manifest,
     "buildSystemAppContext",
     null,
+    denials,
   );
   const db = manifest.database ? createScopedClient(appSlug) : null;
-  const notifications = manifest.notifications
-    ? createNotificationsClient(appSlug)
-    : null;
+  const notifications =
+    manifest.notifications && !denied(denials, "notifications") ? createNotificationsClient(appSlug) : null;
   // User-less: only `audience: "app"` services are reachable from a job.
   const services =
     manifest.consumes.length > 0
-      ? createServicesClient({ callerSlug: appSlug, actingUser: null })
+      ? createServicesClient({ callerSlug: appSlug, actingUser: null, denied: deniedServices(denials) })
       : null;
 
   return {

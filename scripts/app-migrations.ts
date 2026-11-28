@@ -56,6 +56,8 @@ import { listAppMigrations, undeclaredMigrations } from "./app-migration-files";
 import { checkAppMigrationSql, formatSqlProblems, lineAtCharacter } from "./app-sql-policy";
 import { takeMigrationLock } from "./migration-lock";
 import { syncAppRegistry, type MirroredApp } from "./sync-app-registry";
+import { syncCapabilities } from "./sync-capabilities";
+import { registryInstalls } from "../src/generated/registry-installs";
 
 const ROOT = path.resolve(__dirname, "..");
 const APPS_DIR = path.join(ROOT, "apps");
@@ -761,6 +763,14 @@ export async function migrateAppSchemas(
       codeChanged
         ? `  ${slug}: back in the build with different code — inactive until an admin activates it`
         : `  ${slug}: back in the build, unchanged`,
+    );
+  }
+  // What each app asks for, against what an admin approved (Item 8).
+  const capabilities = await syncCapabilities(sql, apps, options.installs ?? registryInstalls);
+  for (const g of capabilities.grew) {
+    console.log(
+      `  ${g.slug}: asks for more than an admin approved (${g.added.join(", ")})` +
+        (g.deactivated ? " — switched off until one approves it on Admin → Apps" : " — flagged on Admin → Apps"),
     );
   }
   for (const u of sync.unreviewed) {

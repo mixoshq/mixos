@@ -10,6 +10,7 @@ import type { AppManifest } from "@/lib/apps/types";
 import type { AppReplacement, NeedsGrants } from "@/lib/apps/access";
 import type { AppTrust } from "@/lib/apps/app-review";
 import type { Anomaly } from "@/lib/apps/anomaly";
+import type { CapabilityStatus } from "@/lib/apps/capability-approvals";
 import type { ProposalTarget } from "@/lib/github/outcomes";
 import AppTile from "./app-tile";
 import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
@@ -35,6 +36,8 @@ interface Props {
   trustBySlug?: Record<string, AppTrust>;
   /** What detection raised that nobody has marked as expected (lib/apps/detection.ts). */
   anomaliesBySlug?: Record<string, Anomaly[]>;
+  /** What each app asks for beyond what was approved, and what an admin turned off. */
+  capabilitiesBySlug?: Record<string, CapabilityStatus>;
   /** On a built deployment with the GitHub App linked: where a removal can be proposed instead. */
   proposal?: ProposalTarget | null;
 }
@@ -50,6 +53,7 @@ export default function AppRegistryList({
   replacedBySlug,
   trustBySlug = {},
   anomaliesBySlug = {},
+  capabilitiesBySlug = {},
   proposal = null,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -112,6 +116,7 @@ export default function AppRegistryList({
               replacement={replacedBySlug[app.slug] ?? null}
               trust={trustBySlug[app.slug] ?? null}
               anomalies={anomaliesBySlug[app.slug] ?? []}
+              capabilities={capabilitiesBySlug[app.slug] ?? null}
               onRemove={() => setRemoving({ kind: "app", slug: app.slug, name: app.name })}
             />
           ))}
