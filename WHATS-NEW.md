@@ -12,6 +12,17 @@ just pulled.
 
 ## 2026-11-28
 
+- **A Registry app runs only once an admin here has reviewed it.** Admin >
+  Apps marks an app installed from a Registry **Third-party**, with where it
+  came from, and offers **Review** in place of Activate: what it can do here,
+  its source at the verified commit, and whether its files changed since
+  install. Activate refuses it until a review matches the exact code it runs,
+  and the release step switches it off when an update or a local edit changes
+  that code. Register records a review in the checkout's database. Platform
+  migration 0006 adds `app_reviews` and `apps.review_needed_since`. Local apps
+  are unaffected. See
+  [`docs/security-architecture.md` §31](docs/security-architecture.md#trust-tiers-a-registry-app-runs-only-once-reviewed-here).
+
 - **The server's secrets leave `process.env` when it starts.** `register()`
   moves every secret MixOS reads into `src/lib/env/secrets.ts` and deletes it,
   with the host secrets MixOS never reads, before any app's code loads. Read

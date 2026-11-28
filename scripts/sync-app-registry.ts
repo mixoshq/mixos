@@ -129,6 +129,17 @@ export interface ReplacedApp {
   connectorCredentialsDeleted: number;
 }
 
+/**
+ * A Registry app this run switched off because no admin here has reviewed the
+ * code it now runs (src/lib/apps/app-review.ts).
+ */
+export interface UnreviewedApp {
+  slug: string;
+  codeHash: string | null;
+  /** Earlier code of it was reviewed here: an update, or a local edit. */
+  previouslyReviewed: boolean;
+}
+
 /** An app this run found had stopped being global. */
 export interface GlobalEndedApp {
   slug: string;
@@ -153,6 +164,8 @@ export interface AppRegistrySyncResult {
   replaced: ReplacedApp[];
   /** Apps that stopped being global. */
   globalEnded: GlobalEndedApp[];
+  /** Registry apps switched off for want of a review of their code. */
+  unreviewed: UnreviewedApp[];
 }
 
 /**
@@ -175,7 +188,13 @@ interface AppRow {
 /** One row in admin_audit_log, in the sync's own transaction. */
 async function audit(
   tx: TransactionSql,
-  action: "app.missing" | "app.returned" | "app.identity.changed" | "app.global.ended",
+  action:
+    | "app.missing"
+    | "app.returned"
+    | "app.identity.changed"
+    | "app.global.ended"
+    | "app.update.unreviewed"
+    | "app.review.required",
   slug: string,
   details: Record<string, unknown>,
 ): Promise<void> {
@@ -313,6 +332,9 @@ export async function syncAppRegistry(
           where app_slug = ${app.slug}
           returning connector_name
         `;
+        // Its reviews were of the extension before it. Its hash differs
+        // anyway; deleted so no record says this one was reviewed.
+        await tx`delete from public.app_reviews where app_slug = ${app.slug}`;
         await audit(tx, "app.identity.changed", app.slug, {
           previous: identityDetails(row.identity),
           identity: identityDetails(identity),
@@ -369,6 +391,45 @@ export async function syncAppRegistry(
       });
     }
 
+    /*
+      A Registry app runs only with a review, by an admin here, of the code it
+      runs (src/lib/apps/app-review.ts). One that is active and has none for
+      its code as this build carries it — an update, a local edit, or the
+      first release after reviews arrived, since none were grandfathered — is
+      switched off, flagged, and audited. A local app, with no install record,
+      is left alone. An inactive one waits: Activate checks the same thing.
+    */
+    const third = appRegistry
+      .map((a) => a.slug)
+      .filter((slug) => installs.some((i) => i.kind === "app" && i.slug === slug));
+    const unreviewed: UnreviewedApp[] = [];
+    if (third.length > 0) {
+      const off = await tx<{ slug: string; code_hash: string | null; earlier: boolean }[]>`
+        update public.apps a
+           set is_active = false,
+               review_needed_since = coalesce(a.review_needed_since, now())
+         where a.slug = any(${third}::text[])
+           and a.is_active
+           and not exists (
+             select 1 from public.app_reviews r
+              where r.app_slug = a.slug and r.code_hash = a.code_hash
+           )
+        returning a.slug, a.code_hash,
+                  exists (select 1 from public.app_reviews r where r.app_slug = a.slug) as earlier
+      `;
+      for (const row of off) {
+        const install = installs.find((i) => i.kind === "app" && i.slug === row.slug)!;
+        await audit(tx, row.earlier ? "app.update.unreviewed" : "app.review.required", row.slug, {
+          codeHash: row.code_hash,
+          version: install.version,
+          commitSha: install.commitSha,
+          modified: install.modified,
+        });
+        unreviewed.push({ slug: row.slug, codeHash: row.code_hash, previouslyReviewed: row.earlier });
+      }
+      unreviewed.sort((a, b) => a.slug.localeCompare(b.slug));
+    }
+
     const inBuild = new Set(slugs);
     return {
       upserted: appRegistry.length,
@@ -380,6 +441,7 @@ export async function syncAppRegistry(
       returned,
       replaced,
       globalEnded,
+      unreviewed,
     };
   });
 }

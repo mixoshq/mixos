@@ -25,6 +25,11 @@ mean. Most of it is a setting or two. Do this before anyone else can reach it.
   [Back it up](README.md#back-it-up).
 - **Decide who can reach it at all.** The fewer people who can reach it, the
   less there is to defend.
+- **Review an app from the Registry before it runs.** It is someone else's
+  code. Admin > Apps shows it as **Third-party** with **Review** in place of
+  Activate; read what it can do and where it came from, record your review,
+  then activate it. An update, or an edit to its files, switches it off until
+  you review that too.
 
 ## Who can reach it
 

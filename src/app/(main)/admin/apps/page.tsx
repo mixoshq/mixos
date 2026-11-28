@@ -13,6 +13,7 @@ import { installEnabled } from "@/lib/repository/policy";
 import { getAppGrantCounts, getAppTableCounts } from "@/lib/apps/admin-actions";
 import { getAppActiveMap, getAppBuildStatus } from "@/lib/apps/access";
 import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
+import { getAppTrust } from "@/lib/apps/app-review";
 import AppRegistryList from "@/components/admin/app-registry-list";
 import AppsNotInBuild from "@/components/admin/apps-not-in-build";
 import BrandConflicts from "@/components/admin/brand-conflicts";
@@ -38,6 +39,9 @@ export default async function AppsAdminPage() {
   // their slug. See getAppBuildStatus.
   const buildStatus = await getAppBuildStatus();
   const { theme } = await getActiveTheme();
+  // Each Registry app's provenance, and whether an admin here reviewed the
+  // code it runs (lib/apps/app-review.ts). Local apps aren't in it.
+  const trustBySlug = await getAppTrust(appRegistry.map((a) => a.slug));
   // On a built deployment with the GitHub App linked, Remove offers a pull
   // request instead; from what is stored, without asking GitHub on every render.
   const proposal = await proposalTarget("app");
@@ -127,6 +131,7 @@ export default async function AppsAdminPage() {
         returnedChangedBySlug={buildStatus.returnedChanged}
         needsGrantsBySlug={buildStatus.needsGrants}
         replacedBySlug={buildStatus.replaced}
+        trustBySlug={trustBySlug}
         proposal={proposal}
       />
       <AppsNotInBuild

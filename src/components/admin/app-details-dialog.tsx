@@ -15,6 +15,7 @@ import {
   type AppSchemaTable,
 } from "@/lib/apps/admin-actions";
 import { Dialog } from "@/components/ui/dialog";
+import type { AppTrust } from "@/lib/apps/app-review";
 import { StatusPill } from "@/components/ui/status";
 import FolderTabs from "@/components/ui/folder-tabs";
 import LucideIcon from "@/components/lucide-icon";
@@ -922,8 +923,11 @@ export default function AppDetailsDialog({
   open,
   onClose,
   onRemove,
+  trust = null,
 }: {
   app: AppManifest;
+  /** A Registry app's provenance and review (lib/apps/app-review.ts); null for a local app. */
+  trust?: AppTrust | null;
   missingConnectors: MissingConnector[];
   /** Whether the app serves anything, for the connector warning's wording. */
   isActive: boolean;
@@ -1015,6 +1019,23 @@ export default function AppDetailsDialog({
     >
       {tab === "overview" && (
         <div className="space-y-5">
+          {/* Where a Registry app came from, and whether an admin here
+              reviewed the code it runs: the tile's two pills, in words. */}
+          {trust && (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
+              <StatusPill tone="neutral">Third-party</StatusPill>
+              {trust.reviewed ? (
+                <StatusPill tone="success">Reviewed</StatusPill>
+              ) : (
+                <StatusPill tone="warning">{trust.previouslyReviewed ? "Updated, needs review" : "Unreviewed"}</StatusPill>
+              )}
+              <span>
+                From {trust.provenance}
+                {trust.modified ? ", modified locally" : ""}.
+                {trust.reviewed && trust.reviewedBy ? ` Reviewed by ${trust.reviewedBy}.` : ""}
+              </span>
+            </div>
+          )}
           {missingConnectors.length > 0 && (
             <div className="rounded-lg border-l-4 border-brand-accent bg-brand-accent/10 px-4 py-3">
               <MissingConnectorWarning

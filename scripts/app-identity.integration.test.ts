@@ -127,8 +127,18 @@ describe("an app under a slug a different extension had", { skip }, () => {
     `;
   }
 
-  /** What an admin's Activate does, through the platform's own client. */
+  /**
+   * What an admin's Activate does, through the platform's own client. A
+   * Registry app activates only with a review of its code (src/lib/apps/
+   * app-review.ts), which an admin records first: this records one for the
+   * code the last release step saw.
+   */
   async function activate(slug: string, typedSlug?: string) {
+    await sql`
+      insert into public.app_reviews (app_slug, code_hash)
+      select slug, code_hash from public.apps where slug = ${slug} and code_hash is not null
+      on conflict do nothing
+    `;
     const access = await import("../src/lib/apps/access");
     return access.setAppActive(slug, true, typedSlug);
   }
@@ -277,7 +287,7 @@ describe("an app under a slug a different extension had", { skip }, () => {
     assert.equal(await activate(files), null);
   });
 
-  test("a new version from the same repository is an update: nothing is flagged or revoked", async () => {
+  test("a new version from the same repository is an update: nothing is flagged or revoked, and it waits for a review", async () => {
     await addKey();
     const update = installOf(files, {
       version: "2.0.0",
@@ -291,7 +301,10 @@ describe("an app under a slug a different extension had", { skip }, () => {
     await release([app(files)], [update]);
 
     const r = await row();
-    assert.deepEqual([r?.is_active, r?.identity_changed_at, r?.returned_changed_at], [true, null, null]);
+    // The same extension, so no identity flag and no revoked key; new code no
+    // admin here has reviewed, so it is off until one does (app-review.ts).
+    assert.deepEqual([r?.is_active, r?.identity_changed_at, r?.returned_changed_at], [false, null, null]);
+    assert.equal((await audited("app.update.unreviewed")).length, 1);
     assert.equal(await liveKeys(), 1);
     assert.equal((await audited("app.identity.changed")).length, 1);
     // Its grant and its settings belong to the slug, and are as they were.
@@ -351,12 +364,15 @@ describe("an app under a slug a different extension had", { skip }, () => {
     assert.match(lines[0], /back in the build, and a different extension than before \(was local, with no install record; now from mixos\.org, third\/files\)/);
   });
 
-  test("a row activation wrote before any release step is recorded, not flagged", async () => {
+  test("a row activation wrote before any release step is recorded, not flagged, and switched off until reviewed", async () => {
     await activate(early);
     assert.equal((await row(early))?.identity, null);
     await release([app(early)], [installOf(early)]);
     const r = await row(early);
-    assert.deepEqual([r?.is_active, r?.identity, r?.identity_changed_at], [true, `https://mixos.org app/${early} acme/mixos-files`, null]);
+    // Recorded as the extension it is, and not flagged as a different one. A
+    // Registry app nobody here reviewed, so nothing grandfathers it on.
+    assert.deepEqual([r?.is_active, r?.identity, r?.identity_changed_at], [false, `https://mixos.org app/${early} acme/mixos-files`, null]);
+    assert.equal((await audited("app.review.required", early)).length, 1);
   });
 
   test("an app new to the database arrives inactive with its identity recorded", async () => {

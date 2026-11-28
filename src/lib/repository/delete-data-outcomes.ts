@@ -152,7 +152,7 @@ export function describeData(
     ]) {
       if (line) lines.push(line);
     }
-    lines.push("Its record here: whether it is active, and where it came from");
+    lines.push("Its record here: whether it is active, where it came from, and any reviews of its code");
     return lines;
   }
 

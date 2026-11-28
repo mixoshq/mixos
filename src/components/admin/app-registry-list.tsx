@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import type { AppReplacement, NeedsGrants } from "@/lib/apps/access";
+import type { AppTrust } from "@/lib/apps/app-review";
 import type { ProposalTarget } from "@/lib/github/outcomes";
 import AppTile from "./app-tile";
 import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
@@ -29,6 +30,8 @@ interface Props {
   needsGrantsBySlug: Record<string, NeedsGrants>;
   /** Apps the release step found under a slug a different extension had. */
   replacedBySlug: Record<string, AppReplacement>;
+  /** Each Registry app's provenance and review (lib/apps/app-review.ts); local apps aren't in it. */
+  trustBySlug?: Record<string, AppTrust>;
   /** On a built deployment with the GitHub App linked: where a removal can be proposed instead. */
   proposal?: ProposalTarget | null;
 }
@@ -42,6 +45,7 @@ export default function AppRegistryList({
   returnedChangedBySlug,
   needsGrantsBySlug,
   replacedBySlug,
+  trustBySlug = {},
   proposal = null,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -102,6 +106,7 @@ export default function AppRegistryList({
               returnedChangedAt={returnedChangedBySlug[app.slug] ?? null}
               needsGrants={needsGrantsBySlug[app.slug] ?? null}
               replacement={replacedBySlug[app.slug] ?? null}
+              trust={trustBySlug[app.slug] ?? null}
               onRemove={() => setRemoving({ kind: "app", slug: app.slug, name: app.name })}
             />
           ))}
