@@ -12,6 +12,17 @@ just pulled.
 
 ## 2026-11-28
 
+- **The server's secrets leave `process.env` when it starts.** `register()`
+  moves every secret MixOS reads into `src/lib/env/secrets.ts` and deletes it,
+  with the host secrets MixOS never reads, before any app's code loads. Read
+  one with `readSecret()`: a lint rule and a test refuse `process.env.<secret>`
+  in `src/`. Scripts are unaffected.
+- **App code may not reach `Function` by reflection.** The build refuses
+  `.constructor`, `__proto__`, `Object.getPrototypeOf` and
+  `Reflect.getPrototypeOf` in an app, and at runtime every function's
+  `.constructor` throws. Check a value's kind with `instanceof` or `typeof`.
+  See [`docs/security-architecture.md` §24](docs/security-architecture.md#24-environment-containment).
+
 - **Give one app its own connector credentials.** In a connector's Reach
   section, **Give it its own credentials…** gives that app a narrower API key,
   or an OAuth client and grant of its own, which it uses instead of the shared

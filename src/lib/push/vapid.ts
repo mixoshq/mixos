@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { setVapidDetails } from "web-push";
+import { readSecret } from "@/lib/env/secrets";
 
 /**
  * Web Push VAPID configuration, read from the environment. Locally these come
@@ -29,7 +30,7 @@ export function getVapidConfig(): VapidConfig {
   if (cached) return cached;
 
   const publicKey = process.env.VAPID_PUBLIC_KEY;
-  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  const privateKey = readSecret("VAPID_PRIVATE_KEY");
   const subject = process.env.VAPID_SUBJECT;
 
   const missing = [
@@ -58,7 +59,7 @@ export function getVapidConfig(): VapidConfig {
 export function isPushConfigured(): boolean {
   return Boolean(
     process.env.VAPID_PUBLIC_KEY &&
-      process.env.VAPID_PRIVATE_KEY &&
+      readSecret("VAPID_PRIVATE_KEY") &&
       process.env.VAPID_SUBJECT,
   );
 }
