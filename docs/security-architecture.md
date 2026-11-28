@@ -1564,6 +1564,19 @@ manifest. Without the second, it throws a `forbidden` ConnectorError telling an
 admin where to allow changes. Neither runs the method. The setting fails closed:
 when it can't be read, every connector is read-only for that request.
 
+**A third key, per app, that only narrows.** An admin can limit one app on one
+connector from its row in the Reach section
+([`src/lib/connectors/app-access.ts`](../src/lib/connectors/app-access.ts),
+migration 0008): **Can't change data** takes its writes away even though its
+entry asks and changes are allowed, and a **method list** leaves it only the
+methods ticked, within what it could reach anyway. The facade enforces both
+(`appReachRules`), on every path the app reaches a connector; a call outside
+them throws a `forbidden` `ConnectorNarrowedError` naming the limit, and is
+recorded as refused, `narrowed` (§26). Unreadable fails closed: the app gets
+reads only. No row is the two keys above, unchanged. Setting it is
+`connector.app.access`. The activation gate doesn't read it: an admin who took
+an app's writes away meant it to run without them.
+
 The second key reaches the provider too. A scope a connector requests with
 `"write"` is asked for at Connect, and minted into a client-credentials token,
 only where changes are allowed, so a read-only install's grant can't write even
@@ -2501,7 +2514,7 @@ Currently recorded: `connector.configure`, `connector.connect`,
 `app.apikey.create`, `app.apikey.revoke`, `app.mcp.tool.enable`,
 `app.mcp.tool.disable`, `app.activate`,
 `app.deactivate`, `app.review`, `app.update.unreviewed`, `app.review.required`,
-`app.anomaly.acknowledge`,
+`app.anomaly.acknowledge`, `connector.app.access`,
 `app.missing`, `app.returned`, `app.identity.changed`,
 `app.global.ended`,
 `connector.missing`, `connector.returned`, `connector.identity.changed`,

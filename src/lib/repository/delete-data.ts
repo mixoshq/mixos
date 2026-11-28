@@ -293,7 +293,8 @@ async function keptByConnector(q: Query, name: string): Promise<Kept> {
       (select count(*)::int from public.connector_webhook_events where connector_name = ${name}) as "webhookEvents",
       (select count(*)::int from public.telemetry_events
         where source_type = 'connector' and source_slug = ${name}) as "telemetryEvents",
-      (select count(*)::int from public.platform_settings where key = any(${connectorKeys(name)})) as settings,
+      ((select count(*)::int from public.platform_settings where key = any(${connectorKeys(name)}))
+        + (select count(*)::int from public.connector_app_access where connector_name = ${name})) as settings,
       (select value from public.platform_settings where key = ${connectorMissingKey(name)}) as marked_at
   `;
   const counts: ConnectorDataCounts = {
@@ -659,7 +660,10 @@ async function deleteConnector(tx: TransactionSql, name: string): Promise<Connec
     telemetryEvents: (
       await tx`delete from public.telemetry_events where source_type = 'connector' and source_slug = ${name}`
     ).count,
-    settings: (await tx`delete from public.platform_settings where key = any(${connectorKeys(name)})`).count,
+    // An admin's limits on apps here go with it, counted with its settings.
+    settings:
+      (await tx`delete from public.platform_settings where key = any(${connectorKeys(name)})`).count +
+      (await tx`delete from public.connector_app_access where connector_name = ${name}`).count,
   };
 }
 

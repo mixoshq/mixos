@@ -123,6 +123,11 @@ fields, **Connect its account** for OAuth, **Verify its connection**, and
 first line counts who shares the credential and who has their own. The way
 back from an app's Connect lands on its row, opened.
 
+Each row also offers **Limits…**: **Can't change data** for an app that asks
+to, and a list of the methods it may call, ticked. It only narrows what the
+manifest and Allow changes give the app, and a row with limits carries a
+**Limited** pill and says what it can still call.
+
 The tile carries the summary: "Used by 3 active apps · 1 can change data".
 
 The section shows what MixOS allows, not what the provider does: that is the

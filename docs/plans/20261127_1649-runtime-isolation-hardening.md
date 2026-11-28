@@ -1141,6 +1141,21 @@ per app. Audited as `connector.app.access`.
 
 **Effort:** S–M, 2–4 days.
 
+**As built** (2026-11-28).
+
+- **Its own error,** `ConnectorNarrowedError` (`forbidden`), not a
+  `ConnectorUseError`: the limit is the admin's, not a bug in the app. MCP and
+  search pass its message on. Refusals are recorded as `narrowed` (Item 6).
+- **Unreadable fails closed to reads only**, as planned, for every connector of
+  that context.
+- **The Reach section shows the limit:** a **Limited** pill, the rows' reads
+  and writes computed with it, and a "Limits…" panel per row.
+- **Only declared methods are kept;** an empty list is refused (deactivate the
+  app instead), and every method ticked deletes the row.
+- **The activation gate ignores it,** so an admin can run an app with its
+  writes taken away.
+- **Delete data** counts a connector's limits with its settings.
+
 ### 7b: Connectors out of process (Docker, Render, Railway; Vercel stays in-process)
 
 **Design first**, in the doc shared with 5b. The shape to evaluate:
@@ -1446,7 +1461,8 @@ None.
 7. **Item 6.** Detection (benefits from Item 0's facade for refused-call
    recording). *In review:* migration 0007, with the departures under its
    "As built".
-8. **Item 7a.** Per-app narrowing; builds on 3a's Reach section.
+8. **Item 7a.** Per-app narrowing; builds on 3a's Reach section. *In review:*
+   migration 0008, with the departures under its "As built".
 9. **Item 8.** Capability approvals; builds on 5a and 7a. Expiry uses Item 6.
 10. **Item 9.** Labels, the Reach page and the escape suite. The suite starts
     earlier: Item 2's PR seeds `tests/escapes/` with Item 0's and its own cases,

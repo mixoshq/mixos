@@ -50,6 +50,7 @@ const REASON: Record<string, string> = {
   undeclared: "a method its connector doesn't declare",
   "write-not-asked": "a write its manifest doesn't ask for",
   "write-not-allowed": "a write the connector isn't allowed to make",
+  narrowed: "outside the limits an admin set for it",
   budget: "over its route's connector budget",
   disabled: "the connector is disabled",
   host: "a host its egress doesn't list",

@@ -74,7 +74,7 @@ export async function recordConnectorEvent(opts: {
   /**
    * ConnectorError category on failure — "denied" vs "throttled" vs "timed
    * out" — or, for a refusal, why: `undeclared`, `write-not-asked`,
-   * `write-not-allowed`, `budget` or `disabled`.
+   * `write-not-allowed`, `narrowed`, `budget` or `disabled`.
    */
   errorCategory?: string | null;
 }): Promise<void> {
@@ -200,7 +200,13 @@ export async function recordRouteCall(opts: {
 }
 
 /** Why the platform refused a connector call, as the refused row records it. */
-export type ConnectorRefusal = "undeclared" | "write-not-asked" | "write-not-allowed" | "budget" | "disabled";
+export type ConnectorRefusal =
+  | "undeclared"
+  | "write-not-asked"
+  | "write-not-allowed"
+  | "narrowed"
+  | "budget"
+  | "disabled";
 
 /**
  * Record a connector call the platform refused before the connector ran it,

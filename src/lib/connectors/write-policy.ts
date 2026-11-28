@@ -65,6 +65,25 @@ export class ConnectorChangesNotAllowedError extends ConnectorError {
 }
 
 /**
+ * What a call fails with when an admin narrowed this app's reach on the
+ * connector (./app-access.ts): writes taken away, or a method outside the
+ * ones it may call. `forbidden`, with no Retry: it stands until an admin
+ * changes the limit.
+ */
+export class ConnectorNarrowedError extends ConnectorError {
+  constructor(connectorName: string, subject: string = connectorName) {
+    super({
+      category: "forbidden",
+      connectorName,
+      subject,
+      userMessage: `${subject} isn't open to this app for that here: an administrator limited what it may call.`,
+      adminHint:
+        "Open Administration → Connectors, then this connector's Reach section, to change what this app may call.",
+    });
+  }
+}
+
+/**
  * The scopes a grant holds: each one it names, and each one those include,
  * followed through (`includes` on an `auth.scopes` entry).
  *

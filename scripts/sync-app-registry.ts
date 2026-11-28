@@ -339,6 +339,8 @@ export async function syncAppRegistry(
         // baseline, and what it raised was about that one.
         await tx`delete from public.app_activity_seen where app_slug = ${app.slug}`;
         await tx`delete from public.app_anomalies where app_slug = ${app.slug}`;
+        // The limits an admin set were for the extension before it.
+        await tx`delete from public.connector_app_access where app_slug = ${app.slug}`;
         await audit(tx, "app.identity.changed", app.slug, {
           previous: identityDetails(row.identity),
           identity: identityDetails(identity),

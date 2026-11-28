@@ -153,3 +153,49 @@ test("each row says what the app may call, and why a write is out of reach", () 
     "Can call 1 method that reads. It doesn't ask to change data, so the 2 methods that change data are refused.",
   );
 });
+
+test("an admin's limit only narrows: writes taken away, or a list of methods", () => {
+  const denied = connectorReach({
+    connector: CRM,
+    apps: APPS,
+    active: ALL_ACTIVE,
+    disabled: false,
+    changesAllowed: true,
+    narrowings: { pipeline: { writes: "deny", methods: null } },
+  });
+  const pipeline = denied.apps.find((a) => a.slug === "pipeline")!;
+  assert.equal(pipeline.write, "denied");
+  assert.deepEqual(pipeline.writes, []);
+  assert.equal(pipeline.canWriteNow, false);
+  assert.equal(
+    describeAppReach(pipeline, 1),
+    "Can call 2 methods that read. It asks to change data, and an admin took its writes away here.",
+  );
+  // Archive, unlimited, still writes.
+  assert.equal(denied.apps.find((a) => a.slug === "archive")!.canWriteNow, true);
+
+  const listed = connectorReach({
+    connector: CRM,
+    apps: APPS,
+    active: ALL_ACTIVE,
+    disabled: false,
+    changesAllowed: true,
+    narrowings: { pipeline: { writes: "inherit", methods: ["listDeals", "createDeal"] } },
+  });
+  const limited = listed.apps.find((a) => a.slug === "pipeline")!;
+  assert.deepEqual(limited.reads, ["listDeals"]);
+  assert.deepEqual(limited.writes, ["createDeal"]);
+  assert.match(describeAppReach(limited, 1), /An admin limited it to those\.$/);
+
+  // A limit with no write in it: no write, though it asks and changes are allowed.
+  const readsOnly = connectorReach({
+    connector: CRM,
+    apps: APPS,
+    active: ALL_ACTIVE,
+    disabled: false,
+    changesAllowed: true,
+    narrowings: { pipeline: { writes: "inherit", methods: ["getDeal"] } },
+  }).apps.find((a) => a.slug === "pipeline")!;
+  assert.equal(readsOnly.canWriteNow, false);
+  assert.deepEqual([readsOnly.reads, readsOnly.writes], [["getDeal"], []]);
+});

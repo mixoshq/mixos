@@ -12,6 +12,12 @@ just pulled.
 
 ## 2026-11-28
 
+- **Limit what one app may call on a connector.** In the connector's Reach
+  section, **Limits…** takes an app's writes away, or leaves it only the
+  methods you tick. It only narrows what the manifest and Allow changes give
+  it, and a refused call shows on the app's tile. Platform migration 0008. See
+  [`docs/security-architecture.md` §16.1](docs/security-architecture.md#161-what-an-app-can-reach-on-a-connector).
+
 - **Unusual activity, on the app's tile.** Every `context.http` hop and every
   connector call the platform refuses is now recorded, and a detector in the
   cron tick (every 15 minutes) raises what an app does beyond its usual: a

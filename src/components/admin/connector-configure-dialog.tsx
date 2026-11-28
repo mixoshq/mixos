@@ -43,6 +43,7 @@ import type { ObservedCalls } from "@/lib/connectors/reach";
 import type { ConnectorWithStatus } from "./connector-registry-list";
 import ConnectorReachSection from "./connector-reach-section";
 import type { AppCredentialActions } from "./app-credentials-panel";
+import type { SetAppLimits } from "./app-limits-panel";
 
 type DialogTab = "details" | "configure" | "methods" | "scopes" | "logs";
 
@@ -70,6 +71,8 @@ interface Props {
   appCredentialActions?: AppCredentialActions;
   /** An app whose own credentials to open on arrival: set by the way back from its Connect. */
   initialApp?: string | null;
+  /** Narrow one app's reach on this connector, from its Reach row. */
+  setAppLimits?: SetAppLimits;
 }
 
 /** "in 52 minutes" / "3 days ago" — enough for an admin to judge freshness. */
@@ -641,6 +644,7 @@ export default function ConnectorConfigureDialog({
   observed,
   appCredentialActions,
   initialApp = null,
+  setAppLimits,
 }: Props) {
   const [tab, setTab] = useState<DialogTab>(initialTab);
   const [saving, startSave] = useTransition();
@@ -1480,6 +1484,14 @@ export default function ConnectorConfigureDialog({
                   : undefined
               }
               initialApp={initialApp}
+              limitsSetup={
+                setAppLimits
+                  ? {
+                      methods: connector.telemetry.map((m) => ({ method: m.method, mutates: m.mutates === true })),
+                      setLimits: setAppLimits,
+                    }
+                  : undefined
+              }
             />
           </div>
         )}

@@ -12,6 +12,8 @@ import type { AppManifest } from "@/lib/apps/types";
 import type { BaseConnector } from "@/lib/connectors/types";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
+import { getAppNarrowings } from "@/lib/connectors/app-access";
+import type { AppNarrowing } from "@/lib/connectors/reach";
 import {
   getAppCredentialRows,
   openAppCredentials,
@@ -267,6 +269,19 @@ async function loadTenantConnectors(
     "write" and an admin has allowed changes. Never the instance itself, whose
     protected `request()` would reach any path with its credential.
   */
+  /*
+    An admin's limits on this app (src/lib/connectors/app-access.ts), read
+    once. Unreadable fails closed: every connector is reads only for this
+    context, as when Allow changes can't be read.
+  */
+  let narrowings: Map<string, AppNarrowing> | null;
+  try {
+    narrowings = await getAppNarrowings(manifest.slug);
+  } catch (err) {
+    console.error(`[${logTag}] could not read this app's connector limits, so all are reads only:`, err);
+    narrowings = null;
+  }
+
   // A refused call is recorded for detection (./detection.ts): an app
   // reaching for what it wasn't given is the signal worth an admin's look.
   const refused = (connName: string, method: string, reason: ConnectorRefusal) =>
@@ -278,6 +293,7 @@ async function loadTenantConnectors(
       subject: connectorManifest(connName)?.displayName ?? connName,
       need: manifest.connectorRequirements.find((r) => r.name === connName),
       writable: writable.has(connName),
+      narrowing: narrowings === null ? "unknown" : (narrowings.get(connName) ?? null),
       onRefused: (method, reason) => refused(connName, method, reason),
     });
   const handOver = (connName: string, connector: BaseConnector) =>

@@ -246,6 +246,37 @@ test("the panel for one app: it replaces the shared ones, never falls back, and 
   assert.doesNotMatch(fresh, /Verify its connection|Use the shared credentials|Connect its account/);
 });
 
+test("limits: a Limited pill, and a panel that only narrows", () => {
+  const narrowed = {
+    ...props(),
+    reach: connectorReach({
+      connector: { name: "crm", telemetry: METHODS },
+      apps: APPS,
+      active: { pipeline: true, reports: true, archive: false },
+      disabled: false,
+      changesAllowed: true,
+      narrowings: { pipeline: { writes: "deny", methods: null } },
+    }),
+    limitsSetup: {
+      methods: METHODS.map((m) => ({ method: m.method, mutates: m.mutates === true })),
+      setLimits: async () => {},
+    },
+  };
+  const words = text(renderToStaticMarkup(createElement(ReachList, { ...narrowed, observed: { state: "read", calls: [] }, openApp: "limits:pipeline" })));
+  assert.match(words, /Pipeline Required Limited Limits…|Pipeline Required Limited Close/);
+  assert.match(words, /It asks to change data, and an admin took its writes away here\./);
+  assert.match(words, /Narrow what Pipeline may call here\. This only takes away/);
+  assert.match(words, /Can't change data, even though it asks to/);
+  assert.match(words, /Methods it may call listDeals getDeal createDeal Changes data/);
+  assert.match(words, /Save its limits Remove its limits/);
+  // Reports doesn't ask to write: its panel offers only its reads.
+  const reports = text(
+    renderToStaticMarkup(createElement(ReachList, { ...narrowed, observed: { state: "read", calls: [] }, openApp: "limits:reports" })),
+  );
+  assert.match(reports, /Narrow what Reports may call here/);
+  assert.doesNotMatch(reports.slice(reports.indexOf("Narrow what Reports")), /createDeal|even though it asks/);
+});
+
 test("no app declares it", () => {
   const p = props();
   const words = text(
