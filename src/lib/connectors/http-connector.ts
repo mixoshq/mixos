@@ -16,6 +16,7 @@ import {
 } from "./status-map";
 import { TOKEN_KEYS, requestToken, requestedScopes } from "./oauth";
 import { connectorConfigState } from "./status";
+import { remoteHooks } from "./remote-hooks";
 import type {
   BaseConnector,
   ConnectorAuthPolicy,
@@ -178,6 +179,13 @@ export abstract class HttpConnector implements BaseConnector {
    * re-point it at somebody else's grant.
    */
   static bindUserGrant(connector: BaseConnector, refresh: GrantRefresher): void {
+    // A connector in a runner: the platform keeps the grant, and renews it
+    // when the runner asks (src/lib/runners/remote-connector.ts).
+    const remote = remoteHooks(connector);
+    if (remote) {
+      remote.bindGrant(refresh);
+      return;
+    }
     // A connector that does not extend this class never refreshes through it,
     // so there is nothing to point anywhere.
     if (!(connector instanceof HttpConnector)) return;
@@ -210,7 +218,9 @@ export abstract class HttpConnector implements BaseConnector {
 
   /** Platform-only, like `bindUserGrant`: see `#writesAllowed`. */
   static allowWrites(connector: BaseConnector): void {
-    if (connector instanceof HttpConnector) connector.#writesAllowed = true;
+    const remote = remoteHooks(connector);
+    if (remote) remote.allowWrites();
+    else if (connector instanceof HttpConnector) connector.#writesAllowed = true;
   }
 
   /**

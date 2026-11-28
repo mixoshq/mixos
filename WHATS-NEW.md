@@ -12,6 +12,22 @@ just pulled.
 
 ## 2026-11-28
 
+- **Connectors run in processes of their own.** On the Docker image (Render,
+  Railway, Compose), each connector now runs in a runner under Node's
+  permission model, with no network, no files, no database and no secrets.
+  The platform hands it its credentials with each call, sends its requests
+  only to the hosts it declares, and renews its tokens itself. A connector
+  can't read another's credentials. `next dev` and Vercel run connectors in
+  process, and `MIXOS_ISOLATION=off` does on the image too, audited. For
+  connector authors:
+  - a method returns data;
+  - any extra host goes in the new `http.hosts`;
+  - there's no database in a webhook handler.
+
+  See
+  [`connectors/AGENTS.md`](connectors/AGENTS.md) and
+  [`docs/security-architecture.md` §33.1](docs/security-architecture.md#331-connectors-in-runners-item-7b).
+
 - **Connector calls are kept for 90 days, not forever.** The cron tick now
   deletes connector telemetry older than `MIXOS_CONNECTOR_TELEMETRY_DAYS`: 90
   unless set, with no upper limit, and `0` keeps it all, as before. It is never

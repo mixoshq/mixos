@@ -1497,8 +1497,8 @@ None.
    *approved on 28 November 2026 with the recommended answers, and being
    built; it answers the open question: server pages of Registry apps need a
    limit (client pages only) on the isolated tier. Step 1, the supervisor, the
-   protocol and the capability, is in review, with its departures under the
-   design's "As built".*
+   protocol and the capability, and step 2, connectors in runners (7b), are in
+   review, with their departures under the design's "As built".*
 7. **Item 6.** Detection (benefits from Item 0's facade for refused-call
    recording). *In review:* migration 0007, with the departures under its
    "As built".

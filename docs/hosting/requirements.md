@@ -16,7 +16,8 @@ the popular hosts supply them.
 ### A host
 
 Any host that runs a Docker image, which brings its own Node 26, or Node.js 22
-or later. [Where to host](providers/README.md#where-to-host) compares the
+or later. With the image, each connector runs in a process of its own, which
+needs Node 25 or later; a Node build, and Vercel, run them in the server. [Where to host](providers/README.md#where-to-host) compares the
 popular ones.
 
 It must put HTTPS in front of MixOS, and be the only way in: through its

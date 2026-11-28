@@ -67,6 +67,9 @@ x-app-env: &app-env
   # Optional. Blank means what it means in .env.local.example: any domain may
   # sign in; no Web Push.
   ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+  # Optional. `off` runs connectors in the server process instead of a process
+  # each (docs/security-architecture.md §33.1). Audited, and shown on the admin pages.
+  MIXOS_ISOLATION: ${MIXOS_ISOLATION:-}
   # Whether admins can browse the catalogue for each kind. This image cannot
   # install from it either way (src/lib/repository/policy.ts).
   INSTALL_APPS: ${INSTALL_APPS:-true}

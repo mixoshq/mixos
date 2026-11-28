@@ -1393,8 +1393,16 @@ const connectorPaginationSchema = z
     }
   });
 
+// A bare hostname: no scheme, port, path or wildcard.
+const connectorHostSchema = z
+  .string()
+  .regex(/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/, "a lowercase hostname, such as uploads.example.com");
+
 const connectorHttpSchema = z.strictObject({
   baseUrl: z.url().optional(),
+  // Other hosts its requests go to. Where connectors run isolated, the
+  // platform sends them nowhere else (src/lib/runners/connector-relay.ts).
+  hosts: z.array(connectorHostSchema).max(20).optional(),
   timeoutMs: z.number().int().positive().max(120_000).optional(),
   deadlineMs: z.number().int().positive().max(120_000).optional(),
   // Total tries, not retries — "maxRetries: 2 means 3 calls" is exactly the
