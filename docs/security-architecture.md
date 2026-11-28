@@ -1497,6 +1497,18 @@ What this still trusts is the declaration: a method that writes but is declared
 as a read runs as a read. The scopes are what bound that, which is why a write
 scope belongs behind `"write"`.
 
+Admin → Connectors shows these rules per app, in the Details tab's Reach
+section ([`src/lib/connectors/reach.ts`](../src/lib/connectors/reach.ts)):
+every app that declares the connector, whether it runs, the declared methods
+it may call under the two keys above, and the calls recorded from it in the
+last 30 days. It is a view of what the facade enforces, not a check of its
+own. It errs toward more reach, never less: an app whose switch can't be read
+counts as running, and calls that can't be read say so rather than reading as
+none. The calls come from `telemetry_events`, so they are evidence, not proof:
+a call the facade refused isn't recorded, recording is best-effort, and code
+that gets around the scan (§24) runs as the platform and could write rows of
+its own.
+
 
 ---
 

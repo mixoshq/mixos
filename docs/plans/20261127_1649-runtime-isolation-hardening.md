@@ -518,6 +518,29 @@ It is read-only, and needs `requireAdmin()` like the page.
 
 **Effort:** S–M, 2–3 days.
 
+**As built** (2026-11-28). Three departures, each for a reason found in the code:
+
+- **No server action.** Next's guide keeps Server Functions for mutations, and
+  the client dispatches them one at a time, so a read on opening the dialog
+  would queue Test and Save behind it. What each app may call is computed with
+  the page (`connectorReach`, `src/lib/connectors/reach.ts`, from the manifests,
+  `readAppActiveMap` and Allow changes). The calls come from one query for every
+  connector (`getObservedConnectorCalls`, `src/lib/connectors/observed.ts`),
+  passed to the dialog as a promise and read with `use()` under Suspense. So
+  there is no new endpoint, and the data leaves the server only inside the
+  admin-gated page. The page test for a non-admin falls away with the action.
+- **Scopes stay on the Methods tab.** Until 3b, every app shares one grant, so
+  a per-app list of scopes would repeat the Methods tab's verdicts for each app.
+  The section says that what the provider allows is on Methods and Scopes, and
+  warns once when changes are allowed on a grant without the write scopes.
+- **The index is `(source_type, source_slug, created_at)`, not
+  `(caller_app_slug)`.** The query filters on the connector and the window,
+  and groups by app and method.
+
+It replaces the Details tab's "Apps using this connector" list, and is shown
+before the credentials are saved too. Unreadable switches count every app as
+running; unreadable telemetry reads "Couldn't read", never "no calls".
+
 ### 3b: Per-app credential override (design here; implement if approved)
 
 **Schema.** Additive, so no existing row changes:
@@ -1314,7 +1337,8 @@ None.
    through `*.pooler.supabase.com:6543` only (turning pipelining off everywhere
    halved throughput under load at 2 ms RTT, 653 → 345 q/s), plus
    `query_timeout: 60` on the request pool.
-4. **Item 3a**, then **3b**.
+4. **Item 3a**, then **3b**. *3a in review:* the Reach section, built as below
+   with the departures under "As built".
 5. **Item 4.** T1 plus scan additions; T2 spike; T3 design doc.
 6. **Item 5a.** Then **one design doc for 5b and 7b**, the shared runner
    infrastructure (§10).

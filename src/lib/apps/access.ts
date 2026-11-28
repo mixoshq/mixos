@@ -258,6 +258,26 @@ export async function getAppActiveMap(): Promise<Record<string, boolean>> {
   return out;
 }
 
+/**
+ * Each app's switch, as `getAppActiveMap` reads it, or null when the table
+ * can't be read. For a page that shows what apps can reach: read as "every app
+ * inactive", a failed lookup would show less reach than there is.
+ */
+export async function readAppActiveMap(): Promise<Record<string, boolean> | null> {
+  try {
+    const { data, error } = await createServiceClient().from("apps").select("slug, is_active");
+    if (error) throw error;
+    const out: Record<string, boolean> = {};
+    for (const row of (data ?? []) as { slug: string; is_active: boolean }[]) {
+      out[row.slug] = row.is_active;
+    }
+    return out;
+  } catch (err) {
+    console.error("[apps] could not read which apps are active:", err);
+    return null;
+  }
+}
+
 /** An app this database keeps that the running build doesn't carry. */
 export interface AppNotInBuild {
   slug: string;

@@ -10,6 +10,17 @@ The newest section is shown automatically after you `git pull` (via the
 just pulled.
 
 
+## 2026-11-28
+
+- **See what each app can reach on a connector.** The Details tab of a
+  connector under Administration → Connectors has a Reach section: every app
+  that declares it, whether the app is active, which methods MixOS lets it
+  call (a write only when its entry asks for `"access": "write"` and an admin
+  has allowed changes), and the methods it called in the last 30 days. Each
+  tile sums it up: "Used by 3 active apps · 1 can change data". It replaces
+  the list of app names. See
+  [`docs/connectors/registry-ux.md`](docs/connectors/registry-ux.md#the-reach-section).
+
 ## 2026-11-27
 
 - **Queries no longer hang behind Supabase's transaction pooler.** Supavisor

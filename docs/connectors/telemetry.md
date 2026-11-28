@@ -64,7 +64,7 @@ Events are visible to admins under **Administration → Analytics**. Selecting y
 - a trend over a selectable time range,
 - a breakdown **by calling app** (`caller_app_slug`).
 
-The connector's **Usage Logs** tab, under **Administration → Connectors**, lists its last 100 calls: when, which app, which user by name, which method, and the result.
+The connector's **Usage Logs** tab, under **Administration → Connectors**, lists its last 100 calls: when, which app, which user by name, which method, and the result. The **Reach** section on its Details tab sums the last 30 days by app and method, beside what each app may call (see [the registry experience](registry-ux.md#the-reach-section)).
 
 ## Why the manifest, not the class
 

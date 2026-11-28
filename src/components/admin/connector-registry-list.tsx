@@ -15,6 +15,7 @@ import {
   describeDependents,
   type ConnectorDependents,
 } from "@/lib/connectors/dependents";
+import type { ConnectorReach, ObservedCalls } from "@/lib/connectors/reach";
 import type { ConnectorConfigState } from "@/lib/connectors/status";
 import type { ConnectorReplacement } from "@/lib/connectors/switch";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
@@ -70,6 +71,11 @@ export type ConnectorWithStatus = ConnectorManifest & {
   /** Which apps declare this connector, required vs optional. */
   dependents: ConnectorDependents;
   /**
+   * What each of those apps can reach on it: whether it runs, and what MixOS
+   * lets it call (lib/connectors/reach.ts).
+   */
+  reach: ConnectorReach;
+  /**
    * When an admin disabled it (ISO 8601), or null while it is enabled. A
    * disabled connector keeps its credentials and its `state`; nothing calls it.
    */
@@ -108,6 +114,11 @@ interface Props {
   ) => Promise<void>;
   /** Allow a connector to change data, or make it read-only again. */
   changesAction: (connectorName: string, allowed: boolean) => Promise<void>;
+  /**
+   * What apps called through each connector in the last 30 days, streamed in
+   * after the page: null when telemetry couldn't be read.
+   */
+  observed?: Promise<ObservedCalls | null>;
 }
 
 type StatusFilter = "all" | "configured" | "unconfigured";
@@ -125,6 +136,7 @@ export default function ConnectorRegistryList({
   testAction,
   switchAction,
   changesAction,
+  observed,
   proposal = null,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -333,6 +345,7 @@ export default function ConnectorRegistryList({
           configureAction={configureAction}
           testAction={testAction}
           changesAction={changesAction}
+          observed={observed}
           // The Remove dialog replaces this one rather than stacking on it:
           // two focus traps at once, and the setup of a connector that is going.
           onRemove={() => {

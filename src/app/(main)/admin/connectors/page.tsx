@@ -8,7 +8,8 @@ import { ExternalLink, Store } from "lucide-react";
 import { revalidatePath } from "next/cache";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { docsUrl } from "@/lib/docs";
-import { requireAdmin } from "@/lib/apps/access";
+import { readAppActiveMap, requireAdmin } from "@/lib/apps/access";
+import { appRegistry } from "@/generated/app-registry";
 import { installEnabled } from "@/lib/repository/policy";
 import { connectorRegistry } from "@/generated/connector-registry";
 import {
@@ -22,6 +23,8 @@ import { getUserTokens } from "@/lib/connectors/user-config";
 import { getConnectorLog, grantedScopes } from "@/lib/connectors/access";
 import { getScopeStatus } from "@/lib/connectors/scope-status";
 import { getConnectorDependents } from "@/lib/connectors/dependents";
+import { getObservedConnectorCalls } from "@/lib/connectors/observed";
+import { connectorReach } from "@/lib/connectors/reach";
 import { getConnectorsNotInBuild } from "@/lib/connectors/not-in-build";
 import { getDisabledConnectors, getReplacedConnectors } from "@/lib/connectors/switch";
 import { setConnectorEnabled } from "@/lib/connectors/switch-admin";
@@ -120,6 +123,15 @@ export default async function ConnectorsAdminPage({
   const writable = await getWritableConnectors(
     connectorRegistry.map((c) => c.name),
   );
+  // Which apps an admin has switched on, for each connector's Reach: one read.
+  // Null when it can't be read, and then every app counts as running, so the
+  // page never shows less reach than there is.
+  const active = await readAppActiveMap();
+  // What apps called through each connector in the last 30 days. Not awaited:
+  // the page streams it to the Reach section, which shows its rows without
+  // the calls until it arrives. It resolves null, never rejects, when the
+  // table can't be read.
+  const observed = getObservedConnectorCalls(connectorRegistry.map((c) => c.name));
   // Connectors this database keeps credentials or connections for that this
   // build doesn't carry, each with Delete data.
   const notInBuild = await getConnectorsNotInBuild(
@@ -163,6 +175,13 @@ export default async function ConnectorsAdminPage({
       const disabledAt = disabled.get(c.name) ?? null;
       const replacement = replaced.get(c.name) ?? null;
       const changesAllowed = writable.has(c.name);
+      const reach = connectorReach({
+        connector: c,
+        apps: appRegistry,
+        active,
+        disabled: disabledAt !== null,
+        changesAllowed,
+      });
 
       if (c.auth?.strategy !== "oauth2_authorization_code") {
         return {
@@ -172,6 +191,7 @@ export default async function ConnectorsAdminPage({
           access,
           scopeStatus,
           dependents,
+          reach,
           disabledAt,
           replacement,
           changesAllowed,
@@ -198,6 +218,7 @@ export default async function ConnectorsAdminPage({
         access,
         scopeStatus,
         dependents,
+        reach,
         disabledAt,
         replacement,
         changesAllowed,
@@ -404,6 +425,7 @@ export default async function ConnectorsAdminPage({
         testAction={testConnector}
         switchAction={switchConnector}
         changesAction={changesConnector}
+        observed={observed}
       />
       <ConnectorsNotInBuild connectors={notInBuild} />
     </div>
