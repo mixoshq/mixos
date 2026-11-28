@@ -12,6 +12,15 @@ just pulled.
 
 ## 2026-11-28
 
+- **Labels you can check, a Reach page, and an escape catalogue.** Apps carry
+  labels computed from what is enforced (Stays on this instance, Read-only,
+  Its own data only, No public routes, Runs in the server process), each with
+  its definition. Admin > Apps > an app > Reach opens a page with everything it
+  can reach beside what it did, and its history. `tests/escapes/catalogue.ts`
+  lists every known escape with its outcome and test, and a test keeps it, the
+  labels and the threat model in step. See
+  [`docs/security-architecture.md` §3.7](docs/security-architecture.md#37-labels-the-reach-page-and-the-escape-suite).
+
 - **Approve what an app asks for, not just the app.** Activating an app
   approves its capabilities (hosts, connectors and writes, services, tools,
   schedules, public routes and more). When an update asks for more, Admin >

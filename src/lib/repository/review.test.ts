@@ -144,6 +144,9 @@ test("an app's review lists what will run, by when it runs", () => {
 test("an app's manifest declarations, in the review's terms", () => {
   const declared = Object.fromEntries(declaredBy("app", APP_JSON).map((d) => [d.label, d.values]));
   assert.deepEqual(declared, {
+    // Labels from what it declares (src/lib/apps/labels.ts): it reaches
+    // outside, writes, and uses others' services and hooks, so only the tier.
+    Labels: ["Runs in the server process"],
     Egress: ["api.acme.example"],
     Env: ["ACME_REGION", "ACME_TOKEN (secret)"],
     Database: ["Its own schema and database role"],
@@ -152,8 +155,15 @@ test("an app's manifest declarations, in the review's terms", () => {
     Hooks: ["emits board.created", "listens to crm.deal.won", "brand hook brand-name"],
     "MCP tools": ["list-boards"],
   });
-  // An app that declares nothing shows every category, empty.
-  for (const d of declaredBy("app", { name: "Bare" })) assert.deepEqual(d.values, [], d.label);
+  // An app that declares nothing shows every category, empty, and every
+  // label it can have before its routes are read.
+  for (const d of declaredBy("app", { name: "Bare" })) {
+    if (d.label === "Labels") {
+      assert.deepEqual(d.values, ["Stays on this instance", "Read-only", "Its own data only", "Runs in the server process"]);
+    } else {
+      assert.deepEqual(d.values, [], d.label);
+    }
+  }
 });
 
 test("a connector's review: its code, and what its manifest says it reaches", () => {

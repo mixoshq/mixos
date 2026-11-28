@@ -25,6 +25,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { connectorRequirements, describeRequirement } from "../connectors/requirements";
+import { appLabels } from "../apps/labels";
 import { floorVerdict } from "../platform/version";
 import type { FloorVerdict } from "../platform/version-floor";
 import { contentHashesMatch } from "./content-hash";
@@ -291,7 +292,21 @@ function hostOf(url: unknown): string | null {
  * validated, and shown as text, at most MAX_VALUES per declaration.
  */
 export function declaredBy(kind: PendingKind, manifest: Record<string, unknown>): Declaration[] {
-  return declaredValues(kind, manifest).map(capped);
+  const declared = declaredValues(kind, manifest).map(capped);
+  if (kind !== "app") return declared;
+  // The labels (src/lib/apps/labels.ts), first, from what its app.json
+  // declares: the ones that can be worked out before its code is read. "No
+  // public routes" needs its routes, so it waits for the build. Not in
+  // declaredValues, which an update's diff compares: a label follows from the
+  // declarations it does compare.
+  const labels = appLabels({
+    slug: typeof manifest.slug === "string" ? manifest.slug : undefined,
+    egress: strings(manifest.egress),
+    connectorRequirements: connectorRequirements(manifest.connectors, manifest.optionalConnectors),
+    consumes: records(manifest.consumes).map((c) => ({ app: field(c, "app") ?? "", service: field(c, "service") ?? "" })),
+    listensTo: records(manifest.listensTo).map((h) => ({ app: field(h, "app") ?? "", hook: field(h, "hook") ?? "" })),
+  });
+  return [capped(declaration("Labels", labels.map((l) => l.label))), ...declared];
 }
 
 /**

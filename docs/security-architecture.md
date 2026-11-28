@@ -740,6 +740,44 @@ change, and asking for less is no prompt.
   as the `scheduler`. A notice on Admin > Apps says which; removing the limit
   gives it back.
 
+### 3.7 Labels, the Reach page, and the escape suite
+
+**Labels from enforcement, never from claims**
+([`src/lib/apps/labels.ts`](../src/lib/apps/labels.ts)). Each label has a
+written definition, the code that makes it true, and escape-suite cases that try
+to break it:
+
+| Label | True when | Made true by |
+|---|---|---|
+| Stays on this instance | No egress, no connectors | `context.http` and the connector list (§13, §16.1); the build's network scan (§24) |
+| Read-only | No connector entry asks for `"write"` | The facade (§16.1) |
+| Its own data only | No consumed service, no other app's hook | The services broker (§23); queries as its own role (§8) |
+| No public routes | No route or page open to `public`, `password` or `key` | The gateway's tiers (§1); left off when the routes aren't known yet |
+| Runs in the server process | Every host, today | The threat model's first row |
+
+"Runs isolated" is defined and never shown: no host has an isolated tier (the
+design is `docs/plans/20261128_0146-out-of-process-runners.md`). Labels are
+shown on the tile, on the register review (from the pending app.json, without
+"No public routes"), and on the Reach page. Browse has only a publisher's
+claims, so it shows none.
+
+**The Reach page**, `/admin/apps/<slug>/reach`, admin-only: its labels with
+their definitions; where it came from and whether its code was reviewed (§31);
+each connector with what an admin set (Changes data, Limited, Own credentials,
+Disabled, turned off) beside the calls it made; each host with the requests
+made and refused; everything else it asks for, and what it asks for beyond its
+approvals (§3.6); open anomalies (§26); and its history from the audit log.
+Built only from the platform's own records.
+
+**The escape suite** ([`tests/escapes/`](../tests/escapes/README.md)).
+[`catalogue.ts`](../tests/escapes/catalogue.ts) lists every known escape, its
+outcome on each tier, the threat-model row it backs, and the tests that show
+it; `catalogue.test.ts` holds the three together. Three cases are **known
+limits**, pinned by tests that pass while the limit holds: the platform's
+login reaches every app's tables, its pool is on the global object, and a
+connector's own code can read another connector's credentials. CI runs the
+suite against Postgres on every pull request.
+
 ---
 
 ## 4. Security Boundaries Summary

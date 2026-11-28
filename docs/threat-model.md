@@ -29,6 +29,10 @@ run before you register it.
 | **A key leaks** | Each key protects one thing and is changed on its own. An encryption key is useless without the database. ([§5](security-architecture.md#5-environment-secrets)) | With the database, that key's secrets: every shared connector credential, for one. A signing key works on its own: `AUTH_SECRET` forges sign-ins, `APP_UNLOCK_SECRET` opens password-protected apps, and `CRON_SECRET` runs scheduled jobs. Changing an encryption key means entering what it protected again, except the GitHub App's, which has a command that re-encrypts it. |
 | **A shared connector token is stolen** | One token per connector, shared by every app and person that uses it, unless an admin gives an app credentials of its own, narrower ones, which it then uses alone and never falls back from. MixOS decides which apps may call which methods, and an admin can narrow one app further. A change needs the app to ask for it and an admin to allow it, and until then MixOS doesn't ask an OAuth provider for the connector's write permissions. Admin → Connectors shows each app that uses it, what it may call, and what it called in the last 30 days. ([§3.4](security-architecture.md#34-connector-credential-scope), [§16.1](security-architecture.md#161-what-an-app-can-reach-on-a-connector)) | The token can do everything its permissions allow at the provider, outside MixOS. Disabling the connector doesn't revoke it: revoke it at the provider, then enter a new one. |
 
+Each row is tried by the escape suite: [`tests/escapes/catalogue.ts`](../tests/escapes/catalogue.ts)
+lists every known escape with the row it backs and the test that shows it,
+including the limits above, which are pinned as tests that pass while they hold.
+
 ## What MixOS doesn't protect against
 
 - An admin acting in bad faith. Admins hold every credential.
