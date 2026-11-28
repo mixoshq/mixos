@@ -741,6 +741,34 @@ scan stays "not a sandbox", and T2 is the runtime answer.
 - Scan additions: S, 1 day.
 - T3 design doc: S–M, 1–2 days.
 
+**As built** (2026-11-28).
+
+- **T1** as planned: `src/lib/env/secrets.ts`, called first in `register()`.
+  The stash is a frozen object under `Symbol.for("mixos.secrets")`,
+  non-enumerable, not module state: Next bundles `instrumentation.ts`, the
+  proxy and the routes as separate entries, which may each hold a copy of the
+  module. It also deletes, without keeping, host secrets MixOS never reads
+  (the rest of the Neon and Supabase integration variables, `NEXTAUTH_SECRET`,
+  `INITIAL_ADMIN_PASSWORD`). A lint fence plus a tree test refuse
+  `process.env.<secret>` in `src/`.
+- **T2 spike: the flag fails.** `next start` doesn't boot under
+  `--disallow-code-generation-from-strings`: Next's bundled
+  `@edge-runtime/primitives` call `new Function` at startup, and the
+  standalone server fails the same way in `depd` (through `send`). Instead,
+  `register()` points `constructor` on the four function prototypes at a
+  refusal (`src/lib/platform/reflection-lock.ts`). Checked: `next start` and
+  `next dev` sign in, render the admin pages and run the cron tick under it,
+  and the full suite passes with it preloaded (the one failure was the
+  release check's known timing flake, which passed in four reruns with and
+  without the lock).
+- **Scan additions** as planned, plus destructured names and object-literal
+  keys. The route reader's "options set their prototype" deferral can't be
+  reached by app code now; its test says so.
+- **F4 stays open, by decision.** Moving the pool off `globalThis` in
+  production risks one pool per bundled entry, each `max: 3`. The route F4
+  names, reaching the global object by reflection (F3), is now refused by the
+  scan and by the lock; what remains is recorded in §24.
+
 ---
 
 ## 8. Item 5: Trust tiers for Registry apps
@@ -1360,7 +1388,11 @@ None.
    with the departures under "As built". *3b in review:* migration 0005
    (`connector_app_configs`, and `app_slug` on `connector_scope_status`), as
    designed, with the departures under its "As built".
-5. **Item 4.** T1 plus scan additions; T2 spike; T3 design doc.
+5. **Item 4.** T1 plus scan additions; T2 spike; T3 design doc. *In review:*
+   T1 and the scan additions as planned; the T2 flag can't be used (Next 16
+   doesn't boot under it), so T2 ships as a lock on every function
+   prototype's `constructor`; T3 is
+   [`20261128_0128-secrets-out-of-process.md`](20261128_0128-secrets-out-of-process.md).
 6. **Item 5a.** Then **one design doc for 5b and 7b**, the shared runner
    infrastructure (§10).
 7. **Item 6.** Detection (benefits from Item 0's facade for refused-call

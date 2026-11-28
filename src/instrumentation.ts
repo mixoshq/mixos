@@ -37,6 +37,11 @@
 // runDueJobs() survives that (the Postgres claim is atomic), but the duplicate
 // wastes a connection every 5 minutes and makes job timing impossible to reason
 // about. Don't add one.
+//
+// And first, before any app's code is loaded: take the server's secrets out of
+// process.env (src/lib/env/secrets.ts), so the platform reads them through
+// readSecret() from then on, and put Function out of reach by reflection
+// (src/lib/platform/reflection-lock.ts).
 export async function register() {
   // Every import is gated on the Node runtime — `register()` also runs in the
   // Edge runtime, where a module that touches the DB or a connector cannot
@@ -44,6 +49,10 @@ export async function register() {
   //
   //   await import("@apps/<slug>/server-hooks");
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { scrubSecrets } = await import("@/lib/env/secrets");
+    scrubSecrets();
+    const { lockFunctionConstructors } = await import("@/lib/platform/reflection-lock");
+    lockFunctionConstructors();
     const { recordThisBuild } = await import("@/lib/platform/this-build");
     void recordThisBuild();
   }

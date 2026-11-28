@@ -33,6 +33,8 @@
  * The two cannot be confused: a 64-character string is only ever read as hex.
  */
 
+import { readSecret } from "./secrets";
+
 const KEY_BYTES = 32;
 const HEX_KEY = /^[0-9a-fA-F]{64}$/;
 const BASE64_KEY = /^[A-Za-z0-9+/]{43}=?$|^[A-Za-z0-9_-]{43}=?$/;
@@ -140,7 +142,7 @@ export function parseKeyValue(raw: string): Buffer | null {
  */
 export function optionalPlatformKey(name: OptionalPlatformKeyName): Buffer | null {
   const spec = OPTIONAL_PLATFORM_KEYS[name];
-  const raw = process.env[spec.env];
+  const raw = readSecret(spec.env);
   if (!raw) return null;
   const key = decodeKey(raw);
   if (!key) {
@@ -195,7 +197,7 @@ export type DeploymentSecretName = keyof typeof DEPLOYMENT_SECRETS;
 /** Which of DEPLOYMENT_SECRETS are unset, in the shape `missingPlatformKeys()` uses. */
 export function missingDeploymentSecrets(): { env: string; reason: string }[] {
   return Object.values(DEPLOYMENT_SECRETS)
-    .filter((spec) => !process.env[spec.env])
+    .filter((spec) => !readSecret(spec.env))
     .map((spec) => ({ env: spec.env, reason: `${spec.env} is not set. ${spec.purpose}` }));
 }
 
@@ -207,7 +209,7 @@ export function missingDeploymentSecrets(): { env: string; reason: string }[] {
  */
 export function platformKey(name: PlatformKeyName): Buffer {
   const spec = PLATFORM_KEYS[name];
-  const raw = process.env[spec.env];
+  const raw = readSecret(spec.env);
 
   if (!raw) {
     throw new Error(

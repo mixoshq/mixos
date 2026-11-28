@@ -290,6 +290,8 @@ describe("loading code around the import rules", () => {
       /^2 __turbopack_context__ is a module loader/,
       /^3 globalThis\.__next_require__ is a module loader/,
       /^4 arguments is a module loader/,
+      // Refused for itself, by the reflection rule below.
+      /^6 \.__proto__ reaches an object's constructor or prototype/,
     );
   });
 
@@ -431,6 +433,53 @@ describe("names", () => {
       /^1 import \* as … from "@\/lib\/apps\/route" takes every export of "@\/lib\/apps\/route", which also holds platform internals/,
       /^2 export \* from "@\/lib\/apps\/call" takes every export/,
       /^3 export \* from "@\/lib\/apps\/sync" takes every export/,
+    );
+  });
+});
+
+// ── reaching Function by reflection (F3) ───────────────────────────────────
+
+describe("reflection", () => {
+  test("a constructor or prototype, read, indexed, destructured or set, is refused", () => {
+    expect(
+      route(
+        [
+          "const F = (() => {}).constructor;",
+          'const G = (async () => {})["constructor"];',
+          "const { constructor: H } = function () {};",
+          "const p = Object.getPrototypeOf(F);",
+          "const q = Reflect.getPrototypeOf(F);",
+          "const o = { __proto__: F };",
+          "const r = o.__proto__;",
+          "export const all = [F, G, H, p, q, o, r];",
+        ].join("\n"),
+      ),
+      /^1 \.constructor reaches an object's constructor or prototype, which is how `Function`, and from it `process`, is reached/,
+      /^2 \.constructor reaches/,
+      /^3 constructor reaches/,
+      /^4 Object\.getPrototypeOf reaches/,
+      /^5 Reflect\.getPrototypeOf reaches/,
+      /^6 __proto__ reaches/,
+      /^7 \.__proto__ reaches/,
+    );
+  });
+
+  test("the escape it closes: Function by reflection, then process", () => {
+    expect(
+      route('export const env = (() => {}).constructor("return process")().env;\n'),
+      /^1 \.constructor reaches an object's constructor or prototype/,
+    );
+  });
+
+  test("a class's own constructor, instanceof and a local Object are fine", () => {
+    expect(
+      route(
+        [
+          "class Thing { constructor(readonly id: string) {} }",
+          "const Object = { getPrototypeOf: (x: unknown) => x };",
+          "export const ok = [new Thing(\"a\") instanceof Thing, Object.getPrototypeOf(1), typeof Thing];",
+        ].join("\n"),
+      ),
     );
   });
 });

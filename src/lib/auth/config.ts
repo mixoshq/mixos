@@ -7,6 +7,7 @@ import type { JWT } from "next-auth/jwt";
 import Credentials from "next-auth/providers/credentials";
 import { installGlobalAppsForNewcomer } from "@/lib/apps/access";
 import { createServiceClient } from "@/lib/db/server";
+import { readSecret } from "@/lib/env/secrets";
 import { DUMMY_PASSWORD_HASH, verifyPassword } from "./password";
 import { chargeSignInAttempt } from "./sign-in-limit";
 
@@ -114,6 +115,10 @@ export async function buildAuthOptions(): Promise<NextAuthConfig> {
   // MixOS from another origin, so Lax is the stricter, correct default.
   // src/proxy.ts already recognises both the plain and `__Secure-` cookie names.
   return {
+    // Passed, not left for Auth.js to read from process.env: the server takes
+    // AUTH_SECRET out of the environment when it starts
+    // (src/lib/env/secrets.ts). Undefined still fails as Auth.js fails today.
+    secret: readSecret("AUTH_SECRET"),
     session: { strategy: "jwt" },
     trustHost: true,
     pages: { signIn: "/login" },

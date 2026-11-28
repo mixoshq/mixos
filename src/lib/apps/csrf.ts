@@ -3,6 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { createHash, timingSafeEqual } from "node:crypto";
+import { readSecret } from "@/lib/env/secrets";
 
 /**
  * Double-submit CSRF verification for cookie-authenticated app API calls.
@@ -91,7 +92,7 @@ export function verifyCsrf(request: Request): boolean {
   const [token, hash] = decodeURIComponent(raw).split("|");
   if (!token || !hash) return false;
 
-  const secret = process.env.AUTH_SECRET;
+  const secret = readSecret("AUTH_SECRET");
   if (!secret) {
     console.error("[csrf] AUTH_SECRET is unset — refusing the request");
     return false;

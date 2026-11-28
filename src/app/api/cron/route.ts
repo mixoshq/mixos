@@ -4,6 +4,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
+import { readSecret } from "@/lib/env/secrets";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { runDueJobs } from "@/lib/apps/scheduler";
 import { pruneRateBuckets } from "@/lib/rate-limit";
@@ -45,7 +46,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 function authorized(request: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
+  const secret = readSecret("CRON_SECRET");
   if (!secret) return false;
 
   const header = request.headers.get("authorization") ?? "";

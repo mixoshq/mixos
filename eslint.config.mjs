@@ -35,6 +35,40 @@ const DARK_VARIANT_MESSAGE =
   "There is no dark: variant to write — a theme has one palette, and a dark look is a different theme (MixOS / MixOS Dark). Drop the variant and use a semantic token; it resolves per theme, and the build verifies every theme. See docs/themes/contrast.md.";
 
 /**
+ * The secrets the server reads through src/lib/env/secrets.ts, which
+ * `readSecret()` holds once `process.env` no longer does. Kept equal to
+ * `mixosSecretNames()` by src/lib/env/secrets.test.ts.
+ */
+export const SECRET_NAMES = [
+  "CONNECTOR_ENCRYPTION_KEY",
+  "USER_OAUTH_ENCRYPTION_KEY",
+  "MCP_TOKEN_KEY",
+  "APP_API_KEY_SECRET",
+  "APP_SETTINGS_ENCRYPTION_KEY",
+  "APP_UNLOCK_SECRET",
+  "GITHUB_APP_ENCRYPTION_KEY",
+  "AUTH_SECRET",
+  "CRON_SECRET",
+  "VAPID_PRIVATE_KEY",
+  "DATABASE_URL",
+  "POSTGRES_URL",
+  "PGPASSWORD",
+];
+const SECRET_PATTERN = `/^(?:${SECRET_NAMES.join("|")})$/`;
+const SECRET_MESSAGE =
+  "The server takes its secrets out of process.env when it starts. Read this one with readSecret() from @/lib/env/secrets.";
+const SECRET_FENCE = [
+  {
+    selector: `MemberExpression[object.type='MemberExpression'][object.object.name='process'][object.property.name='env'][property.name=${SECRET_PATTERN}]`,
+    message: SECRET_MESSAGE,
+  },
+  {
+    selector: `MemberExpression[object.type='MemberExpression'][object.object.name='process'][object.property.name='env'][computed=true][property.value=${SECRET_PATTERN}]`,
+    message: SECRET_MESSAGE,
+  },
+];
+
+/**
  * The colour fence, as `no-restricted-syntax` selectors. Why each one exists
  * is written at the design-system block below.
  *
@@ -148,6 +182,22 @@ const eslintConfig = defineConfig([
     files: ["apps/**/*.{ts,tsx}", "src/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-syntax": ["error", ...COLOUR_FENCE],
+    },
+  },
+  // ── Secrets: through src/lib/env/secrets.ts, never process.env ─────────────
+  //
+  // The server takes its secrets out of process.env when it starts, so a read
+  // there finds nothing in production while it works in every test and script.
+  // readSecret() reads where they are. src/lib/env/secrets.test.ts holds the
+  // same list to mixosSecretNames(), and checks the tree too, since lint runs
+  // only where someone runs it.
+  //
+  // RESTATES the colour fence, for the reason given at COLOUR_FENCE.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/lib/env/secrets.ts", "src/**/*.test.ts"],
+    rules: {
+      "no-restricted-syntax": ["error", ...COLOUR_FENCE, ...SECRET_FENCE],
     },
   },
   // ── Containment: an app reaches the environment and the network by declaration ──

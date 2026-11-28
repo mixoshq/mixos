@@ -788,6 +788,43 @@ re-encrypts the stored App key.
 In production these are the host's environment variables
 ([hosting](hosting/install.md#step-4-set-the-environment)).
 
+### Out of `process.env` once the server starts
+
+App code runs in the platform's process, and `process.env` is the one place
+every secret above sits under a known name. So when the server starts,
+`register()` (`src/instrumentation.ts`) calls `scrubSecrets()`
+([`src/lib/env/secrets.ts`](../src/lib/env/secrets.ts)) before any app's code
+is loaded. It copies each secret MixOS reads, everything in the table above
+plus `DATABASE_URL`/`POSTGRES_URL` and `PGPASSWORD`, to a frozen object held
+under a non-enumerable symbol, and deletes it from `process.env`. It also
+deletes, without keeping, the secrets hosts add that MixOS never reads: the
+rest of Vercel's Neon and Supabase variables (`POSTGRES_URL_NON_POOLING`,
+`SUPABASE_SERVICE_ROLE_KEY` and the like), `NEXTAUTH_SECRET` and
+`INITIAL_ADMIN_PASSWORD`. The platform reads its secrets through
+`readSecret()`, Auth.js gets `secret` passed explicitly, and the database
+client builds its connection from `envWithSecrets()`. A lint rule refuses
+`process.env.<secret>` anywhere in `src/` but that file, and a test checks the
+tree, since lint runs only where someone runs it.
+
+What this stops: a read of `process.env`, an error reporter or log line that
+dumps the environment, and a child process that inherits it (the install
+check's already gets only `PATH` and `TMPDIR`).
+
+What it doesn't stop:
+
+- code that gets around the scan (§24) calling the platform's own functions,
+  `readSecret()` included, or inspecting the heap;
+- on Linux, `/proc/self/environ`, which holds the process's initial
+  environment block whatever is deleted later;
+- `next build`, which runs route modules with the build's environment and no
+  `register()`;
+- a Vercel function or other host unit where Next doesn't call `register()`:
+  `readSecret()` falls back to `process.env`, so nothing breaks, and nothing
+  is scrubbed there either.
+
+Scripts (`release`, `migrate`, `keys:*`) run as processes of their own, with
+no app code, and read `process.env` as before.
+
 ---
 
 ## 6. Rate Limiting
@@ -2157,10 +2194,35 @@ is a global. A declaration the compiler erases does not bind it:
 the running code reaching the real global, so it is refused like the bare
 name.
 
+The scan also refuses the cheapest way around the rules above, reflection:
+every function's `.constructor` is `Function`, so
+`(() => {}).constructor("return process")()` reached the environment without
+naming either. So `.constructor` and `__proto__` are refused as a property
+read, a computed read by literal, a destructured name and an object literal's
+key, and so are `Object.getPrototypeOf` and `Reflect.getPrototypeOf`. A class's
+own `constructor` declaration, `instanceof` and `typeof` are fine.
+
+**And at runtime.** A name built at runtime on an ordinary object (`x[a + b]`)
+gets past any scan, so when the server starts, `register()` also points the
+`constructor` of every function prototype (plain, async, generator and async
+generator) at a function that throws
+([`src/lib/platform/reflection-lock.ts`](../src/lib/platform/reflection-lock.ts)),
+not configurable once set. Reached that way, by any name, `Function` refuses.
+Each refusal keeps the name it replaced, so a library checking
+`fn.constructor.name` still reads it. `Function` and `new Function(…)` by name
+still work, because the platform's dependencies use them, and the scan refuses
+them in app code. Node's `--disallow-code-generation-from-strings`, which would
+refuse every route at once, can't be used: `next start` fails to boot under
+it in Next 16 (its bundled edge-runtime primitives, and `depd` in the standalone
+server, call `new Function` as the server starts).
+
 **This is not a sandbox.** The scan reads syntax. Code determined to evade it
 can assemble a name at runtime or reach the same object through another module.
 What it does is make accidental and naive use impossible to ship, and evasion
-conspicuous in review.
+conspicuous in review. The reflection lock closes the cheapest evasion at
+runtime; others remain (in sloppy-mode code a plain function's `this` is the
+global object, for one), and code that reaches the global object reaches the
+platform's database pool on it (`globalThis.__pg`), and `readSecret()` (§5).
 
 **There is no escape hatch.** Nothing in this section can be declared away,
 because `env` and `context.http` cover every legitimate need, and a reviewer told

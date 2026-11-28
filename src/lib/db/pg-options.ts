@@ -4,6 +4,7 @@
 
 import { isIP } from "node:net";
 import postgres, { type Options, type Sql } from "postgres";
+import { envWithSecrets, readSecret } from "../env/secrets";
 
 /** postgres.js `Options` with no custom type parsers registered. */
 type PgOpts = Options<Record<string, never>>;
@@ -52,7 +53,7 @@ function connectionFromEnv(): ConnectionEnv {
   if (url) return { url, ssl };
 
   const required = ["PGHOST", "PGUSER", "PGPASSWORD", "PGDATABASE"] as const;
-  const missing = required.filter((k) => !process.env[k]);
+  const missing = required.filter((k) => !(k === "PGPASSWORD" ? readSecret(k) : process.env[k]));
   if (missing.length) {
     throw new Error(
       `No Postgres connection configured. Set DATABASE_URL (the Supabase ` +
@@ -71,7 +72,7 @@ function connectionFromEnv(): ConnectionEnv {
     host: process.env.PGHOST!,
     port,
     user: process.env.PGUSER!,
-    password: process.env.PGPASSWORD!,
+    password: readSecret("PGPASSWORD")!,
     database: process.env.PGDATABASE!,
     ssl,
   };
@@ -81,13 +82,13 @@ function connectionFromEnv(): ConnectionEnv {
  * The connection string connectionFromEnv uses, or undefined when it would
  * fall back to the discrete PG* fields.
  */
-export function connectionUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+export function connectionUrl(env: NodeJS.ProcessEnv = envWithSecrets()): string | undefined {
   return (env.DATABASE_URL ?? env.POSTGRES_URL) || undefined;
 }
 
 /** The variable connectionUrl read, so a message can name it without its value. */
 export function connectionUrlName(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = envWithSecrets(),
 ): "DATABASE_URL" | "POSTGRES_URL" | undefined {
   if (!connectionUrl(env)) return undefined;
   return env.DATABASE_URL !== undefined ? "DATABASE_URL" : "POSTGRES_URL";
@@ -99,7 +100,7 @@ export function connectionUrlName(
  * it is how the release step, which must never guess a database, tells
  * "pointed somewhere" from "pointed nowhere".
  */
-export function databaseNamed(env: NodeJS.ProcessEnv = process.env): boolean {
+export function databaseNamed(env: NodeJS.ProcessEnv = envWithSecrets()): boolean {
   return Boolean(connectionUrl(env) || env.PGHOST);
 }
 

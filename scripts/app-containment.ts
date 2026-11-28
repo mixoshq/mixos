@@ -80,6 +80,8 @@ const WHY = {
   html:
     "renders markup the app did not author. Render Markdown with <Markdown> from @/components/ui/markdown.",
   code: "runs a string as code.",
+  reflection:
+    "reaches an object's constructor or prototype, which is how `Function`, and from it `process`, is reached without naming either. Name the class or function you mean, and check a value's kind with `instanceof` or `typeof`.",
   computed:
     "indexes the global object with a name built at runtime, which is how every rule above would otherwise be routed around.",
   symlink:
@@ -106,6 +108,25 @@ const RESTRICTED_GLOBALS = new Map<string, keyof typeof WHY>([
   ["XMLHttpRequest", "network"],
   ["eval", "code"],
   ["Function", "code"],
+]);
+
+/**
+ * Member names that reach an object's constructor or prototype. From any
+ * function, `.constructor` is `Function`, which runs a string as code, so
+ * `(() => {}).constructor("return process")()` reaches the environment without
+ * naming `Function` or `process`. Refused as a property read, a computed
+ * read by literal, a destructured name and an object literal's key.
+ *
+ * What this can't refuse is a name built at runtime on an ordinary object
+ * (`x[a + b]`), so the scan stays "not a sandbox": the runtime answer is Node's
+ * `--disallow-code-generation-from-strings` (docs/security-architecture.md §24).
+ */
+const REFLECTION_MEMBERS = new Set(["constructor", "__proto__"]);
+
+/** `Object.getPrototypeOf` and `Reflect.getPrototypeOf`: the same reach, as a call. */
+const PROTOTYPE_GETTERS = new Map<string, string>([
+  ["Object", "getPrototypeOf"],
+  ["Reflect", "getPrototypeOf"],
 ]);
 
 /**
@@ -182,6 +203,15 @@ export function scanAppContainment(appDirPath: string): ContainmentFinding[] {
           ) {
             report(node, `document.${name}`, "html");
           }
+          // Object.getPrototypeOf(fn), Reflect.getPrototypeOf(fn)
+          if (
+            name !== undefined &&
+            ts.isIdentifier(holder) &&
+            PROTOTYPE_GETTERS.get(holder.text) === name &&
+            isGlobalReference(checker, holder)
+          ) {
+            report(node, `${holder.text}.${name}`, "reflection");
+          }
         }
       } else if (
         ts.isBinaryExpression(node) &&
@@ -201,7 +231,23 @@ export function scanAppContainment(appDirPath: string): ContainmentFinding[] {
       ) {
         // createElement("div", { dangerouslySetInnerHTML }) and JSX spreads.
         report(node, "dangerouslySetInnerHTML", "html");
+      } else if (
+        (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
+        (ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name)) &&
+        REFLECTION_MEMBERS.has(node.name.text)
+      ) {
+        // { __proto__: fn } sets the prototype; { constructor } in a pattern is below.
+        report(node, node.name.text, "reflection");
+      } else if (ts.isBindingElement(node)) {
+        // const { constructor } = fn, const { constructor: F } = fn
+        const key = node.propertyName ?? node.name;
+        if ((ts.isIdentifier(key) || ts.isStringLiteralLike(key)) && REFLECTION_MEMBERS.has(key.text)) {
+          report(node, key.text, "reflection");
+        }
       } else if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+        // x.constructor, x["__proto__"]
+        const member = accessedName(node);
+        if (member !== undefined && REFLECTION_MEMBERS.has(member)) report(node, `.${member}`, "reflection");
         // globalThis.fetch, window["process"], and globalThis[computed]
         if (isGlobalObject(checker, node.expression)) {
           const name = accessedName(node);

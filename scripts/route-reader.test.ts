@@ -351,12 +351,6 @@ describe("what the reader cannot read is deferred with the reason, and the build
       () => ({ fatal: ghost("GET") }),
     ],
     [
-      "options that set their prototype",
-      app(`${HEAD}export const GET = defineRoute({ __proto__: { raw: true }, ${RAW_ROUTE} } as never);\n`),
-      deferred("GET's options set their prototype"),
-      () => ({ skipped: rawRefusal().message }),
-    ],
-    [
       "CommonJS exports",
       app(`exports.GET = async () => new Response("x");\n`),
       deferred("it uses CommonJS `exports`"),
@@ -369,6 +363,17 @@ describe("what the reader cannot read is deferred with the reason, and the build
       assert.deepEqual(await byBuild(t, files), expected(t));
     });
   }
+
+  // The reader defers options that set their prototype, but none reaches it
+  // now: the scan refuses `__proto__` in app code first (app-containment.ts).
+  test("options that set their prototype are refused by the scan, before the reader", async (t) => {
+    const files = app(`${HEAD}export const GET = defineRoute({ __proto__: { raw: true }, ${RAW_ROUTE} } as never);\n`);
+    const read = await byReader(files);
+    assert.deepEqual(read.deferred, []);
+    assert.match(read.problems.join("\n"), /__proto__ reaches an object's constructor or prototype/);
+    const built = await byBuild(t, files);
+    assert.ok("skipped" in built && /__proto__ reaches/.test(String(built.skipped)), JSON.stringify(built));
+  });
 
   test("a method re-exported from another file may be a good route, which the build accepts", async (t) => {
     const files = app(`export { GET } from "../../lib/handlers";\n`, {
