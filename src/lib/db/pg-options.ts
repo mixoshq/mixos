@@ -137,6 +137,10 @@ function resolveSsl(): PgOpts["ssl"] {
  * `prepare: false` is set for every caller and is not optional against Supabase:
  * the pooler runs in transaction mode, where prepared statements are not
  * carried across checkouts and named-statement reuse fails.
+ *
+ * Through Supabase's transaction pooler, each connection also sends one query
+ * at a time (`max_pipeline: 1`), unless the caller says otherwise: see
+ * `isSupabaseTransactionPooler`.
  */
 export function createPgClient(extra: PgOpts = {}): Sql {
   const conn = connectionFromEnv();
@@ -146,6 +150,12 @@ export function createPgClient(extra: PgOpts = {}): Sql {
     let sql: Sql;
     try {
       sql = postgres(conn.url, { ...options, ssl: conn.ssl });
+      // The hosts are known only once postgres.js has read the URL, and a
+      // client connects on its first query, so making it again costs nothing.
+      if (options.max_pipeline === undefined && pipelinesThroughSupavisor(sql.options)) {
+        void sql.end({ timeout: 0 });
+        sql = postgres(conn.url, { ...options, max_pipeline: 1, ssl: conn.ssl });
+      }
     } catch (err) {
       // Node's URL parser keeps the whole string on its error, as `input`, so
       // logging that error would print the password with it. Say which
@@ -166,7 +176,35 @@ export function createPgClient(extra: PgOpts = {}): Sql {
     }
     return sql;
   }
-  return postgres({ ...conn, ...options });
+  const oneAtATime =
+    options.max_pipeline === undefined && isSupabaseTransactionPooler(conn.host, conn.port);
+  return postgres({ ...conn, ...options, ...(oneAtATime ? { max_pipeline: 1 } : {}) });
+}
+
+/**
+ * Whether `host` and `port` are Supabase's transaction pooler: Supavisor, on
+ * port 6543 of `*.pooler.supabase.com`, the connection docs/hosting/ tells a
+ * Supabase install to use.
+ *
+ * Supavisor before 2.10 hangs on pipelined queries in transaction mode: the
+ * queries are sent, and their answers never come. postgres.js pipelines when
+ * every connection in the pool is busy, so a page that runs more queries at
+ * once than the pool has connections (three, src/lib/db/client.ts) would hang.
+ * Supabase doesn't say which Supavisor a project runs, and SQL can't see it, so
+ * there each connection sends one query at a time. That costs a round trip
+ * between queued queries, which a same-region pooler makes about a
+ * millisecond. Port 5432 there is Supavisor in session mode, which is not
+ * affected.
+ */
+export function isSupabaseTransactionPooler(host: string, port: number): boolean {
+  return port === 6543 && /(^|\.)pooler\.supabase\.com\.?$/i.test(host.trim());
+}
+
+/** Whether any host the client may connect to is Supabase's transaction pooler. */
+function pipelinesThroughSupavisor(options: { host: string[]; port: number[] }): boolean {
+  return options.host.some((host, i) =>
+    isSupabaseTransactionPooler(host, options.port[i] ?? options.port[0] ?? 5432),
+  );
 }
 
 /** A host a connection URL can't have meant: see createPgClient. */

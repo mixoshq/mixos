@@ -58,7 +58,10 @@ service-role key. A few things decide whether it works well:
   Supabase's transaction pooler, on port 6543, or the pooled `DATABASE_URL` that
   Neon's Vercel integration sets. Transaction-mode poolers are fine: MixOS uses
   no prepared statements or session state, and the release step's lock is
-  transaction-scoped.
+  transaction-scoped. Through Supabase's transaction pooler, each connection
+  sends one query at a time, because Supavisor before 2.10 never answers a
+  query sent before the last one's answer. Behind any pooler, a query that gets
+  no answer for a minute fails, and the pool connects again.
 - **TLS.** MixOS requires TLS to the database unless `PGSSLMODE` says
   otherwise. Set `PGSSLMODE=disable` for a database on the same private
   network, as on Docker Compose and Render, or `verify-full` to check the

@@ -12,6 +12,14 @@ just pulled.
 
 ## 2026-11-27
 
+- **Queries no longer hang behind Supabase's transaction pooler.** Supavisor
+  before 2.10 never answers a query pipelined behind another, which postgres.js
+  does when a page runs more queries at once than the pool's three connections.
+  Through `*.pooler.supabase.com:6543` each connection now sends one query at a
+  time, and on every host a request-path query with no answer for a minute
+  fails with `QUERY_TIMEOUT` and the pool connects again. See
+  [`docs/hosting/requirements.md`](docs/hosting/requirements.md#a-postgres-database).
+
 - **`context.db` runs as the app's own database role.** Every query an app
   makes runs through a function in the app's schema, `mixos_run`, as
   `mixos_app_<slug>`, so Postgres itself refuses one that reaches another app's

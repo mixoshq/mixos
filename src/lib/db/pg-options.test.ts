@@ -5,9 +5,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { inspect } from "node:util";
-import { connectionUrlName, createPgClient } from "./pg-options";
+import { connectionUrlName, createPgClient, isSupabaseTransactionPooler } from "./pg-options";
 
-const VARS = ["DATABASE_URL", "POSTGRES_URL", "PGSSLMODE"] as const;
+const VARS = [
+  "DATABASE_URL",
+  "POSTGRES_URL",
+  "PGSSLMODE",
+  "PGHOST",
+  "PGPORT",
+  "PGUSER",
+  "PGPASSWORD",
+  "PGDATABASE",
+] as const;
 
 /** Run `fn` with exactly `vars` set among VARS; process.env is restored after. */
 function withEnv(vars: Partial<Record<(typeof VARS)[number], string>>, fn: () => void) {
@@ -87,6 +96,56 @@ test("an IPv6 host and a host list are not taken for a misread port", async () =
     assert.ok(client, url);
     await client.end({ timeout: 0 });
   }
+});
+
+test("through Supabase's transaction pooler, each connection sends one query at a time", async () => {
+  // Supavisor before 2.10 never answers pipelined queries in transaction mode.
+  const POOLER = "aws-0-eu-west-1.pooler.supabase.com";
+  for (const [url, pipeline] of [
+    [`postgres://postgres.ref:pw@${POOLER}:6543/postgres`, 1],
+    [`postgres://postgres.ref:pw@${POOLER.toUpperCase()}:6543/postgres`, 1],
+    // Session mode, on the same host, is not affected.
+    [`postgres://postgres.ref:pw@${POOLER}:5432/postgres`, 100],
+    // Nor is a direct connection, or another host.
+    ["postgres://postgres:pw@db.ref.supabase.co:5432/postgres", 100],
+    ["postgres://owner:pw@ep-x.eu-west-2.aws.neon.tech/neondb", 100],
+    ["postgres://u:pw@pooler.supabase.com.example.org:6543/db", 100],
+    // One pooler among several hosts is enough.
+    [`postgres://u:pw@db.example.com:5432,${POOLER}:6543/db`, 1],
+  ] as const) {
+    let client: ReturnType<typeof createPgClient> | undefined;
+    withEnv({ DATABASE_URL: url, PGSSLMODE: "require" }, () => {
+      client = createPgClient();
+    });
+    assert.ok(client);
+    assert.equal(client.options.max_pipeline, pipeline, url);
+    await client.end({ timeout: 0 });
+  }
+
+  // The discrete PG* settings, the same.
+  let discrete: ReturnType<typeof createPgClient> | undefined;
+  withEnv({ PGHOST: POOLER, PGPORT: "6543", PGUSER: "postgres.ref", PGPASSWORD: "pw", PGDATABASE: "postgres" }, () => {
+    discrete = createPgClient();
+  });
+  assert.equal(discrete?.options.max_pipeline, 1);
+  await discrete?.end({ timeout: 0 });
+
+  // A caller that sets max_pipeline itself keeps it.
+  let explicit: ReturnType<typeof createPgClient> | undefined;
+  withEnv({ DATABASE_URL: `postgres://postgres.ref:pw@${POOLER}:6543/postgres` }, () => {
+    explicit = createPgClient({ max_pipeline: 4 });
+  });
+  assert.equal(explicit?.options.max_pipeline, 4);
+  await explicit?.end({ timeout: 0 });
+});
+
+test("isSupabaseTransactionPooler knows the pooler by its host and its port", () => {
+  assert.equal(isSupabaseTransactionPooler("aws-0-us-east-1.pooler.supabase.com", 6543), true);
+  assert.equal(isSupabaseTransactionPooler("aws-0-us-east-1.pooler.supabase.com.", 6543), true);
+  assert.equal(isSupabaseTransactionPooler("aws-0-us-east-1.pooler.supabase.com", 5432), false);
+  assert.equal(isSupabaseTransactionPooler("notpooler.supabase.com", 6543), false);
+  assert.equal(isSupabaseTransactionPooler("pooler.supabase.com.evil.example", 6543), false);
+  assert.equal(isSupabaseTransactionPooler("localhost", 6543), false);
 });
 
 test("the explicit ssl option wins over the URL's sslmode", async () => {
