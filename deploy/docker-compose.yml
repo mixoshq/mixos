@@ -80,6 +80,8 @@ x-app-env: &app-env
   MIXOS_UPDATE_CHECK: ${MIXOS_UPDATE_CHECK:-true}
   # Which MixOS releases the admin pages announce: stable or prerelease.
   MIXOS_RELEASE_CHANNEL: ${MIXOS_RELEASE_CHANNEL:-stable}
+  # Days of connector calls kept: 90 when blank, 0 for all, never fewer than 90.
+  MIXOS_CONNECTOR_TELEMETRY_DAYS: ${MIXOS_CONNECTOR_TELEMETRY_DAYS:-}
   # Optional. Set, it turns on Admin > GitHub
   # (docs/hosting/after-you-install/production-updates.md). Blank: off.
   GITHUB_APP_ENCRYPTION_KEY: ${GITHUB_APP_ENCRYPTION_KEY:-}

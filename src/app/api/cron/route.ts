@@ -9,7 +9,7 @@ import { connectorRegistry } from "@/generated/connector-registry";
 import { runDueJobs } from "@/lib/apps/scheduler";
 import { pruneRateBuckets } from "@/lib/rate-limit";
 import { pruneUnlockFailures } from "@/lib/apps/unlock-rate-limit";
-import { pruneEgressTelemetry, pruneRouteTelemetry } from "@/lib/apps/telemetry";
+import { pruneConnectorTelemetry, pruneEgressTelemetry, pruneRouteTelemetry } from "@/lib/apps/telemetry";
 import { auditConnectorIsolation } from "@/lib/runners/isolation-audit";
 import { pruneAcknowledgedAnomalies, runDetection, type DetectionOutcome } from "@/lib/apps/detection";
 import { expireUnusedWrites, type ExpiredWrite } from "@/lib/apps/capability-approvals";
@@ -80,8 +80,11 @@ export async function GET(request: NextRequest) {
   const prunedBuckets = await pruneRateBuckets();
   const prunedRouteEvents = await pruneRouteTelemetry();
   // What per-app detection adds is bounded: egress rows at 90 days, and
-  // anomalies an admin marked as expected at 180. Connector rows are kept.
+  // anomalies an admin marked as expected at 180. Connector rows go at
+  // MIXOS_CONNECTOR_TELEMETRY_DAYS, 90 unless set and never fewer, a batch at
+  // a time (src/lib/apps/telemetry-retention.ts).
   const prunedEgressEvents = await pruneEgressTelemetry();
+  const prunedConnectorEvents = await pruneConnectorTelemetry();
   const prunedAnomalies = await pruneAcknowledgedAnomalies();
   // A connector whose webhook signs a timestamp has its replay markers swept
   // after a day. Every other marker is kept for 90 days, because for those it
@@ -147,6 +150,7 @@ export async function GET(request: NextRequest) {
     prunedBuckets,
     prunedRouteEvents,
     prunedEgressEvents,
+    prunedConnectorEvents,
     prunedAnomalies,
     detection,
     expiredWrites,
