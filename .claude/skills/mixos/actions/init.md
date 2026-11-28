@@ -176,14 +176,14 @@ for" each. On **macOS**, something like:
 > Here's what's missing on your machine. I'll install all of it, in this order:
 >
 > 1. **Homebrew** — the macOS package manager everything else installs through.
-> 2. **Node 24** — runs the build tools and the local database CLI.
+> 2. **Node 26** — runs the build tools and the local database CLI.
 > 3. **Project dependencies** (`npm ci`) — about 90 seconds.
 > 4. **Docker Desktop** — runs MixOS and its database on your machine.
 > 5. **VS Code extensions** — Claude Code and Prettier.
 
 On **Linux**:
 
-> 1. **Node 24**, through nvm — runs the build tools and the local database
+> 1. **Node 26**, through nvm — runs the build tools and the local database
 >    CLI. It installs into your home folder; no password needed.
 > 2. **Project dependencies** (`npm ci`) — about 90 seconds.
 > 3. **Docker Engine** — runs MixOS and its database. This one needs
@@ -193,7 +193,7 @@ On **Linux**:
 
 On **WSL**, Docker is installed on the Windows side, by them:
 
-> 1. **Node 24**, through nvm — no password needed.
+> 1. **Node 26**, through nvm — no password needed.
 > 2. **Project dependencies** (`npm ci`) — about 90 seconds.
 > 3. **Docker Desktop for Windows** — runs MixOS and its database. You install
 >    this one in Windows; I'll tell you exactly what to click.
@@ -212,7 +212,7 @@ Then, on every platform:
 > Total download is roughly 1 GB now, plus several more GB of database images
 > the first time MixOS boots. Want me to go ahead?
 
-Wait for a yes. Skip anything already present and say so ("Node 24 is already
+Wait for a yes. Skip anything already present and say so ("Node 26 is already
 installed, skipping"). After this point don't ask again unless something fails
 or a tool prompts for a password.
 
@@ -246,7 +246,7 @@ when it finishes. Then verify the result yourself — don't take "done" on faith
    isn't found afterward, run `eval "$(/opt/homebrew/bin/brew shellenv)"` and
    tell them to add that line to `~/.zprofile`.
 
-2. **Node 24** (only if `node -v` is below 22, or Node is missing):
+2. **Node 26** (only if `node -v` is below 22, or Node is missing):
 
    - **If a newer Node is already installed, but hidden** — Step 1's
      `node scripts/check-node.mjs` named it. **Do not install another one.** The

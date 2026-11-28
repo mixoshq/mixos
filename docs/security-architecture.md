@@ -43,6 +43,7 @@ a security property updates both.
 | Content-Security-Policy | `src/lib/csp.ts`                           |
 | App import policy    | `src/lib/apps/import-policy.mjs`              |
 | App containment scan | `scripts/app-containment.ts`                  |
+| Runners (§33)        | `src/lib/runners/supervisor.ts`, `runner/bootstrap.mjs`, `runner/frames.mjs` |
 | ESLint restrictions  | `eslint.config.mjs`                           |
 | MCP endpoint         | `src/app/api/mcp/route.ts`                    |
 | MCP bearer-check limit | `src/lib/mcp/bearer-limit.ts`               |
@@ -4393,3 +4394,114 @@ a creation, a link, a key or an unlink are audited as `.rejected`, with the
 reason. A proposal is audited against the extension, as `<kind>.propose` or
 `<kind>.propose.rejected`; a MixOS update against the tag, as
 `mixos.update.propose` or `mixos.update.propose.rejected`.
+
+## 33. Runners (Items 5b and 7b)
+
+A runner is a Node process for one Registry app or one connector, so that its
+code runs where none of the platform's secrets, connections or memory are.
+The design is `docs/plans/20261128_0146-out-of-process-runners.md`.
+
+**What exists so far is the runner itself, and nothing runs in one yet.**
+Every app and every connector still runs in the server process, as the rest
+of this document describes, and `hostTier()` (`src/lib/apps/labels.ts`) still
+says so. Connectors move into runners next, then Registry apps; this section
+grows with each.
+
+**How one is started** (`Runner`, `src/lib/runners/supervisor.ts`). The
+platform spawns `runner/bootstrap.mjs` with:
+
+- `--permission`, Node's permission model;
+- `--allow-fs-read` for the `runner/` folder and the bundle's own folder, and
+  nothing else;
+- `--max-old-space-size` for its heap;
+- an empty environment, and one pipe, on fd 3. The runner reads and writes it
+  through `fs` on the descriptor, which the permission model doesn't check.
+  Opened as a socket, `net.Socket({ fd: 3 })`, Node 26.13 refuses it as
+  network access.
+
+Under the permission model, Node 26 refuses the runner:
+
+- the network: `fetch`, TCP, UDP, Unix sockets and DNS;
+- child processes, workers, addons, WASI and the inspector;
+- `process.binding`;
+- every file write, a written report among them;
+- any read outside those two folders.
+
+`src/lib/runners/supervisor.test.ts` tries each one from a real runner.
+
+**What the permission model leaves open, the bootstrap closes** before the
+bundle loads. Three functions reach other processes this user owns, the
+platform's included:
+
+- `process.kill` sends one a signal;
+- `process._debugProcess` opens a debugger in another Node process;
+- `os.setPriority` changes another process's priority.
+
+These, with the internal `_kill` and `_debugEnd`, are replaced with functions
+that throw. `process.binding` is refused, so the originals can't be
+recovered. The bootstrap also refuses to
+start at all outside the permission model, or with the network, child
+processes, workers, addons, WASI, the inspector or file writes allowed (exit
+78).
+
+**The platform is the only enforcement point.** Whatever a runner's code needs
+is a `call` frame back to the platform. Each call carries the capability of the
+run it belongs to: a random 256-bit token the platform mints per run and keeps
+in its own memory, in that runner's connection (`RunnerConnection`). A call is
+answered only while its token names a run this runner is doing now. So a
+runner acts only inside a run the platform started, as that run's user,
+read-only when the run is, and only until it ends:
+
+- a made-up token, or another runner's, names nothing;
+- a token kept past its run is refused once the run has ended, or its
+  deadline has passed;
+- one run may have at most 32 calls waiting.
+
+The platform decides each call it is asked as it would the same call in
+process. A runner holds nothing it could misuse on its own. Frames are
+length-prefixed JSON, at most 16 MB (`runner/frames.mjs`). An error crosses as
+its name, its message and a few named fields, never its stack. A frame that
+breaks the protocol stops the runner.
+
+**It fails closed.** A runner that can't load its code, can't start, or isn't
+supported on the host (before Node 25, or on Vercel) leaves its app or
+connector unavailable. The code is never run in the platform instead.
+
+**Other failures:**
+
+- **Crashes.** A runner that exits fails the runs in it, and the next run
+  starts it again. Each failure in a row doubles the wait before the next
+  start, up to a minute.
+- **Stuck.** While a run is in it, the platform asks the runner every two
+  seconds whether its event loop is still turning. One that doesn't answer is
+  stopped.
+- **Timeouts.** A run past its time fails, and its capability ends with it.
+- **Idle.** A runner idle for ten minutes stops.
+
+**What it doesn't stop yet:**
+
+- **The CPU.** A runner's CPU isn't capped, beyond the heartbeat stopping one
+  stuck in a loop with a run in it.
+- **Its own output.** It goes to the platform's log, a line at a time, each
+  line cut at 2,000 characters.
+- **A run's concurrent calls.** Code running a person's request can use that
+  run's capability for as long as the request lasts, from any of its own
+  concurrent work. That is the same as it can in process.
+
+**The image.** It runs Node 26, the first LTS with the network permission.
+It sets `NODE_OPTIONS=--disable-sigusr1`, so SIGUSR1 doesn't open Node's
+inspector on the server, whoever sends it. That holds today, with or without
+runners. Runners are started with an empty environment, so the option doesn't
+reach them. They don't need it: the bootstrap takes the signal away from
+them.
+
+**What it costs** (`npm run bench:runner`, medians):
+
+| | macOS, Node 26.3 | Linux container, Node 26.13 |
+|---|---|---|
+| A cold start, to the first answer | 75 ms | 22 ms |
+| A run with no calls | 0.06 ms | 0.15 ms |
+| A run making one call | 0.10 ms | 0.28 ms |
+| A run making ten calls at once | 0.20 ms | 0.47 ms |
+
+Both were measured on an Apple M-series laptop, the Linux one in Docker.

@@ -9,10 +9,10 @@
 # baking source in here would be dead weight that goes stale the moment the
 # mount lands on top of it.
 #
-# Same base as the prod image (node:24-bookworm-slim, glibc) so the @next/swc
+# Same base as the prod image (node:26-bookworm-slim, glibc) so the @next/swc
 # native binding Turbopack needs resolves, and so dev and prod differ in as few
 # ways as possible.
-FROM node:24-bookworm-slim
+FROM node:26-bookworm-slim
 WORKDIR /app
 
 ENV NODE_ENV=development \

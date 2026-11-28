@@ -28,6 +28,7 @@
     "verify:connectors": "tsx scripts/verify-connectors.ts",
     "verify:repository-url": "tsx scripts/check-repository-url.ts",
     "registry": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
+    "bench:runner": "tsx scripts/bench-runner.ts",
     "supabase": "tsx scripts/supabase.ts",
     "db:push": "tsx scripts/supabase.ts db push",
     "db:reset": "tsx scripts/supabase.ts db reset",
