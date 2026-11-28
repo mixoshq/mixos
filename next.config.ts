@@ -45,7 +45,7 @@ const nextConfig: NextConfig = {
     // "/*" is the documented global key. It matches every dynamic route in this
     // app (including /api/apps/[...slug]); the copier de-dupes by output path,
     // so one match is enough to pull the tree in once.
-    "/*": ["apps/**/*"],
+    "/*": ["apps/**/*", "runner/**/*"],
   },
 
   // Never in a build: `.mixos/` holds this checkout's installs from the

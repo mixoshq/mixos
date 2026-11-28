@@ -15,7 +15,7 @@ the popular hosts supply them.
 
 ### A host
 
-Any host that runs a Docker image, which brings its own Node 24, or Node.js 22
+Any host that runs a Docker image, which brings its own Node 26, or Node.js 22
 or later. [Where to host](providers/README.md#where-to-host) compares the
 popular ones.
 

@@ -212,3 +212,49 @@ The options, as they were put:
    contained on this tier and pinned as a known limit on Vercel.
 
 **Effort:** L–XL, 15–25 days for 5b and 7b together, after the decisions.
+
+## As built
+
+### Step 1: the supervisor, the protocol and the capability (28 November 2026)
+
+- `src/lib/runners/supervisor.ts` (`Runner`, `RunnerConnection`),
+  `runner/bootstrap.mjs` and `runner/frames.mjs`.
+- The echo bundle, `tests/fixtures/runners/echo/bundle.mjs`, and
+  `npm run bench:runner`.
+- `docs/security-architecture.md` §33. Nothing runs in a runner yet.
+
+Where it departs from the design above, and why:
+
+- **A pipe, not a Unix socket.** Under `--permission`, Node 26 refuses a
+  runner a Unix socket too. Allowing one takes `--allow-net`, which allows the
+  whole network. So the platform hands each runner one pipe, on fd 3. The
+  runner reads and writes it through `fs` on the descriptor, which the
+  permission model doesn't check. Node 26.13 refuses `net.Socket({ fd: 3 })`
+  as network access, though 26.3 allowed it. The frames are as designed.
+- **The capability is a token the platform keeps, not an HMAC under the
+  runner key.** A runner holding the key could mint its own capability, for
+  any user and any expiry. Instead, each run gets a random 256-bit token,
+  kept in the platform, in that runner's connection. The pipe already says
+  which runner a call came from, so a token from another runner names
+  nothing.
+- **The supervisor is a module in the platform, not the image's entry
+  point.** It spawns each runner as a child with an empty environment and
+  only fds 0 to 3. A separate supervisor process would be another process
+  running as the same user, with no boundary added. The image's `CMD` is
+  unchanged.
+- **Signals, which the design missed.** The permission model doesn't cover
+  `process.kill`, so a runner could signal the platform. SIGUSR1 would open
+  Node's inspector on it, and so would `process._debugProcess`. Nor does it
+  cover `os.setPriority`. The bootstrap replaces all of these before the
+  bundle loads. The image sets `NODE_OPTIONS=--disable-sigusr1`, which also
+  holds against any other process in the container.
+- **The image is on Node 26**, the current LTS, for the network permission.
+  So are `.nvmrc`, CI and `Dockerfile.dev`.
+- **The cost, measured** with `npm run bench:runner` on an Apple M-series
+  laptop. The figures are medians, on macOS with Node 26.3, then in a Linux
+  container with Node 26.13:
+  - a cold start to the first answer: 75 ms and 22 ms, against the 100–200 ms
+    estimated;
+  - a run: 0.06 ms and 0.15 ms;
+  - a run that makes one call: 0.10 ms and 0.28 ms;
+  - a run that makes ten at once: 0.20 ms and 0.47 ms.

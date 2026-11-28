@@ -17,8 +17,9 @@
 # admin — as ops/release.cjs, so the same image that serves traffic can prepare
 # its database first. See the `ops` notes in the builder and runner stages.
 #
-# Node 24 to match the pin in .nvmrc (package.json `engines` is the floor,
-# >=22, not the target). bookworm-slim (glibc), NOT alpine: Next 16 builds with
+# Node 26 to match the pin in .nvmrc (package.json `engines` is the floor,
+# >=22, not the target). 26 is also the first LTS with the permission model's
+# network permission, which a runner needs (src/lib/runners/supervisor.ts). bookworm-slim (glibc), NOT alpine: Next 16 builds with
 # Turbopack, which needs the @next/swc native binding, and package-lock.json
 # only carries @next/swc-linux-arm64-gnu / -x64-gnu. A musl base would resolve
 # nothing and fail the build.
@@ -26,7 +27,7 @@
 # ---------------------------------------------------------------------------
 # deps — dependency install, cached on the lockfile alone
 # ---------------------------------------------------------------------------
-FROM node:24-bookworm-slim AS deps
+FROM node:26-bookworm-slim AS deps
 WORKDIR /app
 
 # Only the manifests, so editing source doesn't invalidate the npm layer.
@@ -43,7 +44,7 @@ RUN npm ci --no-audit --no-fund
 # ---------------------------------------------------------------------------
 # builder — next build
 # ---------------------------------------------------------------------------
-FROM node:24-bookworm-slim AS builder
+FROM node:26-bookworm-slim AS builder
 WORKDIR /app
 
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -101,13 +102,22 @@ RUN npm run build:ops
 # ---------------------------------------------------------------------------
 # runner — the shipped image
 # ---------------------------------------------------------------------------
-FROM node:24-bookworm-slim AS runner
+FROM node:26-bookworm-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0
+
+# No debugger on a signal. Without this, SIGUSR1 from any process running as
+# this user (a runner, src/lib/runners/) opens Node's inspector on the server,
+# which is everything it holds. Through NODE_OPTIONS rather than CMD, so a host
+# that starts the image with its own command (Render's free plan,
+# docs/hosting/providers/render.md) keeps it. Runners are started with an empty
+# environment, so it doesn't reach them, and they need no debugger either:
+# runner/bootstrap.mjs takes the signal away from them.
+ENV NODE_OPTIONS=--disable-sigusr1
 
 # The commit this image was built from, shown on the admin pages beside the
 # version. Purely descriptive — nothing gates on it — but "which code is this
