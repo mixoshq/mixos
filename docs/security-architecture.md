@@ -720,8 +720,9 @@ change, and asking for less is no prompt.
   `app.capabilities.grew` with what was added. A **Registry** app is also
   switched off until an admin approves it, by activating it (after 5a's review,
   which leads with the new capabilities). A **local** app stays on, flagged,
-  and **Approve** records it (`app.capabilities.approve`). Whether a local app
-  should be switched off too is an open decision; it isn't.
+  and **Approve** records it (`app.capabilities.approve`). A local app isn't
+  switched off: it is code you wrote, and switching it off on a deploy would
+  take it down each time it gained a host (decided 28 November 2026).
 - **The upgrade path.** A local app's current set is recorded the first time
   the release step sees it, silently. A Registry app gets none: an active one
   with none is switched off (no grandfathering).

@@ -1244,7 +1244,7 @@ per app. Audited as `connector.app.access`.
      `capabilities_pending_since` column), with only the added capabilities
      listed. Fail closed.
    - **Local apps:** get the flag and a notice, and stay on. They are the
-     "apps you write" tier. *(Decision for you: flag only, or also switch off?)*
+     "apps you write" tier. *(Decided 2026-11-28: flag only.)*
    - Approving the diff is `app.capabilities.approve`. A capability that is
      removed is simply removed.
    - For a Registry app, 5a's review dialog leads with this diff.
@@ -1297,7 +1297,7 @@ A platform migration. Backfill:
 
 **As built** (2026-11-28).
 
-- **Local apps: flag only,** the plan's default, since the decision is open.
+- **Local apps: flag only,** as decided on 28 November 2026.
 - **Activation is approval:** `setAppActive` records the current set, so a
   Registry app switched off for growth is approved by activating it (after
   5a's review, whose dialog leads with what is new).
@@ -1489,9 +1489,9 @@ None.
    infrastructure (§10). *5a in review:* migration 0006, with the departures
    under its "As built". *The 5b/7b design is*
    [`20261128_0146-out-of-process-runners.md`](20261128_0146-out-of-process-runners.md),
-   *in review, with four decisions for you; it answers the open question:
-   server pages of Registry apps need a limit (client pages only) on the
-   isolated tier.*
+   *approved on 28 November 2026 with the recommended answers, and being
+   built; it answers the open question: server pages of Registry apps need a
+   limit (client pages only) on the isolated tier.*
 7. **Item 6.** Detection (benefits from Item 0's facade for refused-call
    recording). *In review:* migration 0007, with the departures under its
    "As built".

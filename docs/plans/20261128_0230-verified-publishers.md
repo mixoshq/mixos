@@ -1,6 +1,7 @@
 # Verified publishers and an opt-in kill switch (spec, waiting on mixos.org)
 
-**Status:** proposed, 28 November 2026. A specification for both repositories.
+**Status:** approved as written, 28 November 2026, with the kill switch off by
+default and failing open. A specification for both repositories.
 Nothing in MixOS is built yet, by the plan's own order: Item 10 of
 [`20261127_1649-runtime-isolation-hardening.md`](20261127_1649-runtime-isolation-hardening.md)
 lands "once mixos.org's half is ready". This fixes the wire formats, so the
