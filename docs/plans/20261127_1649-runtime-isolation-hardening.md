@@ -1504,7 +1504,10 @@ None.
     and each later item adds to it. *In review,* with the departures under its
     "As built".
 11. **Item 10.** Verified publishers and the kill switch, once mixos.org's half
-    is ready.
+    is ready. *Specified,* in
+    [`20261128_0230-verified-publishers.md`](20261128_0230-verified-publishers.md):
+    the signed texts (`mixos-release-v2`, `mixos-withdrawal-v1`), `.registry.json`
+    v2, and the order; MixOS's half waits for mixos.org's.
 12. **5b and 7b implementation**, if you approve the design.
 
 Each item gets its own branch and PR, opened with `/mixos deploy`. Before each PR:
