@@ -176,6 +176,8 @@ const DISABLED = Symbol.for("mixos.connector.disabled");
 export function disabledConnector(
   connectorName: string,
   subject: string = connectorName,
+  /** Told of each call it refuses, for detection (src/lib/apps/detection.ts). */
+  onCall?: (method: string) => void,
 ): BaseConnector {
   const target = { name: connectorName, configured: false, [DISABLED]: true };
   return new Proxy(target, {
@@ -186,8 +188,10 @@ export function disabledConnector(
       if (typeof prop !== "string" || prop === "then" || prop === "toJSON") {
         return undefined;
       }
-      return () =>
-        Promise.reject(new ConnectorDisabledError(connectorName, subject));
+      return () => {
+        onCall?.(prop);
+        return Promise.reject(new ConnectorDisabledError(connectorName, subject));
+      };
     },
   }) as unknown as BaseConnector;
 }

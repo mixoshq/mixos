@@ -24,7 +24,8 @@ import { getConnectorLog, grantedScopes } from "@/lib/connectors/access";
 import { getScopeStatus } from "@/lib/connectors/scope-status";
 import { getConnectorDependents } from "@/lib/connectors/dependents";
 import { getObservedConnectorCalls } from "@/lib/connectors/observed";
-import { connectorReach, type OwnCredentialStatus } from "@/lib/connectors/reach";
+import { connectorReach, type AppNarrowing, type OwnCredentialStatus } from "@/lib/connectors/reach";
+import { listConnectorNarrowings, setAppNarrowing } from "@/lib/connectors/app-access";
 import { listAppCredentials } from "@/lib/connectors/app-config";
 import {
   configureAppCredentials,
@@ -187,12 +188,15 @@ export default async function ConnectorsAdminPage({
       const disabledAt = disabled.get(c.name) ?? null;
       const replacement = replaced.get(c.name) ?? null;
       const changesAllowed = writable.has(c.name);
+      // An admin's limits on each app here (lib/connectors/app-access.ts).
+      const narrowings = await listConnectorNarrowings(c.name);
       const reach = connectorReach({
         connector: c,
         apps: appRegistry,
         active,
         disabled: disabledAt !== null,
         changesAllowed,
+        narrowings,
       });
       // Apps an admin gave their own credentials (lib/connectors/app-config.ts):
       // how far each is set up, never the values. Only a tenant connector
@@ -372,6 +376,18 @@ export default async function ConnectorsAdminPage({
     return outcome;
   }
 
+  /**
+   * Narrow one app's reach on a connector, or clear it
+   * (lib/connectors/app-access.ts, which audits it as `connector.app.access`).
+   */
+  async function setAppLimits(connectorName: string, appSlug: string, narrowing: AppNarrowing): Promise<void> {
+    "use server";
+    const session = await requireReadOnlySession();
+    const admin = await requireAdmin(session);
+    await setAppNarrowing({ id: admin.id, email: admin.email }, connectorName, appSlug, narrowing);
+    revalidatePath("/admin/connectors");
+  }
+
   async function removeAppConnector(connectorName: string, appSlug: string): Promise<void> {
     "use server";
     const session = await requireReadOnlySession();
@@ -504,6 +520,7 @@ export default async function ConnectorsAdminPage({
           remove: removeAppConnector,
         }}
         initialApp={openApp}
+        setAppLimits={setAppLimits}
       />
       <ConnectorsNotInBuild connectors={notInBuild} />
     </div>

@@ -45,6 +45,8 @@ export interface ObservedCall {
   calls: number;
   /** How many of them failed. */
   errors: number;
+  /** Calls the platform refused before the connector ran them, not counted in `calls`. */
+  refused: number;
 }
 
 /** Per connector name, its calls, the most made first. Every name asked for has a list. */
@@ -70,6 +72,16 @@ export interface OwnCredentialStatus {
   verifiedDetail: string | null;
 }
 
+/**
+ * An admin's narrowing of one app's reach on one connector (./app-access.ts):
+ * writes taken away, or a list of the only methods it may call. Only narrows.
+ */
+export interface AppNarrowing {
+  writes: "inherit" | "deny";
+  /** The only methods it may call, or null for every one it could reach. */
+  methods: string[] | null;
+}
+
 /** What an app may do with the connector's methods that change data. */
 export type AppWriteReach =
   /** The connector declares no method that changes data. */
@@ -79,7 +91,9 @@ export type AppWriteReach =
   /** It asks, and an admin hasn't allowed this connector to change data. */
   | "read-only"
   /** It asks, and an admin has allowed it: every write is the app's to call. */
-  | "allowed";
+  | "allowed"
+  /** It asks and changes are allowed, and an admin took this app's writes away here. */
+  | "denied";
 
 export interface AppReach {
   slug: string;
@@ -98,6 +112,8 @@ export interface AppReach {
   write: AppWriteReach;
   /** It runs, the connector is enabled, and it may change data with it. */
   canWriteNow: boolean;
+  /** An admin narrowed what it may call here (./app-access.ts), or null. */
+  narrowing: AppNarrowing | null;
 }
 
 export interface ConnectorReach {
@@ -129,6 +145,8 @@ export function connectorReach(opts: {
   disabled: boolean;
   /** An admin allowed the connector to change data (src/lib/connectors/writable.ts). */
   changesAllowed: boolean;
+  /** Each app's narrowing on this connector, by slug (./app-access.ts). */
+  narrowings?: Readonly<Record<string, AppNarrowing>>;
 }): ConnectorReach {
   const { connector, active, disabled, changesAllowed } = opts;
   const declared = connector.telemetry ?? [];
@@ -140,24 +158,30 @@ export function connectorReach(opts: {
     // The schema allows one entry per connector across both lists.
     const need = app.connectorRequirements.find((r) => r.name === connector.name);
     if (!need) continue;
+    const narrowing = opts.narrowings?.[app.slug] ?? null;
+    const allowed = (m: string) => narrowing?.methods == null || narrowing.methods.includes(m);
     const write: AppWriteReach =
       writes.length === 0
         ? "none"
         : need.access !== "write"
           ? "not-asked"
-          : changesAllowed
-            ? "allowed"
-            : "read-only";
+          : !changesAllowed
+            ? "read-only"
+            : narrowing?.writes === "deny"
+              ? "denied"
+              : "allowed";
     const isActive = active === null ? null : active[app.slug] === true;
+    const myWrites = write === "allowed" ? writes.filter(allowed) : [];
     apps.push({
       slug: app.slug,
       name: app.name,
       active: isActive,
       optional: need.optional,
-      reads: [...reads],
-      writes: write === "allowed" ? [...writes] : [],
+      reads: reads.filter(allowed),
+      writes: myWrites,
       write,
-      canWriteNow: write === "allowed" && isActive !== false && !disabled,
+      canWriteNow: myWrites.length > 0 && isActive !== false && !disabled,
+      narrowing,
     });
   }
 
@@ -200,21 +224,29 @@ export function describeReach(reach: ConnectorReach): string | null {
 export function describeAppReach(app: AppReach, declaredWrites: number): string {
   const reads = app.reads.length;
   const total = reads + app.writes.length;
+  if (total === 0 && app.narrowing) {
+    return "An admin limited it to methods it can't call here, so it can call nothing.";
+  }
   if (total === 0 && app.write !== "read-only" && app.write !== "not-asked") {
     return "The connector declares no methods, so it can call nothing.";
   }
   const readsText =
     reads === 0 ? "Can call no method that reads" : `Can call ${plural(reads, "method")} that ${reads === 1 ? "reads" : "read"}`;
+  const limited = app.narrowing?.methods ? " An admin limited it to those." : "";
   const theWrites =
     declaredWrites === 1 ? "the method that changes data is" : `the ${declaredWrites} methods that change data are`;
   switch (app.write) {
     case "allowed":
-      return `Can call ${plural(total, "method")}, ${app.writes.length} of which ${app.writes.length === 1 ? "changes" : "change"} data.`;
+      return app.writes.length === 0
+        ? `${readsText}.${limited}`
+        : `Can call ${plural(total, "method")}, ${app.writes.length} of which ${app.writes.length === 1 ? "changes" : "change"} data.${limited}`;
     case "read-only":
-      return `${readsText}. It asks to change data, and ${theWrites} off while this connector is read-only.`;
+      return `${readsText}. It asks to change data, and ${theWrites} off while this connector is read-only.${limited}`;
     case "not-asked":
-      return `${readsText}. It doesn't ask to change data, so ${theWrites} refused.`;
+      return `${readsText}. It doesn't ask to change data, so ${theWrites} refused.${limited}`;
+    case "denied":
+      return `${readsText}. It asks to change data, and an admin took its writes away here.${limited}`;
     case "none":
-      return `Can call ${plural(reads, "method")}, none of which changes data.`;
+      return `Can call ${plural(reads, "method")}, none of which changes data.${limited}`;
   }
 }

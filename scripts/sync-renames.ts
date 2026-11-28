@@ -91,6 +91,9 @@ const APP_SLUG_TABLES = [
   "connector_app_configs",
   "connector_scope_status",
   "app_reviews",
+  "app_activity_seen",
+  "app_anomalies",
+  "connector_app_access",
 ] as const;
 
 /** The telemetry an app is the source of (delete-data.ts counts the same). */
@@ -100,6 +103,7 @@ const APP_SOURCES = ["app", "route", "service", "mcp"];
 const CONNECTOR_TABLES = [
   "connector_configs",
   "connector_app_configs",
+  "connector_app_access",
   "user_connector_oauth",
   "connector_scope_status",
   "connector_webhook_events",

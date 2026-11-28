@@ -5,7 +5,8 @@
 import { isDisabledConnector } from "@/lib/connectors/switch";
 import type { ConnectorRequirement } from "@/lib/connectors/requirements";
 import type { BaseConnector, ConnectorTelemetryDefinition } from "@/lib/connectors/types";
-import { ConnectorChangesNotAllowedError } from "@/lib/connectors/write-policy";
+import { ConnectorChangesNotAllowedError, ConnectorNarrowedError } from "@/lib/connectors/write-policy";
+import type { AppNarrowing } from "@/lib/connectors/reach";
 
 /**
  * What a caller can reach on a connector: its declared methods, and nothing
@@ -56,6 +57,21 @@ export interface ReachRules {
   refuseWrite: (method: string) => Error;
   /** The error for anything callable the manifest doesn't declare. */
   refuseUndeclared: (member: string) => Error;
+  /**
+   * The members an admin left this caller (src/lib/connectors/app-access.ts),
+   * or undefined for no limit. A declared member outside it is refused with
+   * `refuseNarrowed`.
+   */
+  allows?: (member: string) => boolean;
+  /** The error for a declared member the admin's limit leaves out. */
+  refuseNarrowed?: (member: string) => Error;
+  /**
+   * Told of each refused call as it is made, for detection
+   * (src/lib/apps/detection.ts): `write` when it was a declared write the
+   * caller may not run, `narrowed` when only an admin's limit stopped it,
+   * `undeclared` otherwise. Never told of a mere read.
+   */
+  onRefused?: (member: string, refusal: "write" | "undeclared" | "narrowed") => void;
 }
 
 export function narrowConnector(
@@ -67,7 +83,9 @@ export function narrowConnector(
 
   const reads = new Set(declared.filter((m) => !m.mutates).map((m) => m.method));
   const writes = new Set(declared.filter((m) => m.mutates).map((m) => m.method));
-  const callable = (member: string) => reads.has(member) || (rules.writes && writes.has(member));
+  /** It would be callable but for an admin's limit. */
+  const reachable = (member: string) => reads.has(member) || (rules.writes && writes.has(member));
+  const callable = (member: string) => reachable(member) && (rules.allows?.(member) ?? true);
 
   // Read off the connector with the connector as the receiver: its getters
   // read its own private fields, and routing `this` through a proxy turns a
@@ -122,7 +140,14 @@ export function narrowConnector(
       }
       if (reads.has(prop) || writes.has(prop) || method !== undefined) {
         return () => {
-          throw writes.has(prop) ? rules.refuseWrite(prop) : rules.refuseUndeclared(prop);
+          const write = writes.has(prop);
+          const narrowed = reachable(prop) && rules.refuseNarrowed !== undefined;
+          rules.onRefused?.(prop, narrowed ? "narrowed" : write ? "write" : "undeclared");
+          throw narrowed
+            ? rules.refuseNarrowed!(prop)
+            : write
+              ? rules.refuseWrite(prop)
+              : rules.refuseUndeclared(prop);
         };
       }
       // A field: credentials, a token, the manifest. Not the caller's.
@@ -166,13 +191,52 @@ export function appReachRules(opts: {
   need: Pick<ConnectorRequirement, "access"> | undefined;
   /** Whether the connector's admin allowed changes (src/lib/connectors/writable.ts). */
   writable: boolean;
+  /**
+   * An admin's narrowing of this app on this connector
+   * (src/lib/connectors/app-access.ts), or null for none. `"unknown"` when it
+   * couldn't be read: the app gets the connector's reads only, as when Allow
+   * changes can't be read.
+   */
+  narrowing?: AppNarrowing | null | "unknown";
+  /**
+   * Told of each refused call with why, for detection: an undeclared member,
+   * a write the app's entry doesn't ask for, one the admin hasn't allowed, or
+   * one an admin's limit for this app leaves out.
+   */
+  onRefused?: (
+    member: string,
+    reason: "undeclared" | "write-not-asked" | "write-not-allowed" | "narrowed",
+  ) => void;
 }): ReachRules {
   const { appSlug, connectorName, subject, need, writable } = opts;
   const asked = need?.access === "write";
+  const narrowing = opts.narrowing ?? null;
+  // Writes the other two keys would allow, taken away by the admin's limit,
+  // or by not knowing it.
+  const writesDenied = narrowing === "unknown" || narrowing?.writes === "deny";
+  const methods = narrowing !== null && narrowing !== "unknown" ? narrowing.methods : null;
+  const narrowedError = () => new ConnectorNarrowedError(connectorName, subject);
   return {
-    writes: asked && writable,
+    onRefused: opts.onRefused
+      ? (member, refusal) =>
+          opts.onRefused!(
+            member,
+            refusal === "narrowed" || (refusal === "write" && asked && writable && writesDenied)
+              ? "narrowed"
+              : refusal === "undeclared"
+                ? "undeclared"
+                : asked
+                  ? "write-not-allowed"
+                  : "write-not-asked",
+          )
+      : undefined,
+    writes: asked && writable && !writesDenied,
+    allows: methods ? (member) => methods.includes(member) : undefined,
+    refuseNarrowed: methods ? () => narrowedError() : undefined,
     refuseWrite: (method) =>
-      asked
+      asked && writable && writesDenied
+        ? narrowedError()
+        : asked
         ? new ConnectorChangesNotAllowedError(connectorName, subject)
         : new ConnectorUseError(
             `apps/${appSlug} called ${connectorName}.${method}(), which changes data, but its app.json entry ` +

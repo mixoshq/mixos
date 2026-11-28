@@ -123,6 +123,11 @@ fields, **Connect its account** for OAuth, **Verify its connection**, and
 first line counts who shares the credential and who has their own. The way
 back from an app's Connect lands on its row, opened.
 
+Each row also offers **Limits…**: **Can't change data** for an app that asks
+to, and a list of the methods it may call, ticked. It only narrows what the
+manifest and Allow changes give the app, and a row with limits carries a
+**Limited** pill and says what it can still call.
+
 The tile carries the summary: "Used by 3 active apps · 1 can change data".
 
 The section shows what MixOS allows, not what the provider does: that is the
@@ -138,8 +143,11 @@ Two things it never does, because both would show less reach than there is:
   page, from one query for every connector, and a table that can't be read
   reads "Couldn't read which methods it called."
 
-The calls are evidence, not a full account: a call the facade refused never
-reached the connector, so it isn't recorded, and recording is best-effort.
+The calls are evidence, not a full account: recording is best-effort. A call
+the platform refused (a method the connector doesn't declare, a write the app
+may not make, a disabled connector, a route over its budget) never reached the
+connector, and is counted apart, as refused, since detection records it too
+(§26 of the security architecture).
 
 ---
 

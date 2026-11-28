@@ -12,6 +12,21 @@ just pulled.
 
 ## 2026-11-28
 
+- **Limit what one app may call on a connector.** In the connector's Reach
+  section, **Limits…** takes an app's writes away, or leaves it only the
+  methods you tick. It only narrows what the manifest and Allow changes give
+  it, and a refused call shows on the app's tile. Platform migration 0008. See
+  [`docs/security-architecture.md` §16.1](docs/security-architecture.md#161-what-an-app-can-reach-on-a-connector).
+
+- **Unusual activity, on the app's tile.** Every `context.http` hop and every
+  connector call the platform refuses is now recorded, and a detector in the
+  cron tick (every 15 minutes) raises what an app does beyond its usual: a
+  first write, a first host through a wildcard, any refused call, a spike.
+  Admin > Apps shows it with **Deactivate** and **Mark as expected**, and the
+  Reach tab lists what the app called and reached. Nothing deactivates by
+  itself. Platform migration 0007. See
+  [`docs/security-architecture.md` §26](docs/security-architecture.md#detection).
+
 - **A Registry app runs only once an admin here has reviewed it.** Admin >
   Apps marks an app installed from a Registry **Third-party**, with where it
   came from, and offers **Review** in place of Activate: what it can do here,

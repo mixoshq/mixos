@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { ConnectorDisabledError } from "@/lib/connectors/switch";
-import { ConnectorChangesNotAllowedError } from "@/lib/connectors/write-policy";
+import { ConnectorChangesNotAllowedError, ConnectorNarrowedError } from "@/lib/connectors/write-policy";
 import type {
   BaseConnector,
   ConnectorManifest,
@@ -51,6 +51,7 @@ export function refusalMessage(err: unknown): string | null {
   if (err instanceof ReadOnlyError) return err.message;
   if (err instanceof ConnectorDisabledError) return err.userMessage;
   if (err instanceof ConnectorChangesNotAllowedError) return err.userMessage;
+  if (err instanceof ConnectorNarrowedError) return err.userMessage;
   return null;
 }
 

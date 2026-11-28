@@ -9,6 +9,8 @@ import { AlertCircle } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import type { AppReplacement, NeedsGrants } from "@/lib/apps/access";
 import type { AppTrust } from "@/lib/apps/app-review";
+import { describeAnomaly, type Anomaly } from "@/lib/apps/anomaly";
+import { acknowledgeAnomaliesAction } from "@/lib/apps/admin-actions";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import AppReviewDialog from "./app-review-dialog";
 import LucideIcon from "@/components/lucide-icon";
@@ -65,6 +67,12 @@ interface AppTileProps {
    */
   trust?: AppTrust | null;
   /**
+   * What detection raised about this app that nobody has marked as expected
+   * (lib/apps/detection.ts). Shown as a strip with Deactivate and Mark as
+   * expected; never acted on by itself.
+   */
+  anomalies?: Anomaly[];
+  /**
    * Opens the Remove dialog, which says what goes and what stays before it
    * removes anything. Offered from the Details dialog's footer, not the tile.
    */
@@ -99,8 +107,13 @@ export default function AppTile({
   needsGrants: lostBy,
   replacement,
   trust = null,
+  anomalies = [],
   onRemove,
 }: AppTileProps) {
+  const [acknowledging, startAcknowledge] = useTransition();
+  /** Deactivate from the strip asks once before it switches everything off. */
+  const [confirmingStop, setConfirmingStop] = useState(false);
+  const unusual = anomalies.length > 0;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   /** A Registry app nobody here has reviewed the code of: Review comes before Activate. */
@@ -231,12 +244,13 @@ export default function AppTile({
         badge its own fill, which reads as four severities when it is really
         four measurements — and six of those would be a traffic light.
       */}
-      {(pills.length > 0 || !isActive || backChanged || replaced || needsGrants || trust) && (
+      {(pills.length > 0 || !isActive || backChanged || replaced || needsGrants || trust || unusual) && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {/* The pills here that are states rather than measurements, so the
               ones that get a tone. Nothing marks an active app: active is
               what every app in a working instance is, and a green pill on
               every tile would be a row of decoration. */}
+          {unusual && <StatusPill tone="danger">Unusual activity</StatusPill>}
           {!isActive && <StatusPill tone="warning">Inactive</StatusPill>}
           {trust && (
             <InfoTooltip
@@ -293,6 +307,64 @@ export default function AppTile({
               then activate it by typing its slug.
             </span>
           </p>
+        </div>
+      )}
+      {/* What detection saw, first: it is the one strip that may mean the app
+          is doing something it shouldn't. Nothing here acts by itself. */}
+      {unusual && (
+        <div className="mt-3 rounded-lg border-l-4 border-destructive bg-destructive/10 py-2 pl-3 pr-3">
+          <div className="flex items-start gap-2 text-xs text-foreground">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+            <div className="min-w-0 space-y-1">
+              <ul className="space-y-0.5">
+                {anomalies.slice(0, 3).map((a) => (
+                  <li key={a.id}>{describeAnomaly(a)}</li>
+                ))}
+              </ul>
+              {anomalies.length > 3 && <p>And {anomalies.length - 3} more.</p>}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {isActive &&
+                  (confirmingStop ? (
+                    <>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        busy={pending}
+                        busyLabel="Deactivating…"
+                        onClick={() =>
+                          startTransition(async () => {
+                            await setAppActiveAction(app.slug, false);
+                            setConfirmingStop(false);
+                          })
+                        }
+                      >
+                        Deactivate for everyone
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setConfirmingStop(false)}>
+                        Keep it on
+                      </Button>
+                    </>
+                  ) : (
+                    <Button variant="secondary" size="sm" onClick={() => setConfirmingStop(true)}>
+                      Deactivate
+                    </Button>
+                  ))}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  busy={acknowledging}
+                  busyLabel="Marking…"
+                  onClick={() =>
+                    startAcknowledge(async () => {
+                      await acknowledgeAnomaliesAction(app.slug, anomalies.slice(0, 3).map((a) => a.id));
+                    })
+                  }
+                >
+                  Mark as expected
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
       {needsReview && (

@@ -17,6 +17,7 @@ import {
 } from "@/lib/connectors/dependents";
 import type { ConnectorReach, ObservedCalls, OwnCredentialStatus } from "@/lib/connectors/reach";
 import type { AppCredentialActions } from "./app-credentials-panel";
+import type { SetAppLimits } from "./app-limits-panel";
 import type { ConnectorConfigState } from "@/lib/connectors/status";
 import type { ConnectorReplacement } from "@/lib/connectors/switch";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
@@ -126,6 +127,8 @@ interface Props {
   appCredentialActions?: AppCredentialActions;
   /** With `initialOpen`: the app whose own credentials to open, after their Connect. */
   initialApp?: string | null;
+  /** Narrow one app's reach on a connector, from its Reach row. */
+  setAppLimits?: SetAppLimits;
 }
 
 type StatusFilter = "all" | "configured" | "unconfigured";
@@ -146,6 +149,7 @@ export default function ConnectorRegistryList({
   observed,
   appCredentialActions,
   initialApp = null,
+  setAppLimits,
   proposal = null,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -359,6 +363,7 @@ export default function ConnectorRegistryList({
           observed={observed}
           appCredentialActions={appCredentialActions}
           initialApp={openedFromUrl ? initialApp : null}
+          setAppLimits={setAppLimits}
           // The Remove dialog replaces this one rather than stacking on it:
           // two focus traps at once, and the setup of a connector that is going.
           onRemove={() => {

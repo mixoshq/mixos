@@ -235,7 +235,8 @@ async function keptByApp(q: Query, slug: string): Promise<Kept> {
       (select count(*)::int from public.app_job_runs where app_slug = ${slug}) as "jobRuns",
       (select count(*)::int from public._migrations where app_slug = ${slug}) as migrations,
       (select count(*)::int from public.telemetry_events
-        where source_type in ('app', 'route', 'service', 'mcp') and source_slug = ${slug}) as "telemetryEvents",
+        where (source_type in ('app', 'route', 'service', 'mcp') and source_slug = ${slug})
+           or (source_type = 'egress' and caller_app_slug = ${slug})) as "telemetryEvents",
       (select count(*)::int from public.app_open_events where app_slug = ${slug}) as "appOpens",
       (select count(*)::int from public.oauth_tokens where ${slug} = any(granted_apps)) as mcp_tokens,
       (select count(*)::int from public.oauth_authorization_codes where ${slug} = any(granted_apps)) as mcp_codes,
@@ -292,7 +293,8 @@ async function keptByConnector(q: Query, name: string): Promise<Kept> {
       (select count(*)::int from public.connector_webhook_events where connector_name = ${name}) as "webhookEvents",
       (select count(*)::int from public.telemetry_events
         where source_type = 'connector' and source_slug = ${name}) as "telemetryEvents",
-      (select count(*)::int from public.platform_settings where key = any(${connectorKeys(name)})) as settings,
+      ((select count(*)::int from public.platform_settings where key = any(${connectorKeys(name)}))
+        + (select count(*)::int from public.connector_app_access where connector_name = ${name})) as settings,
       (select value from public.platform_settings where key = ${connectorMissingKey(name)}) as marked_at
   `;
   const counts: ConnectorDataCounts = {
@@ -561,7 +563,8 @@ async function deleteApp(tx: TransactionSql, slug: string, k: Kept): Promise<App
   counts.telemetryEvents = (
     await tx`
       delete from public.telemetry_events
-      where source_type in ('app', 'route', 'service', 'mcp') and source_slug = ${slug}
+      where (source_type in ('app', 'route', 'service', 'mcp') and source_slug = ${slug})
+         or (source_type = 'egress' and caller_app_slug = ${slug})
     `
   ).count;
   counts.appOpens = (await tx`delete from public.app_open_events where app_slug = ${slug}`).count;
@@ -657,7 +660,10 @@ async function deleteConnector(tx: TransactionSql, name: string): Promise<Connec
     telemetryEvents: (
       await tx`delete from public.telemetry_events where source_type = 'connector' and source_slug = ${name}`
     ).count,
-    settings: (await tx`delete from public.platform_settings where key = any(${connectorKeys(name)})`).count,
+    // An admin's limits on apps here go with it, counted with its settings.
+    settings:
+      (await tx`delete from public.platform_settings where key = any(${connectorKeys(name)})`).count +
+      (await tx`delete from public.connector_app_access where connector_name = ${name}`).count,
   };
 }
 

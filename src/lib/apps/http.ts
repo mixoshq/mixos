@@ -9,6 +9,7 @@ import { isIP, type LookupFunction } from "node:net";
 import { pipeline, Readable } from "node:stream";
 import zlib from "node:zlib";
 import { AppError } from "@/lib/apps/errors";
+import { recordEgressEvent } from "@/lib/apps/telemetry";
 
 /**
  * Outbound HTTP for app code, bounded by a declared host allowlist.
@@ -345,10 +346,20 @@ const MAX_REDIRECTS = 3;
 export function createHttpClient(
   appSlug: string,
   declaredEgress: readonly string[],
+  /**
+   * Who the requests are for, recorded on each hop's egress row
+   * (./telemetry.ts, for ./detection.ts). Null for a job or a public page.
+   */
+  opts: { userId?: string | null } = {},
 ): AppHttpClient {
   // A copy of its own, frozen: the list is checked on every request, and the
   // array passed in may be one the caller can still reach.
   const egress: readonly string[] = Object.freeze([...declaredEgress]);
+  const userId = opts.userId ?? null;
+  /** One row per hop, a redirect included: where it went, and how. */
+  const record = (host: string, outcome: "ok" | "error" | "refused", category?: string, status?: number) =>
+    recordEgressEvent({ appSlug, host, userId, outcome, category, status });
+
   async function guardedFetch(url: string, init: RequestInit, hop: number): Promise<Response> {
     if (hop > MAX_REDIRECTS) {
       throw AppError.invalidInput(`Too many redirects fetching ${url}.`);
@@ -362,11 +373,13 @@ export function createHttpClient(
     }
 
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      record(parsed.hostname || parsed.protocol, "refused", "scheme");
       throw AppError.forbidden(
         `"${appSlug}" may not use the ${parsed.protocol} scheme.`,
       );
     }
     if (!hostAllowed(parsed.hostname, egress)) {
+      record(parsed.hostname, "refused", "host");
       throw AppError.forbidden(
         `"${appSlug}" is not allowed to reach ${parsed.hostname}. ` +
           `Add it to \`egress\` in app.json, or use a connector.`,
@@ -376,12 +389,28 @@ export function createHttpClient(
     // Resolved and checked once, then connected to exactly what was checked.
     // An IP literal (reachable only through a redirect, since the manifest
     // schema refuses one in `egress`) is checked directly.
-    const addresses = await checkedAddresses(parsed.hostname);
+    let addresses: Awaited<ReturnType<typeof checkedAddresses>>;
+    try {
+      addresses = await checkedAddresses(parsed.hostname);
+    } catch (err) {
+      // A name that resolves to a private address is refused; one that
+      // doesn't resolve at all is an error.
+      const refused = err instanceof AppError && err.code === "FORBIDDEN";
+      record(parsed.hostname, refused ? "refused" : "error", refused ? "address" : "dns");
+      throw err;
+    }
 
     // Redirects are not followed by the request itself, so each hop goes back
     // through both checks. Following them automatically is how a validated
     // hostname ends up serving a request to the metadata endpoint.
-    const response = await requestPinned(parsed, init, addresses);
+    let response: Response;
+    try {
+      response = await requestPinned(parsed, init, addresses);
+    } catch (err) {
+      record(parsed.hostname, "error", "network");
+      throw err;
+    }
+    record(parsed.hostname, "ok", undefined, response.status);
 
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");

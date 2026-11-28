@@ -1564,6 +1564,19 @@ manifest. Without the second, it throws a `forbidden` ConnectorError telling an
 admin where to allow changes. Neither runs the method. The setting fails closed:
 when it can't be read, every connector is read-only for that request.
 
+**A third key, per app, that only narrows.** An admin can limit one app on one
+connector from its row in the Reach section
+([`src/lib/connectors/app-access.ts`](../src/lib/connectors/app-access.ts),
+migration 0008): **Can't change data** takes its writes away even though its
+entry asks and changes are allowed, and a **method list** leaves it only the
+methods ticked, within what it could reach anyway. The facade enforces both
+(`appReachRules`), on every path the app reaches a connector; a call outside
+them throws a `forbidden` `ConnectorNarrowedError` naming the limit, and is
+recorded as refused, `narrowed` (§26). Unreadable fails closed: the app gets
+reads only. No row is the two keys above, unchanged. Setting it is
+`connector.app.access`. The activation gate doesn't read it: an admin who took
+an app's writes away meant it to run without them.
+
 The second key reaches the provider too. A scope a connector requests with
 `"write"` is asked for at Connect, and minted into a client-credentials token,
 only where changes are allowed, so a read-only install's grant can't write even
@@ -1585,9 +1598,9 @@ last 30 days. It is a view of what the facade enforces, not a check of its
 own. It errs toward more reach, never less: an app whose switch can't be read
 counts as running, and calls that can't be read say so rather than reading as
 none. The calls come from `telemetry_events`, so they are evidence, not proof:
-a call the facade refused isn't recorded, recording is best-effort, and code
-that gets around the scan (§24) runs as the platform and could write rows of
-its own.
+recording is best-effort, and code that gets around the scan (§24) runs as the
+platform and could write rows of its own. A call the facade refused is counted
+apart, as refused (§26, Detection).
 
 
 ---
@@ -2006,7 +2019,9 @@ sidecar does.
   running build carries.
 - The tick also performs GC: `rate_buckets` older than an hour, route telemetry,
   expired webhook replay markers, and `app_unlock_failures` older than twice the
-  lockout window (§21).
+  lockout window (§21); egress telemetry at 90 days and anomalies an admin marked
+  as expected at 180 (§26). It runs per-app detection at most every 15 minutes,
+  in a catch of its own (§26).
 
 ---
 
@@ -2367,6 +2382,58 @@ recorded only for users who hold the app.
 A client cannot forge **who** fired an event, or record one for an app the user
 doesn't hold. What it still chooses is which declared event fired.
 
+### Detection
+
+What an app does beyond what it usually does is raised on its tile for an admin
+([`src/lib/apps/detection.ts`](../src/lib/apps/detection.ts), migration 0007).
+
+**What is recorded,** server-side, fire-and-forget, never failing the call:
+
+- every connector call through an app's facade, with the app, as before;
+- **refused connector calls**, `outcome = 'refused'`, with why in
+  `error_category`: `undeclared` (a member the connector doesn't declare),
+  `write-not-asked`, `write-not-allowed`, `budget` (over the route's
+  connector-call budget) and `disabled`. A refused MCP or search write
+  (read-only, §17) isn't recorded yet;
+- **every `context.http` hop**, a redirect included, as `source_type =
+  'egress'` with the host and the app: `ok` with the status, `error`, or
+  `refused` with why (`host`, `scheme`, `address`).
+
+**The detector** runs from the cron tick at most every 15 minutes (a
+`platform_settings` timestamp, row-locked, so two ticks don't both run it). It
+reads the `connector` and `egress` rows since its last run, through a partial
+index, and raises, one row per app, kind and subject in `app_anomalies`:
+
+| Kind | When |
+|---|---|
+| `new-write` | A first call to a connector method declared `mutates` |
+| `new-host` | A first contact with a host the app's egress allows only through a wildcard |
+| `refused` | Any refused call, connector or egress, counted |
+| `spike` | More than 10× the week's hourly mean in the last hour, and more than 100 calls |
+| `too-many-subjects` | More than 500 distinct methods and hosts, past which nothing new is kept |
+
+What an app has done before is in `app_activity_seen`. The first run takes the
+last 30 days as that baseline and raises nothing, so an upgrade doesn't flag
+every app's normal traffic.
+
+**What an admin sees:** an **Unusual activity** pill and strip on the app's
+tile with the first three, **Deactivate** (with a confirm, audited
+`app.deactivate`) and **Mark as expected** (audited `app.anomaly.acknowledge`),
+and a notice above Admin > Apps while any are open. The app's Reach tab lists
+the methods it called and the hosts it reached in the last 30 days, with what
+was refused.
+
+**It fails open, deliberately.** Recording is best-effort, and the detector
+never deactivates an app by itself: it is a record, not a gate, for the same
+reason as audit rule 2 (§28). False positives taking apps down would cost more
+than the delay of an admin's click.
+
+**Retention.** Egress rows are pruned at 90 days, and anomalies marked as
+expected at 180. Connector rows are kept, as before. Delete data deletes an
+app's egress rows with its other telemetry; its baseline and anomalies go with
+its row, a rename moves them, and a different extension under the slug starts
+with neither.
+
 ---
 
 ## 27. Connector OAuth (MixOS as an OAuth Client)
@@ -2447,6 +2514,7 @@ Currently recorded: `connector.configure`, `connector.connect`,
 `app.apikey.create`, `app.apikey.revoke`, `app.mcp.tool.enable`,
 `app.mcp.tool.disable`, `app.activate`,
 `app.deactivate`, `app.review`, `app.update.unreviewed`, `app.review.required`,
+`app.anomaly.acknowledge`, `connector.app.access`,
 `app.missing`, `app.returned`, `app.identity.changed`,
 `app.global.ended`,
 `connector.missing`, `connector.returned`, `connector.identity.changed`,

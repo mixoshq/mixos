@@ -54,12 +54,20 @@ function props(over: Partial<ReachSectionProps> & { changesAllowed?: boolean; ac
   } satisfies ReachSectionProps;
 }
 
-const call = (appSlug: string | null, method: string, calls: number, errors = 0, appName: string | null = null): ObservedCall => ({
+const call = (
+  appSlug: string | null,
+  method: string,
+  calls: number,
+  errors = 0,
+  appName: string | null = null,
+  refused = 0,
+): ObservedCall => ({
   appSlug,
   appName,
   method,
   calls,
   errors,
+  refused,
 });
 
 const list = (p: ReturnType<typeof props>, observed: Parameters<typeof ReachList>[0]["observed"]) =>
@@ -101,6 +109,11 @@ test("the calls each app made, how many failed, and a method it can't call now",
   assert.match(words, /In the last 30 days: listDeals 1,240, 2 failed · createDeal 3, not callable now/);
   assert.match(words, /Reports Optional .*In the last 30 days: getDeal 1/);
   assert.match(words, /Archive .*No calls in the last 30 days\./);
+});
+
+test("a refused call is counted apart", () => {
+  const words = list(props(), { state: "read", calls: [call("reports", "createDeal", 0, 0, null, 2)] });
+  assert.match(words, /In the last 30 days: createDeal 0, 2 refused, not callable now/);
 });
 
 test("calls from an app that doesn't declare it now, and from no app, are listed apart", () => {
@@ -231,6 +244,37 @@ test("the panel for one app: it replaces the shared ones, never falls back, and 
   );
   assert.match(fresh, /Save its credentials/);
   assert.doesNotMatch(fresh, /Verify its connection|Use the shared credentials|Connect its account/);
+});
+
+test("limits: a Limited pill, and a panel that only narrows", () => {
+  const narrowed = {
+    ...props(),
+    reach: connectorReach({
+      connector: { name: "crm", telemetry: METHODS },
+      apps: APPS,
+      active: { pipeline: true, reports: true, archive: false },
+      disabled: false,
+      changesAllowed: true,
+      narrowings: { pipeline: { writes: "deny", methods: null } },
+    }),
+    limitsSetup: {
+      methods: METHODS.map((m) => ({ method: m.method, mutates: m.mutates === true })),
+      setLimits: async () => {},
+    },
+  };
+  const words = text(renderToStaticMarkup(createElement(ReachList, { ...narrowed, observed: { state: "read", calls: [] }, openApp: "limits:pipeline" })));
+  assert.match(words, /Pipeline Required Limited Limits…|Pipeline Required Limited Close/);
+  assert.match(words, /It asks to change data, and an admin took its writes away here\./);
+  assert.match(words, /Narrow what Pipeline may call here\. This only takes away/);
+  assert.match(words, /Can't change data, even though it asks to/);
+  assert.match(words, /Methods it may call listDeals getDeal createDeal Changes data/);
+  assert.match(words, /Save its limits Remove its limits/);
+  // Reports doesn't ask to write: its panel offers only its reads.
+  const reports = text(
+    renderToStaticMarkup(createElement(ReachList, { ...narrowed, observed: { state: "read", calls: [] }, openApp: "limits:reports" })),
+  );
+  assert.match(reports, /Narrow what Reports may call here/);
+  assert.doesNotMatch(reports.slice(reports.indexOf("Narrow what Reports")), /createDeal|even though it asks/);
 });
 
 test("no app declares it", () => {

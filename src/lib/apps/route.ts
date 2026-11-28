@@ -54,7 +54,7 @@ import { isConnectorError } from "@/lib/connectors/errors";
 import { connectorErrorResponse } from "@/lib/connectors/response";
 import { AppError, toErrorResponse } from "@/lib/apps/errors";
 import { withTimeout } from "@/lib/timeout";
-import { recordRouteCall } from "@/lib/apps/telemetry";
+import { recordRefusedConnectorCall, recordRouteCall } from "@/lib/apps/telemetry";
 
 // ============================================================
 // Declaration types
@@ -536,10 +536,12 @@ function coerceStrings(
  * fields, and routing `this` back through the proxy is the classic way to turn
  * a working getter into a runtime error.
  */
-function withConnectorBudget(
+export function withConnectorBudget(
   connectors: Record<string, BaseConnector>,
   max: number,
   label: string,
+  /** Told of each call refused for the budget, for detection (./detection.ts). */
+  onRefused?: (connector: string, method: string) => void,
 ): Record<string, BaseConnector> {
   const state = { used: 0 };
   const wrapped: Record<string, BaseConnector> = {};
@@ -552,6 +554,7 @@ function withConnectorBudget(
         return (...args: unknown[]) => {
           state.used += 1;
           if (state.used > max) {
+            onRefused?.(name, String(prop));
             throw AppError.budgetExceeded(
               `${label} exceeded its connector-call budget of ${max}. This is almost always a per-record loop that wants to be a batch read — see docs/apps/api-routes.md. Raise the route's budget only when the fan-out is intended.`,
               { budget: "connectorCalls", limit: max, connector: name, method: String(prop) },
@@ -622,6 +625,7 @@ async function executeRoute(
   pathParams: Record<string, string>,
   label: string,
   inputOverride?: unknown,
+  appSlug?: string,
 ): Promise<{ kind: "raw"; response: Response } | { kind: "data"; payload: unknown }> {
   // ROLES, ENFORCED HERE RATHER THAN AT THE MOUNT. This is the single place
   // every caller passes through — both HTTP mounts and the in-process
@@ -682,6 +686,16 @@ async function executeRoute(
       context.connectors,
       def.budget.connectorCalls,
       label,
+      appSlug
+        ? (connector, method) =>
+            recordRefusedConnectorCall({
+              connectorSlug: connector,
+              method,
+              callerAppSlug: appSlug,
+              userId: context.user?.id ?? null,
+              reason: "budget",
+            })
+        : undefined,
     ),
     signal: AbortSignal.any([request.signal, outOfTime.signal]),
     connectorErrorResponse: (err: unknown) => connectorErrorResponse(err, { isAdmin }),
@@ -832,6 +846,7 @@ export async function runRoute(
       pathParams,
       label,
       inputOverride,
+      appSlug,
     );
 
     if (out.kind === "raw") {
@@ -924,6 +939,7 @@ export async function runRouteData<TOut = unknown>(
       pathParams,
       label,
       inputOverride,
+      appSlug,
     );
     if (out.kind === "raw") {
       throw new AppError(

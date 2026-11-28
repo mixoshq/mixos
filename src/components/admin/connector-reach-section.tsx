@@ -19,6 +19,7 @@ import {
 } from "@/lib/connectors/reach";
 import type { CredentialField } from "@/lib/connectors/types";
 import AppCredentialsPanel, { OWN_STATE_LABEL, type AppCredentialActions } from "./app-credentials-panel";
+import AppLimitsPanel, { type SetAppLimits } from "./app-limits-panel";
 
 /**
  * The Details tab's Reach section: every app that declares this connector,
@@ -68,18 +69,29 @@ export interface ReachSectionProps {
   };
   /** An app whose own credentials to open on arrival: the way back from its Connect. */
   initialApp?: string | null;
+  /**
+   * What narrowing an app's reach needs (lib/connectors/app-access.ts): the
+   * connector's methods, and the page's action. Absent where nothing passes it.
+   */
+  limitsSetup?: {
+    methods: { method: string; mutates: boolean }[];
+    setLimits: SetAppLimits;
+  };
 }
 
-/** Which row's own-credentials panel is open, held above the Suspense so streaming in the calls keeps it. */
+/**
+ * Which row's panel is open, `cred:<slug>` or `limits:<slug>`, held above the
+ * Suspense so streaming in the calls keeps it.
+ */
 interface OpenRow {
   openApp: string | null;
-  toggle: (slug: string) => void;
+  toggle: (key: string) => void;
 }
 
 export default function ConnectorReachSection(props: ReachSectionProps) {
   const { reach, observed, connectorName } = props;
-  const [openApp, setOpenApp] = useState<string | null>(props.initialApp ?? null);
-  const open: OpenRow = { openApp, toggle: (slug) => setOpenApp((v) => (v === slug ? null : slug)) };
+  const [openApp, setOpenApp] = useState<string | null>(props.initialApp ? `cred:${props.initialApp}` : null);
+  const open: OpenRow = { openApp, toggle: (key) => setOpenApp((v) => (v === key ? null : key)) };
   return (
     <section>
       <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -118,6 +130,7 @@ export function ReachList({
   writeGrantMissing,
   ownCredentials = [],
   ownCredentialsSetup,
+  limitsSetup,
   openApp = null,
   toggle = () => {},
 }: Omit<ReachSectionProps, "observed" | "initialApp"> & Partial<OpenRow> & { observed: Observed }) {
@@ -171,9 +184,11 @@ export function ReachList({
               observed={observed}
               own={ownBySlug.get(app.slug)}
               setup={ownCredentialsSetup}
+              limits={limitsSetup}
               connectorName={connectorName}
-              open={openApp === app.slug}
-              onToggle={() => toggle(app.slug)}
+              openCredentials={openApp === `cred:${app.slug}`}
+              openLimits={openApp === `limits:${app.slug}`}
+              onToggle={(panel) => toggle(`${panel}:${app.slug}`)}
             />
           </li>
         ))}
@@ -208,8 +223,10 @@ function AppRow({
   observed,
   own,
   setup,
+  limits,
   connectorName,
-  open,
+  openCredentials: open,
+  openLimits,
   onToggle,
 }: {
   app: AppReach;
@@ -217,11 +234,17 @@ function AppRow({
   observed: Observed;
   own: OwnCredentialStatus | undefined;
   setup: ReachSectionProps["ownCredentialsSetup"];
+  limits: ReachSectionProps["limitsSetup"];
   connectorName: string;
-  open: boolean;
-  onToggle: () => void;
+  openCredentials: boolean;
+  openLimits: boolean;
+  onToggle: (panel: "cred" | "limits") => void;
 }) {
   const callable = new Set([...app.reads, ...app.writes]);
+  // What it could reach before any limit: every read, and every write if its
+  // entry asks for "write".
+  const asksWrites = app.write !== "none" && app.write !== "not-asked";
+  const reachableMethods = (limits?.methods ?? []).filter((m) => !m.mutates || asksWrites);
   return (
     <>
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -238,6 +261,11 @@ function AppRow({
             <StatusPill tone="neutral">Read-only here</StatusPill>
           </InfoTooltip>
         )}
+        {app.narrowing && (
+          <InfoTooltip tip="An admin narrowed what it may call here: its writes, the methods, or both.">
+            <StatusPill tone="neutral">Limited</StatusPill>
+          </InfoTooltip>
+        )}
         {own && (
           <InfoTooltip tip="An admin gave it credentials of its own, which it uses instead of the shared ones. It never falls back to the shared ones.">
             <StatusPill tone={own.state === "ready" ? "success" : own.state === "unreadable" ? "danger" : "warning"}>
@@ -245,16 +273,28 @@ function AppRow({
             </StatusPill>
           </InfoTooltip>
         )}
-        {setup && (
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={open}
-            className="ml-auto text-xs font-medium text-primary underline underline-offset-2 hover:no-underline"
-          >
-            {open ? "Close" : own ? "Its own credentials…" : "Give it its own credentials…"}
-          </button>
-        )}
+        <span className="ml-auto flex items-center gap-3">
+          {limits && reachableMethods.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onToggle("limits")}
+              aria-expanded={openLimits}
+              className="text-xs font-medium text-primary underline underline-offset-2 hover:no-underline"
+            >
+              {openLimits ? "Close" : "Limits…"}
+            </button>
+          )}
+          {setup && (
+            <button
+              type="button"
+              onClick={() => onToggle("cred")}
+              aria-expanded={open}
+              className="text-xs font-medium text-primary underline underline-offset-2 hover:no-underline"
+            >
+              {open ? "Close" : own ? "Its own credentials…" : "Give it its own credentials…"}
+            </button>
+          )}
+        </span>
       </span>
       <span className="mt-0.5 block text-sm text-foreground">{describeAppReach(app, declaredWrites)}</span>
       <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -264,6 +304,17 @@ function AppRow({
           (method) => callable.has(method),
         )}
       </span>
+      {limits && openLimits && (
+        <AppLimitsPanel
+          connectorName={connectorName}
+          appSlug={app.slug}
+          appName={app.name}
+          methods={reachableMethods}
+          asksWrites={asksWrites && reachableMethods.some((m) => m.mutates)}
+          narrowing={app.narrowing}
+          setLimits={limits.setLimits}
+        />
+      )}
       {setup && open && (
         <AppCredentialsPanel
           connectorName={connectorName}
@@ -301,8 +352,9 @@ function callList(calls: ObservedCall[], callable?: (method: string) => boolean)
   return calls
     .map((c) => {
       const failed = c.errors > 0 ? `, ${c.errors} failed` : "";
+      const refused = c.refused > 0 ? `, ${c.refused.toLocaleString("en-US")} refused` : "";
       const gone = callable && !callable(c.method) ? ", not callable now" : "";
-      return `${c.method} ${c.calls.toLocaleString("en-US")}${failed}${gone}`;
+      return `${c.method} ${c.calls.toLocaleString("en-US")}${failed}${refused}${gone}`;
     })
     .join(" · ");
 }

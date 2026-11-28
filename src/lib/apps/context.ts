@@ -12,6 +12,8 @@ import type { AppManifest } from "@/lib/apps/types";
 import type { BaseConnector } from "@/lib/connectors/types";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
+import { getAppNarrowings } from "@/lib/connectors/app-access";
+import type { AppNarrowing } from "@/lib/connectors/reach";
 import {
   getAppCredentialRows,
   openAppCredentials,
@@ -31,7 +33,12 @@ import { appReachRules, narrowConnector } from "./connector-reach";
 import { createScopedClient } from "./scoped-db";
 import { createNotificationsClient } from "./notifications";
 import { createServicesClient } from "./services";
-import { createTelemetryClient, instrumentConnector } from "./telemetry";
+import {
+  createTelemetryClient,
+  instrumentConnector,
+  recordRefusedConnectorCall,
+  type ConnectorRefusal,
+} from "./telemetry";
 import { getUserAppRole } from "./access";
 import { loadAppEnv } from "./env";
 import { createHttpClient } from "./http";
@@ -74,12 +81,12 @@ function telemetryClientFor(manifest: AppManifest, userId: string | null) {
  * bounded by the hosts it declared. Both are `[]`/`null` by default — an app
  * that asked for neither can reach neither.
  */
-async function buildContainment(manifest: AppManifest) {
+async function buildContainment(manifest: AppManifest, userId: string | null = null) {
   return {
     env: await loadAppEnv(manifest.slug, manifest.env ?? []),
     http:
       (manifest.egress ?? []).length > 0
-        ? createHttpClient(manifest.slug, manifest.egress)
+        ? createHttpClient(manifest.slug, manifest.egress, { userId })
         : null,
   };
 }
@@ -107,7 +114,7 @@ export async function buildAppContext(
   });
 
   const registrar = appRegistrar(manifest.slug);
-  const containment = await buildContainment(manifest);
+  const containment = await buildContainment(manifest, dbUser.id);
 
   // Initialize declared connectors: the admin-configured credentials in
   // `connector_configs`, shared by every user, or for a `userScoped` connector
@@ -262,6 +269,23 @@ async function loadTenantConnectors(
     "write" and an admin has allowed changes. Never the instance itself, whose
     protected `request()` would reach any path with its credential.
   */
+  /*
+    An admin's limits on this app (src/lib/connectors/app-access.ts), read
+    once. Unreadable fails closed: every connector is reads only for this
+    context, as when Allow changes can't be read.
+  */
+  let narrowings: Map<string, AppNarrowing> | null;
+  try {
+    narrowings = await getAppNarrowings(manifest.slug);
+  } catch (err) {
+    console.error(`[${logTag}] could not read this app's connector limits, so all are reads only:`, err);
+    narrowings = null;
+  }
+
+  // A refused call is recorded for detection (./detection.ts): an app
+  // reaching for what it wasn't given is the signal worth an admin's look.
+  const refused = (connName: string, method: string, reason: ConnectorRefusal) =>
+    recordRefusedConnectorCall({ connectorSlug: connName, method, callerAppSlug: manifest.slug, userId, reason });
   const reachFor = (connName: string) =>
     appReachRules({
       appSlug: manifest.slug,
@@ -269,6 +293,8 @@ async function loadTenantConnectors(
       subject: connectorManifest(connName)?.displayName ?? connName,
       need: manifest.connectorRequirements.find((r) => r.name === connName),
       writable: writable.has(connName),
+      narrowing: narrowings === null ? "unknown" : (narrowings.get(connName) ?? null),
+      onRefused: (method, reason) => refused(connName, method, reason),
     });
   const handOver = (connName: string, connector: BaseConnector) =>
     narrowConnector(connector, connectorManifest(connName)?.telemetry ?? [], reachFor(connName));
@@ -306,6 +332,7 @@ async function loadTenantConnectors(
       connectors[connName] = disabledConnector(
         connName,
         connectorManifest(connName)?.displayName ?? connName,
+        (method) => refused(connName, method, "disabled"),
       );
       continue;
     }
