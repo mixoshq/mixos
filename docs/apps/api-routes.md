@@ -316,6 +316,11 @@ an admin. For a **user-scoped** connector the pattern is different: return
 `{ connected: false }` rather than failing, so the widget can render a Connect
 prompt. See [Connectors](./connectors.md#required-ux-pattern).
 
+What `context.connectors.<name>` holds is the connector's declared methods,
+`name` and `configured`, and nothing else: any other property reads as
+`undefined`, and logging or serializing it shows an empty object. The
+connector's credentials never reach your code, by method or by property.
+
 ### Calling connectors efficiently
 
 Connector calls dominate a route's latency, and the `connectorCalls` budget
@@ -508,6 +513,8 @@ back in-process.
 - Hand-writing a status code for a case `AppError` already covers.
 - Reading `context.user` without a null check on a route that accepts an
   anonymous auth. The compiler stops you; don't cast around it.
+- Writing to `context.manifest` or `context.user`. Both are frozen, so a write
+  throws: the platform reads them again after your handler has them.
 - Raising `budget.connectorCalls` to make a failing route pass. The budget is
   usually telling you the truth about an N+1.
 - Accepting a state-changing request on `GET`. `SameSite=Lax` permits a

@@ -344,8 +344,11 @@ const MAX_REDIRECTS = 3;
 
 export function createHttpClient(
   appSlug: string,
-  egress: readonly string[],
+  declaredEgress: readonly string[],
 ): AppHttpClient {
+  // A copy of its own, frozen: the list is checked on every request, and the
+  // array passed in may be one the caller can still reach.
+  const egress: readonly string[] = Object.freeze([...declaredEgress]);
   async function guardedFetch(url: string, init: RequestInit, hop: number): Promise<Response> {
     if (hop > MAX_REDIRECTS) {
       throw AppError.invalidInput(`Too many redirects fetching ${url}.`);

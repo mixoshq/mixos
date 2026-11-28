@@ -225,6 +225,25 @@ const CONNECTORS: ConnectorManifest[] = [
 ];
 
 /** What a release step reads about each app, for the registry mirror: now, since a test changes `global`. */
+/**
+ * The next build's entry for `slug`, with `change`: a new object, as a build
+ * makes one. The entry in place can't be written to once a context has been
+ * built from it, since that freezes it (src/lib/apps/freeze.ts). Swapped into
+ * the fixtures and the registry alike; the function it returns puts the old
+ * entry back in both.
+ */
+function rebuilt(registry: AppManifest[], slug: string, change: Partial<AppManifest>): () => void {
+  const before = APPS.find((a) => a.slug === slug)!;
+  const swap = (entry: AppManifest) => {
+    for (const list of [APPS, registry] as AppManifest[][]) {
+      const at = list.findIndex((a) => a.slug === slug);
+      if (at >= 0) list[at] = entry;
+    }
+  };
+  swap({ ...before, ...change });
+  return () => swap(before);
+}
+
 const mirrored = () =>
   APPS.map((a) => ({ slug: a.slug, name: a.name, description: a.description, icon: a.icon, global: a.global }));
 
@@ -725,7 +744,6 @@ describe("the Access tab's server actions", { skip }, () => {
   test("a role on a global app is only a role: once the app stops being global, nobody has it through one", async () => {
     signIn("admin");
     const appsDir = path.join(work, "apps");
-    const team = APPS.find((a) => a.slug === TEAM)!;
     const roleOnly = async () =>
       Object.fromEntries(
         (await sql`select user_id, role_only from public.user_app_grants where app_slug = ${TEAM}`).map((r) => [
@@ -756,7 +774,7 @@ describe("the Access tab's server actions", { skip }, () => {
     // While it's global, everyone has it.
     assert.equal(await route("dave"), "resolved");
 
-    team.global = false;
+    let restore = rebuilt(p.registry.appRegistry, TEAM, { global: false });
     try {
       const ended = await p.sync.syncAppRegistry(sql, mirrored(), appsDir, []);
       // Alice, Bob and Carol had it, by a role, and have no grant: it needs
@@ -813,7 +831,7 @@ describe("the Access tab's server actions", { skip }, () => {
       // Carol still has only her role.
       assert.equal(await route("carol"), "forbidden");
     } finally {
-      team.global = true;
+      restore();
     }
 
     // Global again: Alice's grant stays a grant, and a role set on it now
@@ -832,7 +850,7 @@ describe("the Access tab's server actions", { skip }, () => {
 
     // Not global once more: Alice, granted, keeps it. Nobody who had it is
     // left without a grant, so it needs none: recorded, and not marked.
-    team.global = false;
+    restore = rebuilt(p.registry.appRegistry, TEAM, { global: false });
     try {
       const nobody = await p.sync.syncAppRegistry(sql, mirrored(), appsDir, []);
       assert.deepEqual(nobody.globalEnded, [{ slug: TEAM, roleOnly: 0, lost: 0 }]);
@@ -841,7 +859,7 @@ describe("the Access tab's server actions", { skip }, () => {
       assert.equal(await route("alice"), "resolved");
       assert.equal(await route("dave"), "forbidden");
     } finally {
-      team.global = true;
+      restore();
     }
     await p.sync.syncAppRegistry(sql, mirrored(), appsDir, []);
   });
