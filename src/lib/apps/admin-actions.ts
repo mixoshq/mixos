@@ -11,6 +11,8 @@ import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin, setAppActive } from "@/lib/apps/access";
 import { recordAppReview, type AppTrust } from "@/lib/apps/app-review";
 import { acknowledgeAnomalies, getObservedActivity, type ObservedActivity } from "@/lib/apps/detection";
+import { approveCapabilities, setCapabilityDenied } from "@/lib/apps/capability-approvals";
+import type { CapabilityKind } from "@/lib/apps/capabilities";
 import {
   getMissingTenantConfigConnectors,
   missingConnectorSteps,
@@ -148,6 +150,32 @@ export async function acknowledgeAnomaliesAction(slug: string, ids: string[]): P
   const n = await acknowledgeAnomalies({ id: admin.id, email: admin.email }, slug, ids);
   revalidatePath("/admin/apps");
   return n;
+}
+
+/**
+ * Approve what an app newly asks for (src/lib/apps/capability-approvals.ts),
+ * audited there as `app.capabilities.approve`. For a local app, still on.
+ */
+export async function approveCapabilitiesAction(slug: string): Promise<void> {
+  const session = await requireReadOnlySession();
+  const admin = await requireAdmin(session);
+  if (!appRegistry.some((a) => a.slug === slug)) throw new Error("App not found in registry");
+  await approveCapabilities({ id: admin.id, email: admin.email }, slug);
+  revalidatePath("/admin/apps");
+}
+
+/** Turn one of an app's capabilities off, or back on, while it runs. */
+export async function setCapabilityDeniedAction(
+  slug: string,
+  kind: CapabilityKind,
+  capability: string,
+  denied: boolean,
+): Promise<void> {
+  const session = await requireReadOnlySession();
+  const admin = await requireAdmin(session);
+  if (!appRegistry.some((a) => a.slug === slug)) throw new Error("App not found in registry");
+  await setCapabilityDenied({ id: admin.id, email: admin.email }, slug, kind, capability, denied);
+  revalidatePath("/admin/apps");
 }
 
 /** What an app was seen doing in the last 30 days, for its Reach tab. Read on open, as its schema is. */

@@ -549,6 +549,8 @@ describe("Delete data against a real database", { skip }, () => {
       ["public.app_open_events", "app_slug"],
       ["public.connector_app_configs", "app_slug"],
       ["public.connector_scope_status", "app_slug"],
+      // What its activation approved (src/lib/apps/capability-approvals.ts), with its row.
+      ["public.app_capability_approvals", "app_slug"],
     ] as const) {
       const change = changed.get(table);
       assert.ok(change, `${table} didn't change`);

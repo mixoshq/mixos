@@ -703,6 +703,45 @@ What the platform does between those two boxes, in order:
 
 ---
 
+### 3.6 Approved capabilities
+
+Activating an app approves **what its manifest asks for**, as a set
+([`src/lib/apps/capabilities.ts`](../src/lib/apps/capabilities.ts),
+[`src/lib/apps/capability-approvals.ts`](../src/lib/apps/capability-approvals.ts),
+migration 0009): each egress host, connector (and its writes), optional
+connector, consumed and provided service, hook listened to, MCP tool, search
+object, schedule, public, password or key route tier, branding hook,
+notifications, a database, and being global. Reordering the manifest is no
+change, and asking for less is no prompt.
+
+- **Growth means re-approval.** The release step compares each build's set with
+  the approved one (`scripts/sync-capabilities.ts`). An app asking for more is
+  flagged **Asks for more** (`apps.capabilities_pending_since`), audited
+  `app.capabilities.grew` with what was added. A **Registry** app is also
+  switched off until an admin approves it, by activating it (after 5a's review,
+  which leads with the new capabilities). A **local** app stays on, flagged,
+  and **Approve** records it (`app.capabilities.approve`). Whether a local app
+  should be switched off too is an open decision; it isn't.
+- **The upgrade path.** A local app's current set is recorded the first time
+  the release step sees it, silently. A Registry app gets none: an active one
+  with none is switched off (no grandfathering).
+- **Turn one off, keep the app.** An admin can turn off what an app already
+  handles the absence of: an egress host (refused as an undeclared one is), an
+  optional connector (absent), a consumed service (`NOT_ALLOWED`), and
+  notifications (`context.notifications` is null), each audited
+  `app.capability.deny` / `app.capability.allow`. Connector writes are 7a's
+  "Can't change data" (§16.1), and MCP tools have their own switches (§17).
+  Everything else is approved with the app. Read once per context; unreadable
+  turns all four off.
+- **Unused write access expires.** An active app approved more than 90 days
+  ago to change data through a connector that may, with no successful write
+  through it in 90 days, has its writes taken away by the cron tick, as 7a's
+  "Can't change data" with `expired_at` set, audited `app.capability.expired`
+  as the `scheduler`. A notice on Admin > Apps says which; removing the limit
+  gives it back.
+
+---
+
 ## 4. Security Boundaries Summary
 
 | Layer               | What it protects              | Mechanism                                    | Enforced at                  |
@@ -2514,7 +2553,9 @@ Currently recorded: `connector.configure`, `connector.connect`,
 `app.apikey.create`, `app.apikey.revoke`, `app.mcp.tool.enable`,
 `app.mcp.tool.disable`, `app.activate`,
 `app.deactivate`, `app.review`, `app.update.unreviewed`, `app.review.required`,
-`app.anomaly.acknowledge`, `connector.app.access`,
+`app.anomaly.acknowledge`, `connector.app.access`, `app.capabilities.grew`,
+`app.capabilities.approve`, `app.capability.deny`, `app.capability.allow`,
+`app.capability.expired`,
 `app.missing`, `app.returned`, `app.identity.changed`,
 `app.global.ended`,
 `connector.missing`, `connector.returned`, `connector.identity.changed`,

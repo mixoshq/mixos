@@ -17,7 +17,9 @@ import {
 import { Dialog } from "@/components/ui/dialog";
 import type { AppTrust } from "@/lib/apps/app-review";
 import type { ObservedActivity } from "@/lib/apps/detection";
-import { getObservedActivityAction } from "@/lib/apps/admin-actions";
+import { getObservedActivityAction, setCapabilityDeniedAction } from "@/lib/apps/admin-actions";
+import type { CapabilityStatus } from "@/lib/apps/capability-approvals";
+import { describeCapability } from "@/lib/apps/capabilities";
 import { StatusPill } from "@/components/ui/status";
 import FolderTabs from "@/components/ui/folder-tabs";
 import LucideIcon from "@/components/lucide-icon";
@@ -479,6 +481,51 @@ export function MissingConnectorWarning({
  * Between them they are every way the app can send data out of the platform.
  * Exported for its test, which renders it on its own.
  */
+/**
+ * What an admin can turn off while the app runs (lib/apps/capability-approvals.ts):
+ * only what it already handles the absence of. A host turned off is refused
+ * as an undeclared one is, an optional connector is absent, a consumed
+ * service answers NOT_ALLOWED, and `context.notifications` is null.
+ * Everything else it asks for is approved with the app, not turned off alone.
+ */
+export function CapabilityTogglesPanel({ slug, capabilities }: { slug: string; capabilities: CapabilityStatus }) {
+  const [pending, setPending] = useState<string | null>(null);
+  return (
+    <section>
+      <SectionHeading>What you can turn off</SectionHeading>
+      <p className="mt-1 text-sm text-muted-foreground">
+        The app keeps running without these. Everything else it asks for comes with the app.
+      </p>
+      <ul className="mt-2 space-y-1 text-sm text-foreground">
+        {capabilities.deniable.map((c) => {
+          const key = `${c.kind}:${c.capability}`;
+          return (
+            <li key={key} className="flex flex-wrap items-center gap-2">
+              <span>{describeCapability(c)}</span>
+              {c.denied && <StatusPill tone="warning">Off</StatusPill>}
+              <button
+                type="button"
+                disabled={pending === key}
+                onClick={async () => {
+                  setPending(key);
+                  try {
+                    await setCapabilityDeniedAction(slug, c.kind, c.capability, !c.denied);
+                  } finally {
+                    setPending(null);
+                  }
+                }}
+                className="text-xs font-medium text-primary underline underline-offset-2 hover:no-underline disabled:opacity-50"
+              >
+                {c.denied ? "Turn on" : "Turn off"}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 /**
  * Observed beside declared: the connector methods the app called and the
  * hosts its own code reached in the last 30 days, with what was refused, from
@@ -983,10 +1030,13 @@ export default function AppDetailsDialog({
   onClose,
   onRemove,
   trust = null,
+  capabilities = null,
 }: {
   app: AppManifest;
   /** A Registry app's provenance and review (lib/apps/app-review.ts); null for a local app. */
   trust?: AppTrust | null;
+  /** What it asks for beyond its approvals, and what an admin can turn off (lib/apps/capability-approvals.ts). */
+  capabilities?: CapabilityStatus | null;
   missingConnectors: MissingConnector[];
   /** Whether the app serves anything, for the connector warning's wording. */
   isActive: boolean;
@@ -1359,6 +1409,9 @@ export default function AppDetailsDialog({
       {tab === "connectors" && (
         <div className="space-y-8">
           <AppReachPanel app={app} missingConnectors={missingConnectors} />
+          {capabilities && capabilities.deniable.length > 0 && (
+            <CapabilityTogglesPanel slug={app.slug} capabilities={capabilities} />
+          )}
           <ObservedActivityPanel app={app} />
         </div>
       )}

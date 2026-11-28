@@ -12,6 +12,16 @@ just pulled.
 
 ## 2026-11-28
 
+- **Approve what an app asks for, not just the app.** Activating an app
+  approves its capabilities (hosts, connectors and writes, services, tools,
+  schedules, public routes and more). When an update asks for more, Admin >
+  Apps flags it **Asks for more**, and a Registry app is switched off until an
+  admin approves it. On the Reach tab an admin can turn off a host, an optional
+  connector, a consumed service or notifications while the app runs. Write
+  access unused for 90 days is taken away, with a notice. Platform migration
+  0009. See
+  [`docs/security-architecture.md` §3.6](docs/security-architecture.md#36-approved-capabilities).
+
 - **Limit what one app may call on a connector.** In the connector's Reach
   section, **Limits…** takes an app's writes away, or leaves it only the
   methods you tick. It only narrows what the manifest and Allow changes give

@@ -10,7 +10,9 @@ import type { AppManifest } from "@/lib/apps/types";
 import type { AppReplacement, NeedsGrants } from "@/lib/apps/access";
 import type { AppTrust } from "@/lib/apps/app-review";
 import { describeAnomaly, type Anomaly } from "@/lib/apps/anomaly";
-import { acknowledgeAnomaliesAction } from "@/lib/apps/admin-actions";
+import { acknowledgeAnomaliesAction, approveCapabilitiesAction } from "@/lib/apps/admin-actions";
+import type { CapabilityStatus } from "@/lib/apps/capability-approvals";
+import { describeCapability } from "@/lib/apps/capabilities";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import AppReviewDialog from "./app-review-dialog";
 import LucideIcon from "@/components/lucide-icon";
@@ -73,6 +75,11 @@ interface AppTileProps {
    */
   anomalies?: Anomaly[];
   /**
+   * What the app asks for beyond what an admin approved, and the capabilities
+   * they can turn off (lib/apps/capability-approvals.ts). Null when unknown.
+   */
+  capabilities?: CapabilityStatus | null;
+  /**
    * Opens the Remove dialog, which says what goes and what stays before it
    * removes anything. Offered from the Details dialog's footer, not the tile.
    */
@@ -108,8 +115,11 @@ export default function AppTile({
   replacement,
   trust = null,
   anomalies = [],
+  capabilities = null,
   onRemove,
 }: AppTileProps) {
+  const [approving, startApprove] = useTransition();
+  const asksMore = (capabilities?.added.length ?? 0) > 0;
   const [acknowledging, startAcknowledge] = useTransition();
   /** Deactivate from the strip asks once before it switches everything off. */
   const [confirmingStop, setConfirmingStop] = useState(false);
@@ -244,7 +254,7 @@ export default function AppTile({
         badge its own fill, which reads as four severities when it is really
         four measurements — and six of those would be a traffic light.
       */}
-      {(pills.length > 0 || !isActive || backChanged || replaced || needsGrants || trust || unusual) && (
+      {(pills.length > 0 || !isActive || backChanged || replaced || needsGrants || trust || unusual || asksMore) && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {/* The pills here that are states rather than measurements, so the
               ones that get a tone. Nothing marks an active app: active is
@@ -252,6 +262,7 @@ export default function AppTile({
               every tile would be a row of decoration. */}
           {unusual && <StatusPill tone="danger">Unusual activity</StatusPill>}
           {!isActive && <StatusPill tone="warning">Inactive</StatusPill>}
+          {asksMore && <StatusPill tone="warning">Asks for more</StatusPill>}
           {trust && (
             <InfoTooltip
               tip={`Installed from ${trust.provenance}${trust.modified ? ", and modified locally since" : ""}. Someone else's code, so it runs only once an admin here has reviewed it.`}
@@ -367,6 +378,37 @@ export default function AppTile({
           </div>
         </div>
       )}
+      {/* What it asks for that an admin hasn't approved. A Registry app is off
+          until then, and activating it approves them; a local app stays on,
+          and Approve records it. */}
+      {asksMore && (
+        <div className="mt-3 rounded-lg border-l-4 border-brand-accent bg-brand-accent/10 py-2 pl-3 pr-3">
+          <div className="flex items-start gap-2 text-xs text-foreground">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+            <div className="min-w-0 space-y-1">
+              <p>It now asks for more than an admin approved:</p>
+              <ul className="list-disc pl-4">
+                {capabilities!.added.map((c) => (
+                  <li key={`${c.kind}:${c.capability}`}>{describeCapability(c)}</li>
+                ))}
+              </ul>
+              {isActive ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  busy={approving}
+                  busyLabel="Approving…"
+                  onClick={() => startApprove(async () => approveCapabilitiesAction(app.slug))}
+                >
+                  Approve
+                </Button>
+              ) : (
+                <p>{needsReview ? "Review it, then activate it, to approve them." : "Activating it approves them."}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {needsReview && (
         <div className="mt-3 rounded-lg border-l-4 border-brand-accent bg-brand-accent/10 py-2 pl-3 pr-3">
           <p className="flex items-start gap-2 text-xs text-foreground">
@@ -470,13 +512,20 @@ export default function AppTile({
           when it changed and who changed it the same way on the tile and in
           the dialog, and the same on the connector and theme tiles. */}
       {trust && (
-        <AppReviewDialog app={app} trust={trust} open={reviewOpen} onClose={() => setReviewOpen(false)} />
+        <AppReviewDialog
+          app={app}
+          trust={trust}
+          added={capabilities?.added ?? []}
+          open={reviewOpen}
+          onClose={() => setReviewOpen(false)}
+        />
       )}
       <TileFooter lastUpdated={app.lastUpdated} authors={app.authors} />
 
       <AppDetailsDialog
         app={app}
         trust={trust}
+        capabilities={capabilities}
         missingConnectors={missingConnectors}
         isActive={isActive}
         grantCount={grants}

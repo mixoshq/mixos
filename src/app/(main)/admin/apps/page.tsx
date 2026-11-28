@@ -15,6 +15,7 @@ import { getAppActiveMap, getAppBuildStatus } from "@/lib/apps/access";
 import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
 import { getAppTrust } from "@/lib/apps/app-review";
 import { getOpenAnomalies } from "@/lib/apps/detection";
+import { getCapabilityStatus, getExpiredWrites } from "@/lib/apps/capability-approvals";
 import AppRegistryList from "@/components/admin/app-registry-list";
 import AppsNotInBuild from "@/components/admin/apps-not-in-build";
 import BrandConflicts from "@/components/admin/brand-conflicts";
@@ -47,6 +48,11 @@ export default async function AppsAdminPage() {
   // (lib/apps/detection.ts), on each app's tile and in one notice above them.
   const anomaliesBySlug = await getOpenAnomalies();
   const unusual = appRegistry.filter((a) => (anomaliesBySlug[a.slug]?.length ?? 0) > 0);
+  // What each app asks for beyond what an admin approved, and what they
+  // turned off (lib/apps/capability-approvals.ts); and write access the
+  // cron tick took away after 90 days unused.
+  const capabilitiesBySlug = await getCapabilityStatus(appRegistry.map((a) => a.slug));
+  const expiredWrites = (await getExpiredWrites()).filter((e) => appRegistry.some((a) => a.slug === e.app));
   // On a built deployment with the GitHub App linked, Remove offers a pull
   // request instead; from what is stored, without asking GitHub on every render.
   const proposal = await proposalTarget("app");
@@ -132,6 +138,18 @@ export default async function AppsAdminPage() {
           </p>
         </div>
       )}
+      {expiredWrites.length > 0 && (
+        <div role="status" className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground">
+          <p className="font-medium">Write access taken away after 90 days unused:</p>
+          <p className="mt-0.5 text-muted-foreground">
+            {expiredWrites
+              .map((e) => `${appRegistry.find((a) => a.slug === e.app)?.name ?? e.app} through ${e.connector}`)
+              .join(", ")}
+            . To give it back, open the connector under Administration → Connectors, then the app&apos;s Limits in its
+            Reach section, and remove its limits.
+          </p>
+        </div>
+      )}
       <PendingInstalls kind="app" />
       {/* Read from GitHub: the rest of the page doesn't wait for it. */}
       <Suspense fallback={null}>
@@ -153,6 +171,7 @@ export default async function AppsAdminPage() {
         replacedBySlug={buildStatus.replaced}
         trustBySlug={trustBySlug}
         anomaliesBySlug={anomaliesBySlug}
+        capabilitiesBySlug={capabilitiesBySlug}
         proposal={proposal}
       />
       <AppsNotInBuild

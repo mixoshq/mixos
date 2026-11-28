@@ -12,6 +12,7 @@ import { StatusPill } from "@/components/ui/status";
 import type { AppManifest } from "@/lib/apps/types";
 import type { AppTrust } from "@/lib/apps/app-review";
 import { recordAppReviewAction } from "@/lib/apps/admin-actions";
+import { describeCapability, type Capability } from "@/lib/apps/capabilities";
 
 /**
  * Review a Registry app before it runs: where it came from, the exact code
@@ -54,11 +55,14 @@ export function declarationLines(app: AppManifest): string[] {
 export default function AppReviewDialog({
   app,
   trust,
+  added = [],
   open,
   onClose,
 }: {
   app: AppManifest;
   trust: AppTrust;
+  /** What it asks for beyond what was approved before (Item 8): shown first. */
+  added?: Capability[];
   open: boolean;
   onClose: () => void;
 }) {
@@ -100,6 +104,16 @@ export default function AppReviewDialog({
       }
     >
       <div className="space-y-5">
+        {added.length > 0 && (
+          <section className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-foreground">New since it was approved</h3>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-foreground">
+              {added.map((c) => (
+                <li key={`${c.kind}:${c.capability}`}>{describeCapability(c)}</li>
+              ))}
+            </ul>
+          </section>
+        )}
         <section>
           <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Where it came from</h3>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-foreground">

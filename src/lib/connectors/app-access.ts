@@ -86,7 +86,8 @@ export async function setAppNarrowing(
       insert into public.connector_app_access (connector_name, app_slug, writes, methods, set_by)
       values (${connectorName}, ${appSlug}, ${writes}, ${methods}, ${actor.id})
       on conflict (connector_name, app_slug) do update
-        set writes = excluded.writes, methods = excluded.methods, set_by = excluded.set_by, set_at = now()
+        set writes = excluded.writes, methods = excluded.methods, set_by = excluded.set_by, set_at = now(),
+            expired_at = null
     `;
   }
   await recordAdminAction(actor, {
