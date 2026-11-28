@@ -46,6 +46,7 @@ import PendingInstalls from "@/components/admin/pending/pending-installs";
 import ProposedPullRequests from "@/components/admin/github/proposed-pull-requests";
 import { proposalTarget } from "@/lib/github/propose";
 import RegistryNotices from "@/components/admin/registry-notices";
+import { connectorTelemetryProblem } from "@/lib/apps/telemetry-retention";
 import { recordAdminAction, redactedKeys } from "@/lib/apps/admin-audit";
 
 /**
@@ -109,6 +110,8 @@ export default async function ConnectorsAdminPage({
   const params = await searchParams;
   const oauthStatus = typeof params.oauth === "string" ? params.oauth : null;
   const notice = oauthStatus ? OAUTH_MESSAGES[oauthStatus] : undefined;
+  // How long connector calls are kept, when its setting isn't what was meant.
+  const retentionProblem = connectorTelemetryProblem();
   // Set by the OAuth round trip's return URL, so the admin lands back inside
   // the dialog they left rather than in front of a closed grid.
   const openConnector =
@@ -489,6 +492,11 @@ export default async function ConnectorsAdminPage({
         </div>
       </div>
       <RegistryNotices kind="connector" />
+      {retentionProblem && (
+        <div role="status" className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-foreground">
+          {retentionProblem}
+        </div>
+      )}
       {notice && (
         <div
           className={`mb-4 rounded-lg border px-4 py-3 text-sm ${

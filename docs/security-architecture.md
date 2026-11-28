@@ -2508,7 +2508,14 @@ reason as audit rule 2 (§28). False positives taking apps down would cost more
 than the delay of an admin's click.
 
 **Retention.** Egress rows are pruned at 90 days, and anomalies marked as
-expected at 180. Connector rows are kept, as before. Delete data deletes an
+expected at 180. Connector rows are kept for `MIXOS_CONNECTOR_TELEMETRY_DAYS`
+(`src/lib/apps/telemetry-retention.ts`), 90 unless set, and all of them for 0.
+It is never read as fewer than 90. Unused write access expires after 90 days,
+judged from these rows (§3.6), and fewer days would take away access an app
+did use. A value that isn't a whole number deletes nothing until it is fixed,
+because a deletion can't be undone. The release step and Admin > Connectors
+report either case. The cron tick deletes in batches of 10,000, at most 20 a
+tick, so the first sweep after an upgrade spreads over ticks. Delete data deletes an
 app's egress rows with its other telemetry; its baseline and anomalies go with
 its row, a rename moves them, and a different extension under the slug starts
 with neither.

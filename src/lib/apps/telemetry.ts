@@ -4,6 +4,7 @@
 
 import { sql } from "@/lib/db/client";
 import type { BaseConnector } from "@/lib/connectors/types";
+import { connectorTelemetryCutoff, connectorTelemetryRetention } from "./telemetry-retention";
 
 /**
  * Telemetry — first-party usage tracking for apps and connectors.
@@ -279,6 +280,49 @@ export async function pruneEgressTelemetry(retentionDays = 90): Promise<number> 
     console.warn("[telemetry] egress telemetry prune failed:", err);
     return 0;
   }
+}
+
+/** Rows deleted in one statement, and statements in one tick, by pruneConnectorTelemetry. */
+export const CONNECTOR_PRUNE = { batch: 10_000, maxBatches: 20 } as const;
+
+/**
+ * Drop connector rows older than MIXOS_CONNECTOR_TELEMETRY_DAYS
+ * (./telemetry-retention.ts): 90 days unless set, and none at all for 0.
+ * Called from the cron tick.
+ *
+ * A batch at a time, up to CONNECTOR_PRUNE.maxBatches a tick. Connector rows
+ * were kept forever until 28 November 2026, so the first sweep on an instance
+ * that has run a while can be millions of rows. Spread over ticks, it holds
+ * none of them up. Scoped to `source_type = 'connector'`, as the route and
+ * egress prunes are to theirs.
+ */
+export async function pruneConnectorTelemetry(
+  days: number | null = connectorTelemetryRetention().days,
+  opts: { batch?: number; maxBatches?: number; now?: number } = {},
+): Promise<number> {
+  const before = connectorTelemetryCutoff(days, opts.now);
+  if (!before) return 0;
+  const batch = opts.batch ?? CONNECTOR_PRUNE.batch;
+  const maxBatches = opts.maxBatches ?? CONNECTOR_PRUNE.maxBatches;
+  let deleted = 0;
+  try {
+    for (let i = 0; i < maxBatches; i++) {
+      const result = (await sql`
+        delete from public.telemetry_events
+        where id in (
+          select id from public.telemetry_events
+          where source_type = 'connector' and created_at < ${before}
+          limit ${batch}
+        )
+      `) as unknown as { count: number };
+      const count = result.count ?? 0;
+      deleted += count;
+      if (count < batch) break;
+    }
+  } catch (err) {
+    console.warn("[telemetry] connector telemetry prune failed:", err);
+  }
+  return deleted;
 }
 
 /**
