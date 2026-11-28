@@ -768,7 +768,11 @@ export async function migrateAppSchemas(
     console.log(
       `  ${r.slug}: ${back}a different extension than before (was ${describeIdentity(r.previous)}; ` +
         `now ${describeIdentity(r.identity)}) — inactive, with ${r.apiKeysRevoked} API key(s) revoked ` +
-        `and ${r.mcpToolSwitchesReset} MCP tool switch(es) reset, until an admin activates it by typing its slug`,
+        `and ${r.mcpToolSwitchesReset} MCP tool switch(es) reset` +
+        (r.connectorCredentialsDeleted > 0
+          ? `, and its own credentials for ${r.connectorCredentialsDeleted} connector(s) deleted`
+          : "") +
+        `, until an admin activates it by typing its slug`,
     );
   }
   for (const { slug, roleOnly, lost } of sync.globalEnded) {

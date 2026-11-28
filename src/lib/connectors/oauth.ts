@@ -101,6 +101,13 @@ export interface OAuthFlowState {
    * the provider's consent screen is open.
    */
   writes: boolean;
+  /**
+   * The app whose own credentials this grant is for (./app-config.ts), or
+   * null for the shared grant or a person's. Carried here, sealed, and never
+   * in `state` or the redirect URI: the callback writes the grant to this
+   * app's row, so nothing the provider or the browser echoes may choose it.
+   */
+  appSlug: string | null;
 }
 
 export function newFlowState(
@@ -108,11 +115,13 @@ export function newFlowState(
   returnTo: string,
   userId: string | null = null,
   writes = false,
+  appSlug: string | null = null,
 ): OAuthFlowState {
   return {
     connector,
     userId,
     writes,
+    appSlug,
     state: randomBytes(32).toString("base64url"),
     // RFC 7636 allows 43–128 chars; 43 bytes of entropy encodes to 43+.
     codeVerifier: randomBytes(48).toString("base64url"),
@@ -144,6 +153,9 @@ export function openFlowState(
       typeof flow.writes !== "boolean"
     )
       return null;
+    // A cookie sealed before apps had credentials of their own carries none.
+    if (flow.appSlug === undefined) flow.appSlug = null;
+    if (flow.appSlug !== null && typeof flow.appSlug !== "string") return null;
     if (!Number.isFinite(flow.exp) || flow.exp < Date.now()) return null;
     return flow;
   } catch {

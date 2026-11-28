@@ -3,7 +3,14 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 import { connectorRegistry } from "@/generated/connector-registry";
+import {
+  AppCredentialsError,
+  appCredentialTarget,
+  getDecryptedAppConfig,
+  refreshAppConnectorTokens,
+} from "./app-config";
 import { getDecryptedConfig } from "./config";
+import { HttpConnector, TOKEN_SKEW_MS } from "./http-connector";
 import { ConnectorLoadError, constructConnector } from "./loader";
 import { connectorErrorEnvelope } from "./response";
 import type { EnvelopeCategory } from "./response";
@@ -49,6 +56,11 @@ export async function runConnectorTest(
      * grant to test with, so it is tested with this person's own.
      */
     userId?: string;
+    /**
+     * Test one app's own credentials (./app-config.ts) rather than the shared
+     * ones. Never falls back to the shared row: an app with none fails.
+     */
+    appSlug?: string;
   } = {},
 ): Promise<ConnectorTestOutcome> {
   const manifest = connectorRegistry.find((c) => c.name === connectorName);
@@ -89,6 +101,34 @@ export async function runConnectorTest(
       };
     }
 
+    if (opts.appSlug !== undefined) {
+      appCredentialTarget(connectorName, opts.appSlug);
+      const own = await getDecryptedAppConfig(connectorName, opts.appSlug);
+      if (!own) {
+        return {
+          ok: false,
+          category: "unconfigured",
+          message: `This app has no ${manifest.displayName} credentials of its own. Save them first.`,
+          adminHint: null,
+          upstreamRequestId: null,
+        };
+      }
+      const appSlug = opts.appSlug;
+      HttpConnector.bindAppGrant(instance, (rejected?: string) =>
+        refreshAppConnectorTokens({
+          connectorName,
+          appSlug,
+          subject: manifest.displayName,
+          policy: manifest.auth ?? { strategy: "none" },
+          skewMs: TOKEN_SKEW_MS,
+          rejected,
+        }),
+      );
+      await instance.initialize(own);
+      const result = await instance.testConnection();
+      return { ok: true, detail: result.detail ?? null };
+    }
+
     const credentials = await getDecryptedConfig(connectorName);
     if (manifest.userScoped) {
       // The tenant row holds the application, never a grant, so testing it
@@ -117,6 +157,9 @@ export async function runConnectorTest(
     const result = await instance.testConnection();
     return { ok: true, detail: result.detail ?? null };
   } catch (err) {
+    if (err instanceof AppCredentialsError) {
+      return { ok: false, category: "unsupported", message: err.message, adminHint: null, upstreamRequestId: null };
+    }
     if (err instanceof ConnectorLoadError) {
       // The log below names only a category, which for this would be
       // `internal_error`: say what actually happened, and why.

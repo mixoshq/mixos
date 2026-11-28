@@ -40,6 +40,8 @@ export interface AppDataCounts {
   appOpens: number;
   /** MCP authorizations, tokens and codes, that list it among the apps they may read. */
   mcpAccess: number;
+  /** Its own credentials for connectors, in `connector_app_configs`, one per connector. */
+  connectorCredentials: number;
 }
 
 /** What this database keeps for a connector, row by row. */
@@ -48,6 +50,8 @@ export interface ConnectorDataCounts {
   credentials: number;
   /** Users' own connections, in `user_connector_oauth`. */
   connections: number;
+  /** Apps' own credentials for it, in `connector_app_configs`, one per app. */
+  appCredentials: number;
   scopeStatus: number;
   webhookEvents: number;
   telemetryEvents: number;
@@ -142,6 +146,9 @@ export function describeData(
         [c.appOpens, "recorded open", "recorded opens"],
       ]),
       c.mcpAccess > 0 ? `Its place in ${n(c.mcpAccess, "MCP authorization", "MCP authorizations")}` : null,
+      c.connectorCredentials > 0
+        ? `Its own credentials for ${n(c.connectorCredentials, "connector", "connectors")}`
+        : null,
     ]) {
       if (line) lines.push(line);
     }
@@ -152,6 +159,7 @@ export function describeData(
   const c = counts as ConnectorDataCounts;
   const lines: string[] = [];
   if (c.credentials > 0) lines.push("Its saved credentials");
+  if (c.appCredentials > 0) lines.push(`${n(c.appCredentials, "app's own credentials", "apps' own credentials")} for it`);
   for (const line of [
     some([[c.connections, "user's own connection", "users' own connections"]]),
     some([

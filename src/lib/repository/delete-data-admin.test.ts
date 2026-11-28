@@ -156,6 +156,7 @@ describe("the words for what goes", () => {
     telemetryEvents: 1204,
     appOpens: 1,
     mcpAccess: 0,
+    connectorCredentials: 0,
   };
 
   test("an app's: its schema and role, each kind with a count above zero, and its record", () => {
@@ -170,13 +171,18 @@ describe("the words for what goes", () => {
     assert.deepEqual(describeData("app", { ...counts, tables: 0 }, { schema: null, role: null }).slice(0, 1), [
       "1 grant and 3 dashboard widgets",
     ]);
+    assert.ok(
+      describeData("app", { ...counts, connectorCredentials: 2 }, { schema: null, role: null }).includes(
+        "Its own credentials for 2 connectors",
+      ),
+    );
   });
 
   test("a connector's", () => {
     assert.deepEqual(
       describeData(
         "connector",
-        { credentials: 1, connections: 2, scopeStatus: 0, webhookEvents: 1, telemetryEvents: 0, settings: 3 },
+        { credentials: 1, appCredentials: 0, connections: 2, scopeStatus: 0, webhookEvents: 1, telemetryEvents: 0, settings: 3 },
         { schema: null, role: null },
       ),
       [
@@ -185,6 +191,14 @@ describe("the words for what goes", () => {
         "1 webhook replay marker",
         "Its settings here: whether it is switched off, its marks, and where it came from",
       ],
+    );
+    assert.deepEqual(
+      describeData(
+        "connector",
+        { credentials: 0, appCredentials: 1, connections: 0, scopeStatus: 0, webhookEvents: 0, telemetryEvents: 0, settings: 0 },
+        { schema: null, role: null },
+      ),
+      ["1 app's own credentials for it"],
     );
   });
 });

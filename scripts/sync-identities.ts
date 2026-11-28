@@ -200,6 +200,8 @@ export async function syncIdentities(
         select connector_name as name from public.connector_configs
         union
         select connector_name from public.user_connector_oauth
+        union
+        select connector_name from public.connector_app_configs
       ) as held
       where not (held.name = any(${build.connectors}))
       on conflict (key) do nothing
@@ -207,10 +209,11 @@ export async function syncIdentities(
     `;
     for (const { key } of marked) {
       const name = key.slice(MISSING_KEY_PREFIX.length);
-      const [held] = await tx<{ credentials: boolean; connections: number }[]>`
+      const [held] = await tx<{ credentials: boolean; connections: number; appCredentials: number }[]>`
         select
           exists (select 1 from public.connector_configs where connector_name = ${name}) as credentials,
-          (select count(*)::int from public.user_connector_oauth where connector_name = ${name}) as connections
+          (select count(*)::int from public.user_connector_oauth where connector_name = ${name}) as connections,
+          (select count(*)::int from public.connector_app_configs where connector_name = ${name}) as "appCredentials"
       `;
       await audit(tx, "connector.missing", "connector", name, { ...held });
       result.missing.push(name);

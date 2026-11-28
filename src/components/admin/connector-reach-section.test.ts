@@ -166,6 +166,73 @@ test("once they arrive, each app's calls fill its row", async () => {
   assert.match(text(await new Response(unread.prelude).text()), /Couldn't read which methods it called\./);
 });
 
+const own = (appSlug: string, state: "ready" | "needs-authorization" | "unconfigured" | "unreadable" = "ready") => ({
+  appSlug,
+  state,
+  configuredAt: null,
+  configuredBy: null,
+  verifiedAt: null,
+  verifiedDetail: null,
+});
+const setup = {
+  displayName: "Acme CRM",
+  fields: [{ key: "apiKey", label: "API Key", type: "password" as const }],
+  isOAuth: false,
+  actions: { configure: async () => true, test: async () => ({ ok: true as const, detail: null }), remove: async () => {} },
+};
+
+test("an app with credentials of its own says so, and the sentence counts who shares", () => {
+  const words = list(props({ ownCredentials: [own("pipeline")], ownCredentialsSetup: setup }), { state: "read", calls: [] });
+  assert.match(words, /2 use the shared credential, and one uses its own\./);
+  assert.match(words, /Pipeline Required Changes data Own credentials Its own credentials…/);
+  assert.match(words, /Reports Optional Give it its own credentials…/);
+  // Every one with its own.
+  const all = list(
+    props({ ownCredentials: [own("pipeline"), own("reports"), own("archive", "unreadable")], ownCredentialsSetup: setup }),
+    { state: "read", calls: [] },
+  );
+  assert.match(all, /Each of them uses credentials of its own\./);
+  assert.match(all, /Own credentials · unreadable/);
+  // A row an app no longer declares doesn't count.
+  const stray = list(props({ ownCredentials: [own("gone")] }), { state: "read", calls: [] });
+  assert.match(stray, /They all use the same credential/);
+});
+
+test("without the setup, a user-scoped or public connector, there is no way to give one", () => {
+  const words = list(props({ userScoped: true }), { state: "read", calls: [] });
+  assert.doesNotMatch(words, /its own credentials…/);
+});
+
+test("the panel for one app: it replaces the shared ones, never falls back, and saves under its slug", () => {
+  const html = renderToStaticMarkup(
+    createElement(ConnectorReachSection, {
+      ...props({ ownCredentials: [own("pipeline", "needs-authorization")] }),
+      ownCredentialsSetup: { ...setup, isOAuth: true },
+      initialApp: "pipeline",
+    }),
+  );
+  const words = text(html);
+  assert.match(words, /Pipeline uses these instead of the shared credentials, wherever its code reaches Acme CRM\./);
+  assert.match(words, /If they stop working, it doesn't fall back to the shared ones\./);
+  assert.match(words, /Own credentials · not connected/);
+  assert.match(words, /Update its credentials Connect its account Verify its connection Use the shared credentials/);
+  assert.match(html, /name="appSlug" value="pipeline"/);
+  assert.match(html, /name="apiKey"/);
+  // Connect names the app only in the start URL's own parameter, sealed into the cookie there.
+  assert.match(
+    html,
+    /href="\/api\/connectors\/crm\/oauth\/start\?app=pipeline&amp;return=%2Fadmin%2Fconnectors%3Fconnector%3Dcrm%26app%3Dpipeline"/,
+  );
+  // Before it has any: no Connect, Verify or way back yet.
+  const fresh = text(
+    renderToStaticMarkup(
+      createElement(ConnectorReachSection, { ...props(), ownCredentialsSetup: setup, initialApp: "reports" }),
+    ),
+  );
+  assert.match(fresh, /Save its credentials/);
+  assert.doesNotMatch(fresh, /Verify its connection|Use the shared credentials|Connect its account/);
+});
+
 test("no app declares it", () => {
   const p = props();
   const words = text(

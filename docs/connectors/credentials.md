@@ -69,6 +69,31 @@ Reserved credential keys (`oauth_access_token`, `oauth_refresh_token`,
 `oauth_expires_at`, `oauth_scope`) are written by the platform. Never declare
 them in `credentialFields`, and never read them from a connector method.
 
+## An app's own credentials
+
+A tenant connector's credentials are shared by every app that declares it. An
+admin can give one app its own instead, from that app's row in the Reach
+section of the connector's Details tab (**Give it its own credentials…**): a
+narrower API key, or, for OAuth, a client and a grant of its own, connected
+with **Connect its account**. That app then reaches the provider with those,
+everywhere its code uses the connector, and every other app keeps the shared
+ones.
+
+- They are a whole set, stored in `connector_app_configs`, encrypted like the
+  shared row. A blank field keeps its value, as on the shared form.
+- They never fall back to the shared ones. If they can't be read, the app has
+  the connector unconfigured until an admin enters them again or chooses
+  **Use the shared credentials**.
+- An app's own OAuth grant asks for the write scopes only if the app's entry
+  asks for `"access": "write"` and the connector may change data.
+- Webhooks, Disable and Allow changes stay per connector. A user-scoped
+  connector has none: each person's grant is already their own.
+- **Verify its connection** tests them, not the shared ones.
+
+Nothing changes for the connector's author: the same `initialize()` receives
+whichever set applies. See
+[§3.4 of the security architecture](../security-architecture.md#34-connector-credential-scope).
+
 ## Proving credentials work
 
 `configured` only checks that the required fields are non-empty. **Verify

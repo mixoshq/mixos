@@ -34,6 +34,8 @@ export async function getConnectorsNotInBuild(inBuild: readonly string[]): Promi
         union
         select connector_name from public.user_connector_oauth
         union
+        select connector_name from public.connector_app_configs
+        union
         select substr(key, ${MISSING_KEY_PREFIX.length + 1}) from public.platform_settings
         where starts_with(key, ${MISSING_KEY_PREFIX})
       )

@@ -566,11 +566,13 @@ flowchart TD
 
 Access control is therefore at the **external service** level: the CRM's token
 scopes, the billing key's permissions, and so on. MixOS decides *which apps may
-use a connector*, never what that connector's credentials are allowed to do.
+use a connector*, and which of its methods; what a credential may do at the
+provider is the provider's to decide. To narrow that for one app, an admin
+gives it credentials of its own (below).
 
-The property this buys is worth naming: because there is exactly one credential
-set, **any response the connector returns is the same response any user would
-have received**. That is what makes caching, logging and sharing safe to reason
+The property this buys is worth naming: because each app uses exactly one
+credential set, **any response the connector returns is the same response any
+user of that app would have received**. That is what makes caching, logging and sharing safe to reason
 about without thinking about identity.
 
 **User-scoped (`userScoped: true`).** For connectors where one shared account is
@@ -611,6 +613,40 @@ correctness.
 
 A departing user's tokens cascade-delete with their row: they are not history
 worth keeping, they are live access to a third-party account.
+
+**An app's own credentials.** An admin can give one app its own credentials
+for a tenant connector, from that app's row in the connector's Reach section:
+a narrower API key, or an OAuth grant of its own. They live in
+`connector_app_configs`, keyed `(connector_name, app_slug)` and encrypted
+with `CONNECTOR_ENCRYPTION_KEY` like the shared row, and hold a whole set,
+the client id and secret included
+([`src/lib/connectors/app-config.ts`](../src/lib/connectors/app-config.ts)).
+So a compromised app's reach at the provider is what *its* credential allows,
+not what the shared one does.
+
+- **They win, and never fall back.** `loadTenantConnectors()` reads the app's
+  rows once per context. A row for the connector is used instead of the shared
+  row, its token renewals go to that row alone (`HttpConnector.bindAppGrant`,
+  under its own advisory lock), and nothing else reads it. A row that can't be
+  decrypted, or a table that can't be read, leaves the app's tenant connectors
+  unconfigured, bound to a renewal that refuses: never the broader shared
+  credential on the guess that there is no row. The activation gate reads them
+  the same way (`connector-gates.ts`).
+- **What stays per connector:** webhooks, the admin switch and Allow changes.
+  User-scoped connectors have none: each person's grant is already their own.
+- **OAuth for an app** asks for the write scopes only when changes are allowed
+  *and* the app's entry asks for `"access": "write"`, so a reading app's own
+  grant never holds them (§27).
+- **Lifecycle, each one closed:** Delete data deletes a connector's rows and an
+  app's; a rename moves them with the app or the connector; a different
+  extension arriving under the app's slug has them deleted by the release step,
+  as its API keys are revoked (§3.1), since a credential given to one extension
+  must not pass to another; the app's row cascades them.
+
+It doesn't stop a compromised app using *its own* credential, which is in its
+process like the shared one (§24). It bounds what that credential can do.
+Per-user caching (§29) is unchanged: these vary by app, not by person, and an
+app's caches are its own.
 
 ### 3.5 Notification (Web Push) scope
 
@@ -1497,7 +1533,9 @@ What this still trusts is the declaration: a method that writes but is declared
 as a read runs as a read. The scopes are what bound that, which is why a write
 scope belongs behind `"write"`.
 
-Admin → Connectors shows these rules per app, in the Details tab's Reach
+An app given its own credentials for the connector (§3.4) reaches the provider
+with those instead; what it may call is the same. Admin → Connectors shows
+these rules per app, in the Details tab's Reach
 section ([`src/lib/connectors/reach.ts`](../src/lib/connectors/reach.ts)):
 every app that declares the connector, whether it runs, the declared methods
 it may call under the two keys above, and the calls recorded from it in the
@@ -2284,9 +2322,15 @@ under `/api/webhooks` instead.
 - The token endpoint comes from the **connector manifest** — code that ships in a
   diff, not user input. This is what keeps §13's SSRF surface closed here.
 - The result lands in `connector_configs` (tenant) or `user_connector_oauth`
-  (user-scoped, §3.4), encrypted either way.
+  (user-scoped, §3.4), encrypted either way, or, for an app's own credentials
+  (§3.4), in that app's `connector_app_configs` row. Connect for an app is
+  admin-only, starts with `?app=<slug>`, and carries the slug in the sealed
+  flow cookie, never in `state` or anything the provider sees; the callback
+  checks again that the app declares the connector, and writes that app's row
+  alone. It uses the app's own client id, and asks for the write scopes only
+  if the app may change data.
 - At the token exchange the granted scopes are snapshotted into
-  `connector_scope_status`, which is how the registry can later report "a scope
+  `connector_scope_status` (with `app_slug` for an app's own grant), which is how the registry can later report "a scope
   was added to the manifest and this install is still running on the older,
   narrower grant" — a case that otherwise surfaces only as calls quietly starting
   to fail.
@@ -2387,7 +2431,12 @@ the name typed, has the identity it replaced in `details` as `replaced`.
 **Connecting a connector.** An admin finishing the OAuth round trip for a
 tenant connector (§27), with Connect or Reconnect, is `connector.connect`
 against the connector, with the scopes the provider granted in `details` as
-`scopes`, and never a token. It is written once the grant is stored, so a
+`scopes`, and never a token. An app's own credentials (§3.4) are audited in the
+same words, with the app in `details` as `app`: `connector.configure` for a
+save (and `removed: true` when an admin takes them away), `connector.test`,
+and `connector.connect`. The release step's `app.identity.changed` row counts
+the ones it deleted as `connectorCredentialsDeleted`, and its
+`connector.missing` row counts them as `appCredentials`. It is written once the grant is stored, so a
 declined, expired or failed round trip leaves none. A tenant connector has no
 Disconnect: its credentials are only replaced, by `connector.configure` or
 `connector.connect`, or switched off, by `connector.disable`. A person

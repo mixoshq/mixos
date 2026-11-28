@@ -12,8 +12,14 @@ import type { AppManifest } from "@/lib/apps/types";
 import type { BaseConnector } from "@/lib/connectors/types";
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
+import {
+  getAppCredentialRows,
+  openAppCredentials,
+  refreshAppConnectorTokens,
+} from "@/lib/connectors/app-config";
 import { getDecryptedConfig } from "@/lib/connectors/config";
-import { HttpConnector } from "@/lib/connectors/http-connector";
+import { ConnectorError } from "@/lib/connectors/errors";
+import { HttpConnector, TOKEN_SKEW_MS } from "@/lib/connectors/http-connector";
 import {
   disabledConnector,
   getDisabledConnectors,
@@ -267,6 +273,28 @@ async function loadTenantConnectors(
   const handOver = (connName: string, connector: BaseConnector) =>
     narrowConnector(connector, connectorManifest(connName)?.telemetry ?? [], reachFor(connName));
 
+  /*
+    The app's own credentials, for any tenant connector an admin gave it its
+    own for (src/lib/connectors/app-config.ts), read once. They win over the
+    shared row, and never fall back to it: if this can't be read, nobody can
+    tell whether the app has its own, so none of its tenant connectors gets
+    the shared credential on the guess that it hasn't. They are handed over
+    unconfigured instead.
+  */
+  let ownCredentials: Map<string, string> | null = new Map();
+  const tenantNames = declaredNames.filter((n) => connectorManifest(n)?.userScoped !== true);
+  if (tenantNames.length > 0) {
+    try {
+      ownCredentials = await getAppCredentialRows(manifest.slug);
+    } catch (err) {
+      console.error(
+        `[${logTag}] could not read whether this app has its own connector credentials, so its tenant connectors are unconfigured:`,
+        err,
+      );
+      ownCredentials = null;
+    }
+  }
+
   for (const connName of declaredNames) {
     /*
       Turned off by an admin. The connector is never imported, constructed or
@@ -291,12 +319,62 @@ async function loadTenantConnectors(
       // only for a caller that may write with it.
       if (reachFor(connName).writes) HttpConnector.allowWrites(instance);
 
+      const declaredManifest = connectorManifest(connName);
+      const userScopedConnector = declaredManifest?.userScoped === true;
+      const ownRow = userScopedConnector ? undefined : ownCredentials?.get(connName);
+
+      /*
+        Unconfigured, and bound to a refresher that refuses, for the two
+        fail-closed cases below. An unconfigured connector refuses every call
+        before any refresh, so this never runs; it is there so that nothing
+        holding the instance can reach the shared row's grant by renewing it.
+      */
+      const refuseShared = () =>
+        HttpConnector.bindAppGrant(instance, async () => {
+          throw new ConnectorError({
+            category: "unconfigured",
+            connectorName: connName,
+            subject: declaredManifest?.displayName ?? connName,
+          });
+        });
+
       let tenantCreds: Record<string, string> | null = null;
-      try {
-        tenantCreds = await getDecryptedConfig(connName);
-      } catch (err) {
-        console.error(`[${logTag}] getDecryptedConfig failed for "${connName}":`, err);
+      if (!userScopedConnector && ownCredentials === null) {
+        // Unknown whether the app has its own: not the shared row (above).
+        refuseShared();
         tenantCreds = null;
+      } else if (ownRow !== undefined) {
+        // Its own, and only its own. One that can't be decrypted leaves the
+        // connector unconfigured, never on the shared credential.
+        try {
+          tenantCreds = openAppCredentials(ownRow);
+          const policy = declaredManifest?.auth ?? { strategy: "none" as const };
+          const subject = declaredManifest?.displayName ?? connName;
+          HttpConnector.bindAppGrant(instance, (rejected?: string) =>
+            refreshAppConnectorTokens({
+              connectorName: connName,
+              appSlug: manifest.slug,
+              subject,
+              policy,
+              skewMs: TOKEN_SKEW_MS,
+              rejected,
+            }),
+          );
+        } catch (err) {
+          console.error(
+            `[${logTag}] this app's own credentials for "${connName}" can't be read, so it is unconfigured:`,
+            err,
+          );
+          refuseShared();
+          tenantCreds = null;
+        }
+      } else {
+        try {
+          tenantCreds = await getDecryptedConfig(connName);
+        } catch (err) {
+          console.error(`[${logTag}] getDecryptedConfig failed for "${connName}":`, err);
+          tenantCreds = null;
+        }
       }
 
       /*

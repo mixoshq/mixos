@@ -24,7 +24,13 @@ import { getConnectorLog, grantedScopes } from "@/lib/connectors/access";
 import { getScopeStatus } from "@/lib/connectors/scope-status";
 import { getConnectorDependents } from "@/lib/connectors/dependents";
 import { getObservedConnectorCalls } from "@/lib/connectors/observed";
-import { connectorReach } from "@/lib/connectors/reach";
+import { connectorReach, type OwnCredentialStatus } from "@/lib/connectors/reach";
+import { listAppCredentials } from "@/lib/connectors/app-config";
+import {
+  configureAppCredentials,
+  removeAppCredentials,
+  testAppCredentials,
+} from "@/lib/connectors/app-config-admin";
 import { getConnectorsNotInBuild } from "@/lib/connectors/not-in-build";
 import { getDisabledConnectors, getReplacedConnectors } from "@/lib/connectors/switch";
 import { setConnectorEnabled } from "@/lib/connectors/switch-admin";
@@ -109,6 +115,12 @@ export default async function ConnectorsAdminPage({
     connectorRegistry.some((c) => c.name === params.connector)
       ? params.connector
       : null;
+  // With it, after an app's own Connect: that app's row, opened. Only an app
+  // in this build; the dialog finds the row or shows none.
+  const openApp =
+    openConnector && typeof params.app === "string" && appRegistry.some((a) => a.slug === params.app)
+      ? params.app
+      : null;
 
   // Which connectors an admin has turned off, and when: one read for the grid.
   const disabled = await getDisabledConnectors(
@@ -182,6 +194,24 @@ export default async function ConnectorsAdminPage({
         disabled: disabledAt !== null,
         changesAllowed,
       });
+      // Apps an admin gave their own credentials (lib/connectors/app-config.ts):
+      // how far each is set up, never the values. Only a tenant connector
+      // that authenticates can have them.
+      let ownCredentials: OwnCredentialStatus[] = [];
+      if (!c.userScoped && (c.auth?.strategy ?? "none") !== "none") {
+        try {
+          ownCredentials = (await listAppCredentials(c.name)).map((o) => ({
+            appSlug: o.appSlug,
+            state: o.credentials === null ? "unreadable" : registryConfigState(c, o.credentials),
+            configuredAt: o.configuredAt,
+            configuredBy: o.configuredBy,
+            verifiedAt: o.verifiedAt,
+            verifiedDetail: o.verifiedDetail,
+          }));
+        } catch (err) {
+          console.error(`[connectors] ${c.name}: could not read apps' own credentials:`, err);
+        }
+      }
 
       if (c.auth?.strategy !== "oauth2_authorization_code") {
         return {
@@ -192,6 +222,7 @@ export default async function ConnectorsAdminPage({
           scopeStatus,
           dependents,
           reach,
+          ownCredentials,
           disabledAt,
           replacement,
           changesAllowed,
@@ -219,6 +250,7 @@ export default async function ConnectorsAdminPage({
         scopeStatus,
         dependents,
         reach,
+        ownCredentials,
         disabledAt,
         replacement,
         changesAllowed,
@@ -307,6 +339,46 @@ export default async function ConnectorsAdminPage({
       revalidatePath("/admin/connectors");
     }
     return outcome;
+  }
+
+  /**
+   * Give one app its own credentials for a tenant connector, test them, or
+   * take them away (lib/connectors/app-config-admin.ts, which audits each).
+   * Re-checked here: a server action is a public endpoint.
+   */
+  async function configureAppConnector(formData: FormData): Promise<boolean> {
+    "use server";
+    const session = await requireReadOnlySession();
+    const admin = await requireAdmin(session);
+    const typed: Record<string, string> = {};
+    for (const [key, value] of formData.entries()) if (typeof value === "string") typed[key] = value;
+    const ok = await configureAppCredentials(
+      { id: admin.id, email: admin.email },
+      String(formData.get("connectorName") ?? ""),
+      String(formData.get("appSlug") ?? ""),
+      typed,
+    );
+    revalidatePath("/admin/connectors");
+    revalidatePath("/admin/apps");
+    return ok;
+  }
+
+  async function testAppConnector(connectorName: string, appSlug: string): Promise<ConnectorTestOutcome> {
+    "use server";
+    const session = await requireReadOnlySession();
+    const tester = await requireAdmin(session);
+    const outcome = await testAppCredentials({ id: tester.id, email: tester.email }, connectorName, appSlug);
+    if (outcome.ok) revalidatePath("/admin/connectors");
+    return outcome;
+  }
+
+  async function removeAppConnector(connectorName: string, appSlug: string): Promise<void> {
+    "use server";
+    const session = await requireReadOnlySession();
+    const admin = await requireAdmin(session);
+    await removeAppCredentials({ id: admin.id, email: admin.email }, connectorName, appSlug);
+    revalidatePath("/admin/connectors");
+    revalidatePath("/admin/apps");
   }
 
   /**
@@ -426,6 +498,12 @@ export default async function ConnectorsAdminPage({
         switchAction={switchConnector}
         changesAction={changesConnector}
         observed={observed}
+        appCredentialActions={{
+          configure: configureAppConnector,
+          test: testAppConnector,
+          remove: removeAppConnector,
+        }}
+        initialApp={openApp}
       />
       <ConnectorsNotInBuild connectors={notInBuild} />
     </div>

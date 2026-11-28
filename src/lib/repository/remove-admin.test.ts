@@ -330,6 +330,7 @@ describe("Remove code and delete this checkout's data", () => {
         telemetryEvents: 0,
         appOpens: 0,
         mcpAccess: 0,
+        connectorCredentials: 0,
       },
       schema: "app_acme",
       role: "mixos_app_acme",
