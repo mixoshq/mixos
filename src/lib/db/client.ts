@@ -19,6 +19,13 @@ function getSql(): Sql {
     max: 3,
     idle_timeout: 20,
     max_lifetime: 60 * 30,
+    // A backstop for a database or pooler that stops answering. A query with
+    // no answer would otherwise wait for as long as TCP takes to notice, many
+    // minutes, holding one of three connections. After a minute it fails with
+    // QUERY_TIMEOUT, and the pool connects again. No request needs one
+    // statement that long; a job that does can split it. The release step has
+    // its own client, without this, because a migration may run longer.
+    query_timeout: 60,
   });
   return globalForDb.__pg;
 }

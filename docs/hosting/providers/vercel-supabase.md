@@ -166,6 +166,12 @@ deployment doesn't rebuild: its release step ran when it was built.
 - **Connection timeouts, or "too many clients".** `DATABASE_URL` is a direct
   connection string, on port 5432. Use Supabase's transaction pooler, on port
   6543.
+- **`QUERY_TIMEOUT` in the logs.** A query got no answer from the database for
+  a minute, and the pool connected again. Through Supabase's transaction pooler
+  MixOS sends one query at a time on each connection, which an older Supavisor
+  needs. If it happens there, check Supabase's status page; if `DATABASE_URL`
+  names another host on port 6543, use the `pooler.supabase.com` host Supabase
+  gives you, so MixOS knows it's the pooler.
 - **The build log says `DATABASE_URL_UNPOOLED` is not used.** It doesn't name
   the same role and database as `DATABASE_URL`, so the release step connects
   with `DATABASE_URL`, as the app does. Remove a `DATABASE_URL_UNPOOLED` left

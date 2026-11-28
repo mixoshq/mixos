@@ -1310,7 +1310,10 @@ None.
    to Item 4). *Merged, #137.*
 2. **Item 1.** Threat model, written against post-Item-0 code. *Merged, #138.*
 3. **Item 2.** Postgres-enforced isolation (spike first). *In review.* Then the
-   F10 fix, its own small PR (decided 2026-11-27).
+   F10 fix, its own small PR (decided 2026-11-27). *In review:* `max_pipeline: 1`
+   through `*.pooler.supabase.com:6543` only (turning pipelining off everywhere
+   halved throughput under load at 2 ms RTT, 653 → 345 q/s), plus
+   `query_timeout: 60` on the request pool.
 4. **Item 3a**, then **3b**.
 5. **Item 4.** T1 plus scan additions; T2 spike; T3 design doc.
 6. **Item 5a.** Then **one design doc for 5b and 7b**, the shared runner
