@@ -21,7 +21,14 @@
 // Before any of that, every statement is checked against what an app migration
 // may say (scripts/app-sql-policy.ts). The role bounds what a migration does
 // while it runs; the check bounds what it leaves behind, such as a default or a
-// view, for the platform's own role to run later.
+// view. The app's own queries run as its role too, through the app's runner
+// (ensureAppRunner), but the platform reads and writes the app's tables as
+// itself, and that is when what the migration left behind would run with the
+// platform's privileges.
+//
+// Each release puts every app's runner in place and checks it (probeAppRunner),
+// so a runner that's missing or was changed fails the release, not every query
+// after it.
 //
 // Which apps: those in this build's registry with `"database": true`. A folder
 // the registry generator did not accept never has its SQL run, and an app that
@@ -42,6 +49,7 @@ import type { Sql, TransactionSql } from "postgres";
 import { appRegistry } from "../src/generated/app-registry";
 import { appIdentifierProblems, appRoleName, appSchemaName } from "../src/lib/apps/app-identifiers";
 import type { AppManifest } from "../src/lib/apps/types";
+import { RUNNER, runThrough } from "../src/lib/db/query";
 import { describeIdentity } from "../src/lib/repository/identity";
 import type { RegistryInstall } from "../src/lib/repository/install-record";
 import { listAppMigrations, undeclaredMigrations } from "./app-migration-files";
@@ -254,6 +262,129 @@ export async function ensureAppDatabase(sql: Sql, slug: string): Promise<void> {
   });
 }
 
+/**
+ * The body of every app's runner, the function each `context.db` statement
+ * runs through (`run` in src/lib/db/query.ts). `probeAppRunner` compares the
+ * catalog against this text, so it is one constant.
+ */
+const RUNNER_BODY = `
+begin
+  if read_only then
+    perform set_config('transaction_read_only', 'on', true);
+  end if;
+  return query execute stmt using params;
+end
+`;
+
+/** The runner's one setting. Every name the builder writes is schema-qualified. */
+const RUNNER_SEARCH_PATH = "search_path=pg_catalog, pg_temp";
+
+function runnerSignature(slug: string): string {
+  return `${ident(appSchemaName(slug))}.${RUNNER}(text, json, boolean)`;
+}
+
+/**
+ * Put the app's runner in place: `app_<slug>.mixos_run(stmt, params,
+ * read_only)`, a SECURITY DEFINER function owned by the app's role, which
+ * nobody else may execute. Every `context.db` statement runs inside it, so it
+ * runs as the app's role, and Postgres refuses a role change while it does.
+ *
+ * Replaced on every release, owner and grants included, after the app's
+ * migrations: the migration check refuses CREATE, ALTER and DROP FUNCTION, and
+ * this would undo one that got past it anyway, before the probe looks.
+ */
+export async function ensureAppRunner(sql: Sql, slug: string): Promise<void> {
+  const fn = runnerSignature(slug);
+  await sql.begin(async (tx) => {
+    await takeMigrationLock(tx);
+    await tx.unsafe(`
+      create or replace function ${ident(appSchemaName(slug))}.${RUNNER}(stmt text, params json, read_only boolean)
+      returns setof json
+      language plpgsql
+      volatile
+      security definer
+      set search_path = pg_catalog, pg_temp
+      as $mixos_run$${RUNNER_BODY}$mixos_run$
+    `);
+    await tx.unsafe(`alter function ${fn} owner to ${ident(appRoleName(slug))}`);
+    await tx.unsafe(`revoke all on function ${fn} from public`);
+  });
+}
+
+/**
+ * Check the app's runner before any request uses it: in the catalog, that it
+ * is the one `ensureAppRunner` makes (SECURITY DEFINER, owned by the app's
+ * role, its search path and body, executable by that role alone); then by
+ * calling it, read-write and read-only, the way `context.db` will, and asking
+ * the database who the statement ran as.
+ *
+ * Fails closed, and there is no setting to skip it: a SECURITY DEFINER runner
+ * owned by anyone else would run the app's statements as them.
+ */
+export async function probeAppRunner(sql: Sql, slug: string): Promise<void> {
+  const schema = appSchemaName(slug);
+  const role = appRoleName(slug);
+  const [runner] = await sql<
+    { definer: boolean; owner: string; config: string[] | null; body: string; others: string[] }[]
+  >`
+    select p.prosecdef as definer,
+           pg_get_userbyid(p.proowner) as owner,
+           p.proconfig as config,
+           p.prosrc as body,
+           array(
+             select coalesce(pg_get_userbyid(nullif(a.grantee, 0)), 'PUBLIC')
+               from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+              where a.grantee <> p.proowner
+           ) as others
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = ${schema}
+       and p.proname = ${RUNNER}
+       and pg_get_function_identity_arguments(p.oid) = 'stmt text, params json, read_only boolean'
+  `;
+  const problem = !runner
+    ? "is missing"
+    : !runner.definer
+      ? "isn't SECURITY DEFINER, so it would run the app's statements as whoever calls it"
+      : runner.owner !== role
+        ? `belongs to ${runner.owner}, not ${role}, so it would run the app's statements as ${runner.owner}`
+        : JSON.stringify(runner.config) !== JSON.stringify([RUNNER_SEARCH_PATH])
+          ? `has settings ${JSON.stringify(runner.config)}, not ${JSON.stringify([RUNNER_SEARCH_PATH])}`
+          : runner.body !== RUNNER_BODY
+            ? "has a different body from the one the release step writes"
+            : runner.others.length > 0
+              ? `may be executed by ${runner.others.join(", ")}`
+              : null;
+  if (problem) {
+    throw new Error(
+      `${slug}: the function its queries run through, ${schema}.${RUNNER}, ${problem}. ` +
+        `Run the release step again, which replaces it; if it changes again, something other than MixOS is changing it.`,
+    );
+  }
+
+  const ask = "select json_build_object('who', current_user, 'ro', current_setting('transaction_read_only'))";
+  let answers: { who: string; ro: string }[];
+  try {
+    answers = [
+      (await runThrough(sql, { schema }, ask))[0],
+      (await runThrough(sql, { schema, readOnly: true }, ask))[0],
+    ];
+  } catch (err) {
+    throw new Error(
+      `${slug}: this database login can't run queries through ${schema}.${RUNNER}: ` +
+        `${err instanceof Error ? err.message : String(err)}. ` +
+        `It needs to be a member of ${role}, as the release step makes it.`,
+    );
+  }
+  const [rw, ro] = answers;
+  if (rw?.who !== role || ro?.who !== role || rw.ro !== "off" || ro.ro !== "on") {
+    throw new Error(
+      `${slug}: a query through ${schema}.${RUNNER} ran as ${rw?.who}, read-only ${rw?.ro} ` +
+        `(read-only client: ${ro?.who}, ${ro?.ro}), not as ${role}.`,
+    );
+  }
+}
+
 /** The function an app's migration file runs through. It exists only while that file runs. */
 const APPLY_FUNCTION = "mixos_apply_migration";
 
@@ -345,9 +476,10 @@ export async function applyMigration(
  * expensive mistake in this codebase. There is deliberately no cursor column: a
  * cursor lives inside one run and there is nowhere here to put it.
  *
- * It sits in the app's schema, where `context.db.table("_sync_state")` finds
- * it, and belongs to the platform's role, so the app's migrations cannot alter
- * or drop it.
+ * It sits in the app's schema and belongs to the platform's role, so the app's
+ * migrations cannot alter it, and the app's role has no privilege on it:
+ * `context.db` can't read or write it. `runSync` reaches it through the
+ * platform's own handle (`createPlatformScopedClient`).
  */
 async function ensureSyncState(sql: Sql, app: MigratedApp): Promise<void> {
   if (!app.sync || app.sync.length === 0) return;
@@ -591,6 +723,8 @@ async function migrateApps(
     }
 
     await syncUpdatedAtTriggers(sql, app);
+    await ensureAppRunner(sql, app.slug);
+    await probeAppRunner(sql, app.slug);
   }
 }
 
@@ -663,5 +797,26 @@ export async function migrateAppSchemas(
     hardened === 0
       ? "  all tables already protected"
       : `  hardened ${hardened} table(s)`,
+  );
+
+  if (apps.some((a) => a.database)) await warnPublicCreate(sql);
+}
+
+/**
+ * Before Postgres 15, every role may create tables in `public`, every app's
+ * role included. Platform migration 0004 takes that away where this login
+ * owns `public`. Where it doesn't, only the owner can, so this says so on
+ * every release. App SQL is still checked so it can't name `public`; the
+ * database just doesn't refuse it as well.
+ */
+async function warnPublicCreate(sql: Sql): Promise<void> {
+  const [{ open }] = await sql<{ open: boolean }[]>`
+    select has_schema_privilege('public', 'public', 'CREATE') as open
+  `;
+  if (!open) return;
+  console.warn(
+    "  warning: every role, each app's included, may create tables in the public schema " +
+      "(the default before Postgres 15). The owner of the public schema can end that with " +
+      "`revoke create on schema public from public`.",
   );
 }

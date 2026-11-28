@@ -45,6 +45,7 @@ const SYNC_JOB_PREFIX = "sync:";
 import type { ScheduleCadence } from "./types";
 import { type Cadence, computeNextRun } from "./cron";
 import { buildSystemAppContext } from "./context";
+import { createPlatformScopedClient } from "./scoped-db";
 import { JOB_TIMEOUT_MS } from "./job-limits";
 
 /** A claim held longer than this is presumed crashed and may be reclaimed. */
@@ -354,7 +355,7 @@ async function runClaimed(
         );
       }
       const result = await withTimeout(
-        runSync(ctx, definition, mod.default),
+        runSync(ctx, definition, mod.default, createPlatformScopedClient(slug)),
         JOB_TIMEOUT_MS,
         () =>
           abort.abort(new JobTimeoutError(`sync exceeded ${JOB_TIMEOUT_MS}ms`)),

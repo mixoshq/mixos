@@ -29,6 +29,8 @@ import {
   applyMigration,
   ensureAppDatabase,
   migrateAppSchemas,
+  ensureAppRunner,
+  probeAppRunner,
   type MigratedApp,
 } from "./app-migrations";
 import { migratePlatform } from "./platform-migrations";
@@ -195,8 +197,10 @@ describe("app migrations against a real database", { skip }, () => {
   });
 
   test("context.db reaches the app's tables, and updatedAt keeps its column current", async () => {
-    // What createScopedClient builds, on this test's connection.
-    const db = new DbClient(sql).schema(schema);
+    // What createScopedClient builds, on this test's connection: every
+    // statement runs through the app's runner, as the app's role, the trigger
+    // and the view included.
+    const db = new DbClient(sql).schema(schema).confined();
     const user = "00000000-0000-0000-0000-000000000001";
 
     const created = await db.from("notes").insert({ user_id: user, body: "hello" }).select("id, updated_at").single();
@@ -297,7 +301,8 @@ describe("app migrations against a real database", { skip }, () => {
     const [user] = await sql`select is_admin from public.users where email = 'owner@example.com'`;
     assert.equal(user.is_admin, false);
     const [{ functions }] = await sql`
-      select count(*)::int as functions from pg_proc where pronamespace = ${schema}::regnamespace
+      select count(*)::int as functions from pg_proc
+      where pronamespace = ${schema}::regnamespace and proname = 'mixos_apply_migration'
     `;
     assert.equal(functions, 0, "the function a migration runs through outlived it");
   });
@@ -392,6 +397,131 @@ describe("app migrations against a real database", { skip }, () => {
     } finally {
       await elsewhere.end();
       await admin.unsafe(`drop database if exists ${other} with (force)`);
+    }
+  });
+
+  test("each release puts the app's runner in place, and fails on one that was changed", async () => {
+    await quietly(() => migrateAppSchemas(sql, { apps: [notes], appsDir }));
+    await probeAppRunner(sql, notes.slug);
+    const fn = `${schema}.mixos_run(text, json, boolean)`;
+
+    // Each change that would let the runner run an app's statements as
+    // someone else, or let someone else run them.
+    const changes: [string, string, RegExp][] = [
+      ["security invoker", `alter function ${fn} security invoker`, /isn't SECURITY DEFINER/],
+      ["another owner", `alter function ${fn} owner to ${owner}`, new RegExp(`belongs to ${owner}, not ${role}`)],
+      ["executable by everyone", `grant execute on function ${fn} to public`, /may be executed by PUBLIC/],
+      ["another search path", `alter function ${fn} set search_path = public`, /has settings/],
+    ];
+    for (const [what, change, refusal] of changes) {
+      await sql.unsafe(change);
+      await assert.rejects(probeAppRunner(sql, notes.slug), refusal, what);
+      // The next release puts it back.
+      await quietly(() => migrateAppSchemas(sql, { apps: [notes], appsDir }));
+      await probeAppRunner(sql, notes.slug);
+    }
+
+    // Gone, it fails the probe, and the app's queries run nothing.
+    await sql.unsafe(`drop function ${fn}`);
+    await assert.rejects(probeAppRunner(sql, notes.slug), /is missing/);
+    const missing = await new DbClient(sql).schema(schema).confined().from("notes").select("id");
+    assert.equal(missing.error?.code, "42883");
+    await ensureAppRunner(sql, notes.slug);
+    await probeAppRunner(sql, notes.slug);
+  });
+
+  test("the release fails for a login that can't run the app's queries", async () => {
+    // A login that can connect but is no member of the role: what a host
+    // that drops or limits the membership looks like.
+    const stranger = `mixos_appmig_stranger_${run}`;
+    await admin.unsafe(`create role ${stranger} login password '${password}'`);
+    const url = new URL(serverUrl!);
+    url.username = stranger;
+    url.password = password;
+    url.pathname = `/${database}`;
+    const as = postgres(url.toString(), { max: 1, onnotice: () => {} });
+    try {
+      await assert.rejects(
+        probeAppRunner(as, notes.slug),
+        new RegExp(`${notes.slug}: this database login can't run queries through ${schema}\\.mixos_run`),
+      );
+    } finally {
+      await as.end();
+      await admin.unsafe(`drop role ${stranger}`);
+    }
+  });
+
+  test("the sync watermark table is the platform's: the app's role can't read or write it", async () => {
+    const synced = app(`synced-${run}`, {
+      sync: [
+        {
+          name: "items",
+          schedule: { everyMinutes: 60 },
+          source: "mixos",
+          window: { coldStartDays: 3, defaultDays: 7, minDays: 1 },
+          budgetMs: 1000,
+        },
+      ],
+    });
+    migrations(synced.slug, { "001_items.sql": "create table items (id int primary key);" });
+    await quietly(() => migrateAppSchemas(sql, { apps: [notes, synced], appsDir }));
+
+    const table = `${appSchemaName(synced.slug)}._sync_state`;
+    const [privileges] = await sql`
+      select pg_get_userbyid(c.relowner) as owner,
+             has_table_privilege(${appRoleName(synced.slug)}, c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE') as app
+      from pg_class c where c.oid = to_regclass(${table})
+    `;
+    assert.deepEqual({ ...privileges }, { owner, app: false });
+    const read = await new DbClient(sql).schema(appSchemaName(synced.slug)).confined().from("_sync_state").select("*");
+    assert.equal(read.error?.code, "42501");
+  });
+
+  test("every role's CREATE on public is taken away where this login may, and reported where not", async () => {
+    const open = async () => {
+      const [{ open }] = await sql<{ open: boolean }[]>`select has_schema_privilege('public', 'public', 'CREATE') as open`;
+      return open;
+    };
+    const warnings = async () => {
+      const seen: string[] = [];
+      const { log, warn } = console;
+      console.log = () => {};
+      console.warn = (...args: unknown[]) => seen.push(args.join(" "));
+      try {
+        await migrateAppSchemas(sql, { apps: [notes], appsDir });
+      } finally {
+        Object.assign(console, { log, warn });
+      }
+      return seen.filter((w) => /may create tables in the public schema/.test(w));
+    };
+
+    // What Postgres before 15 gives every role, granted by the server's
+    // superuser in this test's database.
+    const url = new URL(serverUrl!);
+    url.pathname = `/${database}`;
+    const superuser = postgres(url.toString(), { max: 1, onnotice: () => {} });
+    try {
+      await superuser.unsafe("grant create on schema public to public");
+      assert.equal(await open(), true);
+      assert.equal((await warnings()).length, 1);
+
+      const migration = fs.readFileSync(path.join(REPO, "supabase", "migrations", "0004_public_schema_create.sql"), "utf8");
+      await sql.unsafe(migration);
+      const [{ may }] = await sql<{ may: boolean }[]>`
+        select pg_has_role(current_user, (select nspowner from pg_namespace where nspname = 'public'), 'USAGE') as may
+      `;
+      if (may) {
+        assert.equal(await open(), false, "0004 left CREATE on public with every role");
+        assert.deepEqual(await warnings(), []);
+      } else {
+        // Before Postgres 15 a new database's public belongs to the bootstrap
+        // superuser: only it can revoke, so the release keeps saying so.
+        assert.equal(await open(), true);
+        assert.equal((await warnings()).length, 1);
+        await superuser.unsafe("revoke create on schema public from public");
+      }
+    } finally {
+      await superuser.end();
     }
   });
 });

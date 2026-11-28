@@ -25,7 +25,7 @@
  *
  *   docker run -d --rm --name reach -e POSTGRES_PASSWORD=pw -p 127.0.0.1:55433:5432 postgres:17
  *   MIXOS_TEST_DATABASE_URL=postgres://postgres:pw@127.0.0.1:55433/postgres \
- *     npx tsx --test src/lib/apps/context-reach.integration.test.ts
+ *     npx tsx --test tests/escapes/context-reach.integration.test.ts
  */
 
 import { after, before, describe, test } from "node:test";
@@ -35,11 +35,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { inspect } from "node:util";
 import postgres, { type Sql } from "postgres";
-import { migratePlatform } from "../../../scripts/platform-migrations";
+import { migratePlatform } from "../../scripts/platform-migrations";
 import type { AppManifest } from "@/lib/apps/types";
 import type { ConnectorManifest } from "@/lib/connectors/types";
 
-const REPO = path.resolve(__dirname, "../../..");
+const REPO = path.resolve(__dirname, "../..");
 const serverUrl = process.env.MIXOS_TEST_DATABASE_URL;
 const skip = serverUrl ? false : "set MIXOS_TEST_DATABASE_URL to run against a real Postgres";
 
@@ -61,8 +61,8 @@ async function loadPlatform() {
     ...(await import("@/lib/connectors/config")),
     ...(await import("@/lib/connectors/http-connector")),
     ...(await import("@/lib/apps/access")),
-    ...(await import("./context")),
-    ...(await import("./read-only-context")),
+    ...(await import("@/lib/apps/context")),
+    ...(await import("@/lib/apps/read-only-context")),
     platformSql: (await import("@/lib/db/client")).sql,
   };
 }

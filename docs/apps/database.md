@@ -25,7 +25,7 @@ Write bare table names, in migrations and in `context.db.table(...)`. They are n
 
 The schema's name is the slug with `-` written as `_` and `_` written as `__`, so `my-app` and `my_app` get different schemas. A slug is lowercase letters and digits, in words joined by single hyphens or underscores; the build refuses any other folder name.
 
-The schema belongs to a role of its own, `mixos_app_<slug>`, which cannot log in. Your migrations run as that role, so they can create and change only what is in your schema.
+The schema belongs to a role of its own, `mixos_app_<slug>`, which cannot log in. Your migrations run as that role, so they can create and change only what is in your schema. So does every query `context.db` makes: Postgres itself refuses one that reaches another app's tables or the platform's, and the defaults and views it runs, run as your role too. From an MCP tool or a search handler, your queries also run read-only, and Postgres refuses a write. Your queries run through a function the release step keeps in your schema, `mixos_run`; your migrations can't change it, and a table of yours may share its name.
 
 **One MixOS database per Postgres server.** Roles belong to the whole server, not to one database, so two MixOS databases on the same server would share each app's role. The release step refuses an app role that another database on the server already uses. Give each MixOS install a Postgres server of its own.
 
@@ -94,7 +94,7 @@ It may not:
 
 An expression anywhere in a migration — a default, a check, a generated column, an index, a view, a statement that fills a table — can call only these built-in functions: `now`, `gen_random_uuid`, `lower`, `upper`, `length`, `char_length`, `btrim`, `ltrim` and `rtrim` (and `TRIM(...)`), `abs`, `round`, `date_trunc`, `date_part` (and `EXTRACT(...)`), `timezone` (`AT TIME ZONE`), `jsonb_build_object`, `jsonb_build_array`, and the aggregates `count`, `sum`, `avg`, `min` and `max`. `CURRENT_TIMESTAMP`, `CURRENT_DATE` and the other clock keywords are allowed, so are operators (`SIMILAR TO` among them) and casts, and a default, check or index may not contain a subquery.
 
-Why so strict: a default, a check, an index or a view runs later, whenever the platform reads or writes your table, and the platform's database role can read every table. Your migration runs as your app's role, but what it leaves behind would run as the platform's. So nothing an app creates may run code or reach past its own schema. The list is [`scripts/app-sql-policy.ts`](../../scripts/app-sql-policy.ts), and a change to it is a platform change.
+Why so strict: a default, a check, an index or a view runs later, whenever your table is read or written. When your app does that, it runs as your app's role. But the platform reads and writes your tables too, for the admin's data viewer and for Delete data, as its own database role, which can read every table, and then what your migration left behind would run as the platform's. So nothing an app creates may run code or reach past its own schema. The list is [`scripts/app-sql-policy.ts`](../../scripts/app-sql-policy.ts), and a change to it is a platform change.
 
 ## Keeping `updated_at` Current
 

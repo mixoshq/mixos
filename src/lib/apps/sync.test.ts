@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runSync, type SyncFetchArgs, type SyncHandler } from "./sync";
 import type { SyncDefinition } from "./types";
-import type { SystemAppContext } from "../hooks/types";
+import type { ScopedClient, SystemAppContext } from "../hooks/types";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -24,11 +24,13 @@ type Row = Record<string, unknown>;
 
 /**
  * Just enough of the scoped client for the two calls runSync makes against its
- * state table: one read by name, and a patch that keeps unlisted columns.
+ * state table: one read by name, and a patch that keeps unlisted columns. It is
+ * the platform's handle the scheduler passes in, not the app's `ctx.db`, which
+ * throws here if runSync reaches for it.
  */
 function stateTable(initial: Row | null) {
   let row = initial;
-  const db = {
+  const state = {
     table(name: string) {
       assert.equal(name, "_sync_state");
       return {
@@ -44,11 +46,16 @@ function stateTable(initial: Row | null) {
       };
     },
   };
+  const appDb = {
+    table() {
+      throw new Error("runSync used the app's ctx.db for its state");
+    },
+  };
   const ctx = {
-    db,
+    db: appDb,
     signal: new AbortController().signal,
   } as unknown as SystemAppContext;
-  return { ctx, row: () => row };
+  return { ctx, state: state as unknown as ScopedClient, row: () => row };
 }
 
 /** A source with nothing in it, recording the windows it was asked for. */
@@ -70,10 +77,10 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 test("an empty window that ends in the past advances the watermark", async () => {
   const start = Date.now() - 30 * DAY_MS;
-  const { ctx, row } = stateTable({ name: "calls", synced_through: iso(start), window_days: 7 });
+  const { ctx, state, row } = stateTable({ name: "calls", synced_through: iso(start), window_days: 7 });
   const { asked, handler } = emptySource();
 
-  const result = await runSync(ctx, definition, handler);
+  const result = await runSync(ctx, definition, handler, state);
 
   assert.equal(asked[0].from.getTime(), start);
   assert.equal(asked[0].to.getTime(), start + 7 * DAY_MS);
@@ -85,15 +92,15 @@ test("an empty window that ends in the past advances the watermark", async () =>
 
 test("an empty stretch is crossed one window per tick, then held at the present", async () => {
   const start = Date.now() - 20 * DAY_MS;
-  const { ctx, row } = stateTable({ name: "calls", synced_through: iso(start), window_days: 7 });
+  const { ctx, state, row } = stateTable({ name: "calls", synced_through: iso(start), window_days: 7 });
   const { asked, handler } = emptySource();
 
-  await runSync(ctx, definition, handler);
-  await runSync(ctx, definition, handler);
+  await runSync(ctx, definition, handler, state);
+  await runSync(ctx, definition, handler, state);
   assert.equal(row()?.synced_through, iso(start + 14 * DAY_MS));
 
   // Six days left: this window reaches now, so an empty answer is held.
-  const held = await runSync(ctx, definition, handler);
+  const held = await runSync(ctx, definition, handler, state);
   assert.deepEqual(
     asked.map((a) => a.from.getTime()),
     [start, start + 7 * DAY_MS, start + 14 * DAY_MS],
@@ -105,10 +112,10 @@ test("an empty stretch is crossed one window per tick, then held at the present"
 
 test("an empty window that reaches the present holds the watermark", async () => {
   const start = Date.now() - DAY_MS;
-  const { ctx, row } = stateTable({ name: "calls", synced_through: iso(start), window_days: 7 });
+  const { ctx, state, row } = stateTable({ name: "calls", synced_through: iso(start), window_days: 7 });
   const { handler } = emptySource();
 
-  const result = await runSync(ctx, definition, handler);
+  const result = await runSync(ctx, definition, handler, state);
 
   assert.equal(result.drained, false);
   assert.equal(result.note, "window drained with zero items; watermark held");
@@ -118,7 +125,7 @@ test("an empty window that reaches the present holds the watermark", async () =>
 
 test("a window with items advances, including one that reaches the present", async () => {
   const start = Date.now() - DAY_MS;
-  const { ctx, row } = stateTable({ name: "calls", synced_through: iso(start), window_days: 7 });
+  const { ctx, state, row } = stateTable({ name: "calls", synced_through: iso(start), window_days: 7 });
   const written: number[][] = [];
   const handler: SyncHandler<number> = {
     fetchPage: async () => ({ items: [1, 2] }),
@@ -127,7 +134,7 @@ test("a window with items advances, including one that reaches the present", asy
     },
   };
 
-  const result = await runSync(ctx, definition, handler);
+  const result = await runSync(ctx, definition, handler, state);
 
   assert.deepEqual(written, [[1, 2]]);
   assert.equal(result.drained, true);

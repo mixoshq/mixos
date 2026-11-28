@@ -396,7 +396,7 @@ own, and a scoped database client pinned to it.
 ```mermaid
 flowchart LR
     APP["app code<br/>context.db.table('goals')"] --> SCOPED["createScopedClient('my-app')<br/>pinned to the app's schema"]
-    SCOPED --> REAL["app_my_app.goals"]
+    SCOPED -- "every statement<br/>as mixos_app_my_app" --> REAL["app_my_app.goals"]
 ```
 
 The schema, and the role that owns it, are derived from the slug by one
@@ -458,13 +458,18 @@ apps whose schema or role names would be the same.
 |  ...                              |
 |                                   |
 |  Each app reaches only its own    |
-|  schema, via createScopedClient() |
+|  schema, via createScopedClient(),|
+|  and its queries run as its role  |
 +-----------------------------------+
 ```
 
 - The `ScopedClient` only exposes a `.table(name)` method, on the query builder
   pinned to the app's schema. A name cannot carry a quote, a dot or another
   schema out of it (§8).
+- Every statement it sends runs inside the app's runner, as the app's role, so
+  Postgres refuses one that reaches another app's table or a platform table,
+  even SQL written to escape, and the defaults and views it runs, run as the
+  app's role too. How, and where that stops, is in §8.
 - App code never sees or constructs another schema's name.
 - Apps without `"database": true` receive `context.db = null`, and may not ship
   `migrations/`: the build fails, and so does the release step.
@@ -481,8 +486,10 @@ own. Only apps the registry accepted run any SQL.
 
 That bounds what a migration does while it runs, not what it leaves behind. A
 trigger, rule, column default, check, index expression or view on an app's table
-runs later, when the platform reads or writes the table, and runs as the
-platform's role. So before anything is applied, every statement is parsed with
+runs later, whenever the table is read or written. When the app does that,
+through `context.db`, it runs as the app's role. When the platform does, as the
+admin's data viewer and Delete data do, it runs as the platform's role, which
+can read every table. So before anything is applied, every statement is parsed with
 Postgres's own parser (libpg_query) and checked against an allowlist
 (`scripts/app-sql-policy.ts`). It allows tables, indexes, views, sequences and
 enum types in the app's schema, and the rows in them. It refuses triggers,
@@ -670,7 +677,7 @@ What the platform does between those two boxes, in order:
 | Email domain gate    | Unauthorized user provisioning| `ALLOWED_EMAIL_DOMAINS` env var check        | `access.ts` (`ensureUser`)   |
 | Encryption at rest   | Credential exposure in DB     | AES-256-GCM with random IV per record        | `encryption.ts`              |
 | Per-request decrypt  | Credential caching/leakage   | Stateless connectors, fresh per request      | `context.ts`                 |
-| Per-app schemas      | Cross-app data access         | A schema and role per app; `ScopedClient` pinned to it | `scoped-db.ts`, `app-identifiers.ts` |
+| Per-app schemas      | Cross-app data access         | A schema and role per app; `ScopedClient` pinned to it; every statement it sends runs inside the app's runner as the app's role, read-only for MCP and search | `scoped-db.ts`, `query.ts` (`run`), `app-migrations.ts` (`ensureAppRunner`), Postgres (see §8) |
 | App migration checks | App SQL reaching past its app | Parsed against an allowlist, run as the app's role | `app-sql-policy.ts`, `app-migrations.ts` |
 | Notification scope   | Cross-app push spam           | `send()` filters recipients to users with the app | `notifications.ts` (`hasAppGrant`) |
 | App import list      | Capabilities past the manifest | Default-deny, by resolved file; a finding skips the app | `import-policy.mjs` (see §24) |
@@ -1017,18 +1024,74 @@ Entirely at the application layer:
   (or `requireAdmin()` on admin paths) before issuing a query. The session pins
   the userId, so a caller cannot read or write another user's row.
 - App tables live in a schema per app, `app_<slug>`, owned by a role per app
-  (§3.2). At runtime the boundary is the `ScopedClient`
-  ([`src/lib/apps/scoped-db.ts`](../src/lib/apps/scoped-db.ts)), the query
-  builder pinned to the app's schema: an app cannot name another app's table,
-  and cannot name a platform table. It connects as the platform's role, like
-  every other query, so at runtime the boundary is held in application code.
+  (§3.2). At runtime two layers hold an app's queries there. The first is the
+  `ScopedClient` ([`src/lib/apps/scoped-db.ts`](../src/lib/apps/scoped-db.ts)),
+  the query builder pinned to the app's schema: an app cannot name another
+  app's table, and cannot name a platform table.
+
+  The second is Postgres. Every statement `context.db` sends runs inside the
+  app's **runner**, `app_<slug>.mixos_run`, as the app's role,
+  `mixos_app_<slug>`, which owns the app's schema and nothing else
+  (`DbClient.confined`, [`src/lib/db/query.ts`](../src/lib/db/query.ts)):
+  - **How.** The runner is a `SECURITY DEFINER` function owned by the app's
+    role, which only that role may execute. The builder sends
+    `select r from app_<slug>.mixos_run($1, $2, $3)`: the statement's text, its
+    values as one JSON array, and whether it is read-only. The function runs the
+    statement as its owner. It is one statement, so it costs no round trip over
+    an unconfined one, and behaves the same through any pooler.
+  - **What Postgres refuses.** A statement that reaches a table, view, sequence
+    or function the app's role has no privilege on fails with `42501`. That
+    includes a platform table, another app's table, and a platform function,
+    whether named directly or reached through SQL text run by a function such as
+    `query_to_xml`. The defaults, checks and views it runs, run as the app's
+    role too.
+  - **The role can't be changed while it runs.** Postgres refuses `SET ROLE`,
+    `set_config('role', …)` and `SET SESSION AUTHORIZATION` inside a
+    `SECURITY DEFINER` function, so SQL text written to escape (setting the role
+    back to the login, or to another app's role) is refused (`42501`) like any
+    other. The runner also runs only a statement that returns rows
+    (`RETURN QUERY EXECUTE`), and one statement only, so DDL can't run through
+    it: no table, function or trigger can be left in the app's schema for the
+    platform to run later.
+  - **Read-only callers.** MCP tools, search, and a service answering either
+    tell the runner they're read-only, and it makes the transaction read-only
+    before it runs the statement. Postgres then refuses their writes (`25006`)
+    beneath the Proxy (§17), and refuses to switch the transaction back.
+  - **It fails closed.** If the runner is missing, or the login may not call it,
+    the statement fails and nothing runs. Every release replaces each app's
+    runner, owner and grants included, after the app's migrations
+    (`ensureAppRunner`, [`scripts/app-migrations.ts`](../scripts/app-migrations.ts)),
+    then checks it in the catalog (security definer, its owner, its search path,
+    its body, no one else may execute it) and by calling it (`probeAppRunner`).
+    A runner that was changed fails the release. The migration check refuses
+    `CREATE`, `ALTER` and `DROP FUNCTION`, so an app's own SQL can't change it.
+  - **The platform's own reads and writes** of an app's tables (the data
+    viewer, Delete data, a sync's watermark in `_sync_state`, which the app's
+    role has no privilege on) run as the platform's role.
+
+  **Where it stops.** The connection is still the platform's login, which is a
+  member of every app's role and calls every app's runner. Code that holds that
+  login, rather than `context.db`, reaches every app's tables. App code can't
+  import the pool or read the server's environment (below, §24), but app code
+  written to get around the build's checks runs in the same process as the
+  pool and isn't held by any of this. Only an app that runs in a process
+  without the platform's login is.
+  [`tests/escapes/app-database.integration.test.ts`](../tests/escapes/app-database.integration.test.ts)
+  pins the refusals, the escapes refused, and this limit.
+
+  Before Postgres 15, every role may create tables in `public`. Platform
+  migration `0004` takes that away where the login owns `public`. Where it
+  doesn't, the release step warns on every run, and the migration check is
+  what keeps app SQL out of `public`.
+
   The other half is settled before anything runs: an app's migrations run as
   the app's own role, and what they may leave behind for the platform's role
   to run is checked first (§3.2).
 
   **The schema bounds the table name, not the app.** `createScopedClient(slug)`
-  accepts *any* slug and builds its own full-access client for that app's
-  schema, so the guarantee rests entirely on app code never calling it —
+  accepts *any* slug and builds a read-write client for that app's schema,
+  bound to that app's role, so the guarantee rests entirely on app code never
+  calling it —
   `context.db` is the client the dispatcher pins to the calling app. An app that
   could import the factory could write
   `createScopedClient("other-app").table("secrets")` and read or write another
@@ -1402,7 +1465,7 @@ closure: a field reads as `undefined`, its own keys, descriptors and prototype
 are the empty object's (so `JSON.stringify`, `Object.entries`, a spread and
 `util.inspect` find nothing), and it can't be written to. Before this, the
 narrowing Proxy's target was the instance, and `context.connectors.x.credentials`
-returned the credential set. `src/lib/apps/context-reach.integration.test.ts`
+returned the credential set. `tests/escapes/context-reach.integration.test.ts`
 holds every context an app is handed to this, with a census of everything
 reachable from it.
 
@@ -1504,10 +1567,14 @@ tables is the worst outcome this feature could have:
    `insert`/`update`/`upsert`/`delete`.
 2. **Runtime** — the client is a `Proxy` that throws on those verbs and re-wraps
    itself across chained calls, so `as any` doesn't defeat it.
-3. **The import list** — no app code, `mcp/` included, can import `@/lib/db*`,
+3. **The database** — every statement the client sends runs through the app's
+   runner in a read-only transaction (§8), so a write that got past (1) and (2)
+   is refused by Postgres (`25006`), and its SQL can't switch the transaction
+   back.
+4. **The import list** — no app code, `mcp/` included, can import `@/lib/db*`,
    the App Services broker, or the context builder. The build refuses it (§24).
 
-4. **Connector declaration** — a connector marks each method `mutates: true` in
+5. **Connector declaration** — a connector marks each method `mutates: true` in
    its `telemetry` list, and the MCP context wraps `ctx.connectors` in a proxy
    (`src/lib/apps/read-only.ts`) through which a tool can call only the methods
    declared as reads. A `mutates` method throws, and so does anything the
@@ -1525,9 +1592,9 @@ tables is the worst outcome this feature could have:
    it does trust is the declaration itself — a method that writes but is not
    marked `mutates` runs.
 
-5. **App Services** — a tool's `ctx.services` is a client that runs the
+6. **App Services** — a tool's `ctx.services` is a client that runs the
    provider's handler read-only: the provider gets the read-only scoped client
-   and connectors narrowed as in (4), and `caller.readOnly` tells it so. Without
+   and connectors narrowed as in (5), and `caller.readOnly` tells it so. Without
    this a tool could write by asking another app to.
 
 ### Token handling
@@ -1969,9 +2036,9 @@ this build, with a code of its own because the consumer's remedy differs: a
 provider switched off stays off until an admin acts, while an update is over
 once the release step has run. Both are a 503 if the consumer lets them escape.
 
-The provider's handler runs with the **provider's own scoped context**, and the
-user is re-authorized in the provider's terms rather than inheriting the
-consumer's decision. Calls are **depth-1**: a provider handler cannot chain to
+The provider's handler runs with the **provider's own scoped context**, whose
+queries run as the provider's role (§8), and the user is re-authorized in the
+provider's terms rather than inheriting the consumer's decision. Calls are **depth-1**: a provider handler cannot chain to
 another provider, so there are no cycles and no impersonation.
 
 **Who is asking is the platform's to say.** The broker reads the acting user
@@ -1986,7 +2053,8 @@ On the public surface there is no user, so only `audience: "app"` services are
 reachable — a public consumer route must do its own authorization first.
 
 A request from an MCP tool runs the provider read-only, as the tool itself is
-(§17).
+(§17), down to the database: the provider's queries run in read-only
+transactions.
 
 ---
 
@@ -2109,7 +2177,7 @@ lie outside what syntax shows:
   reads both again (the manifest for the app's egress, connectors, consent and
   whether it is global; the user for who is asking another app's service, §23),
   and a connector is a facade (§16.1). `context.http` checks a frozen copy of
-  `egress`. `src/lib/apps/context-reach.integration.test.ts` walks everything
+  `egress`. `tests/escapes/context-reach.integration.test.ts` walks everything
   reachable from each kind of context (a route's, a public route's, a job's and
   an MCP tool's) and finds no pool, registry, `process`, connector instance or
   secret. What a closure holds is out of its sight, and out of the app's;

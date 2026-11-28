@@ -12,7 +12,9 @@
 // that owns the app's schema and nothing else (scripts/app-migrations.ts), so
 // the migration itself cannot change a platform table. What it leaves behind is
 // another matter. A trigger, a column default, a check, an index expression or a
-// view runs later, whenever the platform reads or writes the table, and it runs
+// view runs later, whenever the table is read or written. When the app does it,
+// through `context.db`, that is as the app's role (src/lib/apps/scoped-db.ts).
+// When the platform does, as the admin's data viewer and Delete data do, it is
 // as the platform's role, which can read every table. A default that called
 // query_to_xml() over public.users would copy password hashes into the app's own
 // rows on every insert. So an app may create tables and what describes them,
