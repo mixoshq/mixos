@@ -6,6 +6,8 @@ import { connectorLoaders } from "@/generated/connector-loaders";
 import { loadFromMap } from "@/lib/apps/module-map";
 import { connectorLoaderKey } from "./connector-modules";
 import type { BaseConnector } from "./types";
+import { connectorRegistry } from "@/generated/connector-registry";
+import { connectorIsolation, createRemoteConnector } from "@/lib/runners/remote-connector";
 
 /**
  * Constructing a connector from its module: the one place the platform loads
@@ -55,6 +57,15 @@ type ConnectorClass = new () => BaseConnector;
  * when its module throws while loading (the module's error is the `cause`).
  */
 export async function constructConnector(name: string): Promise<BaseConnector> {
+  // Where connectors run isolated, the platform never loads one's code: it
+  // holds a RemoteConnector, and the code runs in the connector's runner
+  // (src/lib/runners/remote-connector.ts).
+  if (connectorIsolation().on) {
+    if (!connectorRegistry.some((c) => c.name === name)) {
+      throw new ConnectorLoadError(name, "missing", `${name} is not a registered connector. Run \`npm run registry\`.`);
+    }
+    return createRemoteConnector(name);
+  }
   const load = await loadFromMap(connectorLoaders, connectorLoaderKey(name));
   if (load.kind === "missing") {
     throw new ConnectorLoadError(

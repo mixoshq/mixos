@@ -292,6 +292,7 @@ any required key that's missing.
 | `INSTALL_APPS`, `INSTALL_CONNECTORS`, `INSTALL_THEMES` | No, default `true` | Whether admins can browse the catalogue for that kind. See [Fixing what an instance runs](after-you-install/README.md#fixing-what-an-instance-runs) |
 | `MIXOS_UPDATE_CHECK` | No, default `true` | Whether the instance checks mixos.org once a day for updates to MixOS and its extensions. `false` sends nothing. See [Release and update notices](after-you-install/README.md#release-and-update-notices) |
 | `MIXOS_RELEASE_CHANNEL` | No, default `stable` | Which releases of MixOS the admin pages tell you about: `stable`, or `prerelease` to include prereleases, such as `v0.3.0-rc.1` |
+| `MIXOS_ISOLATION` | No | `off` runs connectors in the server process even where they could run in processes of their own: the Docker image, on Render, Railway or Compose. Only for an operator who must; Admin > Connectors shows it, and the audit log records each change. See [`docs/security-architecture.md` §33.1](../security-architecture.md#331-connectors-in-runners-item-7b) |
 | `GITHUB_APP_ENCRYPTION_KEY` | No | Turns on Deployment > Production Updates. See [Production Updates](after-you-install/production-updates.md) |
 | `MIXOS_COMMIT` | No | The commit the admin pages show beside the version. See [Which build is running](after-you-install/README.md#which-build-is-running) |
 | `ALLOWED_EMAIL_DOMAINS` | No | Comma-separated email domains that accounts may use. Blank means any |

@@ -165,6 +165,14 @@ export interface ConnectorAuthPolicy {
 export interface ConnectorHttpPolicy {
   /** Default base URL. A `baseUrl` credential overrides it at runtime. */
   baseUrl?: string;
+  /**
+   * Other hosts the connector's requests go to, beyond `baseUrl`,
+   * `auth.tokenUrl` and `auth.authorizeUrl`: bare hostnames, such as an
+   * upload host. Where connectors run isolated, the platform sends a
+   * connector's requests to those, and to the base URL an admin entered, and
+   * nowhere else (src/lib/runners/connector-relay.ts).
+   */
+  hosts?: string[];
   /** Per-attempt timeout. Default 10000. */
   timeoutMs?: number;
   /** Ceiling for the whole call including retries. Default 15000. */

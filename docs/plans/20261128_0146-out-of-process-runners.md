@@ -258,3 +258,44 @@ Where it departs from the design above, and why:
   - a run: 0.06 ms and 0.15 ms;
   - a run that makes one call: 0.10 ms and 0.28 ms;
   - a run that makes ten at once: 0.20 ms and 0.47 ms.
+
+### Step 2: connector runners (7b) (28 November 2026)
+
+- Built:
+  - `src/lib/runners/remote-connector.ts` (`RemoteConnector`,
+    `connectorIsolation`);
+  - `connector-host.ts`, the runner side;
+  - `connector-relay.ts`, the fetch relay;
+  - `isolation-audit.ts`;
+  - `scripts/build-runner-bundles.ts`, run by `npm run prebuild`.
+- `docs/security-architecture.md` §33.1, and a threat-model row of its own.
+
+Where it departs from the design above, and why:
+
+- **No connector code is loaded in the platform at all.** `constructConnector`
+  returns a `RemoteConnector`, and HttpConnector's platform-only statics reach
+  it through a symbol (`src/lib/connectors/remote-hooks.ts`). So the context
+  build, the facade, the telemetry, Verify connection and webhooks needed no
+  change.
+- **One connector object per platform-side instance, kept in the runner while
+  used**, not one per call. A client-credentials token is minted once per
+  request, as in process.
+- **The relay refuses private addresses** for every host the manifest names.
+  Only the base URL an admin entered reaches the private network. In process
+  a connector reached anything.
+- **A new, optional manifest field, `http.hosts`**, for a connector whose
+  requests reach a host its other URLs don't name. It is additive, so no
+  schema version changes.
+- **On by default is "a production build on a host with runners"**: the
+  image. `next dev` and Vercel run connectors in process. `MIXOS_ISOLATION=off`
+  is audited by the cron tick, on each change, since the operator sets it
+  outside the app.
+- **Limits for connector authors on this tier**, in `connectors/AGENTS.md`:
+  - methods return data;
+  - every host is declared;
+  - no database;
+  - `configured` comes from the manifest.
+
+  The design had hoped for none. These are what crossing a process boundary
+  costs, and no connector in this repository breaks any of them.
+

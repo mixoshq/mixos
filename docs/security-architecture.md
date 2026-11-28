@@ -4401,11 +4401,10 @@ A runner is a Node process for one Registry app or one connector, so that its
 code runs where none of the platform's secrets, connections or memory are.
 The design is `docs/plans/20261128_0146-out-of-process-runners.md`.
 
-**What exists so far is the runner itself, and nothing runs in one yet.**
-Every app and every connector still runs in the server process, as the rest
-of this document describes, and `hostTier()` (`src/lib/apps/labels.ts`) still
-says so. Connectors move into runners next, then Registry apps; this section
-grows with each.
+**Connectors run in runners; apps don't yet.** Every app still runs in the
+server process, as the rest of this document describes, and `hostTier()`
+(`src/lib/apps/labels.ts`) still says so. Every connector runs in a runner of
+its own wherever the tier exists (§33.1). Registry apps come next.
 
 **How one is started** (`Runner`, `src/lib/runners/supervisor.ts`). The
 platform spawns `runner/bootstrap.mjs` with:
@@ -4505,3 +4504,84 @@ them.
 | A run making ten calls at once | 0.20 ms | 0.47 ms |
 
 Both were measured on an Apple M-series laptop, the Linux one in Docker.
+
+### 33.1 Connectors in runners (Item 7b)
+
+**Where.** `connectorIsolation()` (`src/lib/runners/remote-connector.ts`)
+turns the tier on where all of these hold:
+
+- the host supports runners: Node 25 or later, and not Vercel;
+- the server is a production build, not a development server;
+- `MIXOS_ISOLATION` isn't `off`.
+
+The Docker image, on Render, Railway or Compose, has it. Admin > Connectors
+says which tier a host has, and why when it isn't isolated. The cron tick
+audits each change as `platform.isolation.connectors`, by the scheduler, with
+the reason (`src/lib/runners/isolation-audit.ts`). An operator who turns it
+off is in the log within a tick.
+
+**What the platform holds.** `constructConnector`
+(`src/lib/connectors/loader.ts`) never loads a connector's code there. It
+returns a `RemoteConnector`, and the rest of the platform uses it as it used
+the class. The context build, the facade (§16.1), the write rules, the
+budgets, the telemetry, Verify connection and webhooks all work unchanged.
+Its declared methods are on its prototype, as a class's are. `request()`,
+the credentials and everything else of the class's aren't. Each method,
+`testConnection` and `handleWebhook` is a run in that connector's runner. The
+platform hands in, with each run, the credentials it decrypted for that
+instance: the shared ones, an app's own (§3.4), or a person's.
+
+**What the runner holds.** One bundle: the connector's code with
+`src/lib/runners/connector-host.ts`, built by `npm run build`
+(`scripts/build-runner-bundles.ts`). The bundle carries no other connector,
+since the generated registry in it holds this connector's manifest alone. It
+carries no database client and no connector config: those are stubs whose
+every member throws. It builds the connector's own class with the credentials
+handed in, keeping one object per platform-side instance, so a
+client-credentials token is minted once per request, as in process.
+
+**What it can ask the platform for: two calls, and nothing else.**
+
+- `http.fetch` (`src/lib/runners/connector-relay.ts`). The runner has no
+  network, so its `fetch` is this call, and it goes only where the connector
+  said it would:
+  - **The hosts its manifest names:** `http.baseUrl`, `http.hosts`,
+    `auth.tokenUrl` and `auth.authorizeUrl`. These are over https only, and to
+    public addresses only: each address is checked, and the request goes to
+    exactly the address checked.
+  - **The base URL an admin entered:** http or https, private addresses
+    included. That is how an admin points a connector at a self-hosted
+    service.
+  - **Redirects** are followed by hand, at most five, each hop checked again.
+    A hop to another origin drops `Authorization` and cookies, as fetch does.
+  - **Answers** are read up to 10 MB, and given 60 seconds.
+- `grant.refresh`. A three-legged grant is renewed by the platform, under its
+  lock, with the grant the instance was bound to (§3.4), and the new tokens
+  are handed back. The runner never reaches the database or the keys.
+
+**It fails closed.** A connector with no bundle in the build, or one whose
+runner can't start, is unavailable where the tier is on. It is never loaded
+in process instead. `npm run build` fails if a registered connector can't be
+bundled.
+
+**Errors.** A `ConnectorError` from a runner is rebuilt in the platform as a
+real one. Its category and messages are kept, and its connector name is the
+platform's, never the runner's word.
+
+**What a connector author meets on this tier** (`connectors/AGENTS.md`):
+
+- A method returns data: plain objects, arrays, strings, numbers, dates and
+  bytes. A `Response`, a stream, a function or a class instance is refused
+  with a message.
+- Requests go only to the hosts above. Another host is declared in
+  `http.hosts`, an optional, additive field.
+- A webhook handler can't use the database: it has none.
+- `configured` is decided from the manifest and the credentials, as the
+  Registry decides it. An override of it in the class isn't read.
+
+**What it still exposes.** A connector's code holds its own credentials while
+it runs. It can misuse them at the provider, and send them to any host it
+declares, which a publisher who controls one of those hosts would see. Where
+connectors run in the server (Vercel, a development server, or
+`MIXOS_ISOLATION=off`), the threat model's first row applies to them, as
+before: their code can reach whatever the server can.

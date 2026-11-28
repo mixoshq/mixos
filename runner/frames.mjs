@@ -25,8 +25,20 @@ export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 
 const TAG = "$mixos";
 
-/** The fields an error keeps when it crosses. ConnectorError's, and a code. */
-const ERROR_FIELDS = ["code", "status", "category", "userMessage", "adminHint", "retryAfter"];
+/** The fields an error keeps when it crosses: ConnectorError's (src/lib/connectors/errors.ts), and a code. */
+const ERROR_FIELDS = [
+  "code",
+  "status",
+  "category",
+  "userMessage",
+  "adminHint",
+  "retryAfter",
+  "retryAfterMs",
+  "attempts",
+  "subject",
+  "connectorName",
+  "upstreamRequestId",
+];
 
 export class FrameError extends Error {
   /** @param {string} message */

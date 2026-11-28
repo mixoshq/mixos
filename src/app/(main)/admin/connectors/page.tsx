@@ -46,6 +46,7 @@ import PendingInstalls from "@/components/admin/pending/pending-installs";
 import ProposedPullRequests from "@/components/admin/github/proposed-pull-requests";
 import { proposalTarget } from "@/lib/github/propose";
 import RegistryNotices from "@/components/admin/registry-notices";
+import { connectorIsolation } from "@/lib/runners/remote-connector";
 import { recordAdminAction, redactedKeys } from "@/lib/apps/admin-audit";
 
 /**
@@ -109,6 +110,8 @@ export default async function ConnectorsAdminPage({
   const params = await searchParams;
   const oauthStatus = typeof params.oauth === "string" ? params.oauth : null;
   const notice = oauthStatus ? OAUTH_MESSAGES[oauthStatus] : undefined;
+  // Where connectors run on this host (Item 7b), and why when it isn't isolated.
+  const isolation = connectorIsolation();
   // Set by the OAuth round trip's return URL, so the admin lands back inside
   // the dialog they left rather than in front of a closed grid.
   const openConnector =
@@ -453,6 +456,11 @@ export default async function ConnectorsAdminPage({
             Configure the shared credentials apps use to reach outside services
             — each connector is set up once here and used by every app that
             declares it.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {isolation.on
+              ? "Each connector runs in a process of its own, holding only its own credentials and reaching only the hosts it declares."
+              : `Connectors run in the server process: ${isolation.reason}.`}
           </p>
         </div>
         {/*

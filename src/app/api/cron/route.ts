@@ -10,6 +10,7 @@ import { runDueJobs } from "@/lib/apps/scheduler";
 import { pruneRateBuckets } from "@/lib/rate-limit";
 import { pruneUnlockFailures } from "@/lib/apps/unlock-rate-limit";
 import { pruneEgressTelemetry, pruneRouteTelemetry } from "@/lib/apps/telemetry";
+import { auditConnectorIsolation } from "@/lib/runners/isolation-audit";
 import { pruneAcknowledgedAnomalies, runDetection, type DetectionOutcome } from "@/lib/apps/detection";
 import { expireUnusedWrites, type ExpiredWrite } from "@/lib/apps/capability-approvals";
 import { pruneWebhookEvents } from "@/lib/connectors/webhook";
@@ -91,6 +92,8 @@ export async function GET(request: NextRequest) {
       .map((c) => c.name),
   );
   const prunedUnlockFailures = await pruneUnlockFailures();
+  // Where connectors run, audited when MIXOS_ISOLATION or the host changes it.
+  const connectorIsolation = await auditConnectorIsolation();
   // Which apps and connectors this build carries, for Delete data on every
   // instance sharing the database (src/lib/platform/builds-seen.ts). At most
   // every ten minutes, and it never throws.
@@ -148,6 +151,7 @@ export async function GET(request: NextRequest) {
     detection,
     expiredWrites,
     prunedUnlockFailures,
+    connectorIsolation,
     prunedWebhookEvents,
     buildSeen,
     updateCheck,

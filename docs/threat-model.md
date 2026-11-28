@@ -6,11 +6,16 @@ page. The detail, and the reasons, are in the
 
 ## The trust model
 
-**MixOS is built to run apps you wrote or have read.** Every app and connector
-runs inside the MixOS server, with the server's power. MixOS gives an app only
-what its `app.json` declares, and checks its code before it runs, but that
-check reads the code: it isn't a sandbox. Code written to get around it can
-reach everything the server can.
+**MixOS is built to run apps you wrote or have read.** Every app runs inside
+the MixOS server, with the server's power. MixOS gives an app only what its
+`app.json` declares, and checks its code before it runs, but that check reads
+the code: it isn't a sandbox. Code written to get around it can reach
+everything the server can.
+
+Connectors run there too, except where they run isolated. That is the Docker
+image, on Render, Railway or Compose, unless `MIXOS_ISOLATION=off`. There,
+each connector runs in a process of its own, with no network, no secrets and
+only its own credentials. Admin > Connectors says which a host does.
 
 An app or a connector from mixos.org is someone else's code. MixOS checks that
 what you install is exactly the release that was published: signed, hashed and
@@ -23,6 +28,7 @@ run before you register it.
 |---|---|---|
 | **An app's code is malicious or compromised** | The build refuses an app that reads the server's environment, reaches the network directly, or imports anything off a short list. At runtime the app gets only what its manifest declares: its own tables, the connector methods it may call, the hosts it listed. It can't widen any of them, and an update that asks for more is flagged, and a Registry app switched off, until an admin approves it. Its database queries run as its own role, so Postgres refuses one that reaches another app's tables or the platform's, however it's written. The server's secrets are out of `process.env` before any app code loads, and reaching `Function` by reflection throws. An app from a Registry runs only once an admin here has reviewed the exact code it runs, and an update switches it off until they review that. What it does beyond its usual (a first write, a refused call, a new host, a spike) is raised on its tile within about 15 minutes. An admin can switch an app off, and none of its code runs from the next request. ([§24](security-architecture.md#24-environment-containment), [§16.1](security-architecture.md#161-what-an-app-can-reach-on-a-connector), [§8](security-architecture.md#where-authorization-actually-happens), [§3.1](security-architecture.md#31-user-to-app-access-control)) | Code written to dodge the build's check runs inside the server. It can reach every key, the whole database and every connector's credentials. |
 | **A package MixOS uses is malicious** | Apps can't add packages. MixOS's own are pinned by its lockfile, and CI fails on a high-severity advisory in any that ship. ([§30](security-architecture.md#30-dependency-supply-chain)) | A compromised package runs with the server's full power. |
+| **A connector's code is malicious or compromised** | Where connectors run isolated, each runs in a process of its own under Node's permission model: no network, no files, no secrets, no other process. It holds only the credentials the platform hands it for each call, so it can't read another connector's. Its requests go out through the platform, and only to the hosts its manifest names, over https to public addresses, or to the base URL an admin entered. Renewing a grant is the platform's, under its lock. Apps reach it only through the facade, as before. ([§33.1](security-architecture.md#331-connectors-in-runners-item-7b)) | Its own credentials, and what they can do at the provider, through the hosts it declares; a publisher who controls one of those hosts can send them there. Where connectors run in the server (Vercel, a development server, or `MIXOS_ISOLATION=off`), it is the first row: everything the server can reach. |
 | **A route in an app has a bug** | Around every handler, the platform checks sign-in, access, roles, CSRF, the input's and output's shape, rate limits and budgets, and keeps error details from the browser. A query that names another app's tables or the platform's is refused by the database. ([§1](security-architecture.md#1-request-lifecycle), [§8](security-architecture.md#where-authorization-actually-happens)) | Whatever that app can reach: its own data, and its connectors' methods. A bug that runs an attacker's code is the first row. |
 | **Someone steals a person's session** | Session cookies can't be read by scripts, and another site can't send them with a post or a script. Changing data through an app's API also needs a token only MixOS's own pages get. An admin can sign someone out everywhere, and changing a password does it too. Admin rights are re-checked on every request. ([§12](security-architecture.md#12-session-cookie-security), [§7](security-architecture.md#7-csrf-protection)) | Until they're signed out, the thief is that person. An admin's session can configure connectors, switch apps on and make API keys. There is no second factor. |
 | **The database password leaks** | Connector credentials, people's account tokens and secret app settings are encrypted with keys that aren't in the database. Passwords are bcrypt hashes, and MCP tokens and API keys are kept only as HMACs. ([§5](security-architecture.md#5-environment-secrets), [§8](security-architecture.md#8-database-access-model)) | Everything else can be read and changed: every app's data, the people, the audit log. The attacker can make themselves an admin. Keep the database off the public internet. |

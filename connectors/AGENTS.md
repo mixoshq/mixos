@@ -45,6 +45,15 @@ Read these once, then read the guides. Most agent failures come from ignoring th
 
 **An admin allows a connector to change data** at Admin > Connectors, on its own step of the Configure wizard; every connector starts read-only. Until then the platform refuses each method declared `mutates` before it runs, and Connect asks for none of the scopes requested with `"write"`. There is nothing to handle in `index.ts` either: a connector does not add a read-only mode of its own. See [Architecture](../docs/connectors/architecture.md#changing-data).
 
+**Where a connector runs.** On a host that runs connectors isolated (the Docker image on Render, Railway or Compose, unless `MIXOS_ISOLATION=off`; Admin > Connectors says which), each connector runs in a process of its own, under Node's permission model, with no network, no files, no database and no secrets. The platform hands it its credentials with each call. Elsewhere (Vercel, `npm run dev`) it runs in the server, as before. Write it to work in both, which these keep true:
+
+- **Return data.** A method returns plain objects, arrays, strings, numbers, booleans, dates or bytes. A `Response`, a stream, a generator, a function or an instance of a class of yours can't leave its process, and is refused with a message naming the method.
+- **Declare every host.** Its requests go only to `http.baseUrl`, `auth.tokenUrl`, `auth.authorizeUrl`, the hosts in `http.hosts`, and the base URL an admin entered, over https and to public addresses except the admin's. Declare any other host its requests reach, such as an upload host, in `http.hosts` (bare hostnames, at most 20); it needs a MixOS that knows the field.
+- **Import nothing of the platform's but `@/lib/connectors/*`.** In its runner there is no database: `@/lib/db/*` and the connector config are stubs that throw when used. A webhook handler records nothing in the database.
+- **Let `configured` be.** The platform decides it from `credentialKeys` and `credentialFields`, as the Registry does; an override in the class isn't read where it runs isolated.
+
+See [`docs/security-architecture.md` §33.1](../docs/security-architecture.md#331-connectors-in-runners-item-7b).
+
 ## Credential handling
 
 Connectors are **tenant-scoped by default**: one credential set, configured once

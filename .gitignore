@@ -16,6 +16,8 @@
 
 # next.js
 /.next/
+# Connector runner bundles, made by `npm run prebuild` (scripts/build-runner-bundles.ts).
+/runner-bundles/
 /out/
 
 # production

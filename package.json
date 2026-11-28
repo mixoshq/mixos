@@ -13,7 +13,7 @@
     "docker:prod": "node scripts/check-node.mjs && tsx scripts/docker-up.ts --prod",
     "docker:down": "tsx scripts/docker-down.ts",
     "docker:reset": "tsx scripts/docker-down.ts --reset",
-    "prebuild": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
+    "prebuild": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts && tsx scripts/build-runner-bundles.ts",
     "pretypecheck": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
     "build": "next build",
     "vercel-build": "npm run build && tsx scripts/vercel-release.ts",

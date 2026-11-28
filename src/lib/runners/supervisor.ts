@@ -32,6 +32,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import type { Duplex, Readable } from "node:stream";
 import { encodeFrame, FrameError, FrameReader } from "../../../runner/frames.mjs";
@@ -422,8 +423,18 @@ export class Runner {
   #start(): Promise<RunnerConnection> {
     const support = isolationSupport();
     if (!support.supported) return Promise.reject(new RunnerUnavailableError(support.reason));
-    const dir = runnerDir();
-    const bundle = path.resolve(this.opts.bundle);
+    // Real paths: the permission model checks the path a file really has, so
+    // a read allowed through a symlink (macOS's /var, a symlinked deploy
+    // directory) would be refused.
+    let dir: string;
+    let bundle: string;
+    try {
+      dir = realpathSync(runnerDir());
+      bundle = realpathSync(path.resolve(this.opts.bundle));
+    } catch {
+      this.#failed();
+      return Promise.reject(new RunnerUnavailableError(`${this.opts.id} has no code at ${this.opts.bundle}`));
+    }
     const args = [
       "--permission",
       `--allow-fs-read=${dir}`,

@@ -12,6 +12,22 @@ just pulled.
 
 ## 2026-11-28
 
+- **Connectors run in processes of their own.** On the Docker image (Render,
+  Railway, Compose), each connector now runs in a runner under Node's
+  permission model, with no network, no files, no database and no secrets.
+  The platform hands it its credentials with each call, sends its requests
+  only to the hosts it declares, and renews its tokens itself. A connector
+  can't read another's credentials. `next dev` and Vercel run connectors in
+  process, and `MIXOS_ISOLATION=off` does on the image too, audited. For
+  connector authors:
+  - a method returns data;
+  - any extra host goes in the new `http.hosts`;
+  - there's no database in a webhook handler.
+
+  See
+  [`connectors/AGENTS.md`](connectors/AGENTS.md) and
+  [`docs/security-architecture.md` §33.1](docs/security-architecture.md#331-connectors-in-runners-item-7b).
+
 - **Labels you can check, a Reach page, and an escape catalogue.** Apps carry
   labels computed from what is enforced (Stays on this instance, Read-only,
   Its own data only, No public routes, Runs in the server process), each with

@@ -29,7 +29,10 @@ export interface EscapeCase {
   id: string;
   /** What the hostile code tries. */
   attempt: string;
-  /** What happens, on each tier. "isolated" is the out-of-process tier, not built. */
+  /**
+   * What happens, on each tier. "isolated" is the out-of-process tier: built
+   * for connectors (src/lib/runners/remote-connector.ts), not yet for apps.
+   */
   outcome: { inProcess: Outcome; isolated: Outcome | "not-built" };
   /** The row of docs/threat-model.md it backs. */
   threatModelRow: string;
@@ -228,13 +231,15 @@ export const ESCAPES: EscapeCase[] = [
   {
     id: "connector-reads-another",
     attempt: "A connector's own code reads another connector's credentials",
-    outcome: { inProcess: "known-limit", isolated: "not-built" },
+    outcome: { inProcess: "known-limit", isolated: "contained" },
     threatModelRow: TOKEN_ROW,
     tests: [
       {
         file: "tests/escapes/known-limits.integration.test.ts",
         name: "a connector's own code can read another connector's credentials",
       },
+      { file: "src/lib/runners/remote-connector.test.ts", name: "the bundle carries this connector alone, and no database" },
+      { file: "src/lib/runners/supervisor.test.ts", name: "every way out the permission model and the bootstrap close is closed" },
     ],
   },
   {
