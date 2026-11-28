@@ -330,6 +330,11 @@ global again. The Access tab lists the people with a role apart from the
 people with access, and granting turns a role-only row into a grant, recording
 who granted it.
 
+**A Registry app has to be reviewed first.** An app installed from a Registry
+is activated only once an admin of this instance has reviewed the exact code it
+runs, and the release step switches it off when its code changes (§31, "Trust
+tiers"). An app written here is unaffected.
+
 **The app has to be active, and in the running build.** `resolveAuthTier` and
 `hasAppGrant` refuse an app an admin has deactivated, or one the running build
 doesn't carry, before they read a grant (`isAppActive()` in
@@ -2441,7 +2446,8 @@ Currently recorded: `connector.configure`, `connector.connect`,
 `app.password.clear`, `app.setting.set`, `app.setting.clear`,
 `app.apikey.create`, `app.apikey.revoke`, `app.mcp.tool.enable`,
 `app.mcp.tool.disable`, `app.activate`,
-`app.deactivate`, `app.missing`, `app.returned`, `app.identity.changed`,
+`app.deactivate`, `app.review`, `app.update.unreviewed`, `app.review.required`,
+`app.missing`, `app.returned`, `app.identity.changed`,
 `app.global.ended`,
 `connector.missing`, `connector.returned`, `connector.identity.changed`,
 `theme.identity.changed`, `app.job.run`, `app.job.enable`, `app.job.disable`,
@@ -2897,6 +2903,63 @@ what was registered without a rebuild (`next dev`). On any other database the
 result points to Admin > Apps on the instance that serves the app. The action
 checks the database again before it acts, and then applies Activate's own checks
 and audit row (`app.activate`).
+
+### Trust tiers: a Registry app runs only once reviewed here
+
+There are two tiers. An app with no install record is **local**: written or
+copied here, by people who can read it, and nothing below applies. An app
+installed from a Registry is **third-party**: someone else's code, shown on
+Admin > Apps with a **Third-party** pill that says where it came from
+(`<host> · <owner>/<repo> · <version>`, and "modified locally" when it
+applies).
+
+A third-party app runs only once an admin of **this instance** has recorded a
+review of **the exact code it runs**
+([`src/lib/apps/app-review.ts`](../src/lib/apps/app-review.ts), migration
+0006):
+
+- **The record** is a row in `app_reviews`, keyed `(app_slug, code_hash)`. The
+  code hash is the release step's (`scripts/app-code-hash.ts`), over the app's
+  folder as deployed, local edits included, read from the folder every host
+  carries (`outputFileTracingIncludes`), or the hash the release step recorded
+  when the folder can't be read. Neither known matches no review.
+- **Review**, on the tile in place of Activate, shows where the app came from,
+  its source on GitHub at the commit install verified, whether its files have
+  changed since, everything its manifest lets it do here, and that its
+  migrations have already run. Recording it is `app.review`, with the hash,
+  version, commit and repository.
+- **Activate refuses** a third-party app with no review of its code
+  (`setAppActive()`, on the server, whatever asked: the tile, the catalogue's
+  Register flow, the smoke CLI). Which apps are third-party is read from the
+  build's install records and, failing that, from the identity the release
+  step recorded, so a dev server that hasn't reloaded since a Register still
+  counts the app; an identity this version can't read counts as third-party.
+- **The release step switches an active one off** when no review matches its
+  code as this build carries it, sets `apps.review_needed_since`, and audits it:
+  `app.update.unreviewed` when earlier code was reviewed (an update, or a local
+  edit), `app.review.required` when none was. The tile then reads **Updated,
+  needs review** or **Unreviewed**.
+- **Nothing was grandfathered.** No Registry apps were installed when this
+  shipped, so the first release step after it switches off any active one that
+  nobody here reviewed.
+- **Register is a review.** The admin reads what will run and confirms it, and
+  Register refuses anything but the files shown, so it records a review of the
+  folder it put in place, in the checkout's database, as `app.review` with
+  `via: "register"`. Another instance's database has no such row, and its admin
+  reviews the app there.
+
+Keyed by hash, a review of one build's code never counts for another's,
+whichever build wrote it to a shared database. Reviews are deleted with the
+app's row, moved by a rename, and deleted by the release step when a different
+extension takes the slug.
+
+What it leaves: **migrations run before review.** The release step applies an
+app's migrations whether or not it is reviewed, as its own role in its own
+schema (§8), and the review says so. Skipping them until review would leave a
+reviewed app "being updated" until the next release step, which on Vercel is a
+redeploy. And a review is a person accepting what the manifest declares for
+this source, not a check that the code is safe: it runs inside the server
+either way (§24, docs/threat-model.md).
 
 ### A smoke test after Register
 

@@ -878,6 +878,27 @@ the threat model's "compromised app code" row.
 
 **Effort:** M–L, 4–6 days.
 
+**As built** (2026-11-28), with the decisions: no grandfathering,
+deactivation on an unreviewed update, and migrations option (i).
+
+- **The current code hash is read live** from the app's folder, which every
+  host carries, falling back to `apps.code_hash`, so a local edit in a dev
+  server needs a review before Activate, not only after the next release step.
+- **Third-party is read from the build's install records and the recorded
+  identity**, so a dev server that hasn't reloaded its generated files since a
+  Register still gates the app; an unreadable identity counts as third-party.
+- **Register records a review** (`via: "register"`) in the checkout's database,
+  since it is one: Register refuses anything but the files the admin
+  confirmed. Without it, "Activate in this checkout" would always be refused.
+- **Two audit actions:** `app.update.unreviewed` (earlier code was reviewed)
+  and `app.review.required` (none was, as after the upgrade).
+- **The review dialog** lists the manifest's declarations itself, rather than
+  reusing `review.ts`, which reads a pending package; it runs on any built
+  deployment because it reads only the manifest, the install record and the
+  folder's hash.
+- **Not built:** a standalone-build fixture test of the dialog. The hash path
+  it depends on, the folder on disk, is the API router's too.
+
 ### 5b: Running Registry apps out of process (design doc only)
 
 **Constraint.** App code is compiled into the Next server bundle through the
@@ -1394,7 +1415,8 @@ None.
    prototype's `constructor`; T3 is
    [`20261128_0128-secrets-out-of-process.md`](20261128_0128-secrets-out-of-process.md).
 6. **Item 5a.** Then **one design doc for 5b and 7b**, the shared runner
-   infrastructure (§10).
+   infrastructure (§10). *5a in review:* migration 0006, with the departures
+   under its "As built".
 7. **Item 6.** Detection (benefits from Item 0's facade for refused-call
    recording).
 8. **Item 7a.** Per-app narrowing; builds on 3a's Reach section.

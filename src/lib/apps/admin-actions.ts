@@ -9,6 +9,7 @@ import { appRegistry } from "@/generated/app-registry";
 import { revalidatePath } from "next/cache";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin, setAppActive } from "@/lib/apps/access";
+import { recordAppReview, type AppTrust } from "@/lib/apps/app-review";
 import {
   getMissingTenantConfigConnectors,
   missingConnectorSteps,
@@ -117,6 +118,22 @@ export interface AppSchemaTable {
  * Audited like the other privileged app operations: who turned an app off for
  * everyone is exactly the question asked afterwards.
  */
+/**
+ * Record that this admin reviewed the code a Registry app runs now
+ * (src/lib/apps/app-review.ts), so it may be activated. Audited as
+ * `app.review` there. Returns what the tile shows afterwards.
+ */
+export async function recordAppReviewAction(slug: string): Promise<AppTrust> {
+  const session = await requireReadOnlySession();
+  const admin = await requireAdmin(session);
+  if (!appRegistry.some((a) => a.slug === slug)) {
+    throw new Error("App not found in registry");
+  }
+  const trust = await recordAppReview({ id: admin.id, email: admin.email }, slug);
+  revalidatePath("/admin/apps");
+  return trust;
+}
+
 export async function setAppActiveAction(
   slug: string,
   isActive: boolean,

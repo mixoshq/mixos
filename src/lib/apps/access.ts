@@ -7,6 +7,7 @@ import { createServiceClient, sql } from "@/lib/db/server";
 import { appRegistry } from "@/generated/app-registry";
 import { IS_GRANT_SQL } from "@/lib/apps/grant-rule";
 import { identityDetails, type IdentityDetails } from "@/lib/repository/identity";
+import { assertReviewedForActivation } from "./app-review";
 
 function getGlobalAppSlugs(): string[] {
   return appRegistry.filter((a) => a.global).map((a) => a.slug);
@@ -199,6 +200,10 @@ export async function filterActiveApps(slugs: string[]): Promise<string[]> {
  * grants, settings and data of the extension before it. Activating it clears
  * the flag, and returns the identity it replaced, for the audit row; any other
  * call returns null.
+ *
+ * An app installed from a Registry is activated only when an admin here has
+ * reviewed the code it runs (./app-review.ts): this is the check, on the
+ * server, whichever button or command asked.
  */
 export async function setAppActive(
   slug: string,
@@ -225,6 +230,9 @@ export async function setAppActive(
       }
       confirmed = { replaced: identityDetails(row.replaced_identity) };
     }
+    // After the identity: which extension this is comes before whether its
+    // code was reviewed.
+    await assertReviewedForActivation(slug);
   }
 
   const { error } = await supabase.from("apps").upsert(

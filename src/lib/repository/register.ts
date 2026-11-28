@@ -94,6 +94,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { recordAdminAction, type AdminActor } from "../apps/admin-audit";
+import { recordRegisteredReview } from "../apps/app-review";
 import { BUILT_DEPLOYMENT_NOTICE, isBuiltDeployment } from "../platform/build";
 import {
   CheckoutLockHeldError,
@@ -380,6 +381,23 @@ export async function registerPending(
           : {}),
       },
     });
+    // Register is a review of the code it puts in place, so it records one
+    // (src/lib/apps/app-review.ts), in this checkout's database. Best-effort:
+    // the app is registered either way, and an admin can review it on
+    // Admin > Apps before activating it.
+    if (kind === "app") {
+      try {
+        await recordRegisteredReview(options.actor, {
+          slug,
+          root,
+          source: result.source,
+          version: result.version,
+          commitSha: result.commitSha,
+        });
+      } catch (err) {
+        console.error(`[register] ${slug}: the review couldn't be recorded; review it on Admin > Apps:`, err);
+      }
+    }
     return result;
   } catch (err) {
     const failure = describeRegisterFailure(err);

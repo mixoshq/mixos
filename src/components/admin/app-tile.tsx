@@ -8,6 +8,9 @@ import { useState, useTransition } from "react";
 import { AlertCircle } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import type { AppReplacement, NeedsGrants } from "@/lib/apps/access";
+import type { AppTrust } from "@/lib/apps/app-review";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import AppReviewDialog from "./app-review-dialog";
 import LucideIcon from "@/components/lucide-icon";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status";
@@ -56,6 +59,12 @@ interface AppTileProps {
    */
   replacement: AppReplacement | null;
   /**
+   * For an app installed from a Registry: where from, and whether an admin
+   * here reviewed the code it runs (lib/apps/app-review.ts). Null for a local
+   * app, which shows nothing new.
+   */
+  trust?: AppTrust | null;
+  /**
    * Opens the Remove dialog, which says what goes and what stays before it
    * removes anything. Offered from the Details dialog's footer, not the tile.
    */
@@ -89,9 +98,13 @@ export default function AppTile({
   returnedChangedAt,
   needsGrants: lostBy,
   replacement,
+  trust = null,
   onRemove,
 }: AppTileProps) {
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  /** A Registry app nobody here has reviewed the code of: Review comes before Activate. */
+  const needsReview = trust !== null && !trust.reviewed;
   const [pending, startTransition] = useTransition();
   /** Activate's typed confirmation, for an app that replaces a different extension. */
   const [confirming, setConfirming] = useState(false);
@@ -218,13 +231,23 @@ export default function AppTile({
         badge its own fill, which reads as four severities when it is really
         four measurements — and six of those would be a traffic light.
       */}
-      {(pills.length > 0 || !isActive || backChanged || replaced || needsGrants) && (
+      {(pills.length > 0 || !isActive || backChanged || replaced || needsGrants || trust) && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {/* The pills here that are states rather than measurements, so the
               ones that get a tone. Nothing marks an active app: active is
               what every app in a working instance is, and a green pill on
               every tile would be a row of decoration. */}
           {!isActive && <StatusPill tone="warning">Inactive</StatusPill>}
+          {trust && (
+            <InfoTooltip
+              tip={`Installed from ${trust.provenance}${trust.modified ? ", and modified locally since" : ""}. Someone else's code, so it runs only once an admin here has reviewed it.`}
+            >
+              <StatusPill tone="neutral">Third-party</StatusPill>
+            </InfoTooltip>
+          )}
+          {needsReview && (
+            <StatusPill tone="warning">{trust!.previouslyReviewed ? "Updated, needs review" : "Unreviewed"}</StatusPill>
+          )}
           {replaced && (
             <StatusPill tone="warning">Replaces a different extension</StatusPill>
           )}
@@ -272,6 +295,21 @@ export default function AppTile({
           </p>
         </div>
       )}
+      {needsReview && (
+        <div className="mt-3 rounded-lg border-l-4 border-brand-accent bg-brand-accent/10 py-2 pl-3 pr-3">
+          <p className="flex items-start gap-2 text-xs text-foreground">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+            <span>
+              From {trust!.provenance}
+              {trust!.modified ? ", modified locally" : ""}.{" "}
+              {trust!.previouslyReviewed
+                ? "Its code changed since an admin here reviewed it"
+                : "Nobody here has reviewed its code yet"}
+              {trust!.reviewNeededSince ? ", so it was switched off" : ""}. Review what it can do, then activate it.
+            </span>
+          </p>
+        </div>
+      )}
       {backChanged && (
         <div className="mt-3 rounded-lg border-l-4 border-brand-accent bg-brand-accent/10 py-2 pl-3 pr-3">
           <p className="flex items-start gap-2 text-xs text-foreground">
@@ -315,20 +353,33 @@ export default function AppTile({
               on, Details takes the fill back and turning it off becomes the
               quiet action, which is the right weight for something that
               removes an app from everyone at once. */}
-          <Button
-            variant={isActive ? "ghost" : "primary"}
-            size="sm"
-            disabled={pending || blockActivate}
-            onClick={toggleActive}
-            aria-label={`${isActive ? "Deactivate" : "Activate"} ${app.name}`}
-            title={
-              blockActivate
-                ? `${missingConnectorSteps(missingConnectors)} first`
-                : undefined
-            }
-          >
-            {pending ? "Saving…" : isActive ? "Deactivate" : "Activate"}
-          </Button>
+          {/* Review takes Activate's place, and its weight, while a Registry
+              app's code is unreviewed: activating is refused until then. */}
+          {needsReview && !isActive ? (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setReviewOpen(true)}
+              aria-label={`Review ${app.name}`}
+            >
+              Review
+            </Button>
+          ) : (
+            <Button
+              variant={isActive ? "ghost" : "primary"}
+              size="sm"
+              disabled={pending || blockActivate}
+              onClick={toggleActive}
+              aria-label={`${isActive ? "Deactivate" : "Activate"} ${app.name}`}
+              title={
+                blockActivate
+                  ? `${missingConnectorSteps(missingConnectors)} first`
+                  : undefined
+              }
+            >
+              {pending ? "Saving…" : isActive ? "Deactivate" : "Activate"}
+            </Button>
+          )}
           <Button
             variant={isActive ? "primary" : "ghost"}
             size="sm"
@@ -346,10 +397,14 @@ export default function AppTile({
       {/* The Details dialog's footer band, in the same words: an admin reads
           when it changed and who changed it the same way on the tile and in
           the dialog, and the same on the connector and theme tiles. */}
+      {trust && (
+        <AppReviewDialog app={app} trust={trust} open={reviewOpen} onClose={() => setReviewOpen(false)} />
+      )}
       <TileFooter lastUpdated={app.lastUpdated} authors={app.authors} />
 
       <AppDetailsDialog
         app={app}
+        trust={trust}
         missingConnectors={missingConnectors}
         isActive={isActive}
         grantCount={grants}

@@ -115,11 +115,15 @@ describe("activating an app for a smoke test", { skip }, () => {
     for (const slug of [plain, global, needsCrm, wasGlobal]) {
       await sql`insert into public.apps (slug, name, is_active, identity) values (${slug}, ${slug}, false, 'local')`;
     }
-    // What the release step leaves for a local app reinstalled from the Registry.
+    // What the release step leaves for a local app reinstalled from the Registry,
+    // with the review Register records (src/lib/apps/app-review.ts): a
+    // Registry app activates only with one of its code.
     await sql`
-      insert into public.apps (slug, name, is_active, identity, identity_changed_at, replaced_identity)
-      values (${replaced}, ${replaced}, false, ${`https://mixos.org app/${replaced} acme/mixos-files`}, now(), 'local')
+      insert into public.apps (slug, name, is_active, identity, identity_changed_at, replaced_identity, code_hash)
+      values (${replaced}, ${replaced}, false, ${`https://mixos.org app/${replaced} acme/mixos-files`}, now(), 'local',
+              'sha256-smoke')
     `;
+    await sql`insert into public.app_reviews (app_slug, code_hash) values (${replaced}, 'sha256-smoke')`;
 
     process.env.DATABASE_URL = u.toString();
     process.env.PGSSLMODE = u.searchParams.get("sslmode") ?? "disable";

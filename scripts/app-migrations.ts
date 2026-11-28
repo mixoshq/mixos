@@ -763,6 +763,13 @@ export async function migrateAppSchemas(
         : `  ${slug}: back in the build, unchanged`,
     );
   }
+  for (const u of sync.unreviewed) {
+    console.log(
+      `  ${u.slug}: installed from a Registry, and ${
+        u.previouslyReviewed ? "its code changed since an admin here reviewed it" : "no admin here has reviewed its code"
+      } — switched off until one reviews it on Admin → Apps`,
+    );
+  }
   for (const r of sync.replaced) {
     const back = sync.returned.some((a) => a.slug === r.slug) ? "back in the build, and " : "";
     console.log(

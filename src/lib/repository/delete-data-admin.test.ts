@@ -166,7 +166,7 @@ describe("the words for what goes", () => {
       "2 MCP tool switches",
       "2 records of migrations that ran",
       "1,204 telemetry events and 1 recorded open",
-      "Its record here: whether it is active, and where it came from",
+      "Its record here: whether it is active, where it came from, and any reviews of its code",
     ]);
     assert.deepEqual(describeData("app", { ...counts, tables: 0 }, { schema: null, role: null }).slice(0, 1), [
       "1 grant and 3 dashboard widgets",
