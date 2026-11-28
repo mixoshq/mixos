@@ -45,6 +45,8 @@ export interface ObservedCall {
   calls: number;
   /** How many of them failed. */
   errors: number;
+  /** Calls the platform refused before the connector ran them, not counted in `calls`. */
+  refused: number;
 }
 
 /** Per connector name, its calls, the most made first. Every name asked for has a list. */

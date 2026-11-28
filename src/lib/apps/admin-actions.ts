@@ -10,6 +10,7 @@ import { revalidatePath } from "next/cache";
 import { requireReadOnlySession } from "@/lib/auth/session";
 import { requireAdmin, setAppActive } from "@/lib/apps/access";
 import { recordAppReview, type AppTrust } from "@/lib/apps/app-review";
+import { acknowledgeAnomalies, getObservedActivity, type ObservedActivity } from "@/lib/apps/detection";
 import {
   getMissingTenantConfigConnectors,
   missingConnectorSteps,
@@ -132,6 +133,31 @@ export async function recordAppReviewAction(slug: string): Promise<AppTrust> {
   const trust = await recordAppReview({ id: admin.id, email: admin.email }, slug);
   revalidatePath("/admin/apps");
   return trust;
+}
+
+/**
+ * Mark an app's open anomalies as expected (src/lib/apps/detection.ts):
+ * `ids`, or every open one. Audited there as `app.anomaly.acknowledge`.
+ */
+export async function acknowledgeAnomaliesAction(slug: string, ids: string[]): Promise<number> {
+  const session = await requireReadOnlySession();
+  const admin = await requireAdmin(session);
+  if (!appRegistry.some((a) => a.slug === slug)) {
+    throw new Error("App not found in registry");
+  }
+  const n = await acknowledgeAnomalies({ id: admin.id, email: admin.email }, slug, ids);
+  revalidatePath("/admin/apps");
+  return n;
+}
+
+/** What an app was seen doing in the last 30 days, for its Reach tab. Read on open, as its schema is. */
+export async function getObservedActivityAction(slug: string): Promise<ObservedActivity> {
+  const session = await requireReadOnlySession();
+  await requireAdmin(session);
+  if (!appRegistry.some((a) => a.slug === slug)) {
+    throw new Error("App not found in registry");
+  }
+  return getObservedActivity(slug);
 }
 
 export async function setAppActiveAction(

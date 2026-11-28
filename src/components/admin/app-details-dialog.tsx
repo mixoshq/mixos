@@ -16,6 +16,8 @@ import {
 } from "@/lib/apps/admin-actions";
 import { Dialog } from "@/components/ui/dialog";
 import type { AppTrust } from "@/lib/apps/app-review";
+import type { ObservedActivity } from "@/lib/apps/detection";
+import { getObservedActivityAction } from "@/lib/apps/admin-actions";
 import { StatusPill } from "@/components/ui/status";
 import FolderTabs from "@/components/ui/folder-tabs";
 import LucideIcon from "@/components/lucide-icon";
@@ -477,6 +479,63 @@ export function MissingConnectorWarning({
  * Between them they are every way the app can send data out of the platform.
  * Exported for its test, which renders it on its own.
  */
+/**
+ * Observed beside declared: the connector methods the app called and the
+ * hosts its own code reached in the last 30 days, with what was refused, from
+ * telemetry (lib/apps/detection.ts). Read when the tab opens, as the schema
+ * is read when the dialog does. Evidence, not a full account: recording is
+ * best-effort.
+ */
+export function ObservedActivityPanel({
+  app,
+  load = getObservedActivityAction,
+}: {
+  app: AppManifest;
+  /** For a test: what to read with. */
+  load?: (slug: string) => Promise<ObservedActivity>;
+}) {
+  const [observed, setObserved] = useState<ObservedActivity | null>(null);
+  const [failed, setFailed] = useState(false);
+  const requested = useRef(false);
+  useEffect(() => {
+    if (requested.current) return;
+    requested.current = true;
+    load(app.slug).then(setObserved, () => setFailed(true));
+  }, [app.slug, load]);
+
+  const listed = new Set(app.egress.map((h) => h.toLowerCase()));
+  return (
+    <section>
+      <SectionHeading>Observed in the last 30 days</SectionHeading>
+      {failed ? (
+        <p className="mt-2 text-sm text-muted-foreground">Couldn&apos;t read what it did.</p>
+      ) : observed === null ? (
+        <p className="mt-2 text-sm text-muted-foreground">Reading…</p>
+      ) : observed.connectorMethods.length === 0 && observed.hosts.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No connector calls or outside requests.</p>
+      ) : (
+        <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+          {observed.connectorMethods.map((m) => (
+            <li key={`c:${m.subject}`} className="flex flex-wrap items-center gap-2">
+              <Mono>{m.subject}</Mono>
+              <span>{formatCount(m.calls, "call")}</span>
+              {m.refused > 0 && <StatusPill tone="danger">{m.refused} refused</StatusPill>}
+            </li>
+          ))}
+          {observed.hosts.map((h) => (
+            <li key={`h:${h.host}`} className="flex flex-wrap items-center gap-2">
+              <Mono>{h.host}</Mono>
+              <span>{formatCount(h.calls, "request")}</span>
+              {!listed.has(h.host) && h.refused < h.calls && <StatusPill tone="neutral">Through a wildcard</StatusPill>}
+              {h.refused > 0 && <StatusPill tone="danger">{h.refused} refused</StatusPill>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function AppReachPanel({
   app,
   missingConnectors,
@@ -1298,7 +1357,10 @@ export default function AppDetailsDialog({
       )}
 
       {tab === "connectors" && (
-        <AppReachPanel app={app} missingConnectors={missingConnectors} />
+        <div className="space-y-8">
+          <AppReachPanel app={app} missingConnectors={missingConnectors} />
+          <ObservedActivityPanel app={app} />
+        </div>
       )}
 
       {tab === "mcp" && <McpToolsPanel app={app} />}

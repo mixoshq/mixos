@@ -66,9 +66,16 @@ export async function recordConnectorEvent(opts: {
   method: string;
   callerAppSlug: string;
   userId: string | null;
-  /** How the call settled. Omitted only if a caller cannot tell. */
-  outcome?: "ok" | "error";
-  /** ConnectorError category on failure — "denied" vs "throttled" vs "timed out". */
+  /**
+   * How the call settled. Omitted only if a caller cannot tell. `refused` is
+   * a call the platform stopped before the connector ran it (./detection.ts).
+   */
+  outcome?: "ok" | "error" | "refused";
+  /**
+   * ConnectorError category on failure — "denied" vs "throttled" vs "timed
+   * out" — or, for a refusal, why: `undeclared`, `write-not-asked`,
+   * `write-not-allowed`, `budget` or `disabled`.
+   */
   errorCategory?: string | null;
 }): Promise<void> {
   try {
@@ -189,6 +196,82 @@ export async function recordRouteCall(opts: {
     // an empty catch, which is why a CHECK-constraint violation on a new
     // source_type would have been invisible forever. One warn is worth it.
     console.warn("[telemetry] route call not recorded:", err);
+  }
+}
+
+/** Why the platform refused a connector call, as the refused row records it. */
+export type ConnectorRefusal = "undeclared" | "write-not-asked" | "write-not-allowed" | "budget" | "disabled";
+
+/**
+ * Record a connector call the platform refused before the connector ran it,
+ * for detection (./detection.ts): a refusal is the clearest sign of an app
+ * reaching for what it wasn't given. Fire-and-forget, and never throws.
+ */
+export function recordRefusedConnectorCall(opts: {
+  connectorSlug: string;
+  method: string;
+  callerAppSlug: string;
+  userId: string | null;
+  reason: ConnectorRefusal;
+}): void {
+  void recordConnectorEvent({
+    connectorSlug: opts.connectorSlug,
+    method: opts.method,
+    callerAppSlug: opts.callerAppSlug,
+    userId: opts.userId,
+    outcome: "refused",
+    errorCategory: opts.reason,
+  });
+}
+
+/** Why `context.http` refused a hop, as its egress row records it. */
+export type EgressRefusal = "host" | "scheme" | "address";
+
+/**
+ * Record one `context.http` hop: the host, the app, and how it went (ok, an
+ * error, or refused before any connection, with why). One row per hop, so a
+ * redirect to somewhere else is its own row. Fire-and-forget, and never
+ * throws: a telemetry failure must not fail the request.
+ */
+export function recordEgressEvent(opts: {
+  appSlug: string;
+  host: string;
+  userId: string | null;
+  outcome: "ok" | "error" | "refused";
+  /** For a refusal, why; for an error, a short category. */
+  category?: string | null;
+  /** The HTTP status, for an answered hop. */
+  status?: number | null;
+}): void {
+  void (async () => {
+    try {
+      await sql`
+        insert into public.telemetry_events
+          (source_type, source_slug, caller_app_slug, event_name, user_id, outcome, error_category, properties)
+        values (
+          'egress', ${opts.host.toLowerCase()}, ${opts.appSlug}, 'request', ${opts.userId},
+          ${opts.outcome}, ${opts.category ?? null},
+          ${sql.json(opts.status != null ? { status: opts.status } : {})}
+        )
+      `;
+    } catch {
+      // best-effort
+    }
+  })();
+}
+
+/** Drop egress rows past 90 days: the one source Item 6 adds, and bounds. */
+export async function pruneEgressTelemetry(retentionDays = 90): Promise<number> {
+  try {
+    const result = (await sql`
+      delete from public.telemetry_events
+      where source_type = 'egress'
+        and created_at < now() - ${retentionDays} * interval '1 day'
+    `) as unknown as { count: number };
+    return result.count ?? 0;
+  } catch (err) {
+    console.warn("[telemetry] egress telemetry prune failed:", err);
+    return 0;
   }
 }
 

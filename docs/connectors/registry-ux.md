@@ -138,8 +138,11 @@ Two things it never does, because both would show less reach than there is:
   page, from one query for every connector, and a table that can't be read
   reads "Couldn't read which methods it called."
 
-The calls are evidence, not a full account: a call the facade refused never
-reached the connector, so it isn't recorded, and recording is best-effort.
+The calls are evidence, not a full account: recording is best-effort. A call
+the platform refused (a method the connector doesn't declare, a write the app
+may not make, a disabled connector, a route over its budget) never reached the
+connector, and is counted apart, as refused, since detection records it too
+(§26 of the security architecture).
 
 ---
 

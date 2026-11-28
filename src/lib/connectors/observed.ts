@@ -15,8 +15,8 @@ import { OBSERVED_DAYS, type ObservedCalls } from "./reach";
  * it settles, with the app that made it (`instrumentConnector`,
  * src/lib/apps/telemetry.ts). So it is evidence, not a full account:
  *
- *   - a call the app's facade refused never reached the connector, so it isn't
- *     here (src/lib/apps/connector-reach.ts);
+ *   - a call the platform refused never reached the connector, and is counted
+ *     apart, in `refused` (src/lib/apps/detection.ts records it);
  *   - recording is best-effort, so a call can be missing;
  *   - an app's own SQL can't write the table, since it runs as the app's role
  *     (docs/security-architecture.md §8), but code that gets around the build's
@@ -44,13 +44,15 @@ export async function getObservedConnectorCalls(
         event_name: string;
         calls: number;
         errors: number;
+        refused: number;
       }[]
     >`
       select source_slug,
              caller_app_slug,
              event_name,
-             count(*)::int as calls,
-             (count(*) filter (where outcome = 'error'))::int as errors
+             (count(*) filter (where outcome is distinct from 'refused'))::int as calls,
+             (count(*) filter (where outcome = 'error'))::int as errors,
+             (count(*) filter (where outcome = 'refused'))::int as refused
         from public.telemetry_events
        where source_type = 'connector'
          and source_slug = any(${[...names]}::text[])
@@ -66,6 +68,7 @@ export async function getObservedConnectorCalls(
         method: r.event_name,
         calls: Number(r.calls),
         errors: Number(r.errors),
+        refused: Number(r.refused),
       });
     }
     return out;

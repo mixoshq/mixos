@@ -301,8 +301,9 @@ function callList(calls: ObservedCall[], callable?: (method: string) => boolean)
   return calls
     .map((c) => {
       const failed = c.errors > 0 ? `, ${c.errors} failed` : "";
+      const refused = c.refused > 0 ? `, ${c.refused.toLocaleString("en-US")} refused` : "";
       const gone = callable && !callable(c.method) ? ", not callable now" : "";
-      return `${c.method} ${c.calls.toLocaleString("en-US")}${failed}${gone}`;
+      return `${c.method} ${c.calls.toLocaleString("en-US")}${failed}${refused}${gone}`;
     })
     .join(" · ");
 }

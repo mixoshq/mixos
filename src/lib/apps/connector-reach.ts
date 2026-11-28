@@ -56,6 +56,12 @@ export interface ReachRules {
   refuseWrite: (method: string) => Error;
   /** The error for anything callable the manifest doesn't declare. */
   refuseUndeclared: (member: string) => Error;
+  /**
+   * Told of each refused call as it is made, for detection
+   * (src/lib/apps/detection.ts): `write` when it was a declared write the
+   * caller may not run, `undeclared` otherwise. Never told of a mere read.
+   */
+  onRefused?: (member: string, refusal: "write" | "undeclared") => void;
 }
 
 export function narrowConnector(
@@ -122,7 +128,9 @@ export function narrowConnector(
       }
       if (reads.has(prop) || writes.has(prop) || method !== undefined) {
         return () => {
-          throw writes.has(prop) ? rules.refuseWrite(prop) : rules.refuseUndeclared(prop);
+          const write = writes.has(prop);
+          rules.onRefused?.(prop, write ? "write" : "undeclared");
+          throw write ? rules.refuseWrite(prop) : rules.refuseUndeclared(prop);
         };
       }
       // A field: credentials, a token, the manifest. Not the caller's.
@@ -166,10 +174,19 @@ export function appReachRules(opts: {
   need: Pick<ConnectorRequirement, "access"> | undefined;
   /** Whether the connector's admin allowed changes (src/lib/connectors/writable.ts). */
   writable: boolean;
+  /**
+   * Told of each refused call with why, for detection: an undeclared member,
+   * a write the app's entry doesn't ask for, or one the admin hasn't allowed.
+   */
+  onRefused?: (member: string, reason: "undeclared" | "write-not-asked" | "write-not-allowed") => void;
 }): ReachRules {
   const { appSlug, connectorName, subject, need, writable } = opts;
   const asked = need?.access === "write";
   return {
+    onRefused: opts.onRefused
+      ? (member, refusal) =>
+          opts.onRefused!(member, refusal === "undeclared" ? "undeclared" : asked ? "write-not-allowed" : "write-not-asked")
+      : undefined,
     writes: asked && writable,
     refuseWrite: (method) =>
       asked

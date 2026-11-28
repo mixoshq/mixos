@@ -9,7 +9,8 @@ import { connectorRegistry } from "@/generated/connector-registry";
 import { runDueJobs } from "@/lib/apps/scheduler";
 import { pruneRateBuckets } from "@/lib/rate-limit";
 import { pruneUnlockFailures } from "@/lib/apps/unlock-rate-limit";
-import { pruneRouteTelemetry } from "@/lib/apps/telemetry";
+import { pruneEgressTelemetry, pruneRouteTelemetry } from "@/lib/apps/telemetry";
+import { pruneAcknowledgedAnomalies, runDetection, type DetectionOutcome } from "@/lib/apps/detection";
 import { pruneWebhookEvents } from "@/lib/connectors/webhook";
 import { runReleaseCheck, type ReleaseCheckOutcome } from "@/lib/platform/release-check";
 import { recordThisBuild } from "@/lib/platform/this-build";
@@ -76,6 +77,10 @@ export async function GET(request: NextRequest) {
   // report the tick as failed, and pruneRateBuckets swallows its own errors.
   const prunedBuckets = await pruneRateBuckets();
   const prunedRouteEvents = await pruneRouteTelemetry();
+  // What per-app detection adds is bounded: egress rows at 90 days, and
+  // anomalies an admin marked as expected at 180. Connector rows are kept.
+  const prunedEgressEvents = await pruneEgressTelemetry();
+  const prunedAnomalies = await pruneAcknowledgedAnomalies();
   // A connector whose webhook signs a timestamp has its replay markers swept
   // after a day. Every other marker is kept for 90 days, because for those it
   // is the one thing refusing a replay.
@@ -112,11 +117,25 @@ export async function GET(request: NextRequest) {
     releaseCheck = "error";
   }
 
+  // Per-app detection (src/lib/apps/detection.ts), at most every 15 minutes,
+  // in a catch of its own: what it raises is for an admin to read, and a
+  // failure here mustn't fail the tick.
+  let detection: DetectionOutcome | "error";
+  try {
+    detection = await runDetection();
+  } catch (err) {
+    console.error("[cron] detection failed:", err);
+    detection = "error";
+  }
+
   return NextResponse.json({
     ok: true,
     durationMs: Date.now() - startedAt,
     prunedBuckets,
     prunedRouteEvents,
+    prunedEgressEvents,
+    prunedAnomalies,
+    detection,
     prunedUnlockFailures,
     prunedWebhookEvents,
     buildSeen,

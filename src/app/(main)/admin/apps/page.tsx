@@ -14,6 +14,7 @@ import { getAppGrantCounts, getAppTableCounts } from "@/lib/apps/admin-actions";
 import { getAppActiveMap, getAppBuildStatus } from "@/lib/apps/access";
 import { getMissingTenantConfigConnectors } from "@/lib/apps/connector-gates";
 import { getAppTrust } from "@/lib/apps/app-review";
+import { getOpenAnomalies } from "@/lib/apps/detection";
 import AppRegistryList from "@/components/admin/app-registry-list";
 import AppsNotInBuild from "@/components/admin/apps-not-in-build";
 import BrandConflicts from "@/components/admin/brand-conflicts";
@@ -42,6 +43,10 @@ export default async function AppsAdminPage() {
   // Each Registry app's provenance, and whether an admin here reviewed the
   // code it runs (lib/apps/app-review.ts). Local apps aren't in it.
   const trustBySlug = await getAppTrust(appRegistry.map((a) => a.slug));
+  // What detection raised and nobody has marked as expected
+  // (lib/apps/detection.ts), on each app's tile and in one notice above them.
+  const anomaliesBySlug = await getOpenAnomalies();
+  const unusual = appRegistry.filter((a) => (anomaliesBySlug[a.slug]?.length ?? 0) > 0);
   // On a built deployment with the GitHub App linked, Remove offers a pull
   // request instead; from what is stored, without asking GitHub on every render.
   const proposal = await proposalTarget("app");
@@ -112,6 +117,21 @@ export default async function AppsAdminPage() {
         </div>
       </div>
       <RegistryNotices kind="app" />
+      {unusual.length > 0 && (
+        <div
+          role="status"
+          className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-foreground"
+        >
+          <p className="font-medium">
+            Unusual activity in {unusual.length === 1 ? "1 app" : `${unusual.length} apps`}:{" "}
+            {unusual.map((a) => a.name).join(", ")}.
+          </p>
+          <p className="mt-0.5 text-muted-foreground">
+            Each tile says what was seen. Deactivate an app to stop all of its code at once, or mark what you
+            recognise as expected.
+          </p>
+        </div>
+      )}
       <PendingInstalls kind="app" />
       {/* Read from GitHub: the rest of the page doesn't wait for it. */}
       <Suspense fallback={null}>
@@ -132,6 +152,7 @@ export default async function AppsAdminPage() {
         needsGrantsBySlug={buildStatus.needsGrants}
         replacedBySlug={buildStatus.replaced}
         trustBySlug={trustBySlug}
+        anomaliesBySlug={anomaliesBySlug}
         proposal={proposal}
       />
       <AppsNotInBuild

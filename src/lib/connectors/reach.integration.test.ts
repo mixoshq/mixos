@@ -178,7 +178,7 @@ describe("Reach", { skip }, () => {
     }
   });
 
-  test("calls through an app's context are grouped by app and method; a refused write isn't there", async () => {
+  test("calls through an app's context are grouped by app and method; a refused write is counted apart", async () => {
     const reader = await connectorsOf(READER);
     await reader.listItems();
     await reader.listItems();
@@ -186,13 +186,14 @@ describe("Reach", { skip }, () => {
 
     const writer = await connectorsOf(WRITER);
     await writer.listItems();
-    // Read-only: the facade refuses it before the connector is called, so nothing records it.
+    // Read-only: the facade refuses it before the connector is called, and
+    // records it as refused (src/lib/apps/detection.ts).
     await assert.rejects(
       async () => writer.createItem({ name: "x" }),
       (err: { category?: string; userMessage?: string }) =>
         err.category === "forbidden" && /read-only here/.test(err.userMessage ?? ""),
     );
-    await settled(4);
+    await settled(5);
 
     // Older than the window, another connector's, and a failure: written as the instrumentation would.
     await sql`
@@ -207,12 +208,14 @@ describe("Reach", { skip }, () => {
     const observed = await p.getObservedConnectorCalls([KEYED, OTHER, "unused"]);
     assert.ok(observed);
     assert.deepEqual(observed[KEYED], [
-      { appSlug: READER, appName: "Reader", method: "getItem", calls: 2, errors: 1 },
-      { appSlug: READER, appName: "Reader", method: "listItems", calls: 2, errors: 0 },
-      { appSlug: WRITER, appName: "Writer", method: "listItems", calls: 1, errors: 0 },
-      { appSlug: null, appName: null, method: "listItems", calls: 1, errors: 0 },
+      { appSlug: READER, appName: "Reader", method: "getItem", calls: 2, errors: 1, refused: 0 },
+      { appSlug: READER, appName: "Reader", method: "listItems", calls: 2, errors: 0, refused: 0 },
+      { appSlug: WRITER, appName: "Writer", method: "listItems", calls: 1, errors: 0, refused: 0 },
+      { appSlug: null, appName: null, method: "listItems", calls: 1, errors: 0, refused: 0 },
+      // Refused by the facade before the connector ran it: counted apart.
+      { appSlug: WRITER, appName: "Writer", method: "createItem", calls: 0, errors: 0, refused: 1 },
     ]);
-    assert.deepEqual(observed[OTHER], [{ appSlug: READER, appName: "Reader", method: "listThings", calls: 1, errors: 0 }]);
+    assert.deepEqual(observed[OTHER], [{ appSlug: READER, appName: "Reader", method: "listThings", calls: 1, errors: 0, refused: 0 }]);
     assert.deepEqual(observed.unused, []);
   });
 

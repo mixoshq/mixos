@@ -235,7 +235,8 @@ async function keptByApp(q: Query, slug: string): Promise<Kept> {
       (select count(*)::int from public.app_job_runs where app_slug = ${slug}) as "jobRuns",
       (select count(*)::int from public._migrations where app_slug = ${slug}) as migrations,
       (select count(*)::int from public.telemetry_events
-        where source_type in ('app', 'route', 'service', 'mcp') and source_slug = ${slug}) as "telemetryEvents",
+        where (source_type in ('app', 'route', 'service', 'mcp') and source_slug = ${slug})
+           or (source_type = 'egress' and caller_app_slug = ${slug})) as "telemetryEvents",
       (select count(*)::int from public.app_open_events where app_slug = ${slug}) as "appOpens",
       (select count(*)::int from public.oauth_tokens where ${slug} = any(granted_apps)) as mcp_tokens,
       (select count(*)::int from public.oauth_authorization_codes where ${slug} = any(granted_apps)) as mcp_codes,
@@ -561,7 +562,8 @@ async function deleteApp(tx: TransactionSql, slug: string, k: Kept): Promise<App
   counts.telemetryEvents = (
     await tx`
       delete from public.telemetry_events
-      where source_type in ('app', 'route', 'service', 'mcp') and source_slug = ${slug}
+      where (source_type in ('app', 'route', 'service', 'mcp') and source_slug = ${slug})
+         or (source_type = 'egress' and caller_app_slug = ${slug})
     `
   ).count;
   counts.appOpens = (await tx`delete from public.app_open_events where app_slug = ${slug}`).count;

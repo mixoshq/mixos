@@ -54,12 +54,20 @@ function props(over: Partial<ReachSectionProps> & { changesAllowed?: boolean; ac
   } satisfies ReachSectionProps;
 }
 
-const call = (appSlug: string | null, method: string, calls: number, errors = 0, appName: string | null = null): ObservedCall => ({
+const call = (
+  appSlug: string | null,
+  method: string,
+  calls: number,
+  errors = 0,
+  appName: string | null = null,
+  refused = 0,
+): ObservedCall => ({
   appSlug,
   appName,
   method,
   calls,
   errors,
+  refused,
 });
 
 const list = (p: ReturnType<typeof props>, observed: Parameters<typeof ReachList>[0]["observed"]) =>
@@ -101,6 +109,11 @@ test("the calls each app made, how many failed, and a method it can't call now",
   assert.match(words, /In the last 30 days: listDeals 1,240, 2 failed · createDeal 3, not callable now/);
   assert.match(words, /Reports Optional .*In the last 30 days: getDeal 1/);
   assert.match(words, /Archive .*No calls in the last 30 days\./);
+});
+
+test("a refused call is counted apart", () => {
+  const words = list(props(), { state: "read", calls: [call("reports", "createDeal", 0, 0, null, 2)] });
+  assert.match(words, /In the last 30 days: createDeal 0, 2 refused, not callable now/);
 });
 
 test("calls from an app that doesn't declare it now, and from no app, are listed apart", () => {

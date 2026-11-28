@@ -12,6 +12,15 @@ just pulled.
 
 ## 2026-11-28
 
+- **Unusual activity, on the app's tile.** Every `context.http` hop and every
+  connector call the platform refuses is now recorded, and a detector in the
+  cron tick (every 15 minutes) raises what an app does beyond its usual: a
+  first write, a first host through a wildcard, any refused call, a spike.
+  Admin > Apps shows it with **Deactivate** and **Mark as expected**, and the
+  Reach tab lists what the app called and reached. Nothing deactivates by
+  itself. Platform migration 0007. See
+  [`docs/security-architecture.md` §26](docs/security-architecture.md#detection).
+
 - **A Registry app runs only once an admin here has reviewed it.** Admin >
   Apps marks an app installed from a Registry **Third-party**, with where it
   came from, and offers **Review** in place of Activate: what it can do here,

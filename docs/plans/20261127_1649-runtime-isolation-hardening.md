@@ -1048,6 +1048,28 @@ model's "compromised app code" row.
 
 **Effort:** L, 5–8 days.
 
+**As built** (2026-11-28), with the decisions: connector rows kept, and no
+automatic deactivation.
+
+- **Recorded refusals:** the facade (`undeclared`, `write-not-asked`,
+  `write-not-allowed`), the route's budget (`budget`) and the disabled stand-in
+  (`disabled`). The read-only layer for MCP and search doesn't record its
+  refusals yet.
+- **Egress** records each hop, with the status for an answered one, `dns` and
+  `network` errors, and `host`, `scheme` and `address` refusals. The answered
+  and redirect paths aren't covered by an integration test, which would need a
+  public host; the refusals are.
+- **`new-host`** fires only for a host the egress list doesn't name literally,
+  as planned ("meaningful for wildcard egress").
+- **The detector runs in one transaction**, holding the timestamp row's lock,
+  so concurrent ticks serialize instead of double-raising.
+- **Mark as expected** marks the anomalies the tile shows, at most three at a
+  time, not ones the admin hasn't seen.
+- **Observed vs declared** is read when the Reach tab opens, as the schema is.
+- **Delete data** now deletes the app's egress rows with its own telemetry.
+- **Not built:** connector hosts recorded by `HttpConnector.attempt` (optional
+  in the plan).
+
 ---
 
 ## 10. Direction (answered 2026-11-27)
@@ -1422,7 +1444,8 @@ None.
    server pages of Registry apps need a limit (client pages only) on the
    isolated tier.*
 7. **Item 6.** Detection (benefits from Item 0's facade for refused-call
-   recording).
+   recording). *In review:* migration 0007, with the departures under its
+   "As built".
 8. **Item 7a.** Per-app narrowing; builds on 3a's Reach section.
 9. **Item 8.** Capability approvals; builds on 5a and 7a. Expiry uses Item 6.
 10. **Item 9.** Labels, the Reach page and the escape suite. The suite starts

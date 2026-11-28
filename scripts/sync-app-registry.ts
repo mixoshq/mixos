@@ -335,6 +335,10 @@ export async function syncAppRegistry(
         // Its reviews were of the extension before it. Its hash differs
         // anyway; deleted so no record says this one was reviewed.
         await tx`delete from public.app_reviews where app_slug = ${app.slug}`;
+        // What detection saw the extension before it do is not this one's
+        // baseline, and what it raised was about that one.
+        await tx`delete from public.app_activity_seen where app_slug = ${app.slug}`;
+        await tx`delete from public.app_anomalies where app_slug = ${app.slug}`;
         await audit(tx, "app.identity.changed", app.slug, {
           previous: identityDetails(row.identity),
           identity: identityDetails(identity),

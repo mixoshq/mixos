@@ -9,6 +9,7 @@ import { Search } from "lucide-react";
 import type { AppManifest } from "@/lib/apps/types";
 import type { AppReplacement, NeedsGrants } from "@/lib/apps/access";
 import type { AppTrust } from "@/lib/apps/app-review";
+import type { Anomaly } from "@/lib/apps/anomaly";
 import type { ProposalTarget } from "@/lib/github/outcomes";
 import AppTile from "./app-tile";
 import RemoveDialog, { type RemoveTarget } from "./remove/remove-dialog";
@@ -32,6 +33,8 @@ interface Props {
   replacedBySlug: Record<string, AppReplacement>;
   /** Each Registry app's provenance and review (lib/apps/app-review.ts); local apps aren't in it. */
   trustBySlug?: Record<string, AppTrust>;
+  /** What detection raised that nobody has marked as expected (lib/apps/detection.ts). */
+  anomaliesBySlug?: Record<string, Anomaly[]>;
   /** On a built deployment with the GitHub App linked: where a removal can be proposed instead. */
   proposal?: ProposalTarget | null;
 }
@@ -46,6 +49,7 @@ export default function AppRegistryList({
   needsGrantsBySlug,
   replacedBySlug,
   trustBySlug = {},
+  anomaliesBySlug = {},
   proposal = null,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -107,6 +111,7 @@ export default function AppRegistryList({
               needsGrants={needsGrantsBySlug[app.slug] ?? null}
               replacement={replacedBySlug[app.slug] ?? null}
               trust={trustBySlug[app.slug] ?? null}
+              anomalies={anomaliesBySlug[app.slug] ?? []}
               onRemove={() => setRemoving({ kind: "app", slug: app.slug, name: app.name })}
             />
           ))}
