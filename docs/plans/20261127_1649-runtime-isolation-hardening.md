@@ -1388,6 +1388,24 @@ None.
 - Labels and the Reach page: M, 4–6 days.
 - The suite: S–M, 3 days to start, then growing with each item.
 
+**As built** (2026-11-28).
+
+- **No labels on Browse:** a listing carries only the publisher's claims, and a
+  label from claims is what this item rules out. The register review shows
+  them from the pending app.json.
+- **"Runs isolated" is defined and never shown,** since no tier is built.
+- **The suite is a catalogue** (`tests/escapes/catalogue.ts`) over the tests
+  that already try each escape where they live, plus new ones where none did
+  (a route past its tiers, and two known limits), with a test that every named
+  test exists and every label's escapes are cases. Writing a fresh hostile
+  fixture per case would have duplicated most of them.
+- **Known limits pinned:** the platform login (Item 2's), the pool on the
+  global object (F4), and a connector reading another's credentials (7b's
+  reason).
+- **Not covered:** DNS rebinding as such. The resolve-and-pin tests (every
+  answer checked, the request pinned to it) are what defeat it, and the
+  catalogue points there.
+
 ---
 
 ## 14. Item 10: Verified publishers, and an opt-in kill switch
@@ -1483,7 +1501,8 @@ None.
    *In review:* migration 0009, with the departures under its "As built".
 10. **Item 9.** Labels, the Reach page and the escape suite. The suite starts
     earlier: Item 2's PR seeds `tests/escapes/` with Item 0's and its own cases,
-    and each later item adds to it.
+    and each later item adds to it. *In review,* with the departures under its
+    "As built".
 11. **Item 10.** Verified publishers and the kill switch, once mixos.org's half
     is ready.
 12. **5b and 7b implementation**, if you approve the design.

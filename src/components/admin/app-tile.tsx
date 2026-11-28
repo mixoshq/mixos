@@ -13,6 +13,7 @@ import { describeAnomaly, type Anomaly } from "@/lib/apps/anomaly";
 import { acknowledgeAnomaliesAction, approveCapabilitiesAction } from "@/lib/apps/admin-actions";
 import type { CapabilityStatus } from "@/lib/apps/capability-approvals";
 import { describeCapability } from "@/lib/apps/capabilities";
+import { appLabels } from "@/lib/apps/labels";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import AppReviewDialog from "./app-review-dialog";
 import LucideIcon from "@/components/lucide-icon";
@@ -198,6 +199,8 @@ export default function AppTile({
     zero is exactly what this list then hides.
   */
   const pills: string[] = [];
+  /** Labels from what is enforced, less the host's tier, the same for every app here. */
+  const labels = appLabels(app).filter((l) => l.id !== "in-process" && l.id !== "isolated");
   if (app.global) pills.push("Anyone");
   else if (grants > 0) pills.push(formatCount(grants, "granted user"));
   if (app.pageCount > 0) pills.push(formatCount(app.pageCount, "page"));
@@ -254,7 +257,7 @@ export default function AppTile({
         badge its own fill, which reads as four severities when it is really
         four measurements — and six of those would be a traffic light.
       */}
-      {(pills.length > 0 || !isActive || backChanged || replaced || needsGrants || trust || unusual || asksMore) && (
+      {(pills.length > 0 || !isActive || backChanged || replaced || needsGrants || trust || unusual || asksMore || labels.length > 0) && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           {/* The pills here that are states rather than measurements, so the
               ones that get a tone. Nothing marks an active app: active is
@@ -285,6 +288,14 @@ export default function AppTile({
               {text}
             </StatusPill>
           ))}
+          {/* Labels from what is enforced (lib/apps/labels.ts), each with its
+              definition. The host's tier is on the app's Reach page, since it
+              is the same for every app here. */}
+          {labels.map((l) => (
+              <InfoTooltip key={l.id} tip={l.definition}>
+                <StatusPill tone="neutral">{l.label}</StatusPill>
+              </InfoTooltip>
+            ))}
         </div>
       )}
 

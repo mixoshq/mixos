@@ -1408,6 +1408,12 @@ export default function AppDetailsDialog({
 
       {tab === "connectors" && (
         <div className="space-y-8">
+          <Link
+            href={`/admin/apps/${app.slug}/reach`}
+            className="inline-block text-sm font-medium text-primary underline underline-offset-2 hover:no-underline"
+          >
+            Open its Reach page: everything it can reach, what it did, its labels and its history
+          </Link>
           <AppReachPanel app={app} missingConnectors={missingConnectors} />
           {capabilities && capabilities.deniable.length > 0 && (
             <CapabilityTogglesPanel slug={app.slug} capabilities={capabilities} />
