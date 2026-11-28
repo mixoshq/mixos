@@ -1416,7 +1416,11 @@ None.
    [`20261128_0128-secrets-out-of-process.md`](20261128_0128-secrets-out-of-process.md).
 6. **Item 5a.** Then **one design doc for 5b and 7b**, the shared runner
    infrastructure (§10). *5a in review:* migration 0006, with the departures
-   under its "As built".
+   under its "As built". *The 5b/7b design is*
+   [`20261128_0146-out-of-process-runners.md`](20261128_0146-out-of-process-runners.md),
+   *in review, with four decisions for you; it answers the open question:
+   server pages of Registry apps need a limit (client pages only) on the
+   isolated tier.*
 7. **Item 6.** Detection (benefits from Item 0's facade for refused-call
    recording).
 8. **Item 7a.** Per-app narrowing; builds on 3a's Reach section.
