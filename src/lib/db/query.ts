@@ -46,6 +46,11 @@ import type { Sql } from "postgres";
  * could carry a quote, a dot or a parenthesis would step outside it. The
  * builder's state lives in private fields for the same reason — an app holding
  * a builder cannot rewrite the schema or table it already names.
+ *
+ * Beneath that, an app's client is confined (`DbClient.confined`): every
+ * statement it sends runs inside the app's runner, a function in the app's
+ * schema that runs it as the app's own role, and Postgres refuses one that
+ * reaches anything the app doesn't own. See `run`.
  */
 
 /**
@@ -125,7 +130,19 @@ interface Filter {
   value: unknown;
 }
 
+/**
+ * Where a confined client's statements run: through the runner in `schema`
+ * (`RUNNER`), as the role that owns it, and whether they may write. The
+ * platform's own client has none, and runs as the connecting login itself.
+ */
+interface Binding {
+  schema: string;
+  readOnly: boolean;
+}
+
 interface QueryState {
+  /** Set once, by the client the query came from. */
+  readonly as: Binding | null;
   schema: string;
   table: string;
   action: Action;
@@ -260,9 +277,33 @@ function jsonRow(row: Record<string, unknown>): Record<string, unknown> {
  */
 class Params {
   readonly values: unknown[] = [];
-  add(value: unknown): string {
+
+  /**
+   * `packed` is a confined client's form: the runner takes every value as one
+   * JSON array, its single parameter, so `$1->0` is the first value and
+   * `$1->>0` the first as text.
+   */
+  constructor(readonly packed = false) {}
+
+  /** A value the SQL reads as JSON. */
+  json(value: unknown): string {
     this.values.push(value);
-    return `$${this.values.length}`;
+    return this.packed ? `($1->${this.values.length - 1})` : `$${this.values.length}::json`;
+  }
+
+  /** A value the SQL reads as text. */
+  text(value: string): string {
+    this.values.push(value);
+    return this.packed ? `($1->>${this.values.length - 1})` : `$${this.values.length}::text`;
+  }
+
+  /**
+   * A select-list column. A confined statement returns a single JSON value per
+   * row, the row as an object, which is what the runner returns; the result
+   * reads the same either way (`run`).
+   */
+  column(expression: string, name: string): string {
+    return this.packed ? `json_build_object('${name}', ${expression})` : `${expression} as ${name}`;
   }
 }
 
@@ -293,8 +334,8 @@ function where(filters: Filter[], alias: string, table: string, params: Params):
       const values = f.value as unknown[];
       // An empty list matches nothing, as in PostgREST.
       if (values.length === 0) return "false";
-      const rows = params.add(values.map((v) => ({ [f.column]: jsonValue(v) })));
-      return `${column} = any(array(select _f.${name} from json_populate_recordset(null::${table}, ${rows}::json) as _f))`;
+      const rows = params.json(values.map((v) => ({ [f.column]: jsonValue(v) })));
+      return `${column} = any(array(select _f.${name} from json_populate_recordset(null::${table}, ${rows}) as _f))`;
     }
     if (f.op === "is") {
       if (f.value === null) return `${column} is null`;
@@ -308,10 +349,10 @@ function where(filters: Filter[], alias: string, table: string, params: Params):
       }
       // PostgREST spells the LIKE wildcard `*`, because `%` is awkward in a
       // URL, and code written for it may use either.
-      return `${column} ${f.op} ${params.add(f.value.replace(/\*/g, "%"))}::text`;
+      return `${column} ${f.op} ${params.text(f.value.replace(/\*/g, "%"))}`;
     }
-    const value = params.add({ [f.column]: jsonValue(f.value) });
-    return `${column} ${COMPARISON[f.op]} (select _f.${name} from json_populate_record(null::${table}, ${value}::json) as _f)`;
+    const value = params.json({ [f.column]: jsonValue(f.value) });
+    return `${column} ${COMPARISON[f.op]} (select _f.${name} from json_populate_record(null::${table}, ${value}) as _f)`;
   });
   return ` where ${clauses.join(" and ")}`;
 }
@@ -328,25 +369,28 @@ interface CompiledQuery {
  *
  * `data` is null when nothing needs to run for rows: a `head` count, or an
  * insert of zero rows. Every data statement yields one column, `_r`, holding a
- * row as JSON.
+ * row as JSON. For a confined client (`state.as`) each statement instead yields
+ * one JSON value per row, `{"_r": ...}`, and a write that returns nothing
+ * returns a null per row, because the runner returns JSON rows (`Params`).
  */
 function compile(
   state: QueryState,
   conflict: string[] | null = state.onConflict,
 ): { data: CompiledQuery | null; count: CompiledQuery | null } {
   const table = qualified(state.schema, state.table);
+  const packed = state.as !== null;
 
   if (state.action === "select") {
     const countQuery = state.count
       ? (() => {
-          const params = new Params();
+          const params = new Params(packed);
           const w = where(state.filters, "_t", table, params);
-          return { text: `select count(*) as count from ${table} as _t${w}`, params: params.values };
+          return { text: `select ${params.column("count(*)", "count")} from ${table} as _t${w}`, params: params.values };
         })()
       : null;
     if (state.head) return { data: null, count: countQuery };
 
-    const params = new Params();
+    const params = new Params(packed);
     const w = where(state.filters, "_t", table, params);
     const order = state.order
       .map(
@@ -356,7 +400,7 @@ function compile(
       )
       .join(", ");
     const text =
-      `select ${rowJson(state.columns ?? "*", "_t")} as _r from ${table} as _t${w}` +
+      `select ${params.column(rowJson(state.columns ?? "*", "_t"), "_r")} from ${table} as _t${w}` +
       (order ? ` order by ${order}` : "") +
       (state.limit !== null ? ` limit ${state.limit}` : "") +
       (state.offset !== null ? ` offset ${state.offset}` : "");
@@ -370,7 +414,7 @@ function compile(
     throw new QueryError(`order(), limit() and range() are only available on select(), not ${state.action}().`);
   }
 
-  const params = new Params();
+  const params = new Params(packed);
   let statement: string;
 
   if (state.action === "insert" || state.action === "upsert") {
@@ -382,10 +426,10 @@ function compile(
       throw new QueryError(`${state.action}() was given rows with no columns.`);
     }
     const cols = state.written.map((c) => quote(c, "column"));
-    const payload = params.add(state.rows.map((r) => jsonRow(r)));
+    const payload = params.json(state.rows.map((r) => jsonRow(r)));
     statement =
       `insert into ${table} as _t (${cols.join(", ")}) ` +
-      `select ${cols.join(", ")} from json_populate_recordset(null::${table}, ${payload}::json)`;
+      `select ${cols.join(", ")} from json_populate_recordset(null::${table}, ${payload})`;
 
     if (state.action === "upsert") {
       if (!conflict || conflict.length === 0) {
@@ -407,10 +451,10 @@ function compile(
       throw new QueryError("update() without a filter would change every row. Add a filter such as .eq().");
     }
     const cols = state.written.map((c) => quote(c, "column"));
-    const payload = params.add(jsonRow(state.rows[0]));
+    const payload = params.json(jsonRow(state.rows[0]));
     statement =
       `update ${table} as _t set ${cols.map((c) => `${c} = _v.${c}`).join(", ")} ` +
-      `from json_populate_record(null::${table}, ${payload}::json) as _v` +
+      `from json_populate_record(null::${table}, ${payload}) as _v` +
       where(state.filters, "_t", table, params);
   } else {
     if (state.filters.length === 0) {
@@ -420,13 +464,15 @@ function compile(
   }
 
   if (state.columns === null) {
-    return { data: { text: statement, params: params.values }, count: null };
+    // The runner returns rows, so a confined write returns one null per row.
+    const text = packed ? `${statement} returning null::json` : statement;
+    return { data: { text, params: params.values }, count: null };
   }
   return {
     data: {
       text:
         `with _w as (${statement} returning ${projection(state.columns, "_t").sql}) ` +
-        `select to_json(_w) as _r from _w`,
+        `select ${params.column("to_json(_w)", "_r")} from _w`,
       params: params.values,
     },
     count: null,
@@ -492,39 +538,91 @@ function toDbError(err: unknown): DbError {
  * `onConflict` are rare and off the hot path, and a cache would outlive a
  * migration that changed the key.
  */
-async function primaryKey(sql: Sql, schema: string, table: string): Promise<string[]> {
-  const rows = await sql.unsafe<{ name: string }[]>(
-    `select a.attname as name
+async function primaryKey(sql: Sql, state: QueryState): Promise<string[]> {
+  const params = new Params(state.as !== null);
+  const regclass = params.text(qualified(state.schema, state.table));
+  const rows = await run(
+    sql,
+    {
+      text: `select ${params.column("a.attname", "name")}
        from pg_index i
        join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey)
-      where i.indrelid = to_regclass($1) and i.indisprimary
+      where i.indrelid = to_regclass(${regclass}) and i.indisprimary
       order by array_position(i.indkey::int2[], a.attnum)`,
-    [qualified(schema, table)],
+      params: params.values,
+    },
+    state.as,
   );
-  return rows.map((r) => r.name);
+  return rows.map((r) => r.name as string);
 }
+
+/**
+ * The function in each app's schema that a confined client's statements run
+ * through: `<schema>.mixos_run(stmt text, params json, read_only boolean)`.
+ * The release step creates it, and checks it, for every app with a database
+ * (`ensureAppRunner` and `probeAppRunner` in scripts/app-migrations.ts).
+ */
+export const RUNNER = "mixos_run";
 
 /**
  * Run compiled SQL on the pool or inside a transaction. The cast is the one
  * place the builder's parameters meet postgres.js's types: each is a JSON value
  * bound as `::json` or a string bound as `::text` (see Params), which
  * postgres.js accepts but which TypeScript cannot see from here.
+ *
+ * A confined client's statement runs inside the app's runner. It is a
+ * SECURITY DEFINER function owned by the app's role, so the statement runs as
+ * that role, and the role is fixed for as long as it runs: Postgres refuses
+ * `SET ROLE`, `set_config('role', ...)` and `SET SESSION AUTHORIZATION` inside
+ * such a function. So the statement reaches what the app's role owns and
+ * nothing else, even if its text were written to escape. The runner runs only a
+ * statement that returns rows (`RETURN QUERY EXECUTE`), so DDL can't run through
+ * it, and one statement only. With `readOnly` it makes the transaction
+ * read-only first, which Postgres won't let a later query undo.
+ *
+ * It is one statement, so it costs no round trip over an unconfined one, and
+ * behaves the same through any pooler. If the runner is missing, or this login
+ * may not call it, the statement fails and nothing runs.
  */
-async function run(db: Pick<Sql, "unsafe">, query: CompiledQuery): Promise<Row[]> {
-  return [...(await db.unsafe(query.text, query.params as never[]))];
+async function run(
+  db: Pick<Sql, "unsafe">,
+  query: CompiledQuery,
+  as: Binding | null,
+): Promise<Row[]> {
+  if (!as) return [...(await db.unsafe(query.text, query.params as never[]))];
+  const rows = await db.unsafe(
+    `select r from ${quote(as.schema, "schema name")}.${RUNNER}($1, $2::json, $3::boolean) as r`,
+    [query.text, query.params, as.readOnly] as never[],
+  );
+  return rows.map((row) => (row as unknown as { r: Row }).r);
+}
+
+/**
+ * Run SQL text through `schema`'s runner exactly as a confined client would.
+ * The text has to return one JSON value per row, and reads its values as
+ * `$1->0`, `$1->>0` and so on. Only for the release step's check and for
+ * tests, which check what the database refuses beneath the builder.
+ */
+export function runThrough(
+  sql: Pick<Sql, "unsafe">,
+  as: { schema: string; readOnly?: boolean },
+  text: string,
+  params: unknown[] = [],
+): Promise<Row[]> {
+  return run(sql, { text, params }, { schema: as.schema, readOnly: as.readOnly === true });
 }
 
 async function execute(sql: Sql, state: QueryState): Promise<DbResponse<Row>> {
   try {
     const conflict =
       state.action === "upsert" && !state.onConflict && state.rows.length > 0
-        ? await primaryKey(sql, state.schema, state.table)
+        ? await primaryKey(sql, state)
         : state.onConflict;
     const compiled = compile(state, conflict);
 
     // count(*) is a bigint, which postgres.js returns as a string.
     const count = compiled.count
-      ? Number((await run(sql, compiled.count))[0]?.count ?? 0)
+      ? Number((await run(sql, compiled.count, state.as))[0]?.count ?? 0)
       : null;
 
     const writes = state.action !== "select";
@@ -540,7 +638,7 @@ async function execute(sql: Sql, state: QueryState): Promise<DbResponse<Row>> {
 
     const query = compiled.data;
     if (writes && state.columns === null) {
-      await run(sql, query);
+      await run(sql, query, state.as);
       return success(null, count, okStatus);
     }
 
@@ -551,7 +649,7 @@ async function execute(sql: Sql, state: QueryState): Promise<DbResponse<Row>> {
       // error to mean "nothing happened" needs.
       try {
         const rows = await sql.begin(async (tx) => {
-          const out = (await run(tx, query)).map((r) => r._r);
+          const out = (await run(tx, query, state.as)).map((r) => r._r);
           const bad = state.cardinality === "one" ? out.length !== 1 : out.length > 1;
           if (bad) throw new CardinalityError(out.length);
           return out;
@@ -563,7 +661,7 @@ async function execute(sql: Sql, state: QueryState): Promise<DbResponse<Row>> {
       }
     }
 
-    const rows = (await run(sql, query)).map((r) => r._r);
+    const rows = (await run(sql, query, state.as)).map((r) => r._r);
     return cardinal(rows, state.cardinality, count, okStatus);
   } catch (err) {
     return failure(toDbError(err));
@@ -610,8 +708,14 @@ function writtenColumns(rows: Record<string, unknown>[], many: boolean): string[
   return [...seen];
 }
 
-function blankState(schema: string, table: string, action: Action): QueryState {
+function blankState(
+  as: Binding | null,
+  schema: string,
+  table: string,
+  action: Action,
+): QueryState {
   return {
+    as,
     schema,
     table,
     action,
@@ -763,15 +867,17 @@ export class TableQuery {
   readonly #sql: Sql;
   readonly #schema: string;
   readonly #table: string;
+  readonly #as: Binding | null;
 
-  constructor(sql: Sql, schema: string, table: string) {
+  constructor(sql: Sql, schema: string, table: string, as: Binding | null = null) {
     this.#sql = sql;
     this.#schema = schema;
     this.#table = table;
+    this.#as = as;
   }
 
   #start<T>(action: Action, build: (state: QueryState) => void): FilterQuery<T> {
-    const state = blankState(this.#schema, this.#table, action);
+    const state = blankState(this.#as, this.#schema, this.#table, action);
     try {
       build(state);
       return new FilterQuery<T>(this.#sql, state);
@@ -837,23 +943,40 @@ export class TableQuery {
 /**
  * Every verb, on any table in one schema: `public` unless constructed with
  * another. The platform's own client is the `public` one; an app's
- * `context.db` is one built for the app's schema.
+ * `context.db` is one built for the app's schema and bound to the app's role.
  */
 export class DbClient {
   readonly #sql: Sql;
   readonly #schema: string;
+  readonly #as: Binding | null;
 
-  constructor(sql: Sql, schema = "public") {
+  constructor(sql: Sql, schema = "public", as: Binding | null = null) {
     this.#sql = sql;
     this.#schema = schema;
+    this.#as = as;
   }
 
-  /** The same pool, reaching tables in `schema` instead. */
+  /** The same pool, reaching tables in `schema` instead. A binding carries over. */
   schema(schema: string): DbClient {
-    return new DbClient(this.#sql, schema);
+    return new DbClient(this.#sql, schema, this.#as);
+  }
+
+  /**
+   * The same pool and schema, with every statement run through the schema's
+   * runner, as the role that owns it (see `run`). With `readOnly`, Postgres
+   * also refuses every write. The runner stays this schema's if `.schema()`
+   * is called afterwards: the statement then names the other schema, and the
+   * role refuses it.
+   */
+  confined(options: { readOnly?: boolean } = {}): DbClient {
+    quote(this.#schema, "schema name");
+    return new DbClient(this.#sql, this.#schema, {
+      schema: this.#schema,
+      readOnly: options.readOnly === true,
+    });
   }
 
   from(table: string): TableQuery {
-    return new TableQuery(this.#sql, this.#schema, table);
+    return new TableQuery(this.#sql, this.#schema, table, this.#as);
   }
 }

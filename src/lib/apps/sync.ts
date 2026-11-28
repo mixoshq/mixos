@@ -150,19 +150,23 @@ async function writeState(
  * normal outcome, not a failure: what finished is committed and the summary says
  * the run was truncated, so a partial tick is distinguishable from a complete
  * one.
+ *
+ * `stateDb` is the platform's handle on the app's schema, from the scheduler
+ * (`createPlatformScopedClient`): `_sync_state` belongs to the platform's role,
+ * and the app's `ctx.db`, which runs as the app's role, can't reach it.
  */
 export async function runSync<Item>(
   ctx: SystemAppContext,
   definition: SyncDefinition,
   handler: SyncHandler<Item>,
+  stateDb: ScopedClient,
 ): Promise<SyncResult> {
   if (!ctx.db) {
     throw new Error(
       `sync "${definition.name}" needs a scoped database — set "database": true.`,
     );
   }
-  const db = ctx.db;
-  const state = await readState(db, definition.name);
+  const state = await readState(stateDb, definition.name);
   const now = Date.now();
 
   const windowDays = state?.window_days
@@ -232,7 +236,7 @@ export async function runSync<Item>(
     // Relaxing matters as much as shrinking: without it, one dense stretch
     // shrinks the window permanently.
     const relaxed = clampWindow(windowDays * 2, definition.window);
-    await writeState(db, definition.name, {
+    await writeState(stateDb, definition.name, {
       synced_through: to.toISOString(),
       window_days: relaxed,
       last_status: "ok",
@@ -241,7 +245,7 @@ export async function runSync<Item>(
     if (handler.onDrained) await handler.onDrained(ctx);
   } else if (suspiciouslyEmpty) {
     note = "window drained with zero items; watermark held";
-    await writeState(db, definition.name, {
+    await writeState(stateDb, definition.name, {
       last_status: "empty",
       last_run_at: new Date().toISOString(),
     });
@@ -252,7 +256,7 @@ export async function runSync<Item>(
     // interrupted run cost nothing.
     const shrunk = clampWindow(windowDays / 2, definition.window);
     note = "stopped on time budget";
-    await writeState(db, definition.name, {
+    await writeState(stateDb, definition.name, {
       window_days: shrunk,
       last_status: "truncated",
       last_run_at: new Date().toISOString(),

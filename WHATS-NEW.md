@@ -12,6 +12,18 @@ just pulled.
 
 ## 2026-11-27
 
+- **`context.db` runs as the app's own database role.** Every query an app
+  makes runs through a function in the app's schema, `mixos_run`, as
+  `mixos_app_<slug>`, so Postgres itself refuses one that reaches another app's
+  tables or the platform's, and refuses writes from MCP tools and search
+  handlers. An app that reads and writes its own tables is unaffected. Three
+  things change: `_sync_state` belongs to the platform, and `context.db` can
+  no longer read or write it; the release step creates each app's `mixos_run`
+  and fails if one isn't as it made it; and platform migration 0004 takes
+  `CREATE` on `public` from every role where Postgres before 15 still grants
+  it: run `npm run db:local` (or the release step). See
+  [`docs/apps/database.md`](docs/apps/database.md#where-your-tables-live).
+
 - **What `context` hands an app is read-only, and a connector is only its
   methods.** `context.manifest` and `context.user` are frozen, so a write to
   either throws, and `AppContextUser`'s fields are `readonly`.

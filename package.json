@@ -21,7 +21,7 @@
     "prelint": "node scripts/check-node.mjs && tsx scripts/generate-project-registry.ts",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
+    "test": "tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\" \"tests/**/*.test.ts\"",
     "keys:generate": "tsx scripts/generate-keys.ts",
     "keys:check": "tsx scripts/generate-keys.ts --check",
     "keys:rotate-github-app": "tsx scripts/rekey-github-app.ts",

@@ -340,3 +340,47 @@ test("a query runs once however many times it is awaited", async () => {
   await Promise.all([query, query]);
   assert.equal(calls.length, 1);
 });
+
+// ── confined clients ────────────────────────────────────────────────────────
+
+const RUNNER_CALL = `select r from "app_notes".mixos_run($1, $2::json, $3::boolean) as r`;
+
+test("a confined client sends each statement through its schema's runner, its values as one JSON array", async () => {
+  const { db, calls } = fakeSql(() => [{ r: { _r: { id: "n1" } } }]);
+  const { data, error } = await db.schema("app_notes").confined().from("notes").select("id").eq("body", "a'b").like("tag", "x*");
+
+  assert.equal(error, null);
+  assert.deepEqual(data, [{ id: "n1" }]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].text, RUNNER_CALL);
+  const [statement, values, readOnly] = calls[0].params as [string, unknown[], boolean];
+  assert.equal(
+    statement,
+    `select json_build_object('_r', (select to_json(_p) from (select _t."id" as "id") as _p)) ` +
+      `from "app_notes"."notes" as _t where _t."body" = ` +
+      `(select _f."body" from json_populate_record(null::"app_notes"."notes", ($1->0)) as _f) ` +
+      `and _t."tag" like ($1->>1)`,
+  );
+  // Values, never SQL: the statement reads them from its one parameter.
+  assert.deepEqual(values, [{ body: "a'b" }, "x%"]);
+  assert.equal(readOnly, false);
+});
+
+test("a confined write that returns nothing still returns rows, and a read-only client says so", async () => {
+  const { db, calls } = fakeSql(() => [{ r: null }]);
+  assert.equal((await db.schema("app_notes").confined().from("notes").delete().eq("id", "n1")).error, null);
+  assert.match(calls[0].params[0] as string, /^delete from "app_notes"\."notes" as _t where .* returning null::json$/);
+
+  const ro = fakeSql(() => [{ r: { count: 3 } }]);
+  const { count } = await ro.db.schema("app_notes").confined({ readOnly: true }).from("notes").select("id", { count: "exact", head: true });
+  assert.equal(count, 3);
+  assert.equal(ro.calls[0].params[0], `select json_build_object('count', count(*)) from "app_notes"."notes" as _t`);
+  assert.equal(ro.calls[0].params[2], true);
+});
+
+test("a confined client keeps its runner when pointed at another schema", async () => {
+  const { db, calls } = fakeSql(() => []);
+  await db.schema("app_notes").confined().schema("app_other").from("t").select("id");
+  assert.equal(calls[0].text, RUNNER_CALL);
+  assert.match(calls[0].params[0] as string, /from "app_other"\."t"/);
+});

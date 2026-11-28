@@ -12,16 +12,35 @@ import { ReadOnlyError } from "./read-only";
  * `app_<slug>.orders`, the table the app's migration created as `orders`. An app
  * cannot name another app's table, or a platform table, through it.
  *
- * It connects as the platform's role, like every other query, and reaches the
- * app's tables because that role is a member of the app's. What app SQL could
- * leave behind for that role to run is bounded when the migration is checked
- * (scripts/app-sql-policy.ts). See docs/apps/database.md.
+ * Two things hold it there. The builder refuses any name that is not a plain
+ * identifier, so a name can't carry a quote, a dot or another schema out. And
+ * every statement runs inside the app's runner, `app_<slug>.mixos_run`, as the
+ * app's own role, `mixos_app_<slug>`, which owns the app's schema and nothing
+ * else. Postgres refuses a statement that reaches anything outside it, and the
+ * defaults and views it runs, run as that role too. The connection is the
+ * platform's; `DbClient.confined` (src/lib/db/query.ts) says why the statement
+ * can't get back to it. See docs/apps/database.md.
  */
 export function createScopedClient(appSlug: string) {
+  return scopedClient(appSlug, false);
+}
+
+function scopedClient(appSlug: string, readOnly: boolean) {
+  const db = createServiceClient().schema(appSchemaName(appSlug)).confined({ readOnly });
+  return {
+    table: (name: string) => db.from(name),
+  };
+}
+
+/**
+ * The platform's own handle on an app's schema, for the tables the platform
+ * keeps there: `_sync_state`, which the app's role can't read or write. It
+ * runs as the platform's role, so it is never handed to app code; `runSync`
+ * takes it from the scheduler.
+ */
+export function createPlatformScopedClient(appSlug: string): ScopedClient {
   const db = createServiceClient().schema(appSchemaName(appSlug));
   return {
-    // The builder refuses any name that is not a plain identifier, so `name`
-    // cannot carry a quote, a dot or another schema out of this one.
     table: (name: string) => db.from(name),
   };
 }
@@ -52,14 +71,16 @@ const MUTATING_METHODS = new Set(["insert", "update", "upsert", "delete"]);
  * read-only by contract (see docs/apps/mcp.md), and by an App Services provider
  * answering a request from one.
  *
- * The type alone would satisfy an honest caller; the Proxy is here for the
- * dishonest one. `ctx.db as any` is a one-token bypass of the compiler, and the
- * blast radius — a model-driven caller writing to an app's tables — is bad
- * enough to warrant the runtime trap as well. Throwing (rather than silently
- * no-op'ing) keeps the failure loud and attributable in logs.
+ * Three layers. The type alone would satisfy an honest caller; the Proxy is
+ * here for the dishonest one. `ctx.db as any` is a one-token bypass of the
+ * compiler, and the blast radius — a model-driven caller writing to an app's
+ * tables — is bad enough to warrant the runtime trap as well. Throwing (rather
+ * than silently no-op'ing) keeps the failure loud and attributable in logs.
+ * Beneath both, the client's transactions are read-only, so Postgres refuses a
+ * write that got past them (25006).
  */
 export function createReadOnlyScopedClient(appSlug: string): ReadOnlyScopedClient {
-  const scoped = createScopedClient(appSlug);
+  const scoped = scopedClient(appSlug, true);
 
   const guard = <T extends object>(builder: T, name: string): T =>
     new Proxy(builder, {
