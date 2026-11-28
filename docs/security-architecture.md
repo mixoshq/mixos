@@ -1,7 +1,10 @@
 # Security Architecture: Apps & Connectors
 
 This document describes the security model, data flow, and isolation boundaries
-of the MixOS platform. It is intended for security reviewers and auditors.
+of the MixOS platform. It is intended for security reviewers and auditors. For
+what MixOS protects against and what it doesn't, on one page and in plain
+words, see the [threat model](threat-model.md). The two must agree: a change to
+a security property updates both.
 
 **Key source files referenced throughout:**
 

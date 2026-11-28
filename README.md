@@ -387,7 +387,8 @@ a deployment's database migrations.
 
 Report a vulnerability privately, not in an issue: see
 [`SECURITY.md`](SECURITY.md), which also says what an installed app or
-connector can reach. The design is in
+connector can reach. What MixOS protects against, and what it doesn't, is on
+one page in the [threat model](docs/threat-model.md). The design is in
 [`docs/security-architecture.md`](docs/security-architecture.md).
 
 ## Licence

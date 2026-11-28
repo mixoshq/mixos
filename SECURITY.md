@@ -59,7 +59,9 @@ instance. An app or a connector from the Registry waits, unregistered, until an
 admin registers it: read what it will run first. The Registry checks that what lands on your disk is the signed,
 reviewed commit. It doesn't make that code safe to run.
 
-The design, and the reasoning behind each boundary, is in
+What MixOS protects against, and what's still exposed, is on one page in the
+[threat model](docs/threat-model.md). The design, and the reasoning behind each
+boundary, is in
 [`docs/security-architecture.md`](docs/security-architecture.md). Sections 24
 (environment containment) and 31 (installing from the Registry) cover the two
 above.
