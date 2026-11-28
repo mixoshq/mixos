@@ -239,6 +239,7 @@ async function keptByApp(q: Query, slug: string): Promise<Kept> {
       (select count(*)::int from public.app_open_events where app_slug = ${slug}) as "appOpens",
       (select count(*)::int from public.oauth_tokens where ${slug} = any(granted_apps)) as mcp_tokens,
       (select count(*)::int from public.oauth_authorization_codes where ${slug} = any(granted_apps)) as mcp_codes,
+      (select count(*)::int from public.connector_app_configs where app_slug = ${slug}) as "connectorCredentials",
       (select count(*)::int from pg_class k join pg_namespace n on n.oid = k.relnamespace
         where n.nspname = ${names?.schema ?? null} and k.relkind in ('r', 'p')) as tables
   `;
@@ -257,6 +258,7 @@ async function keptByApp(q: Query, slug: string): Promise<Kept> {
     telemetryEvents: c.telemetryEvents,
     appOpens: c.appOpens,
     mcpAccess: c.mcp_tokens + c.mcp_codes,
+    connectorCredentials: c.connectorCredentials,
   };
   return {
     name: row?.name ?? slug,
@@ -284,6 +286,7 @@ async function keptByConnector(q: Query, name: string): Promise<Kept> {
   const [c] = await q<(ConnectorDataCounts & { marked_at: string | null })[]>`
     select
       (select count(*)::int from public.connector_configs where connector_name = ${name}) as credentials,
+      (select count(*)::int from public.connector_app_configs where connector_name = ${name}) as "appCredentials",
       (select count(*)::int from public.user_connector_oauth where connector_name = ${name}) as connections,
       (select count(*)::int from public.connector_scope_status where connector_name = ${name}) as "scopeStatus",
       (select count(*)::int from public.connector_webhook_events where connector_name = ${name}) as "webhookEvents",
@@ -294,6 +297,7 @@ async function keptByConnector(q: Query, name: string): Promise<Kept> {
   `;
   const counts: ConnectorDataCounts = {
     credentials: c.credentials,
+    appCredentials: c.appCredentials,
     connections: c.connections,
     scopeStatus: c.scopeStatus,
     webhookEvents: c.webhookEvents,
@@ -536,6 +540,7 @@ const ZERO_APP: AppDataCounts = {
   telemetryEvents: 0,
   appOpens: 0,
   mcpAccess: 0,
+  connectorCredentials: 0,
 };
 
 async function deleteApp(tx: TransactionSql, slug: string, k: Kept): Promise<AppDataCounts> {
@@ -548,6 +553,9 @@ async function deleteApp(tx: TransactionSql, slug: string, k: Kept): Promise<App
   counts.migrations = (await tx`delete from public._migrations where app_slug = ${slug}`).count;
   counts.settings = (await tx`delete from public.app_settings where app_slug = ${slug}`).count;
   counts.apiKeys = (await tx`delete from public.app_api_keys where app_slug = ${slug}`).count;
+  // Its own connector credentials, and what their grants were recorded to hold.
+  await tx`delete from public.connector_scope_status where app_slug = ${slug}`;
+  counts.connectorCredentials = (await tx`delete from public.connector_app_configs where app_slug = ${slug}`).count;
   counts.scheduledJobs = (await tx`delete from public.app_scheduled_jobs where app_slug = ${slug}`).count;
   counts.jobRuns = (await tx`delete from public.app_job_runs where app_slug = ${slug}`).count;
   counts.telemetryEvents = (
@@ -642,6 +650,7 @@ async function deleteApp(tx: TransactionSql, slug: string, k: Kept): Promise<App
 async function deleteConnector(tx: TransactionSql, name: string): Promise<ConnectorDataCounts> {
   return {
     credentials: (await tx`delete from public.connector_configs where connector_name = ${name}`).count,
+    appCredentials: (await tx`delete from public.connector_app_configs where connector_name = ${name}`).count,
     connections: (await tx`delete from public.user_connector_oauth where connector_name = ${name}`).count,
     scopeStatus: (await tx`delete from public.connector_scope_status where connector_name = ${name}`).count,
     webhookEvents: (await tx`delete from public.connector_webhook_events where connector_name = ${name}`).count,

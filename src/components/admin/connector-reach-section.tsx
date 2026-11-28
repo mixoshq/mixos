@@ -4,7 +4,7 @@
 
 "use client";
 
-import { Suspense, use } from "react";
+import { Suspense, use, useState } from "react";
 import { StatusPill } from "@/components/ui/status";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import {
@@ -15,7 +15,10 @@ import {
   type ConnectorReach,
   type ObservedCall,
   type ObservedCalls,
+  type OwnCredentialStatus,
 } from "@/lib/connectors/reach";
+import type { CredentialField } from "@/lib/connectors/types";
+import AppCredentialsPanel, { OWN_STATE_LABEL, type AppCredentialActions } from "./app-credentials-panel";
 
 /**
  * The Details tab's Reach section: every app that declares this connector,
@@ -50,10 +53,33 @@ export interface ReachSectionProps {
    * provider refuses the writes until someone connects again.
    */
   writeGrantMissing: boolean;
+  /** Apps with credentials of their own for it (lib/connectors/app-config.ts). */
+  ownCredentials?: OwnCredentialStatus[];
+  /**
+   * What giving an app its own credentials needs: the connector's fields and
+   * the page's actions. Absent where they can't be given, a user-scoped
+   * connector or one that authenticates with nothing.
+   */
+  ownCredentialsSetup?: {
+    displayName: string;
+    fields: CredentialField[];
+    isOAuth: boolean;
+    actions: AppCredentialActions;
+  };
+  /** An app whose own credentials to open on arrival: the way back from its Connect. */
+  initialApp?: string | null;
+}
+
+/** Which row's own-credentials panel is open, held above the Suspense so streaming in the calls keeps it. */
+interface OpenRow {
+  openApp: string | null;
+  toggle: (slug: string) => void;
 }
 
 export default function ConnectorReachSection(props: ReachSectionProps) {
   const { reach, observed, connectorName } = props;
+  const [openApp, setOpenApp] = useState<string | null>(props.initialApp ?? null);
+  const open: OpenRow = { openApp, toggle: (slug) => setOpenApp((v) => (v === slug ? null : slug)) };
   return (
     <section>
       <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -62,18 +88,18 @@ export default function ConnectorReachSection(props: ReachSectionProps) {
       {reach.apps.length === 0 ? (
         <p className="mt-1 text-sm text-foreground">No app uses this connector yet.</p>
       ) : observed ? (
-        <Suspense fallback={<ReachList {...props} observed={{ state: "loading" }} />}>
-          <StreamedReachList {...props} observed={observed} connectorName={connectorName} />
+        <Suspense fallback={<ReachList {...props} {...open} observed={{ state: "loading" }} />}>
+          <StreamedReachList {...props} {...open} observed={observed} connectorName={connectorName} />
         </Suspense>
       ) : (
-        <ReachList {...props} observed={{ state: "unknown" }} />
+        <ReachList {...props} {...open} observed={{ state: "unknown" }} />
       )}
     </section>
   );
 }
 
 function StreamedReachList(
-  props: Omit<ReachSectionProps, "observed"> & { observed: Promise<ObservedCalls | null> },
+  props: Omit<ReachSectionProps, "observed"> & OpenRow & { observed: Promise<ObservedCalls | null> },
 ) {
   const all = use(props.observed);
   const calls = all?.[props.connectorName];
@@ -84,13 +110,20 @@ function StreamedReachList(
 export function ReachList({
   reach,
   observed,
+  connectorName,
   declaredWrites,
   disabled,
   userScoped,
   authenticates,
   writeGrantMissing,
-}: Omit<ReachSectionProps, "observed" | "connectorName"> & { observed: Observed }) {
+  ownCredentials = [],
+  ownCredentialsSetup,
+  openApp = null,
+  toggle = () => {},
+}: Omit<ReachSectionProps, "observed" | "initialApp"> & Partial<OpenRow> & { observed: Observed }) {
   const declaring = new Set(reach.apps.map((a) => a.slug));
+  const ownBySlug = new Map(ownCredentials.filter((o) => declaring.has(o.appSlug)).map((o) => [o.appSlug, o]));
+  const sharedCount = reach.apps.length - ownBySlug.size;
   /** Calls from an app that doesn't declare the connector now, or from no app at all. */
   const others =
     observed.state === "read" ? observed.calls.filter((c) => c.appSlug === null || !declaring.has(c.appSlug)) : [];
@@ -101,9 +134,15 @@ export function ReachList({
         {describeReach(reach)}.{" "}
         {userScoped
           ? "Each person connects their own account, and an app uses it only on that person's requests."
-          : authenticates
-            ? "They all use the same credential, so revoking it at the provider stops every one of them."
-            : null}
+          : !authenticates
+            ? null
+            : ownBySlug.size === 0
+              ? "They all use the same credential, so revoking it at the provider stops every one of them."
+              : sharedCount === 0
+                ? "Each of them uses credentials of its own."
+                : `${sharedCount === 1 ? "One uses" : `${sharedCount} use`} the shared credential, and ${
+                    ownBySlug.size === 1 ? "one uses its own" : `${ownBySlug.size} use their own`
+                  }.`}
       </p>
 
       {disabled && (
@@ -126,7 +165,16 @@ export function ReachList({
       <ul className="divide-y divide-border overflow-hidden rounded-md border border-border">
         {reach.apps.map((app, i) => (
           <li key={app.slug} className={`px-3 py-2 ${i % 2 === 1 ? "bg-muted/60" : ""}`}>
-            <AppRow app={app} declaredWrites={declaredWrites} observed={observed} />
+            <AppRow
+              app={app}
+              declaredWrites={declaredWrites}
+              observed={observed}
+              own={ownBySlug.get(app.slug)}
+              setup={ownCredentialsSetup}
+              connectorName={connectorName}
+              open={openApp === app.slug}
+              onToggle={() => toggle(app.slug)}
+            />
           </li>
         ))}
       </ul>
@@ -158,10 +206,20 @@ function AppRow({
   app,
   declaredWrites,
   observed,
+  own,
+  setup,
+  connectorName,
+  open,
+  onToggle,
 }: {
   app: AppReach;
   declaredWrites: number;
   observed: Observed;
+  own: OwnCredentialStatus | undefined;
+  setup: ReachSectionProps["ownCredentialsSetup"];
+  connectorName: string;
+  open: boolean;
+  onToggle: () => void;
 }) {
   const callable = new Set([...app.reads, ...app.writes]);
   return (
@@ -180,6 +238,23 @@ function AppRow({
             <StatusPill tone="neutral">Read-only here</StatusPill>
           </InfoTooltip>
         )}
+        {own && (
+          <InfoTooltip tip="An admin gave it credentials of its own, which it uses instead of the shared ones. It never falls back to the shared ones.">
+            <StatusPill tone={own.state === "ready" ? "success" : own.state === "unreadable" ? "danger" : "warning"}>
+              {OWN_STATE_LABEL[own.state]}
+            </StatusPill>
+          </InfoTooltip>
+        )}
+        {setup && (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            className="ml-auto text-xs font-medium text-primary underline underline-offset-2 hover:no-underline"
+          >
+            {open ? "Close" : own ? "Its own credentials…" : "Give it its own credentials…"}
+          </button>
+        )}
       </span>
       <span className="mt-0.5 block text-sm text-foreground">{describeAppReach(app, declaredWrites)}</span>
       <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -189,6 +264,18 @@ function AppRow({
           (method) => callable.has(method),
         )}
       </span>
+      {setup && open && (
+        <AppCredentialsPanel
+          connectorName={connectorName}
+          connectorDisplayName={setup.displayName}
+          appSlug={app.slug}
+          appName={app.name}
+          fields={setup.fields}
+          isOAuth={setup.isOAuth}
+          own={own}
+          actions={setup.actions}
+        />
+      )}
     </>
   );
 }

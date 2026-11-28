@@ -299,6 +299,17 @@ describe("Delete data against a real database", { skip }, () => {
               ${[`${NOTES}/notes`, `${ARCHIVE}/notes`]}::text[])
     `;
 
+    // An app's own credentials for a connector: NOTES's for CRM_EU, with its
+    // grant's scopes, which go with NOTES; ARCHIVE's for CRM, which go with CRM.
+    await sql`
+      insert into public.connector_app_configs (connector_name, app_slug, encrypted_credentials)
+      values (${CRM_EU}, ${NOTES}, 'SEALED'), (${CRM}, ${ARCHIVE}, 'SEALED')
+    `;
+    await sql`
+      insert into public.connector_scope_status (connector_name, app_slug, scope, status)
+      values (${CRM_EU}, ${NOTES}, 'read', 'granted')
+    `;
+
     // Everything a connector keeps, for both.
     for (const name of [CRM, CRM_EU]) {
       await sql`insert into public.connector_configs (connector_name, encrypted_credentials) values (${name}, 'SEALED')`;
@@ -377,6 +388,7 @@ describe("Delete data against a real database", { skip }, () => {
       telemetryEvents: 4,
       appOpens: 1,
       mcpAccess: 2,
+      connectorCredentials: 1,
     } satisfies AppDataCounts);
   });
 
@@ -513,6 +525,7 @@ describe("Delete data against a real database", { skip }, () => {
         telemetryEvents: 4,
         appOpens: 1,
         mcpAccess: 2,
+        connectorCredentials: 1,
       },
       schema: appSchemaName(NOTES),
       role: appRoleName(NOTES),
@@ -534,6 +547,8 @@ describe("Delete data against a real database", { skip }, () => {
       ["public.app_job_runs", "app_slug"],
       ["public._migrations", "app_slug"],
       ["public.app_open_events", "app_slug"],
+      ["public.connector_app_configs", "app_slug"],
+      ["public.connector_scope_status", "app_slug"],
     ] as const) {
       const change = changed.get(table);
       assert.ok(change, `${table} didn't change`);
@@ -667,7 +682,7 @@ describe("Delete data against a real database", { skip }, () => {
       select actor_id, actor_email, details from public.admin_audit_log
       where action = 'connector.missing' and target_id = ${CRM}
     `;
-    assert.deepEqual({ ...missing }, { actor_id: null, actor_email: RELEASE_STEP_ACTOR, details: { credentials: true, connections: 1 } });
+    assert.deepEqual({ ...missing }, { actor_id: null, actor_email: RELEASE_STEP_ACTOR, details: { credentials: true, connections: 1, appCredentials: 1 } });
 
     // A second run without it keeps the first date.
     await releaseConnectors([CRM_EU, maps]);
@@ -698,6 +713,7 @@ describe("Delete data against a real database", { skip }, () => {
     const result = await deleteExtensionData("connector", CRM, { ...asked(), actor: ADMIN });
     assert.deepEqual(result.counts, {
       credentials: 1,
+      appCredentials: 1,
       connections: 1,
       scopeStatus: 2,
       webhookEvents: 1,
@@ -710,6 +726,7 @@ describe("Delete data against a real database", { skip }, () => {
     const changed = changes(before, await snapshot());
     for (const [table, column] of [
       ["public.connector_configs", "connector_name"],
+      ["public.connector_app_configs", "connector_name"],
       ["public.user_connector_oauth", "connector_name"],
       ["public.connector_scope_status", "connector_name"],
       ["public.connector_webhook_events", "connector_name"],

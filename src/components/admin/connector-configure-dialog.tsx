@@ -42,6 +42,7 @@ import {
 import type { ObservedCalls } from "@/lib/connectors/reach";
 import type { ConnectorWithStatus } from "./connector-registry-list";
 import ConnectorReachSection from "./connector-reach-section";
+import type { AppCredentialActions } from "./app-credentials-panel";
 
 type DialogTab = "details" | "configure" | "methods" | "scopes" | "logs";
 
@@ -65,6 +66,10 @@ interface Props {
   onRemove?: () => void;
   /** What apps called through each connector lately, for the Reach section; the page streams it. */
   observed?: Promise<ObservedCalls | null>;
+  /** Give one app its own credentials, from its Reach row. */
+  appCredentialActions?: AppCredentialActions;
+  /** An app whose own credentials to open on arrival: set by the way back from its Connect. */
+  initialApp?: string | null;
 }
 
 /** "in 52 minutes" / "3 days ago" — enough for an admin to judge freshness. */
@@ -634,6 +639,8 @@ export default function ConnectorConfigureDialog({
   changesAction,
   onRemove,
   observed,
+  appCredentialActions,
+  initialApp = null,
 }: Props) {
   const [tab, setTab] = useState<DialogTab>(initialTab);
   const [saving, startSave] = useTransition();
@@ -1461,6 +1468,18 @@ export default function ConnectorConfigureDialog({
               userScoped={connector.userScoped === true}
               authenticates={authenticates}
               writeGrantMissing={reconnectForWrites && connector.userScoped !== true}
+              ownCredentials={connector.ownCredentials}
+              ownCredentialsSetup={
+                connector.userScoped !== true && authenticates && appCredentialActions
+                  ? {
+                      displayName: connector.displayName,
+                      fields: connector.credentialFields,
+                      isOAuth,
+                      actions: appCredentialActions,
+                    }
+                  : undefined
+              }
+              initialApp={initialApp}
             />
           </div>
         )}

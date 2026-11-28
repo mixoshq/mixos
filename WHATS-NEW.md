@@ -12,6 +12,14 @@ just pulled.
 
 ## 2026-11-28
 
+- **Give one app its own connector credentials.** In a connector's Reach
+  section, **Give it its own credentials…** gives that app a narrower API key,
+  or an OAuth client and grant of its own, which it uses instead of the shared
+  ones everywhere its code reaches the connector, and never falls back from.
+  Its own OAuth grant asks for write scopes only if the app may change data.
+  Platform migration 0005 adds the table they live in. See
+  [`docs/connectors/credentials.md`](docs/connectors/credentials.md#an-apps-own-credentials).
+
 - **See what each app can reach on a connector.** The Details tab of a
   connector under Administration → Connectors has a Reach section: every app
   that declares it, whether the app is active, which methods MixOS lets it

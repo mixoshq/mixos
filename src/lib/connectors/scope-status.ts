@@ -75,8 +75,11 @@ export async function recordScopeStatus(opts: {
   /** Whether the authorization asked for the scopes requested with "write". */
   writes: boolean;
   userId?: string | null;
+  /** The app whose own grant this is (./app-config.ts); null for the shared grant or a person's. */
+  appSlug?: string | null;
 }): Promise<void> {
   const userId = opts.userId ?? null;
+  const appSlug = opts.appSlug ?? null;
   const rows = classifyGrant(opts.scopes, opts.granted, { writes: opts.writes });
 
   // One transaction: a half-written snapshot is worse than the previous one,
@@ -86,6 +89,7 @@ export async function recordScopeStatus(opts: {
       delete from public.connector_scope_status
        where connector_name = ${opts.connectorName}
          and user_id is not distinct from ${userId}
+         and app_slug is not distinct from ${appSlug}
     `;
     if (rows.length === 0) return;
     await tx`
@@ -93,11 +97,13 @@ export async function recordScopeStatus(opts: {
         rows.map((r) => ({
           connector_name: opts.connectorName,
           user_id: userId,
+          app_slug: appSlug,
           scope: r.scope,
           status: r.status,
         })),
         "connector_name",
         "user_id",
+        "app_slug",
         "scope",
         "status",
       )}
@@ -115,6 +121,8 @@ export async function recordScopeStatus(opts: {
 export async function getScopeStatus(
   connectorName: string,
   userId?: string | null,
+  /** An app's own grant (./app-config.ts). Omitted for the shared grant or a person's. */
+  appSlug?: string | null,
 ): Promise<ScopeStatusRow[]> {
   try {
     const rows = await sql<
@@ -124,6 +132,7 @@ export async function getScopeStatus(
         from public.connector_scope_status
        where connector_name = ${connectorName}
          and user_id is not distinct from ${userId ?? null}
+         and app_slug is not distinct from ${appSlug ?? null}
     `;
     return rows.map((r) => ({
       scope: r.scope,

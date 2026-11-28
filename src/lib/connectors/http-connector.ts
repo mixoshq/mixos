@@ -165,6 +165,8 @@ export abstract class HttpConnector implements BaseConnector {
    * of the tenant row found no refresh token, and a token that expired
    * mid-request failed as `auth_failed` while `configured` still said true.
    * The platform binds the caller's own grant instead; see `bindUserGrant`.
+   * An app with its own credentials (./app-config.ts) has its own row, bound
+   * with `bindAppGrant`, so its refresh never renews, or reads, the shared one.
    */
   #userGrant: GrantRefresher | null = null;
 
@@ -183,6 +185,18 @@ export abstract class HttpConnector implements BaseConnector {
       throw new Error(`connector "${connector.name}" already has a grant bound.`);
     }
     connector.#userGrant = refresh;
+  }
+
+  /**
+   * Point this instance's token refresh at one app's own credentials, in
+   * connector_app_configs. Platform-only: `loadTenantConnectors`
+   * (src/lib/apps/context.ts) and Verify connection call it before
+   * `initialize()`. The same slot as `bindUserGrant`, bound once, so nothing
+   * holding the instance later can re-point it at the shared row or another
+   * app's.
+   */
+  static bindAppGrant(connector: BaseConnector, refresh: GrantRefresher): void {
+    HttpConnector.bindUserGrant(connector, refresh);
   }
 
   /**

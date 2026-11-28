@@ -115,6 +115,14 @@ the connector, required or optional:
   `telemetry_events`. A method it called that it can't call now says so. Calls
   from an app that no longer declares the connector are listed beneath.
 
+Each row of a tenant connector that authenticates also offers **Give it its
+own credentials…**, which opens that app's credentials inline: the connector's
+fields, **Connect its account** for OAuth, **Verify its connection**, and
+**Use the shared credentials** to take them away. A row with its own carries an
+**Own credentials** pill that says how far they are set up, and the section's
+first line counts who shares the credential and who has their own. The way
+back from an app's Connect lands on its row, opened.
+
 The tile carries the summary: "Used by 3 active apps · 1 can change data".
 
 The section shows what MixOS allows, not what the provider does: that is the

@@ -88,6 +88,8 @@ const APP_SLUG_TABLES = [
   "app_scheduled_jobs",
   "app_job_runs",
   "app_open_events",
+  "connector_app_configs",
+  "connector_scope_status",
 ] as const;
 
 /** The telemetry an app is the source of (delete-data.ts counts the same). */
@@ -96,6 +98,7 @@ const APP_SOURCES = ["app", "route", "service", "mcp"];
 /** The tables that hold a connector's rows in a `connector_name` column. */
 const CONNECTOR_TABLES = [
   "connector_configs",
+  "connector_app_configs",
   "user_connector_oauth",
   "connector_scope_status",
   "connector_webhook_events",

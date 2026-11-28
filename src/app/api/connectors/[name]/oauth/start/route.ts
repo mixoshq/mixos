@@ -35,7 +35,10 @@ export async function GET(
   const { name } = await ctx.params;
   const returnTo = safeReturnPath(request.nextUrl.searchParams.get("return"));
 
-  const start = await startConnectorOAuth(name, session, returnTo);
+  // For one app's own credentials (src/lib/connectors/app-config.ts), from the
+  // Reach section. Checked inside, and sealed into the flow cookie.
+  const app = request.nextUrl.searchParams.get("app");
+  const start = await startConnectorOAuth(name, session, returnTo, app || null);
   if (!start.ok) {
     return NextResponse.redirect(
       oauthReturnUrl(returnTo, request.nextUrl.origin, name, start.outcome),

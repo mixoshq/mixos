@@ -183,11 +183,21 @@ describe("an app under a slug a different extension had", { skip }, () => {
     assert.deepEqual(await audited("app.identity.changed"), []);
   });
 
-  test("reinstalled from the Registry, it is switched off and flagged, and loses its API keys and tool switches and nothing else", async () => {
+  test("reinstalled from the Registry, it is switched off and flagged, and loses its API keys, tool switches and own connector credentials and nothing else", async () => {
     // Two tools an admin turned on for the extension before it.
     await sql`
       insert into public.app_mcp_tool_settings (app_slug, tool_name, enabled)
       values (${files}, 'search', true), (${files}, 'peek', false)
+    `;
+    // Its own credentials for a connector, and what their grant held: given
+    // to the extension before it, so never passed to this one.
+    await sql`
+      insert into public.connector_app_configs (connector_name, app_slug, encrypted_credentials)
+      values ('crm', ${files}, 'SEALED')
+    `;
+    await sql`
+      insert into public.connector_scope_status (connector_name, app_slug, scope, status)
+      values ('crm', ${files}, 'read', 'granted')
     `;
     const { printed } = await release([app(files)], [installOf(files)]);
     const identity = `https://mixos.org app/${files} acme/mixos-files`;
@@ -212,6 +222,12 @@ describe("an app under a slug a different extension had", { skip }, () => {
       select count(*)::int as switches from public.app_mcp_tool_settings where app_slug = ${files}
     `;
     assert.equal(switches, 0, "the tool switches of the extension before it were kept");
+    const [own] = await sql`
+      select
+        (select count(*)::int from public.connector_app_configs where app_slug = ${files}) as credentials,
+        (select count(*)::int from public.connector_scope_status where app_slug = ${files}) as scopes
+    `;
+    assert.deepEqual({ ...own }, { credentials: 0, scopes: 0 }, "the credentials given to the extension before it were kept");
 
     assert.deepEqual(await audited("app.identity.changed"), [
       {
@@ -229,6 +245,7 @@ describe("an app under a slug a different extension had", { skip }, () => {
           deactivated: true,
           apiKeysRevoked: 1,
           mcpToolSwitchesReset: 2,
+          connectorCredentialsDeleted: 1,
         },
       },
     ]);
@@ -237,7 +254,7 @@ describe("an app under a slug a different extension had", { skip }, () => {
       new RegExp(
         `${files}: a different extension than before \\(was local, with no install record; now from mixos\\.org, ` +
           `acme/mixos-files\\) — inactive, with 1 API key\\(s\\) revoked and 2 MCP tool switch\\(es\\) reset, ` +
-          `until an admin activates it by typing its slug`,
+          `and its own credentials for 1 connector\\(s\\) deleted, until an admin activates it by typing its slug`,
       ),
     );
 

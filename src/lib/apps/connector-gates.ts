@@ -5,6 +5,7 @@
 import { appRegistry } from "@/generated/app-registry";
 import { connectorRegistry } from "@/generated/connector-registry";
 import { grantedScopes } from "@/lib/connectors/access";
+import { getAppCredentialRows, openAppCredentials } from "@/lib/connectors/app-config";
 import { getDecryptedConfig } from "@/lib/connectors/config";
 import type { ConnectorRequirement } from "@/lib/connectors/requirements";
 import { registryConfigState } from "@/lib/connectors/status";
@@ -50,12 +51,18 @@ export { missingConnectorSteps };
  * allowed changes (src/lib/connectors/writable.ts). A tenant OAuth grant taken
  * before that holds only the read scopes, so the connector needs connecting
  * again until it holds the ones it requests with "write".
+ *
+ * An app with its own credentials for a tenant connector
+ * (src/lib/connectors/app-config.ts) is served by those, so they are what is
+ * checked, never the shared row: `own` is the app's rows, or null when they
+ * couldn't be read, which can't serve a call either.
  */
 async function connectorBlock(
   name: string,
   disabled: ReadonlySet<string>,
   writable: ReadonlySet<string>,
   need: ConnectorRequirement | undefined,
+  own: ReadonlyMap<string, string> | null,
 ): Promise<ConnectorBlock | null> {
   const connector = connectorRegistry.find((c) => c.name === name);
   if (!connector) return "unconfigured";
@@ -63,7 +70,14 @@ async function connectorBlock(
 
   let credentials: Record<string, string> | null;
   try {
-    credentials = await getDecryptedConfig(name);
+    if (connector.userScoped) {
+      credentials = await getDecryptedConfig(name);
+    } else if (own === null) {
+      return "unconfigured";
+    } else {
+      const row = own.get(name);
+      credentials = row !== undefined ? openAppCredentials(row) : await getDecryptedConfig(name);
+    }
   } catch (err) {
     // Credentials that can't be decrypted (the key changed, say) can't serve
     // a call either. The admin pages still render, with the connector shown
@@ -141,10 +155,25 @@ export async function getMissingTenantConfigConnectors(
     );
     writable = new Set();
   }
+  // The app's own credentials (src/lib/connectors/app-config.ts), read the
+  // same way: a gate that can't tell whether it has its own throws, and a page
+  // that only shows the answer shows its tenant connectors as not configured,
+  // since the app's code would get them unconfigured too.
+  let own: ReadonlyMap<string, string> | null;
+  try {
+    own = await getAppCredentialRows(appSlug);
+  } catch (err) {
+    if (!forDisplay) throw err;
+    console.error(
+      `[connector-gates] ${appSlug}: could not read its own connector credentials; showing its tenant connectors as not configured:`,
+      err,
+    );
+    own = null;
+  }
   const checks = await Promise.all(
     app.connectors.map(async (name): Promise<MissingConnector | null> => {
       const need = app.connectorRequirements.find((r) => r.name === name);
-      const state = await connectorBlock(name, disabled, writable, need);
+      const state = await connectorBlock(name, disabled, writable, need, own);
       if (state === null) return null;
       const meta = connectorRegistry.find((c) => c.name === name);
       return { name, displayName: meta?.displayName ?? name, state };

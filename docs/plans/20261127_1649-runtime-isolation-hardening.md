@@ -636,6 +636,25 @@ which reuses the credential fields and the Connect step. The app's Reach tab sho
 
 **Effort:** L, 6–9 days.
 
+**As built** (2026-11-28). As designed, with these settled in the code:
+
+- **A whole credential set.** An app's row holds the client id and secret
+  too, not only a grant, so it never reads the shared row for anything.
+- **Unreadable fails closed twice:** a row that can't be decrypted, or a table
+  that can't be read, leaves the app's tenant connectors unconfigured, and
+  bound to a renewal that refuses. The activation gate throws in the second
+  case, as it does for an unreadable switch.
+- **Write scopes:** an app's own consent asks for them only if changes are
+  allowed *and* the app's entry asks for `"write"`, a narrowing the design
+  didn't spell out.
+- **The UI is inline in the Reach row**, not a second dialog, so there is one
+  focus trap. Removing is audited as `connector.configure` with
+  `removed: true`.
+- **An admin's save starts over a row that can't be decrypted**, so "enter them
+  again" works; a token write over one still fails.
+- **The app's Reach tab** in the design is Item 9's page, so "Own credentials"
+  shows on the connector's Reach rows for now.
+
 ---
 
 ## 7. Item 4: Keep secrets out of reach of app code
@@ -1338,7 +1357,9 @@ None.
    halved throughput under load at 2 ms RTT, 653 → 345 q/s), plus
    `query_timeout: 60` on the request pool.
 4. **Item 3a**, then **3b**. *3a in review:* the Reach section, built as below
-   with the departures under "As built".
+   with the departures under "As built". *3b in review:* migration 0005
+   (`connector_app_configs`, and `app_slug` on `connector_scope_status`), as
+   designed, with the departures under its "As built".
 5. **Item 4.** T1 plus scan additions; T2 spike; T3 design doc.
 6. **Item 5a.** Then **one design doc for 5b and 7b**, the shared runner
    infrastructure (§10).

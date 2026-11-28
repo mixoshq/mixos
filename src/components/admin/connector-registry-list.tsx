@@ -15,7 +15,8 @@ import {
   describeDependents,
   type ConnectorDependents,
 } from "@/lib/connectors/dependents";
-import type { ConnectorReach, ObservedCalls } from "@/lib/connectors/reach";
+import type { ConnectorReach, ObservedCalls, OwnCredentialStatus } from "@/lib/connectors/reach";
+import type { AppCredentialActions } from "./app-credentials-panel";
 import type { ConnectorConfigState } from "@/lib/connectors/status";
 import type { ConnectorReplacement } from "@/lib/connectors/switch";
 import type { ConnectorTestOutcome } from "@/lib/connectors/test-connection";
@@ -75,6 +76,8 @@ export type ConnectorWithStatus = ConnectorManifest & {
    * lets it call (lib/connectors/reach.ts).
    */
   reach: ConnectorReach;
+  /** Apps an admin gave credentials of their own for it (lib/connectors/app-config.ts). */
+  ownCredentials: OwnCredentialStatus[];
   /**
    * When an admin disabled it (ISO 8601), or null while it is enabled. A
    * disabled connector keeps its credentials and its `state`; nothing calls it.
@@ -119,6 +122,10 @@ interface Props {
    * after the page: null when telemetry couldn't be read.
    */
   observed?: Promise<ObservedCalls | null>;
+  /** Give one app its own credentials for a connector, from its Reach row. */
+  appCredentialActions?: AppCredentialActions;
+  /** With `initialOpen`: the app whose own credentials to open, after their Connect. */
+  initialApp?: string | null;
 }
 
 type StatusFilter = "all" | "configured" | "unconfigured";
@@ -137,6 +144,8 @@ export default function ConnectorRegistryList({
   switchAction,
   changesAction,
   observed,
+  appCredentialActions,
+  initialApp = null,
   proposal = null,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -340,12 +349,16 @@ export default function ConnectorRegistryList({
           key={openConnector.name}
           connector={openConnector}
           open
-          initialTab={openedFromUrl ? "configure" : "details"}
+          // Back from an app's own Connect: its row, on Details, not the
+          // shared setup on Configure.
+          initialTab={openedFromUrl && !initialApp ? "configure" : "details"}
           onClose={() => setOpenName(null)}
           configureAction={configureAction}
           testAction={testAction}
           changesAction={changesAction}
           observed={observed}
+          appCredentialActions={appCredentialActions}
+          initialApp={openedFromUrl ? initialApp : null}
           // The Remove dialog replaces this one rather than stacking on it:
           // two focus traps at once, and the setup of a connector that is going.
           onRemove={() => {

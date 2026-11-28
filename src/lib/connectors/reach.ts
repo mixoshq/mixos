@@ -50,6 +50,26 @@ export interface ObservedCall {
 /** Per connector name, its calls, the most made first. Every name asked for has a list. */
 export type ObservedCalls = Record<string, ObservedCall[]>;
 
+/**
+ * One app's own credentials for a tenant connector (./app-config.ts), as the
+ * admin page shows them: never the values, only how far they are set up.
+ */
+export interface OwnCredentialStatus {
+  appSlug: string;
+  /**
+   * The rule the runtime's `configured` uses (./status.ts), applied to the
+   * app's own set; "unreadable" when the row can't be decrypted, and the app
+   * then has the connector unconfigured.
+   */
+  state: "ready" | "needs-authorization" | "unconfigured" | "unreadable";
+  /** When they were last saved, and by whom. */
+  configuredAt: number | null;
+  configuredBy: string | null;
+  /** When Verify connection last succeeded with them. */
+  verifiedAt: number | null;
+  verifiedDetail: string | null;
+}
+
 /** What an app may do with the connector's methods that change data. */
 export type AppWriteReach =
   /** The connector declares no method that changes data. */

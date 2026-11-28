@@ -121,6 +121,12 @@ export interface ReplacedApp {
   apiKeysRevoked: number;
   /** How many of its MCP tool switches this run deleted. */
   mcpToolSwitchesReset: number;
+  /**
+   * How many connectors' own credentials of its this run deleted
+   * (src/lib/connectors/app-config.ts): a credential an admin gave one
+   * extension never passes to another.
+   */
+  connectorCredentialsDeleted: number;
 }
 
 /** An app this run found had stopped being global. */
@@ -296,6 +302,17 @@ export async function syncAppRegistry(
           where app_slug = ${app.slug}
           returning tool_name
         `;
+        // Its own connector credentials, given to the extension before it,
+        // with what their grants were recorded to hold. The new one uses the
+        // shared credentials until an admin gives it its own.
+        await tx`
+          delete from public.connector_scope_status where app_slug = ${app.slug}
+        `;
+        const credentials = await tx`
+          delete from public.connector_app_configs
+          where app_slug = ${app.slug}
+          returning connector_name
+        `;
         await audit(tx, "app.identity.changed", app.slug, {
           previous: identityDetails(row.identity),
           identity: identityDetails(identity),
@@ -303,6 +320,7 @@ export async function syncAppRegistry(
           deactivated: row.is_active,
           apiKeysRevoked: revoked.length,
           mcpToolSwitchesReset: switches.length,
+          connectorCredentialsDeleted: credentials.length,
         });
         replaced.push({
           slug: app.slug,
@@ -311,6 +329,7 @@ export async function syncAppRegistry(
           deactivated: row.is_active,
           apiKeysRevoked: revoked.length,
           mcpToolSwitchesReset: switches.length,
+          connectorCredentialsDeleted: credentials.length,
         });
       } else if (codeChanged) {
         await tx`

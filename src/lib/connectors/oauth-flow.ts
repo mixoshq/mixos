@@ -6,6 +6,12 @@ import { connectorRegistry } from "@/generated/connector-registry";
 import { requireAdmin } from "@/lib/apps/access";
 import { recordAdminAction, type AdminActor } from "@/lib/apps/admin-audit";
 import type { SessionPayload } from "@/lib/auth/session";
+import {
+  AppCredentialsError,
+  appCredentialTarget,
+  getDecryptedAppConfig,
+  saveAppConnectorTokens,
+} from "./app-config";
 import { getDecryptedConfig, saveConnectorTokens } from "./config";
 import { isConnectorError } from "./errors";
 import {
@@ -39,16 +45,61 @@ export type OAuthStart =
   | { ok: true; authorizeUrl: string; sealedFlow: string }
   | { ok: false; outcome: "unsupported" | "disabled" | "missing-client" };
 
-/** Begin the consent round trip for one connector. */
+/**
+ * Whether one app may hold its own grant for a connector, or null when it may
+ * not (./app-config.ts): a tenant connector it declares.
+ */
+function appTarget(name: string, appSlug: string) {
+  try {
+    return appCredentialTarget(name, appSlug);
+  } catch (err) {
+    if (err instanceof AppCredentialsError) return null;
+    throw err;
+  }
+}
+
+/**
+ * Begin the consent round trip for one connector. With `appSlug`, for that
+ * app's own grant (./app-config.ts), which an admin starts from the Reach
+ * section: its client id is the app's own, and it asks for the write scopes
+ * only when changes are allowed *and* the app's entry asks for them.
+ */
 export async function startConnectorOAuth(
   name: string,
   session: Session,
   returnTo: string,
+  appSlug: string | null = null,
 ): Promise<OAuthStart> {
   const connector = connectorRegistry.find((c) => c.name === name);
   const policy = connector?.auth;
   if (!connector || policy?.strategy !== "oauth2_authorization_code") {
     return { ok: false, outcome: "unsupported" };
+  }
+
+  if (appSlug !== null) {
+    await requireAdmin(session);
+    const target = appTarget(name, appSlug);
+    if (!target) return { ok: false, outcome: "unsupported" };
+    if (await isConnectorDisabled(name)) return { ok: false, outcome: "disabled" };
+
+    const [idKey] = policy.credentialKeys ?? ["clientId", "clientSecret"];
+    const own = await getDecryptedAppConfig(name, appSlug);
+    const clientId = own?.[idKey];
+    if (!clientId) return { ok: false, outcome: "missing-client" };
+
+    const asks = target.app.connectorRequirements.some((r) => r.name === name && r.access === "write");
+    let writes = false;
+    try {
+      writes = asks && (await isConnectorWritable(name));
+    } catch (err) {
+      console.error(`[connector-oauth] ${name}: could not read whether changes are allowed:`, err);
+    }
+    const flow = newFlowState(name, returnTo, null, writes, appSlug);
+    return {
+      ok: true,
+      authorizeUrl: buildAuthorizeUrl(policy, { connector: name, clientId, flow }),
+      sealedFlow: sealFlowState(flow),
+    };
   }
 
   /*
@@ -159,6 +210,15 @@ export async function finishConnectorOAuth(opts: {
     reason. That admin is who the audit row names.
   */
   const userScoped = connector.userScoped === true;
+  /*
+    An app's own grant (./app-config.ts): admin-only like the shared one, for
+    the app the sealed cookie names, which must still declare this tenant
+    connector. Checked again here, since the build may have changed during
+    the round trip.
+  */
+  const appSlug = flow.appSlug ?? null;
+  if (appSlug !== null && (userScoped || !appTarget(name, appSlug))) return finish("unsupported");
+
   let admin: AdminActor | null = null;
   if (!userScoped) {
     const dbUser = await requireAdmin(session);
@@ -175,7 +235,8 @@ export async function finishConnectorOAuth(opts: {
     "clientId",
     "clientSecret",
   ];
-  const credentials = (await getDecryptedConfig(name)) ?? {};
+  const credentials =
+    (appSlug !== null ? await getDecryptedAppConfig(name, appSlug) : await getDecryptedConfig(name)) ?? {};
 
   let granted: string[];
   try {
@@ -193,6 +254,9 @@ export async function finishConnectorOAuth(opts: {
       // Only the grant is personal — the client id and secret above stay where
       // the admin put them.
       await saveUserTokens(session.user.id, name, tokens);
+    } else if (appSlug !== null) {
+      // The app's own row, and only it: the shared grant is untouched.
+      await saveAppConnectorTokens(name, appSlug, tokens);
     } else {
       await saveConnectorTokens(name, tokens);
     }
@@ -211,6 +275,7 @@ export async function finishConnectorOAuth(opts: {
         granted,
         writes: flow.writes,
         userId: userScoped ? session.user.id : null,
+        appSlug,
       });
     } catch (err) {
       console.error(`[connector-oauth] ${name} scope snapshot failed:`, err);
@@ -233,7 +298,7 @@ export async function finishConnectorOAuth(opts: {
       action: "connector.connect",
       targetType: "connector",
       targetId: name,
-      details: { scopes: granted, writes: flow.writes },
+      details: { scopes: granted, writes: flow.writes, ...(appSlug !== null ? { app: appSlug } : {}) },
     });
   }
 
